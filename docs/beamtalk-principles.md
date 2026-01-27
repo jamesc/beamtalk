@@ -2,7 +2,7 @@
 
 Core philosophy guiding beamtalk design. These inform all implementation decisions.
 
-For detailed syntax and features, see [beamtalk-language-features.md](beamtalk-language-features.md).
+For detailed syntax and features, see [beamtalk-language-features.md](beamtalk-language-features.md). For syntax design rationale, see [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md).
 
 ---
 
@@ -117,15 +117,28 @@ Message sends are **asynchronous by default**, returning futures (like Newspeak,
 
 ---
 
-## 9. BEAM Interop is Pragmatic
+## 9. Seamless BEAM Ecosystem Integration
 
-Beamtalk objects can **call and be called by** Erlang/Elixir.
+Beamtalk is a **first-class BEAM citizen**, not an isolated language.
 
-- Generate standard BEAM modules callable from any BEAM language
-- Consume existing OTP libraries and behaviors
-- Distribution across nodes works automatically
+Interop is not an afterthought — it's essential for adoption. The BEAM ecosystem has decades of battle-tested libraries (OTP, Phoenix, Ecto, Nx). Beamtalk must use them seamlessly.
 
-**Implication:** Generated code must follow BEAM conventions (module exports, OTP callbacks).
+**Design principles:**
+- **Call any BEAM module** — Erlang, Elixir, Gleam, LFE libraries work directly
+- **Be callable by any BEAM language** — Beamtalk actors are standard `gen_server` modules
+- **Share supervision trees** — Mix Beamtalk actors with Erlang/Elixir processes under one supervisor
+- **Use Hex.pm** — Standard package manager, no separate ecosystem
+- **OTP-native** — Actors implement OTP behaviors; appear in Observer; support distributed Erlang
+
+**Why this matters:**
+- Zero libraries means zero adoption
+- Teams won't rewrite working Elixir/Erlang code
+- Phoenix, Ecto, Nx are too valuable to abandon
+- Gradual migration must be possible
+
+**Implication:** Generated code follows BEAM conventions exactly. Foreign function interface is simple and low-friction. Build tools integrate with Mix/Rebar3.
+
+See [beamtalk-interop.md](beamtalk-interop.md) for detailed specification.
 
 ---
 
@@ -204,6 +217,9 @@ Following Anders Hejlsberg's TypeScript principle: the compiler IS the language 
 
 ## References
 
+- [Architecture](beamtalk-architecture.md) - Compiler, runtime, and live development flow
+- [IDE and Live Development](beamtalk-ide.md) - Smalltalk-style integrated environment
+- [BEAM Interop Specification](beamtalk-interop.md) - Detailed Erlang/Elixir integration
 - [TypeScript Compiler Architecture](https://github.com/microsoft/TypeScript/wiki/Architectural-Overview) - Tooling-first design
 - [Newspeak Language](https://newspeaklanguage.org/) - Module system, encapsulation, async actors
 - [Dylan](https://opendylan.org/) - Sealing, conditions, method combinations

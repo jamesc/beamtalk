@@ -8,7 +8,7 @@ Unlike static actor languages (Gleam) or imperative shells, Beamtalk treats agen
 
 **Target users**: AI product teams, researchers, and engineers building autonomous agent systems who demand rapid iteration, introspection, and fault tolerance.
 
-For full language design, see [beamtalk-principles.md](beamtalk-principles.md) and [beamtalk-language-features.md](beamtalk-language-features.md).
+For full language design, see [beamtalk-principles.md](beamtalk-principles.md), [beamtalk-language-features.md](beamtalk-language-features.md), and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md).
 
 ---
 
@@ -30,47 +30,47 @@ Teams prototype agent workflows in notebooks or IDEs, then struggle to turn them
 Treat agents as **persistent BEAM actors** with Smalltalk-style liveness:
 
 - **Spawn agents instantly**:
-  ```smalltalk
-  researcher := Researcher spawn model: #openai_gpt4.
+  ```
+  researcher := Researcher spawn model: #openai_gpt4
   ```
   One line, no boilerplate; maps to a BEAM process with its own mailbox.
 
 - **Message asynchronously** (returns futures by default):
-  ```smalltalk
-  result := researcher query: "Analyze this code".
-  result await.  "Explicitly wait for response"
+  ```
+  result := researcher query: "Analyze this code"
+  result await  // Explicitly wait for response
 
-  "Or use continuation style"
+  // Or use continuation style
   researcher query: "Analyze this code"
-    whenResolved: [:analysis | self process: analysis].
+    whenResolved: [:analysis | self process: analysis]
   ```
   Late-bound sends; unknown messages trigger `doesNotUnderstand:` handlers.
 
 - **Edit live**:
-  ```smalltalk
-  patch Researcher >> #plan: prompt {
-    Telemetry log: 'Planning with: ', prompt.
-    ^super plan: prompt.
+  ```
+  patch Researcher >> plan: prompt {
+    Telemetry log: 'Planning with: ', prompt
+    ^super plan: prompt
   }
   ```
   Hot-reload behaviors without restart, leveraging BEAM's code upgrade semantics.
 
 - **Inspect everything**:
-  ```smalltalk
-  researcher inspect.      "Opens live browser on state"
-  researcher mailbox peek. "Non-destructive mailbox view"
-  researcher state.        "=> {model: #openai_gpt4, memory: [...], ...}"
+  ```
+  researcher inspect       // Opens live browser on state
+  researcher mailbox peek  // Non-destructive mailbox view
+  researcher state         // => {model: #openai_gpt4, memory: [...], ...}
   ```
   A Smalltalk-style image view of a BEAM cluster.
 
 - **Swarm & supervise**:
-  ```smalltalk
+  ```
   Supervisor subclass: ResearchTeam
     children: [
       Researcher spawn model: #claude_opus,
       Critic spawn model: #gpt4_turbo
     ]
-    strategy: #oneForOne.
+    strategy: #oneForOne
   ```
   Declarative multi-agent topologies with restart strategies.
 
@@ -86,98 +86,98 @@ Treat agents as **persistent BEAM actors** with Smalltalk-style liveness:
 
 **Scenario**: Analyze a codebase using specialized agents (Researcher, Architect, Critic) working in parallel, debating findings and converging on recommendations.
 
-```smalltalk
+```
 Supervisor subclass: CodeAnalysisTeam
   children: [
     Researcher spawn model: #claude_opus,
     Architect spawn model: #gpt4_turbo,
     Critic spawn model: #claude_sonnet
-  ].
+  ]
 
-team := CodeAnalysisTeam spawn.
+team := CodeAnalysisTeam spawn
 
-"Async analysis - returns future"
-analysis := team analyze: codeRepo.
+// Async analysis - returns future
+analysis := team analyze: codeRepo
 
-"Live inspection while running"
-team inspect.  "Browser shows: researcher -> architect -> critic message flow"
+// Live inspection while running
+team inspect  // Browser shows: researcher -> architect -> critic message flow
 
-"Mid-run: patch critic to focus on security"
-patch Critic >> #review: code {
-  self.prompt := "Focus on security flaws".
-  ^super review: code.
+// Mid-run: patch critic to focus on security
+patch Critic >> review: code {
+  self.prompt := "Focus on security flaws"
+  ^super review: code
 }
 
-"Wait for completion"
-findings := analysis await.
+// Wait for completion
+findings := analysis await
 ```
 
 ### 2.2 LLM Agent with Memory and Tools
 
-```smalltalk
+```
 Actor subclass: ResearchAgent
   state:
     model = #claude_opus,
     memory = OrderedCollection new,
-    tools = ToolRegistry default.
+    tools = ToolRegistry default
 
-  #query: question =>
+  query: question =>
     | context response |
-    context := self.memory last: 10.
+    context := self.memory last: 10
     response := self.model
       complete: question
       context: context
-      tools: self.tools.
-    self.memory add: {question, response}.
-    ^response.
+      tools: self.tools
+    self.memory add: {question, response}
+    ^response
 
-  #addTool: tool =>
-    self.tools register: tool.
+  addTool: tool =>
+    self.tools register: tool
 
-  #clearMemory =>
-    self.memory := OrderedCollection new.
+  clearMemory =>
+    self.memory := OrderedCollection new
 ```
 
 ### 2.3 Agent Orchestration with Futures
 
-```smalltalk
-"Fan-out: multiple agents work in parallel"
+```
+// Fan-out: multiple agents work in parallel
 agents := (1 to: 10) collect: [:i |
   Researcher spawn model: #claude_sonnet
-].
+]
 
-"Send tasks, collect futures"
+// Send tasks, collect futures
 futures := agents withIndexCollect: [:agent :i |
   agent analyze: (tasks at: i)
-].
+]
 
-"Wait for all to complete"
-results := futures collect: [:f | f await].
+// Wait for all to complete
+results := futures collect: [:f | f await]
 
-"Or process as they complete"
+// Or process as they complete
 futures do: [:f |
-  f whenResolved: [:result | self aggregate: result].
-].
+  f whenResolved: [:result | self aggregate: result]
+]
 ```
 
 ### 2.4 Supervised Agent with Retry
 
-```smalltalk
+```
 Supervisor subclass: ResilientAnalyzer
   children: [
     {Researcher spawn model: #claude_opus, restartStrategy: #transient}
   ]
   strategy: #oneForOne
   maxRestarts: 5
-  restartWindow: 60.  "seconds"
+  restartWindow: 60  // seconds
 
-analyzer := ResilientAnalyzer spawn.
+analyzer := ResilientAnalyzer spawn
 
-"If agent crashes (e.g., API timeout), supervisor restarts it"
-result := analyzer analyze: data.
+// If agent crashes (e.g., API timeout), supervisor restarts it
+result := analyzer analyze: data
 result
   whenResolved: [:r | self handleSuccess: r]
-  whenRejected: [:e | self handleFailure: e].
+  whenRejected: [:e | self handleFailure: e]
 ```
 
 ---
@@ -215,3 +215,5 @@ result
 
 - [beamtalk-principles.md](beamtalk-principles.md) - Core design philosophy (13 principles)
 - [beamtalk-language-features.md](beamtalk-language-features.md) - Full syntax, features, and tooling
+- [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) - Syntax design decisions
+- [beamtalk-interop.md](beamtalk-interop.md) - Erlang/Elixir integration (essential for using LLM SDKs)

@@ -263,34 +263,38 @@ When generating code that interacts with OTP:
 
 ## Smalltalk/Beamtalk Syntax Reference
 
-For agents working on the parser or generating beamtalk code:
+For agents working on the parser or generating beamtalk code. See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md) for design decisions.
 
-```smalltalk
-"Unary message"
+```
+// Unary message
 object message
 
-"Binary message"
+// Binary message (standard math precedence)
 3 + 4
+2 + 3 * 4  // => 14
 
-"Keyword message"
+// Keyword message
 array at: 1 put: 'hello'
 
-"Cascade - multiple messages to same receiver"
+// Cascade - multiple messages to same receiver
 Transcript show: 'Hello'; cr; show: 'World'
 
-"Blocks (closures)"
+// Blocks (closures)
 [:x :y | x + y]
 
-"Assignment"
+// Assignment
 count := 0
 
-"Return"
+// Return
 ^result
+
+// String interpolation (double quotes)
+greeting := "Hello, {name}!"
 ```
 
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
-2. Binary messages: `3 + 4`
+2. Binary messages: `3 + 4` (with standard math precedence)
 3. Keyword messages: `array at: 1`
 
 ---
@@ -337,6 +341,11 @@ count := 0
 
 - [Design Principles](docs/beamtalk-principles.md) - Core philosophy guiding all decisions
 - [Language Features](docs/beamtalk-language-features.md) - Planned syntax and features
+- [Syntax Rationale](docs/beamtalk-syntax-rationale.md) - Why we keep/change Smalltalk conventions
+- [Architecture](docs/beamtalk-architecture.md) - Compiler, runtime, and live development flow
+- [IDE and Live Development](docs/beamtalk-ide.md) - Smalltalk-style integrated environment
+- [BEAM Interop](docs/beamtalk-interop.md) - Erlang/Elixir integration specification
+- [Feasibility Assessment](docs/beamtalk-feasibility.md) - Technical and market analysis
 - [Agent Systems](docs/beamtalk-for-agents.md) - Multi-agent AI use cases
 - [Core Erlang specification](https://www.it.uu.se/research/group/hipe/cerl/)
 - [BEAM VM internals](https://blog.stenmans.org/theBeamBook/)

@@ -1,8 +1,10 @@
 # Beamtalk Language Features
 
-Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy.
+Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy, [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions, and [beamtalk-interop.md](beamtalk-interop.md) for Erlang/Elixir integration.
 
 **Status:** Design phase - syntax and semantics subject to change.
+
+**Syntax note:** Beamtalk uses a cleaned-up Smalltalk syntax: `//` comments (not `"..."`), standard math precedence (not left-to-right), and optional statement terminators (newlines work).
 
 ---
 
@@ -10,48 +12,48 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ### Actor Definition
 
-```smalltalk
+```
 Actor subclass: Counter
   state: value = 0
 
-  #increment => self.value += 1
-  #decrement => self.value -= 1
-  #getValue => ^self.value
-  #incrementBy: delta => self.value += delta
+  increment => self.value += 1
+  decrement => self.value -= 1
+  getValue => ^self.value
+  incrementBy: delta => self.value += delta
 ```
 
 ### Message Sends
 
-```smalltalk
-"Unary message"
-counter increment.
+```
+// Unary message
+counter increment
 
-"Binary message"
-3 + 4.
+// Binary message (standard math precedence: 2 + 3 * 4 = 14)
+3 + 4
 
-"Keyword message"
-array at: 1 put: 'hello'.
+// Keyword message
+array at: 1 put: 'hello'
 
-"Cascade - multiple messages to same receiver"
-Transcript show: 'Hello'; cr; show: 'World'.
+// Cascade - multiple messages to same receiver
+Transcript show: 'Hello'; cr; show: 'World'
 ```
 
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
-2. Binary messages: `3 + 4`
+2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `array at: 1`
 
 ### Blocks (Closures)
 
-```smalltalk
-"Block with no arguments"
+```
+// Block with no arguments
 [self doSomething]
 
-"Block with arguments"
+// Block with arguments
 [:x :y | x + y]
 
-"Block with local variables"
-[:x | | temp | temp := x * 2. temp + 1]
+// Block with local variables
+[:x | | temp | temp := x * 2; temp + 1]
 ```
 
 ---
@@ -62,24 +64,24 @@ Beamtalk uses **async-first** message passing (like Newspeak), unlike Smalltalk'
 
 ### Default: Async with Futures
 
-```smalltalk
-"Returns immediately with a future"
-result := agent analyze: data.
+```
+// Returns immediately with a future
+result := agent analyze: data
 
-"Explicitly wait for value"
-value := result await.
+// Explicitly wait for value
+value := result await
 
-"Continuation style - non-blocking"
+// Continuation style - non-blocking
 agent analyze: data
   whenResolved: [:value | self process: value]
-  whenRejected: [:error | self handle: error].
+  whenRejected: [:error | self handle: error]
 ```
 
 ### Sync Opt-In
 
-```smalltalk
-"Blocks until complete - use sparingly"
-value := agent analyzeSync: data.
+```
+// Blocks until complete - use sparingly
+value := agent analyzeSync: data
 ```
 
 ### BEAM Mapping
@@ -99,40 +101,40 @@ Smalltalk lacks pattern matching - this is a major ergonomic addition.
 
 ### In Message Handlers
 
-```smalltalk
-"Match on message structure"
-#handle: {#ok, value} => self process: value.
-#handle: {#error, reason} => self logError: reason.
-#handle: _ => self handleUnknown.
+```
+// Match on message structure
+handle: {#ok, value} => self process: value
+handle: {#error, reason} => self logError: reason
+handle: _ => self handleUnknown
 
-"Match with guards"
-#process: n when: [n > 0] => self positive: n.
-#process: n when: [n < 0] => self negative: n.
-#process: 0 => self zero.
+// Match with guards
+process: n when: [n > 0] => self positive: n
+process: n when: [n < 0] => self negative: n
+process: 0 => self zero
 ```
 
 ### Destructuring Assignment
 
-```smalltalk
-"Destructure tuple"
-{x, y, z} := point coordinates.
+```
+// Destructure tuple
+{x, y, z} := point coordinates
 
-"Destructure in block"
-results collect: [{#ok, v} -> v. {#error, _} -> nil].
+// Destructure in block
+results collect: [{#ok, v} -> v; {#error, _} -> nil]
 
-"Nested destructuring"
-{name, {street, city}} := person address.
+// Nested destructuring
+{name, {street, city}} := person address
 ```
 
 ### Binary Pattern Matching
 
-```smalltalk
-"Parse a network packet"
-#parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
-  Packet new version: version payload: payload.
+```
+// Parse a network packet
+parsePacket: <<version: 8, length: 16/big, payload: length/binary, rest/binary>> =>
+  Packet new version: version payload: payload
 
-"Build binary"
-packet := <<16r01, messageLength: 16/big, messageBytes/binary>>.
+// Build binary
+packet := <<16r01, messageLength: 16/big, messageBytes/binary>>
 ```
 
 ---
@@ -143,21 +145,21 @@ Clean data flow through transformations.
 
 ### Sync Pipe
 
-```smalltalk
+```
 data
   |> Transform with: options
   |> Filter where: [:x | x > 0]
-  |> Sort by: #name.
+  |> Sort by: #name
 ```
 
 ### Async Pipe
 
-```smalltalk
-"Each step returns future, flows through"
+```
+// Each step returns future, flows through
 data
   |>> agent1 process
   |>> agent2 validate
-  |>> agent3 store.
+  |>> agent3 store
 ```
 
 ---
@@ -168,26 +170,26 @@ Early exit on error without deep nesting.
 
 ### Problem: Nested Error Handling
 
-```smalltalk
-"Ugly pyramid of doom"
+```
+// Ugly pyramid of doom
 (file open: path) ifOk: [:f |
   (f read) ifOk: [:data |
     (Json parse: data) ifOk: [:json |
-      self process: json]]].
+      self process: json]]]
 ```
 
 ### Solution: With Blocks
 
-```smalltalk
+```
 with: [
-  file := File open: path.
-  data := file read.
-  json := Json parse: data.
+  file := File open: path
+  data := file read
+  json := Json parse: data
 ] do: [
   self process: json
 ] else: [:error |
   self handleError: error
-].
+]
 ```
 
 ---
@@ -196,24 +198,24 @@ with: [
 
 Explicit error handling as alternative to exceptions.
 
-```smalltalk
-"Return Result instead of raising"
-#divide: a by: b -> Result =>
+```
+// Return Result instead of raising
+divide: a by: b -> Result =>
   b = 0
     ifTrue: [Error new: #divisionByZero]
-    ifFalse: [Ok new: a / b].
+    ifFalse: [Ok new: a / b]
 
-"Chain with map"
+// Chain with map
 (self divide: 10 by: x)
   |> map: [:v | v * 2]
-  |> unwrapOr: 0.
+  |> unwrapOr: 0
 
-"Pattern match on result"
-result := self divide: a by: b.
+// Pattern match on result
+result := self divide: a by: b
 result match: [
-  {#ok, v} -> self use: v.
-  {#error, e} -> self report: e.
-].
+  {#ok, v} -> self use: v
+  {#error, e} -> self report: e
+]
 ```
 
 ---
@@ -222,19 +224,19 @@ result match: [
 
 Declarative iteration with filtering.
 
-```smalltalk
-"List comprehension with filter"
-for: [x in: 1 to: 10. x > 5]
-yield: [x * 2].
-"=> [12, 14, 16, 18, 20]"
+```
+// List comprehension with filter
+for: [x in: 1 to: 10; x > 5]
+yield: [x * 2]
+// => [12, 14, 16, 18, 20]
 
-"Multiple generators"
-for: [x in: 1 to: 3. y in: 1 to: 3]
-yield: [{x, y}].
+// Multiple generators
+for: [x in: 1 to: 3; y in: 1 to: 3]
+yield: [{x, y}]
 
-"Parallel iteration"
-for: [name in: names. age in: ages]
-yield: [Person new name: name age: age].
+// Parallel iteration
+for: [name in: names; age in: ages]
+yield: [Person new name: name age: age]
 ```
 
 ---
@@ -243,20 +245,20 @@ yield: [Person new name: name age: age].
 
 Declarative fault tolerance.
 
-```smalltalk
+```
 Supervisor subclass: WebApp
   children: [
     {DatabasePool, scale: 10},
     HTTPRouter spawn,
     {MetricsCollector, interval: 5000}
   ]
-  strategy: #oneForOne.
+  strategy: #oneForOne
 
-"Actor with supervision spec"
+// Actor with supervision spec
 Actor subclass: Worker
-  supervisor: #transient  "Restart on crash, not normal exit"
+  supervisor: #transient  // Restart on crash, not normal exit
   maxRestarts: 5
-  restartWindow: 60.  "seconds"
+  restartWindow: 60  // seconds
 ```
 
 ---
@@ -265,17 +267,17 @@ Actor subclass: Worker
 
 Hot code reload with dedicated syntax.
 
-```smalltalk
-"Patch a method on running actors"
+```
+// Patch a method on running actors
 patch Counter >> #increment {
-  Telemetry log: 'incrementing'.
-  self.value += 1.
+  Telemetry log: 'incrementing'
+  self.value += 1
 }
 
-"Patch with state migration"
+// Patch with state migration
 patch Agent >> state {
-  "Add new field, migrate existing"
-  self.memory := self.history ifNil: [OrderedCollection new].
+  // Add new field, migrate existing
+  self.memory := self.history ifNil: [OrderedCollection new]
 }
 ```
 
@@ -285,20 +287,20 @@ patch Agent >> state {
 
 Type-based dispatch for polymorphism.
 
-```smalltalk
-"Define protocol"
+```
+// Define protocol
 Protocol define: #Stringable
-  requiring: [#asString].
+  requiring: [#asString]
 
-"Implement for types"
+// Implement for types
 Integer implements: #Stringable
-  #asString => self printString.
+  asString => self printString
 
 Point implements: #Stringable
-  #asString => '({self x}, {self y})'.
+  asString => "({self x}, {self y})"
 
-"Use generically"
-items collect: [:x | x asString].
+// Use generically
+items collect: [:x | x asString]
 ```
 
 ---
@@ -309,48 +311,48 @@ Types are optional - add them gradually for safety and optimization.
 
 ### Basic Annotations
 
-```smalltalk
+```
 Actor subclass: Counter
   state: value: Integer = 0
 
-  #increment => self.value += 1
-  #getValue -> Integer => ^self.value
+  increment => self.value += 1
+  getValue -> Integer => ^self.value
 
-"Typed parameters"
-#transferFrom: source: Account amount: Money -> Boolean =>
-  source withdraw: amount.
-  self deposit: amount.
+// Typed parameters
+transferFrom: source: Account amount: Money -> Boolean =>
+  source withdraw: amount
+  self deposit: amount
   ^true
 ```
 
 ### Limited Types
 
-```smalltalk
-"Singleton type - exactly one value"
+```
+// Singleton type - exactly one value
 state: direction: #north | #south | #east | #west
 
-"Union type"
+// Union type
 state: result: Integer | Error
 
-"False-or type (Option/Maybe)"
+// False-or type (Option/Maybe)
 state: cache: Integer | False = false
 
-"Subtype constraint"
-#process: items: <Collection> => ...
+// Subtype constraint
+process: items: <Collection> => ...
 ```
 
 ### Sealing for Optimization
 
-```smalltalk
-"Sealed class - no subclasses, enables optimization"
+```
+// Sealed class - no subclasses, enables optimization
 sealed Actor subclass: Point
   state: x: Float, y: Float
 
-  #distanceTo: other: Point -> Float =>
+  distanceTo: other: Point -> Float =>
     ((self.x - other x) squared + (self.y - other y) squared) sqrt
 
-"Sealed method - final implementation"
-Counter >> sealed #getValue -> Integer => ^self.value
+// Sealed method - final implementation
+Counter >> sealed getValue -> Integer => ^self.value
 ```
 
 ### BEAM Integration
@@ -367,27 +369,27 @@ Recoverable exceptions with options.
 
 ### Traditional Exception
 
-```smalltalk
+```
 [file open: path]
   on: FileNotFound
-  do: [:e | ^nil].
+  do: [:e | ^nil]
 ```
 
 ### Conditions with Restarts
 
-```smalltalk
-"Handler chooses recovery option"
+```
+// Handler chooses recovery option
 [file open: path]
   on: FileNotFound
   restarts: [
     #useDefault -> [^self defaultFile],
     #retry -> [^self open: (self promptForPath)],
     #createNew -> [^File create: path]
-  ].
+  ]
 
-"Signaler offers restart options"
+// Signaler offers restart options
 FileNotFound signal: path
-  restarts: [#useDefault, #retry, #createNew].
+  restarts: [#useDefault, #retry, #createNew]
 ```
 
 ### BEAM Mapping
@@ -402,25 +404,25 @@ FileNotFound signal: path
 
 Cross-cutting concerns via before/after/around methods.
 
-```smalltalk
-"Primary method"
-Agent >> #processMessage: msg =>
-  self.model generate: msg.
+```
+// Primary method
+Agent >> processMessage: msg =>
+  self.model generate: msg
 
-"Before - runs first"
-Agent >> before #processMessage: msg =>
-  Telemetry emit: #messageReceived with: msg.
+// Before - runs first
+Agent >> before processMessage: msg =>
+  Telemetry emit: #messageReceived with: msg
 
-"After - runs last"
-Agent >> after #processMessage: msg =>
-  self.messageCount += 1.
+// After - runs last
+Agent >> after processMessage: msg =>
+  self.messageCount += 1
 
-"Around - wraps"
-Agent >> around #processMessage: msg =>
+// Around - wraps
+Agent >> around processMessage: msg =>
   | start result |
-  start := Time now.
-  result := self proceed.  "Call next in chain"
-  Metrics record: #duration value: (Time now - start).
+  start := Time now
+  result := self proceed  // Call next in chain
+  Metrics record: #duration value: (Time now - start)
   ^result
 ```
 
@@ -512,57 +514,57 @@ beamtalk observer           # Launch observer GUI
 
 ### REPL Features
 
-```smalltalk
-"Spawn and interact"
-counter := Counter spawn.
-counter increment.
-counter getValue await.  "=> 1"
+```
+// Spawn and interact
+counter := Counter spawn
+counter increment
+counter getValue await  // => 1
 
-"Inspect running actors"
-counter inspect.         "Opens browser"
-counter state.           "=> {value: 1}"
-counter mailbox peek.    "=> []"
+// Inspect running actors
+counter inspect         // Opens browser
+counter state           // => {value: 1}
+counter mailbox peek    // => []
 
-"Hot patch"
+// Hot patch
 patch Counter >> #increment {
-  Transcript log: 'incrementing'.
-  self.value += 1.
+  Transcript log: 'incrementing'
+  self.value += 1
 }
 
-"Evaluate in actor context"
-counter eval: [self.value := 100].
+// Evaluate in actor context
+counter eval: [self.value := 100]
 ```
 
 ### Testing Framework
 
-```smalltalk
-"Unit tests for actors"
+```
+// Unit tests for actors
 TestCase subclass: CounterTest
 
-  #testIncrement =>
+  testIncrement =>
     | counter |
-    counter := Counter spawn.
-    counter increment await.
-    self assert: (counter getValue await) equals: 1.
+    counter := Counter spawn
+    counter increment await
+    self assert: (counter getValue await) equals: 1
 
-  #testConcurrency =>
+  testConcurrency =>
     | counter futures |
-    counter := Counter spawn.
-    futures := (1 to: 100) collect: [:_ | counter increment].
-    futures do: [:f | f await].
-    self assert: (counter getValue await) equals: 100.
+    counter := Counter spawn
+    futures := (1 to: 100) collect: [:_ | counter increment]
+    futures do: [:f | f await]
+    self assert: (counter getValue await) equals: 100
 
-"Property-based testing"
+// Property-based testing
 PropertyTest subclass: CounterProperties
 
-  #incrementNeverNegative =>
+  incrementNeverNegative =>
     forAll: [n in: PositiveInteger]
     check: [
       | counter |
-      counter := Counter spawn.
-      n timesRepeat: [counter increment await].
-      (counter getValue await) >= 0.
-    ].
+      counter := Counter spawn
+      n timesRepeat: [counter increment await]
+      (counter getValue await) >= 0
+    ]
 ```
 
 ### Observability Integration
@@ -577,18 +579,18 @@ PropertyTest subclass: CounterProperties
 
 ### Debug/Trace Syntax
 
-```smalltalk
-"Trace all messages to an actor"
-counter trace: #all.
+```
+// Trace all messages to an actor
+counter trace: #all
 
-"Trace specific messages"
-counter trace: [#increment, #getValue].
+// Trace specific messages
+counter trace: [#increment, #getValue]
 
-"Conditional breakpoint"
-counter breakOn: #increment when: [self.value > 100].
+// Conditional breakpoint
+counter breakOn: #increment when: [self.value > 100]
 
-"Log message flow"
-Tracer enable: #messageFlow for: Counter.
+// Log message flow
+Tracer enable: #messageFlow for: Counter
 ```
 
 ---
