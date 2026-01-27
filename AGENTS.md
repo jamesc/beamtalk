@@ -94,6 +94,28 @@ beamtalk/
 
 ## Rust Development Best Practices
 
+### License Headers
+
+All source code files must include the Apache 2.0 license header. Add this at the top of every new file:
+
+**Rust files (`.rs`):**
+```rust
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+```
+
+**Erlang files (`.erl`, `.hrl`):**
+```erlang
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+```
+
+**Beamtalk files (`.bt`):**
+```smalltalk
+"Copyright 2026 James Casey"
+"SPDX-License-Identifier: Apache-2.0"
+```
+
 ### Code Style
 
 - Use `rustfmt` with default settings; run `cargo fmt` before committing

@@ -185,4 +185,4 @@ We use [Linear](https://linear.app) for issue tracking (project prefix: `BT`).
 
 ## License
 
-TBD
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
