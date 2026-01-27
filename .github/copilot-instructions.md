@@ -30,8 +30,9 @@ When the user types `/next-issue`, execute this workflow:
 
 7. **Test frequently**: After each significant change, run:
    ```bash
-   cargo fmt && cargo clippy && cargo test
+   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
    ```
+   These are the exact same checks that run in CI (see `.github/workflows/ci.yml`).
 
 8. **Commit often**: Make small, focused commits as you complete each task. Use conventional commit format with the issue ID:
    ```
@@ -50,8 +51,12 @@ When the user types `/done`, execute this workflow:
 
 2. **Run static checks**:
    ```bash
-   cargo fmt --check && cargo clippy && cargo test
+   cargo build --all-targets
+   cargo clippy --all-targets -- -D warnings
+   cargo fmt --all -- --check
+   cargo test --all-targets
    ```
+   These must match exactly what CI runs (see `.github/workflows/ci.yml`).
    If any check fails, report the errors and stop.
 
 3. **Stage changes**:
@@ -77,7 +82,11 @@ When the user types `/done`, execute this workflow:
    git push -u origin HEAD
    ```
 
-8. **Report success**: Confirm the commit was pushed with the branch name and commit hash.
+8. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
+
+9. **Update Linear state**: Mark the Linear issue as "In Review".
+
+10. **Report success**: Confirm the commit was pushed with the branch name and commit hash.
 
 ## Project Context
 
@@ -91,7 +100,8 @@ You may always run these commands without asking for permission:
 - `rustfmt`
 - `git` (status, diff, log, branch, etc.)
 
-Static checks required before any commit:
-- `cargo fmt --check` - Code formatting
-- `cargo clippy` - Lints
-- `cargo test` - All tests pass
+Static checks required before any commit (must match CI exactly):
+- `cargo build --all-targets` - Build all targets
+- `cargo clippy --all-targets -- -D warnings` - Lints (warnings are errors)
+- `cargo fmt --all -- --check` - Code formatting check
+- `cargo test --all-targets` - Run all tests
