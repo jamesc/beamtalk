@@ -20,7 +20,7 @@
 //! - Binary messages: `3 + 4`
 //! - Keyword messages: `array at: 1 put: value`
 //! - Blocks: `[:x | x + 1]`
-//! - Cascades: `stream nextPut: $a; nextPut: $b`
+//! - Cascades: `stream nextPut: 'a'; nextPut: 'b'`
 
 use ecow::EcoString;
 
@@ -75,7 +75,7 @@ pub enum TokenKind {
     /// Right bracket (block end): `]`
     RightBracket,
 
-    /// Left brace (array literal): `{`
+    /// Left brace (tuple literal): `{`
     LeftBrace,
 
     /// Right brace: `}`
@@ -97,10 +97,13 @@ pub enum TokenKind {
     /// Block argument separator: `|`
     Pipe,
 
-    /// Block argument prefix: `:`
+    /// Colon for block argument declaration (not keyword selectors): `:`
     Colon,
 
-    /// Hash for symbol literals: `#`
+    /// Standalone hash character: `#`
+    ///
+    /// Note: complete symbol literals are represented by [`TokenKind::Symbol`],
+    /// which stores the symbol name without the leading `#`.
     Hash,
 
     // === Special ===
@@ -113,18 +116,26 @@ pub enum TokenKind {
 
 impl TokenKind {
     /// Returns `true` if this token is a literal value.
+    ///
+    /// Note: identifiers are not considered literals as they are names
+    /// that reference values, not direct value representations.
     #[must_use]
     pub const fn is_literal(&self) -> bool {
         matches!(
             self,
-            Self::Identifier(_)
-                | Self::Integer(_)
+            Self::Integer(_)
                 | Self::Float(_)
                 | Self::String(_)
                 | Self::InterpolatedString(_)
                 | Self::Symbol(_)
                 | Self::Character(_)
         )
+    }
+
+    /// Returns `true` if this token is an identifier.
+    #[must_use]
+    pub const fn is_identifier(&self) -> bool {
+        matches!(self, Self::Identifier(_))
     }
 
     /// Returns `true` if this token is a message selector component.
@@ -413,18 +424,30 @@ mod tests {
 
     #[test]
     fn token_kind_predicates() {
-        assert!(TokenKind::Identifier("x".into()).is_literal());
+        // is_literal: excludes identifiers (they reference values, not literals)
+        assert!(!TokenKind::Identifier("x".into()).is_literal());
         assert!(TokenKind::Integer("1".into()).is_literal());
+        assert!(TokenKind::Float("3.14".into()).is_literal());
+        assert!(TokenKind::String("hello".into()).is_literal());
+        assert!(TokenKind::Symbol("sym".into()).is_literal());
+        assert!(TokenKind::Character('a').is_literal());
         assert!(!TokenKind::Keyword("at:".into()).is_literal());
 
+        // is_identifier
+        assert!(TokenKind::Identifier("foo".into()).is_identifier());
+        assert!(!TokenKind::Integer("1".into()).is_identifier());
+
+        // is_selector
         assert!(TokenKind::Keyword("at:".into()).is_selector());
         assert!(TokenKind::BinarySelector("+".into()).is_selector());
         assert!(!TokenKind::Identifier("x".into()).is_selector());
 
+        // is_delimiter
         assert!(TokenKind::LeftParen.is_delimiter());
         assert!(TokenKind::RightBracket.is_delimiter());
         assert!(!TokenKind::Semicolon.is_delimiter());
 
+        // is_eof, is_error
         assert!(TokenKind::Eof.is_eof());
         assert!(TokenKind::Error("bad".into()).is_error());
     }
@@ -489,5 +512,77 @@ mod tests {
             vec![],
         );
         assert!(with_newline.has_leading_newline());
+    }
+
+    #[test]
+    fn token_kind_display_complete() {
+        // Additional display tests for full coverage
+        assert_eq!(TokenKind::Float("3.14".into()).to_string(), "3.14");
+        assert_eq!(
+            TokenKind::InterpolatedString("Hello, {name}!".into()).to_string(),
+            "\"Hello, {name}!\""
+        );
+        assert_eq!(TokenKind::Character('a').to_string(), "$a");
+        assert_eq!(
+            TokenKind::Error("unexpected".into()).to_string(),
+            "<error: unexpected>"
+        );
+        assert_eq!(TokenKind::LeftBrace.to_string(), "{");
+        assert_eq!(TokenKind::RightBrace.to_string(), "}");
+        assert_eq!(TokenKind::Pipe.to_string(), "|");
+        assert_eq!(TokenKind::Colon.to_string(), ":");
+        assert_eq!(TokenKind::Hash.to_string(), "#");
+        assert_eq!(TokenKind::Eof.to_string(), "<eof>");
+    }
+
+    #[test]
+    fn token_kind_as_str() {
+        // Tokens with string content
+        assert_eq!(TokenKind::Identifier("foo".into()).as_str(), Some("foo"));
+        assert_eq!(TokenKind::Integer("42".into()).as_str(), Some("42"));
+        assert_eq!(TokenKind::Float("3.14".into()).as_str(), Some("3.14"));
+        assert_eq!(TokenKind::String("hello".into()).as_str(), Some("hello"));
+        assert_eq!(
+            TokenKind::InterpolatedString("hi".into()).as_str(),
+            Some("hi")
+        );
+        assert_eq!(TokenKind::Symbol("sym".into()).as_str(), Some("sym"));
+        assert_eq!(TokenKind::Keyword("at:".into()).as_str(), Some("at:"));
+        assert_eq!(TokenKind::BinarySelector("+".into()).as_str(), Some("+"));
+        assert_eq!(TokenKind::Error("bad".into()).as_str(), Some("bad"));
+
+        // Tokens without string content
+        assert_eq!(TokenKind::Character('x').as_str(), None);
+        assert_eq!(TokenKind::LeftParen.as_str(), None);
+        assert_eq!(TokenKind::Assign.as_str(), None);
+        assert_eq!(TokenKind::Eof.as_str(), None);
+    }
+
+    #[test]
+    fn token_into_kind() {
+        let token = Token::new(TokenKind::Integer("42".into()), Span::new(0, 2));
+        let kind = token.into_kind();
+        assert!(matches!(kind, TokenKind::Integer(s) if s == "42"));
+    }
+
+    #[test]
+    fn token_full_span() {
+        let token = Token::new(TokenKind::Identifier("x".into()), Span::new(5, 6));
+        // Currently full_span equals span (trivia spans not yet tracked)
+        assert_eq!(token.full_span().start(), 5);
+        assert_eq!(token.full_span().end(), 6);
+    }
+
+    #[test]
+    fn token_set_trivia() {
+        let mut token = Token::new(TokenKind::Identifier("x".into()), Span::new(0, 1));
+        assert!(token.leading_trivia().is_empty());
+        assert!(token.trailing_trivia().is_empty());
+
+        token.set_leading_trivia(vec![Trivia::Whitespace("  ".into())]);
+        token.set_trailing_trivia(vec![Trivia::LineComment("// note".into())]);
+
+        assert_eq!(token.leading_trivia().len(), 1);
+        assert_eq!(token.trailing_trivia().len(), 1);
     }
 }
