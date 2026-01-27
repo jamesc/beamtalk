@@ -212,18 +212,51 @@ The `beamtalk_` prefix avoids collisions with existing modules.
 
 ### Strings and Binaries
 
-```
-// Single-quoted strings are binaries (recommended)
-name := 'Alice'           // => <<"Alice">> in Erlang
+Beamtalk strings are **UTF-8 binaries** by default, matching Elixir's approach:
 
-// Double-quoted strings support interpolation
+```
+// Single-quoted strings are UTF-8 binaries (recommended)
+name := 'Alice'           // => <<"Alice">> in Erlang
+multilang := '你好世界'    // => UTF-8 encoded binary
+emoji := '🎉'             // => <<240,159,142,137>>
+
+// Double-quoted strings support interpolation (also UTF-8)
 greeting := "Hello, {name}!"  // => <<"Hello, Alice!">>
+localized := "欢迎 {name}"     // => UTF-8 binary
+
+// Character literals are Unicode codepoints
+$a                        // => 97
+$世                       // => 19990
 
 // Erlang charlists (legacy, rarely needed)
-charlist := Erlang.string: "hello"  // => [104,101,108,108,111]
+charlist := 'hello' toCharlist  // => [104,101,108,108,111]
 ```
 
-**Default:** Beamtalk strings compile to Erlang binaries, not charlists. This matches modern BEAM convention.
+**Default:** Beamtalk strings compile to Erlang UTF-8 binaries, **not charlists**. This matches modern BEAM convention.
+
+#### String Encoding Details
+
+| Beamtalk | Erlang/Elixir | Bytes (example) |
+|----------|---------------|----------------|
+| `'hello'` | `<<"hello">>` | `[104,101,108,108,111]` (ASCII) |
+| `'世界'` | `<<228,184,150,231,149,140>>` | UTF-8 encoded |
+| `"Hi, {x}"` | `<<"Hi, ", X/binary>>` | Interpolated UTF-8 |
+| Charlist | `[104,101,108,108,111]` | List of integers |
+
+#### When to Use Charlists
+
+Most Erlang modules accept binaries now. Use charlists only when:
+- Required by old Erlang APIs (`:io.format/2`, some `:file` functions)
+- Explicitly documented as charlist-only
+
+```
+// Modern Erlang - accepts binaries
+Erlang.file read_file: 'data.txt'  // Binary path works
+
+// Legacy Erlang - needs charlist
+path := 'data.txt' toCharlist
+Erlang.io format: '~s~n' toCharlist arguments: [name toCharlist]
+```
 
 ### Collections
 
