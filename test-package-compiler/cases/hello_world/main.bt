@@ -1,0 +1,5 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Simple hello world program for testing compilation pipeline
+Transcript show: 'Hello, World!'
