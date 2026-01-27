@@ -14,9 +14,11 @@
 
 #![doc = include_str!("../../../README.md")]
 
+pub mod ast;
 pub mod parse;
 
 /// Re-export commonly used types.
 pub mod prelude {
+    pub use crate::ast::{Expression, Identifier, Literal, Module};
     pub use crate::parse::Span;
 }
