@@ -82,11 +82,20 @@ When the user types `/done`, execute this workflow:
    git push -u origin HEAD
    ```
 
-8. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
+8. **Create Pull Request**: Extract the issue number from the branch name (e.g., `BT-10` from `BT-10-implement-erlang-codegen`). Fetch the Linear issue details. Create a PR using:
+   ```bash
+   gh pr create --title "<Issue Title> (BT-{number})" --body "<Issue description with link to Linear issue>"
+   ```
+   The PR body should include:
+   - Link to Linear issue: `https://linear.app/beamtalk/issue/BT-{number}`
+   - Brief summary of what was implemented
+   - List of key changes
 
-9. **Update Linear state**: Mark the Linear issue as "In Review".
+9. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
 
-10. **Report success**: Confirm the commit was pushed with the branch name and commit hash.
+10. **Update Linear state**: Mark the Linear issue as "In Review".
+
+11. **Report success**: Confirm the commit was pushed, PR was created (with PR URL), and Linear was updated.
 
 ## Project Context
 
