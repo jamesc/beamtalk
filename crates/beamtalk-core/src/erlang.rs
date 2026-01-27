@@ -195,6 +195,9 @@ impl CoreErlangGenerator {
         // Generate method table
         self.generate_method_table(module)?;
 
+        // Module end
+        writeln!(self.output, "end")?;
+
         Ok(())
     }
 
@@ -252,7 +255,10 @@ impl CoreErlangGenerator {
         writeln!(self.output, "case Msg of")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "{{Selector, Args, FuturePid}} ->")?;
+        writeln!(
+            self.output,
+            "<{{Selector, Args, FuturePid}}> when 'true' ->"
+        )?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
@@ -262,10 +268,16 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "{{'reply', Result, NewState}} ->")?;
+        writeln!(
+            self.output,
+            "<{{'reply', Result, NewState}}> when 'true' ->"
+        )?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let _ = FuturePid ! {{'resolved', Result}}")?;
+        writeln!(
+            self.output,
+            "let _Ignored = call 'erlang':'!'(FuturePid, {{'resolved', Result}})"
+        )?;
         self.write_indent()?;
         writeln!(self.output, "in {{'noreply', NewState}}")?;
         self.indent -= 2;
@@ -282,13 +294,13 @@ impl CoreErlangGenerator {
 
     /// Generates the `handle_call/3` callback for sync message sends.
     fn generate_handle_call(&mut self) -> Result<()> {
-        writeln!(self.output, "'handle_call'/3 = fun (Msg, From, State) ->")?;
+        writeln!(self.output, "'handle_call'/3 = fun (Msg, _From, State) ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Msg of")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "{{Selector, Args}} ->")?;
+        writeln!(self.output, "<{{Selector, Args}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
@@ -298,7 +310,10 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "{{'reply', Result, NewState}} ->")?;
+        writeln!(
+            self.output,
+            "<{{'reply', Result, NewState}}> when 'true' ->"
+        )?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "{{'reply', Result, NewState}}")?;
@@ -346,7 +361,7 @@ impl CoreErlangGenerator {
                     (target.as_ref(), value.as_ref())
                 {
                     self.write_indent()?;
-                    write!(self.output, "'{}' ->", id.name)?;
+                    write!(self.output, "<'{}'> when 'true' ->", id.name)?;
                     writeln!(self.output)?;
                     self.indent += 1;
 
@@ -358,7 +373,7 @@ impl CoreErlangGenerator {
                         self.indent += 1;
 
                         self.write_indent()?;
-                        write!(self.output, "[")?;
+                        write!(self.output, "<[")?;
                         for (i, param) in block.parameters.iter().enumerate() {
                             if i > 0 {
                                 write!(self.output, ", ")?;
@@ -366,7 +381,7 @@ impl CoreErlangGenerator {
                             let var_name = self.fresh_var(&param.name);
                             write!(self.output, "{var_name}")?;
                         }
-                        write!(self.output, "] ->")?;
+                        write!(self.output, "]> when 'true' ->")?;
                         writeln!(self.output)?;
                         self.indent += 1;
                     }
@@ -383,7 +398,7 @@ impl CoreErlangGenerator {
                         self.write_indent()?;
                         writeln!(
                             self.output,
-                            "_ -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+                            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
                         )?;
                         self.indent -= 1;
                         self.write_indent()?;
@@ -397,7 +412,7 @@ impl CoreErlangGenerator {
 
         // Default case for unknown messages
         self.write_indent()?;
-        writeln!(self.output, "_ ->")?;
+        writeln!(self.output, "<_> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
@@ -764,7 +779,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TODO: Debug erlc compilation issue - manual tests pass but integrated test fails"]
     fn test_generated_core_erlang_compiles() {
         use std::fs;
         use std::process::Command;
@@ -773,9 +787,9 @@ mod tests {
         let module = Module::new(Vec::new(), Span::new(0, 0));
         let core_erlang = generate(&module).expect("codegen should succeed");
 
-        // Write to temporary file
+        // Write to temporary file (filename must match module name)
         let temp_dir = std::env::temp_dir();
-        let core_file = temp_dir.join("test_beamtalk_module.core");
+        let core_file = temp_dir.join("beamtalk_module.core");
         fs::write(&core_file, &core_erlang).expect("should write core erlang file");
 
         // Try to compile with erlc
@@ -788,7 +802,7 @@ mod tests {
 
         // Clean up
         let _ = fs::remove_file(&core_file);
-        let beam_file = temp_dir.join("test_beamtalk_module.beam");
+        let beam_file = temp_dir.join("beamtalk_module.beam");
         let _ = fs::remove_file(&beam_file);
 
         // Check compilation succeeded
