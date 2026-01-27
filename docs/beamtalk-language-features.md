@@ -43,6 +43,25 @@ Transcript show: 'Hello'; cr; show: 'World'
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `array at: 1`
 
+### Field Access and Assignment
+
+Direct field access within actors using dot notation:
+
+```
+// Read field
+current := self.value
+
+// Write field
+self.value := 10
+
+// Compound assignment
+self.value += 1
+self.count -= delta
+self.total *= factor
+```
+
+**Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
+
 ### Blocks (Closures)
 
 ```
@@ -447,6 +466,9 @@ around (enter) → before → primary → after → around (exit)
 |----------------------------|----------------------|
 | Object | Process with state (actor) |
 | Class | Module + constructor function |
+| Instance variable | Process state map field |
+| Field access (`self.x`) | `maps:get('x', State)` |
+| Field write (`self.x := v`) | `maps:put('x', v, State)` |
 | Message send | Async: `gen_server:cast` + future |
 | Sync message | `gen_server:call` (opt-in) |
 | Future/Promise | Lightweight process or ref |
@@ -456,7 +478,6 @@ around (enter) → before → primary → after → around (exit)
 | Image | Running node(s) |
 | Workspace | Connected REPL to live node |
 | Class browser | Code introspection via `code:` module |
-| Instance variable | Process state map |
 | Global variable | Registered process or application env |
 
 ---

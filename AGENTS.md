@@ -111,9 +111,9 @@ All source code files must include the Apache 2.0 license header. Add this at th
 ```
 
 **Beamtalk files (`.bt`):**
-```smalltalk
-"Copyright 2026 James Casey"
-"SPDX-License-Identifier: Apache-2.0"
+```
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
 ```
 
 ### Code Style

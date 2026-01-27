@@ -158,6 +158,24 @@ getValue => ^self.value
 
 **Why:** `^` is distinctive and clear. But requiring it for every expression is noisy. Last expression in a block is implicitly returned.
 
+### Field Access: Add Dot Notation
+
+**Smalltalk has no field access syntax** — all access is via messages. We add direct field access:
+
+```
+// Direct field access within actor
+self.value          // read field
+self.value := 10    // write field
+self.value += 1     // compound assignment
+
+// Equivalent to message send (still works)
+self getValue       // unary message
+```
+
+**Why:** Direct field access is clearer for state manipulation. `self.value` is less noisy than `self getValue` for simple reads. Compound assignment (`+=`) eliminates repetition.
+
+**Compilation:** `self.value` compiles to `maps:get('value', State)` — it's a direct lookup, not a message send.
+
 ### String Interpolation: Add It
 
 **Smalltalk has no string interpolation.** We add it:
@@ -182,6 +200,8 @@ literal := 'No {interpolation} here'
 | Comment (line) | `//` | `// this is a comment` |
 | Comment (block) | `/* */` | `/* multi-line */` |
 | Assignment | `:=` | `x := 5` |
+| Compound assignment | `+=`, `-=`, `*=`, `/=` | `x += 1` |
+| Field access | `self.field` | `self.value` |
 | Return | `^` | `^self.value` |
 | Unary message | `receiver message` | `counter increment` |
 | Binary message | `a op b` | `3 + 4` |
@@ -236,10 +256,10 @@ Use parentheses to override: `(2 + 3) * 4`
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value := self.value + 1
-  decrement => self.value := self.value - 1
+  increment => self.value += 1
+  decrement => self.value -= 1
   getValue => ^self.value
-  incrementBy: delta => self.value := self.value + delta
+  incrementBy: delta => self.value += delta
 ```
 
 ### Async Message Passing
