@@ -28,13 +28,18 @@ fn main() {
             let path = entry.path();
 
             if path.is_dir() {
+                // Watch the test case subdirectory for changes
+                println!("cargo:rerun-if-changed={}", path.display());
+
                 let main_bt = path.join("main.bt");
                 if main_bt.exists() {
-                    let case_name = path
+                    // Watch the main.bt file for changes
+                    println!("cargo:rerun-if-changed={}", main_bt.display());
+
+                    let case_name_os = path
                         .file_name()
-                        .and_then(|n| n.to_str())
-                        .expect("Test case directory name is not valid UTF-8")
-                        .to_string();
+                        .unwrap_or_else(|| panic!("Test case path {:?} has no file name", path));
+                    let case_name = case_name_os.to_string_lossy().into_owned();
 
                     // Validate that the case name is a valid Rust identifier component
                     if !case_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
