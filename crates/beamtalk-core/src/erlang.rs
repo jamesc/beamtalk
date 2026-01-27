@@ -25,22 +25,26 @@
 //!
 //! Generated Core Erlang:
 //! ```erlang
-//! module 'counter' ['init'/0, 'handle_cast'/2]
+//! module 'counter' ['init'/1, 'handle_cast'/2, 'handle_call'/3,
+//!                   'code_change'/3, 'dispatch'/3, 'method_table'/0]
 //!   attributes ['behaviour' = ['gen_server']]
 //!
 //! 'init'/1 = fun (_Args) ->
-//!     let InitialState = #{
+//!     let InitialState = ~{
 //!       '__class__' => 'Counter',
 //!       '__methods__' => call 'counter':'method_table'/0(),
 //!       'value' => 0
-//!     }
+//!     }~
 //!     in {'ok', InitialState}
 //!
-//! 'handle_cast'/2 = fun ({Selector, Args, FuturePid}, State) ->
-//!     case call 'counter':'dispatch'/3(Selector, Args, State) of
-//!       {'reply', Result, NewState} ->
-//!         FuturePid ! {'resolved', Result},
-//!         {'noreply', NewState}
+//! 'handle_cast'/2 = fun (Msg, State) ->
+//!     case Msg of
+//!       <{Selector, Args, FuturePid}> when 'true' ->
+//!         case call 'counter':'dispatch'/3(Selector, Args, State) of
+//!           <{'reply', Result, NewState}> when 'true' ->
+//!             let _ = call 'erlang':'!'(FuturePid, {'resolved', Result})
+//!             in {'noreply', NewState}
+//!         end
 //!     end
 //! ```
 //!
@@ -145,8 +149,9 @@ struct CoreErlangGenerator {
     indent: usize,
     /// Counter for generating unique variable names.
     var_counter: usize,
-    /// Map of identifiers to Core Erlang variable names.
-    var_bindings: HashMap<String, String>,
+    /// Stack of variable binding scopes. Each scope is a map of identifiers
+    /// to Core Erlang variable names. Inner scopes shadow outer scopes.
+    var_scopes: Vec<HashMap<String, String>>,
 }
 
 impl CoreErlangGenerator {
@@ -157,8 +162,31 @@ impl CoreErlangGenerator {
             output: String::new(),
             indent: 0,
             var_counter: 0,
-            var_bindings: HashMap::new(),
+            var_scopes: vec![HashMap::new()],
         }
+    }
+
+    /// Pushes a new scope for variable bindings.
+    fn push_scope(&mut self) {
+        self.var_scopes.push(HashMap::new());
+    }
+
+    /// Pops the current scope, discarding its bindings.
+    fn pop_scope(&mut self) {
+        if self.var_scopes.len() > 1 {
+            self.var_scopes.pop();
+        }
+    }
+
+    /// Looks up a variable binding in the current scope stack.
+    fn lookup_var(&self, name: &str) -> Option<&String> {
+        // Search from innermost to outermost scope
+        for scope in self.var_scopes.iter().rev() {
+            if let Some(var_name) = scope.get(name) {
+                return Some(var_name);
+            }
+        }
+        None
     }
 
     /// Generates a full module with `gen_server` behaviour.
@@ -360,6 +388,9 @@ impl CoreErlangGenerator {
                 if let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
                 {
+                    // Push a new scope for this method's parameter bindings
+                    self.push_scope();
+
                     self.write_indent()?;
                     write!(self.output, "<'{}'> when 'true' ->", id.name)?;
                     writeln!(self.output)?;
@@ -406,6 +437,9 @@ impl CoreErlangGenerator {
                     }
 
                     self.indent -= 1;
+
+                    // Pop the scope when done with this method
+                    self.pop_scope();
                 }
             }
         }
@@ -532,8 +566,8 @@ impl CoreErlangGenerator {
 
     /// Generates code for an identifier reference.
     fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
-        // Check if it's a bound variable
-        if let Some(var_name) = self.var_bindings.get(id.name.as_str()) {
+        // Check if it's a bound variable in current or outer scopes
+        if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
             write!(self.output, "{var_name}")?;
         } else {
             // Field access from state
@@ -560,6 +594,9 @@ impl CoreErlangGenerator {
 
     /// Generates code for a block (closure).
     fn generate_block(&mut self, block: &Block) -> Result<()> {
+        // Push a new scope for block parameters
+        self.push_scope();
+
         write!(self.output, "fun (")?;
         for (i, param) in block.parameters.iter().enumerate() {
             if i > 0 {
@@ -570,6 +607,9 @@ impl CoreErlangGenerator {
         }
         write!(self.output, ") -> ")?;
         self.generate_block_body(block)?;
+
+        // Pop the scope when done with the block
+        self.pop_scope();
         Ok(())
     }
 
@@ -608,26 +648,37 @@ impl CoreErlangGenerator {
             return self.generate_binary_op(op, receiver, arguments);
         }
 
-        // For other messages, this would be an actor send
-        // For now, treat as local function call
-        write!(self.output, "call '{}':'", self.module_name)?;
+        // For other messages, route through the module's dispatch/3 function.
+        // This matches how methods are represented (via dispatch/3).
+        write!(self.output, "call '{}':'dispatch'/3(", self.module_name)?;
+
+        // First argument: the selector name as an atom.
+        write!(self.output, "'")?;
         match selector {
-            MessageSelector::Unary(name) => write!(self.output, "{name}'")?,
-            MessageSelector::Binary(op) => write!(self.output, "{op}'")?,
+            MessageSelector::Unary(name) => write!(self.output, "{name}")?,
             MessageSelector::Keyword(parts) => {
                 let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
-                write!(self.output, "{name}'")?;
+                write!(self.output, "{name}")?;
+            }
+            // Binary selectors are handled above and should not reach here.
+            MessageSelector::Binary(op) => {
+                return Err(CodeGenError::Internal(format!(
+                    "unexpected binary selector in generate_message_send: {op}"
+                )));
             }
         }
-        write!(self.output, "/{}", arguments.len())?;
-        write!(self.output, "(")?;
+        write!(self.output, "', [")?;
+
+        // Second argument: list of message arguments.
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
             self.generate_expression(arg)?;
         }
-        write!(self.output, ")")?;
+
+        // Third argument: State (receiver is assumed to be self for now)
+        write!(self.output, "], State)")?;
 
         Ok(())
     }
@@ -682,11 +733,14 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates a fresh variable name.
+    /// Generates a fresh variable name and binds it in the current scope.
     fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         let var_name = format!("_{}{}", base.replace('_', ""), self.var_counter);
-        self.var_bindings.insert(base.to_string(), var_name.clone());
+        // Insert into the current (innermost) scope
+        if let Some(current_scope) = self.var_scopes.last_mut() {
+            current_scope.insert(base.to_string(), var_name.clone());
+        }
         var_name
     }
 
