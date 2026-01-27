@@ -818,9 +818,10 @@ mod tests {
     fn parse_ok(source: &str) -> Module {
         let tokens = lex_with_eof(source);
         let (module, diagnostics) = parse(tokens);
-        if !diagnostics.is_empty() {
-            panic!("Expected no errors, got: {diagnostics:?}");
-        }
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors, got: {diagnostics:?}"
+        );
         module
     }
 
@@ -843,10 +844,10 @@ mod tests {
 
     #[test]
     fn parse_float_literal() {
-        let module = parse_ok("3.14");
+        let module = parse_ok("2.5");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::Literal(Literal::Float(f), _) if (f - 3.14).abs() < 0.001 => {}
+            Expression::Literal(Literal::Float(f), _) if (*f - 2.5_f64).abs() < 0.001 => {}
             _ => panic!("Expected float literal"),
         }
     }
