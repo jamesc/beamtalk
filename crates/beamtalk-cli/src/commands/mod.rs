@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! CLI command implementations.
+
+pub mod build;
+pub mod new;
+pub mod run;

@@ -43,7 +43,10 @@ fn main() {
 
                     // Validate that the case name is a valid Rust identifier component
                     if !case_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                        panic!("Test case name '{}' contains invalid characters. Use only alphanumeric characters and underscores.", case_name);
+                        panic!(
+                            "Test case name '{}' contains invalid characters. Use only alphanumeric characters and underscores.",
+                            case_name
+                        );
                     }
 
                     test_cases.push(case_name);
