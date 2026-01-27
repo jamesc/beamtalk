@@ -121,6 +121,19 @@ pub enum Expression {
     /// An identifier (variable or class name).
     Identifier(Identifier),
 
+    /// Field access (`self.value`).
+    ///
+    /// This is direct field access within an actor, not a message send.
+    /// Compiles to direct map access in BEAM.
+    FieldAccess {
+        /// The receiver (typically `self`).
+        receiver: Box<Expression>,
+        /// The field name being accessed.
+        field: Identifier,
+        /// Source location of the entire field access.
+        span: Span,
+    },
+
     /// A message send (method call).
     MessageSend {
         /// The receiver of the message.
@@ -136,11 +149,23 @@ pub enum Expression {
     /// A block (closure/lambda).
     Block(Block),
 
-    /// An assignment statement.
+    /// An assignment statement (`x := value`).
     Assignment {
-        /// The variable being assigned to.
-        target: Identifier,
+        /// The target being assigned to (identifier or field access).
+        target: Box<Expression>,
         /// The value being assigned.
+        value: Box<Expression>,
+        /// Source location of the entire assignment.
+        span: Span,
+    },
+
+    /// A compound assignment (`self.value += 1`, `x *= 2`).
+    CompoundAssignment {
+        /// The target being modified.
+        target: Box<Expression>,
+        /// The compound operator.
+        operator: CompoundOperator,
+        /// The value (right-hand side).
         value: Box<Expression>,
         /// Source location of the entire assignment.
         span: Span,
@@ -174,6 +199,32 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A pipe expression (`data |> transform`).
+    ///
+    /// Pipes pass the left side as the first argument to the right side.
+    Pipe {
+        /// The value being piped.
+        value: Box<Expression>,
+        /// The pipe operator (sync or async).
+        operator: PipeOperator,
+        /// The function/message to pipe into.
+        target: Box<Expression>,
+        /// Source location of the entire pipe expression.
+        span: Span,
+    },
+
+    /// A pattern match expression.
+    ///
+    /// Example: `value match: [{#ok, x} -> x; {#error, e} -> nil]`
+    Match {
+        /// The value being matched against.
+        value: Box<Expression>,
+        /// The match arms.
+        arms: Vec<MatchArm>,
+        /// Source location of the entire match.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -191,11 +242,15 @@ impl Expression {
     pub const fn span(&self) -> Span {
         match self {
             Self::Literal(_, span)
+            | Self::FieldAccess { span, .. }
             | Self::MessageSend { span, .. }
             | Self::Assignment { span, .. }
+            | Self::CompoundAssignment { span, .. }
             | Self::Return { span, .. }
             | Self::Cascade { span, .. }
             | Self::Parenthesized { span, .. }
+            | Self::Pipe { span, .. }
+            | Self::Match { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -206,6 +261,67 @@ impl Expression {
     #[must_use]
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
+    }
+}
+
+/// Compound assignment operators (`+=`, `-=`, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompoundOperator {
+    /// Addition assignment (`+=`).
+    Add,
+    /// Subtraction assignment (`-=`).
+    Subtract,
+    /// Multiplication assignment (`*=`).
+    Multiply,
+    /// Division assignment (`/=`).
+    Divide,
+    /// Remainder assignment (`%=`).
+    Remainder,
+}
+
+impl CompoundOperator {
+    /// Returns the string representation of the operator.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "+=",
+            Self::Subtract => "-=",
+            Self::Multiply => "*=",
+            Self::Divide => "/=",
+            Self::Remainder => "%=",
+        }
+    }
+
+    /// Returns the corresponding binary operator.
+    #[must_use]
+    pub const fn to_binary(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Remainder => "%",
+        }
+    }
+}
+
+/// Pipe operators for data flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PipeOperator {
+    /// Synchronous pipe (`|>`).
+    Sync,
+    /// Asynchronous pipe (`|>>`).
+    Async,
+}
+
+impl PipeOperator {
+    /// Returns the string representation of the operator.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sync => "|>",
+            Self::Async => "|>>",
+        }
     }
 }
 
@@ -396,6 +512,159 @@ impl BlockParameter {
     }
 }
 
+/// A match arm in a match expression.
+///
+/// Example: `{#ok, value} -> value`
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    /// The pattern to match against.
+    pub pattern: Pattern,
+    /// Optional guard expression.
+    pub guard: Option<Expression>,
+    /// The expression to evaluate if the pattern matches.
+    pub body: Expression,
+    /// Source location of this match arm.
+    pub span: Span,
+}
+
+impl MatchArm {
+    /// Creates a new match arm without a guard.
+    #[must_use]
+    pub fn new(pattern: Pattern, body: Expression, span: Span) -> Self {
+        Self {
+            pattern,
+            guard: None,
+            body,
+            span,
+        }
+    }
+
+    /// Creates a new match arm with a guard.
+    #[must_use]
+    pub fn with_guard(pattern: Pattern, guard: Expression, body: Expression, span: Span) -> Self {
+        Self {
+            pattern,
+            guard: Some(guard),
+            body,
+            span,
+        }
+    }
+}
+
+/// A pattern for pattern matching.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    /// Wildcard pattern (`_`) - matches anything.
+    Wildcard(Span),
+
+    /// Literal pattern - matches exact value.
+    Literal(Literal, Span),
+
+    /// Variable binding pattern - binds to a name.
+    Variable(Identifier),
+
+    /// Tuple pattern - matches tuple structure.
+    ///
+    /// Example: `{#ok, value}`
+    Tuple {
+        /// Elements of the tuple pattern.
+        elements: Vec<Pattern>,
+        /// Source location.
+        span: Span,
+    },
+
+    /// List pattern - matches list structure.
+    ///
+    /// Example: `[head | tail]`
+    List {
+        /// Head elements.
+        elements: Vec<Pattern>,
+        /// Optional tail pattern.
+        tail: Option<Box<Pattern>>,
+        /// Source location.
+        span: Span,
+    },
+
+    /// Binary pattern for binary matching.
+    ///
+    /// Example: `<<version:8, length:16/big>>`
+    Binary {
+        /// Segments of the binary pattern.
+        segments: Vec<BinarySegment>,
+        /// Source location.
+        span: Span,
+    },
+}
+
+impl Pattern {
+    /// Returns the span of this pattern.
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        match self {
+            Self::Variable(id) => id.span,
+            Self::Wildcard(span)
+            | Self::Literal(_, span)
+            | Self::Tuple { span, .. }
+            | Self::List { span, .. }
+            | Self::Binary { span, .. } => *span,
+        }
+    }
+}
+
+/// A segment in a binary pattern.
+///
+/// Example: In `<<version:8, data/binary>>`, `version:8` and `data/binary` are segments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinarySegment {
+    /// The value or variable.
+    pub value: Pattern,
+    /// Size specifier (e.g., `8`, `16`).
+    pub size: Option<Box<Expression>>,
+    /// Type specifier (e.g., `binary`, `integer`, `float`).
+    pub segment_type: Option<BinarySegmentType>,
+    /// Signedness (for integer types).
+    pub signedness: Option<BinarySignedness>,
+    /// Endianness.
+    pub endianness: Option<BinaryEndianness>,
+    /// Unit size.
+    pub unit: Option<usize>,
+    /// Source location.
+    pub span: Span,
+}
+
+/// Type specifier for binary segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinarySegmentType {
+    /// Integer value.
+    Integer,
+    /// Float value.
+    Float,
+    /// Binary/bytes.
+    Binary,
+    /// UTF-8 string.
+    Utf8,
+}
+
+/// Signedness for integer binary segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinarySignedness {
+    /// Signed integer.
+    Signed,
+    /// Unsigned integer.
+    Unsigned,
+}
+
+/// Endianness for binary segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BinaryEndianness {
+    /// Big-endian.
+    Big,
+    /// Little-endian.
+    Little,
+    /// Native endianness.
+    Native,
+}
+
 /// A message in a cascade.
 ///
 /// Cascades send multiple messages to the same receiver.
@@ -523,5 +792,129 @@ mod tests {
         );
         assert_eq!(msg.selector.name(), "cr");
         assert!(msg.arguments.is_empty());
+    }
+
+    #[test]
+    fn field_access_expression() {
+        let receiver = Box::new(Expression::Identifier(Identifier::new(
+            "self",
+            Span::new(0, 4),
+        )));
+        let field = Identifier::new("value", Span::new(5, 10));
+        let expr = Expression::FieldAccess {
+            receiver,
+            field,
+            span: Span::new(0, 10),
+        };
+        assert_eq!(expr.span(), Span::new(0, 10));
+    }
+
+    #[test]
+    fn compound_assignment() {
+        let target = Box::new(Expression::Identifier(Identifier::new(
+            "count",
+            Span::new(0, 5),
+        )));
+        let value = Box::new(Expression::Literal(Literal::Integer(1), Span::new(9, 10)));
+        let expr = Expression::CompoundAssignment {
+            target,
+            operator: CompoundOperator::Add,
+            value,
+            span: Span::new(0, 10),
+        };
+        assert_eq!(expr.span(), Span::new(0, 10));
+        assert_eq!(CompoundOperator::Add.as_str(), "+=");
+        assert_eq!(CompoundOperator::Add.to_binary(), "+");
+    }
+
+    #[test]
+    fn compound_operators() {
+        assert_eq!(CompoundOperator::Add.as_str(), "+=");
+        assert_eq!(CompoundOperator::Subtract.as_str(), "-=");
+        assert_eq!(CompoundOperator::Multiply.as_str(), "*=");
+        assert_eq!(CompoundOperator::Divide.as_str(), "/=");
+        assert_eq!(CompoundOperator::Remainder.as_str(), "%=");
+    }
+
+    #[test]
+    fn pipe_operators() {
+        assert_eq!(PipeOperator::Sync.as_str(), "|>");
+        assert_eq!(PipeOperator::Async.as_str(), "|>>");
+    }
+
+    #[test]
+    fn pipe_expression() {
+        let value = Box::new(Expression::Identifier(Identifier::new(
+            "data",
+            Span::new(0, 4),
+        )));
+        let target = Box::new(Expression::Identifier(Identifier::new(
+            "transform",
+            Span::new(8, 17),
+        )));
+        let expr = Expression::Pipe {
+            value,
+            operator: PipeOperator::Sync,
+            target,
+            span: Span::new(0, 17),
+        };
+        assert_eq!(expr.span(), Span::new(0, 17));
+    }
+
+    #[test]
+    fn pattern_wildcard() {
+        let pattern = Pattern::Wildcard(Span::new(0, 1));
+        assert_eq!(pattern.span(), Span::new(0, 1));
+    }
+
+    #[test]
+    fn pattern_variable() {
+        let pattern = Pattern::Variable(Identifier::new("x", Span::new(0, 1)));
+        assert_eq!(pattern.span(), Span::new(0, 1));
+    }
+
+    #[test]
+    fn pattern_tuple() {
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Literal(Literal::Symbol("ok".into()), Span::new(1, 4)),
+                Pattern::Variable(Identifier::new("value", Span::new(6, 11))),
+            ],
+            span: Span::new(0, 12),
+        };
+        assert_eq!(pattern.span(), Span::new(0, 12));
+    }
+
+    #[test]
+    fn match_arm_creation() {
+        let pattern = Pattern::Wildcard(Span::new(0, 1));
+        let body = Expression::Literal(Literal::Integer(0), Span::new(5, 6));
+        let arm = MatchArm::new(pattern, body, Span::new(0, 6));
+        assert!(arm.guard.is_none());
+
+        let pattern = Pattern::Variable(Identifier::new("x", Span::new(0, 1)));
+        let guard = Expression::Identifier(Identifier::new("x", Span::new(7, 8)));
+        let body = Expression::Identifier(Identifier::new("x", Span::new(12, 13)));
+        let arm = MatchArm::with_guard(pattern, guard, body, Span::new(0, 13));
+        assert!(arm.guard.is_some());
+    }
+
+    #[test]
+    fn match_expression() {
+        let value = Box::new(Expression::Identifier(Identifier::new(
+            "result",
+            Span::new(0, 6),
+        )));
+        let arm = MatchArm::new(
+            Pattern::Wildcard(Span::new(14, 15)),
+            Expression::Literal(Literal::Integer(0), Span::new(19, 20)),
+            Span::new(14, 20),
+        );
+        let expr = Expression::Match {
+            value,
+            arms: vec![arm],
+            span: Span::new(0, 21),
+        };
+        assert_eq!(expr.span(), Span::new(0, 21));
     }
 }
