@@ -91,11 +91,17 @@ When the user types `/done`, execute this workflow:
    - Brief summary of what was implemented
    - List of key changes
 
-9. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
+9. **Request Copilot Review**: After creating the PR, request a GitHub Copilot code review:
+   ```bash
+   gh pr comment --body "@copilot review"
+   ```
+   This triggers an automated code review from GitHub Copilot.
 
-10. **Update Linear state**: Mark the Linear issue as "In Review".
+10. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
 
-11. **Report success**: Confirm the commit was pushed, PR was created (with PR URL), and Linear was updated.
+11. **Update Linear state**: Mark the Linear issue as "In Review".
+
+12. **Report success**: Confirm the commit was pushed, PR was created (with PR URL), Copilot review requested, and Linear was updated.
 
 ## Project Context
 
