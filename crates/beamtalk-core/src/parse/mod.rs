@@ -31,10 +31,12 @@
 
 mod error;
 mod lexer;
+mod parser;
 mod span;
 mod token;
 
 pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
+pub use parser::{Diagnostic, Severity, parse};
 pub use span::Span;
 pub use token::{Token, TokenKind, Trivia};
