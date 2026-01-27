@@ -1,0 +1,25 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-cli"
+description = "Beamtalk compiler command-line interface"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "beamtalk"
+path = "src/main.rs"
+
+[dependencies]
+beamtalk-core.workspace = true
+clap.workspace = true
+camino.workspace = true
+miette.workspace = true
+
+[lints]
+workspace = true

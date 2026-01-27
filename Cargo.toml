@@ -1,0 +1,52 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["James Casey"]
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/jamesc/beamtalk"
+
+[workspace.dependencies]
+# Workspace crates
+beamtalk-core = { path = "crates/beamtalk-core" }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Strings and paths
+ecow = "0.2"
+camino = "1"
+
+# Error handling
+thiserror = "2"
+miette = { version = "7", features = ["fancy"] }
+
+# Serialization (for snapshot tests)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Testing
+insta = { version = "1", features = ["yaml"] }
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Restriction lints (opt-in for quality)
+clone_on_ref_ptr = "warn"
+undocumented_unsafe_blocks = "warn"
+# Allow some pedantic lints that are too noisy
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
