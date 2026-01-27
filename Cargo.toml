@@ -44,6 +44,8 @@ unused_lifetimes = "warn"
 [workspace.lints.clippy]
 cargo = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+# Allow multiple versions from transitive dependencies
+multiple_crate_versions = "allow"
 # Restriction lints (opt-in for quality)
 clone_on_ref_ptr = "warn"
 undocumented_unsafe_blocks = "warn"

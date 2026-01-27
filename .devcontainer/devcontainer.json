@@ -6,7 +6,8 @@
   },
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {}
   },
   "customizations": {
     "vscode": {
@@ -33,13 +34,17 @@
       }
     }
   },
-  "postCreateCommand": "cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:rustlang /usr/local/cargo/registry ${containerWorkspaceFolder}/target && cargo fetch && [ -f .vscode/mcp.json.example ] && [ ! -f .vscode/mcp.json ] && cp .vscode/mcp.json.example .vscode/mcp.json || true",
   "remoteUser": "vscode",
+  "runArgs": [
+    "--env-file",
+    "${localWorkspaceFolder}/.env"
+  ],
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
     "source=beamtalk-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
   ],
   "containerEnv": {
-    "CARGO_TARGET_DIR": "/workspace/target"
+    "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
   }
 }

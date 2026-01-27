@@ -7,6 +7,10 @@
 # IDE
 .vscode/mcp.json
 
+# Environment (secrets)
+.env
+.env.local
+
 # OS
 .DS_Store
 Thumbs.db

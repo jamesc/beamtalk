@@ -4,7 +4,7 @@
 
 Beamtalk brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. Write code in a running system, hot-reload behavior without restarts, and scale to millions of concurrent actors.
 
-```
+```beamtalk
 // Spawn an actor
 counter := Counter spawn
 
@@ -42,7 +42,7 @@ patch Counter >> #increment {
 
 Every Beamtalk object is a BEAM process with its own state and mailbox:
 
-```
+```beamtalk
 Actor subclass: Counter
   state: value = 0
 
@@ -55,7 +55,7 @@ Actor subclass: Counter
 
 Messages are asynchronous by default, returning futures:
 
-```
+```beamtalk
 // Returns immediately with a future
 result := agent analyze: data
 
@@ -72,7 +72,7 @@ agent analyze: data
 
 Erlang-inspired pattern matching for clean message handling:
 
-```
+```beamtalk
 handle: {#ok, value} => self process: value
 handle: {#error, reason} => self logError: reason
 handle: _ => self handleUnknown
@@ -82,7 +82,7 @@ handle: _ => self handleUnknown
 
 OTP supervision trees as language-level constructs:
 
-```
+```beamtalk
 Supervisor subclass: WebApp
   children: [
     {DatabasePool, scale: 10},
@@ -96,7 +96,7 @@ Supervisor subclass: WebApp
 
 Hot-reload with dedicated syntax:
 
-```
+```beamtalk
 // Update running actors instantly
 patch Agent >> processMessage: msg {
   Telemetry emit: #messageReceived
@@ -116,7 +116,7 @@ Beamtalk is purpose-built for multi-agent AI systems:
 - **Fault tolerance** — agents crash and restart cleanly via supervision
 - **Distributed** — spread agents across BEAM clusters transparently
 
-```
+```beamtalk
 Supervisor subclass: ResearchTeam
   children: [
     Researcher spawn model: #claude_opus,
@@ -152,7 +152,7 @@ The language design is documented:
 
 ### Planned Architecture
 
-```
+```text
 beamtalk/
 ├── crates/
 │   ├── beamtalk-core/     # Lexer, parser, AST, type checking, codegen

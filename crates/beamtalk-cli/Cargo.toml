@@ -10,6 +10,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["compiler", "beam", "smalltalk", "erlang"]
+categories = ["compilers", "development-tools"]
 
 [[bin]]
 name = "beamtalk"

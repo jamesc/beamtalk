@@ -90,6 +90,10 @@ impl From<Range<u32>> for Span {
 }
 
 impl From<Range<usize>> for Span {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source files over 4GB are not supported"
+    )]
     fn from(range: Range<usize>) -> Self {
         Self::new(range.start as u32, range.end as u32)
     }
