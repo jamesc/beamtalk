@@ -19,11 +19,18 @@
 //! ```
 //!
 //! See [`TokenKind`] for all supported syntactic elements.
+//!
+//! # Error Handling
+//!
+//! The lexer uses error recovery - invalid input becomes [`TokenKind::Error`]
+//! tokens rather than stopping. Use [`LexError`] for structured error reporting.
 
+mod error;
 mod lexer;
 mod span;
 mod token;
 
+pub use error::{LexError, LexErrorKind};
 pub use lexer::{Lexer, lex, lex_with_eof};
 pub use span::Span;
 pub use token::{Token, TokenKind, Trivia};
