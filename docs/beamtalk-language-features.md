@@ -8,6 +8,123 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ---
 
+## String Encoding and UTF-8
+
+**Beamtalk strings are UTF-8 by default.** This follows modern BEAM conventions and matches Elixir's approach.
+
+### String Types
+
+```
+// Single-quoted strings - UTF-8 binaries (recommended)
+name := 'Alice'
+greeting := 'Hello, 世界! 🌍'
+
+// Double-quoted strings - UTF-8 with interpolation
+message := "Welcome, {name}!"
+emoji := "Status: {status} ✓"
+
+// All strings are <<"UTF-8 binary">> in Erlang
+```
+
+### Character Encoding
+
+| Beamtalk | Erlang/BEAM | Notes |
+|----------|-------------|-------|
+| `'hello'` | `<<"hello">>` | UTF-8 binary |
+| `"Hi, {name}"` | `<<"Hi, ", Name/binary>>` | Interpolated UTF-8 |
+| Grapheme cluster | Via `:string` module | `'👨‍👩‍👧‍👦'` is one grapheme, multiple codepoints |
+| `$a` | `97` (codepoint) | Character literal = Unicode codepoint |
+
+### String Operations (Grapheme-Aware)
+
+String operations respect Unicode grapheme clusters (user-perceived characters):
+
+```
+// Length in graphemes, not bytes
+'Hello' length        // => 5
+'世界' length          // => 2 (not 6 bytes)
+'👨‍👩‍👧‍👦' length        // => 1 (family emoji is 1 grapheme, 7 codepoints)
+
+// Slicing by grapheme
+'Hello' at: 1         // => 'H'
+'世界' at: 1           // => '世'
+
+// Iteration over graphemes
+'Hello' each: [:char | Transcript show: char]
+
+// Case conversion (locale-aware)
+'HELLO' lowercase     // => 'hello'
+'straße' uppercase    // => 'STRASSE' (German ß → SS)
+```
+
+### Binary Pattern Matching for Bytes
+
+When you need byte-level access (network protocols, file formats):
+
+```
+// Parse UTF-8 manually
+parseUtf8: <<codepoint/utf8, rest/binary>> =>
+  Transcript show: codepoint
+  self parseUtf8: rest
+
+parseUtf8: <<>> => // done
+
+// Parse fixed-size header + UTF-8 body
+parsePacket: <<version:8, length:16/big, body:length/binary, rest/binary>> =>
+  // body is a UTF-8 string
+  message := body asString
+  self process: message
+
+// Build binary with UTF-8 content
+packet := <<1, messageBytes/utf8>>
+```
+
+### BEAM Mapping
+
+| Beamtalk | Erlang | Notes |
+|----------|--------|-------|
+| `'string'` | `<<"string">>` | Binary, not charlist |
+| `'世界'` | `<<228,184,150,231,149,140>>` | UTF-8 encoded bytes |
+| String operations | `:string` module | Grapheme-aware (`:string.length/1`) |
+| `$x` | Integer codepoint | `$a` = 97, `$世` = 19990 |
+| Charlist (legacy) | `[104,101,108,108,111]` | Use `String toCharlist:` if needed |
+
+### Why UTF-8 by Default?
+
+1. **Modern web/API standard** - JSON, HTTP, REST APIs all use UTF-8
+2. **Compact for ASCII** - 1 byte per ASCII character (most code/English text)
+3. **Elixir compatibility** - Seamless interop with Elixir libraries
+4. **BEAM convention** - Erlang's `:string` module is Unicode-aware
+5. **Agent/LLM-friendly** - AI models output UTF-8; easy integration
+
+### Legacy Charlist Support
+
+For Erlang modules that require charlists:
+
+```
+// Convert to charlist when needed
+charlist := 'hello' toCharlist  // => [104, 101, 108, 108, 111]
+
+// Call Erlang with charlist
+Erlang.io format: charlist arguments: []
+
+// Convert back from charlist
+str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
+```
+
+### Implementation Status
+
+| Feature | Status |
+|---------|--------|
+| UTF-8 string literals | ✅ Lexer supports |
+| String interpolation | 🚧 Planned |
+| Grapheme-aware length | 🚧 Via Erlang `:string` |
+| Unicode normalization | 🚧 Via Erlang `:unicode` |
+| Case folding | 🚧 Via Erlang `:string` |
+| Binary pattern UTF-8 | ✅ AST supports |
+
+---
+
 ## Core Syntax
 
 ### Actor Definition
