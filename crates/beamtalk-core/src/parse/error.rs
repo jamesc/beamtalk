@@ -17,7 +17,8 @@ use super::Span;
 /// A lexical error encountered during tokenization.
 ///
 /// The lexer uses error recovery, so lexical errors don't stop parsing.
-/// These errors can be extracted from the token stream if needed.
+/// Lexical problems are reported via error tokens in the token stream,
+/// which can be inspected and converted into [`LexError`] values for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Error, Diagnostic)]
 #[error("{kind}")]
 #[diagnostic()]
@@ -70,18 +71,6 @@ pub enum LexErrorKind {
     /// A block comment was not terminated.
     #[error("unterminated block comment")]
     UnterminatedComment,
-
-    /// An invalid escape sequence in a string.
-    #[error("invalid escape sequence '\\{0}'")]
-    InvalidEscape(char),
-
-    /// An invalid number literal.
-    #[error("invalid number literal")]
-    InvalidNumber,
-
-    /// An invalid character literal.
-    #[error("invalid character literal")]
-    InvalidCharacter,
 }
 
 #[cfg(test)]

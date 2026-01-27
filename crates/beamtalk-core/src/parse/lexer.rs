@@ -406,7 +406,16 @@ impl<'src> Lexer<'src> {
                 }
                 Some('\\') => {
                     self.advance(); // backslash
-                    self.advance(); // escaped char
+                    match self.peek_char() {
+                        None => {
+                            // Unterminated escape at end of string
+                            let text = self.text_for(self.span_from(start));
+                            return TokenKind::Error(EcoString::from(text));
+                        }
+                        Some(_) => {
+                            self.advance(); // escaped char
+                        }
+                    }
                 }
                 _ => {
                     self.advance();
@@ -520,7 +529,7 @@ impl<'src> Lexer<'src> {
             && self.peek_char_second().is_some_and(|c| c.is_ascii_digit())
         {
             self.advance(); // -
-            return self.lex_number_with_prefix(start, "-");
+            return self.lex_number_with_prefix(start);
         }
 
         self.advance_while(|c| {
@@ -535,7 +544,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Lexes a number with a prefix already consumed (e.g., negative sign).
-    fn lex_number_with_prefix(&mut self, start: u32, _prefix: &str) -> TokenKind {
+    fn lex_number_with_prefix(&mut self, start: u32) -> TokenKind {
         // Integer part
         self.advance_while(|c| c.is_ascii_digit());
 

@@ -22,8 +22,12 @@
 //!
 //! # Error Handling
 //!
-//! The lexer uses error recovery - invalid input becomes [`TokenKind::Error`]
-//! tokens rather than stopping. Use [`LexError`] for structured error reporting.
+//! The lexer uses error recovery: invalid input is converted into
+//! [`TokenKind::Error`] tokens rather than stopping. These tokens carry all the
+//! information needed for diagnostics, so downstream code should inspect
+//! `TokenKind::Error` variants when reporting lexing problems.
+//!
+//! Use [`LexError`] to construct structured diagnostics with miette integration.
 
 mod error;
 mod lexer;
