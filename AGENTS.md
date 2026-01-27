@@ -94,6 +94,15 @@ beamtalk/
 
 ## Rust Development Best Practices
 
+This section follows the [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/) and [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). When in doubt, consult these upstream sources.
+
+### Upstream Guidelines
+
+Follow these established guidelines:
+- [Rust API Guidelines Checklist](https://rust-lang.github.io/api-guidelines/checklist.html) — naming, traits, documentation
+- [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/) — pragmatic patterns for safety and maintainability
+- [Rust Style Guide](https://doc.rust-lang.org/nightly/style-guide/) — formatting conventions
+
 ### License Headers
 
 All source code files must include the Apache 2.0 license header. Add this at the top of every new file:
@@ -116,20 +125,239 @@ All source code files must include the Apache 2.0 license header. Add this at th
 // SPDX-License-Identifier: Apache-2.0
 ```
 
-### Code Style
+### Static Verification
 
-- Use `rustfmt` with default settings; run `cargo fmt` before committing
-- Use `clippy` at warn level: `cargo clippy -- -W clippy::all`
-- Prefer `thiserror` for error types, `miette` for user-facing diagnostics
-- Use `ecow::EcoString` for AST string data (copy-on-write efficiency)
-- Use `camino::Utf8PathBuf` instead of `std::path::PathBuf`
+Configure lints in the workspace `Cargo.toml`:
+
+```toml
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Restriction lints (opt-in for quality)
+clone_on_ref_ptr = "warn"
+undocumented_unsafe_blocks = "warn"
+```
+
+Run before committing:
+```bash
+cargo fmt          # Format code
+cargo clippy       # Lint checks
+cargo test         # Run tests
+```
+
+Use `#[expect(...)]` instead of `#[allow(...)]` for lint overrides — it warns when the override becomes unnecessary:
+```rust
+#[expect(clippy::unused_async, reason = "will add I/O later")]
+pub async fn ping() {}
+```
+
+### Naming Conventions
+
+Follow [RFC 430](https://rust-lang.github.io/api-guidelines/naming.html#c-case):
+
+| Item | Convention | Example |
+|------|------------|---------|
+| Types, Traits | `UpperCamelCase` | `TokenKind`, `Parser` |
+| Functions, Methods | `snake_case` | `parse_expression` |
+| Local variables | `snake_case` | `token_kind` |
+| Constants | `SCREAMING_SNAKE_CASE` | `MAX_ERRORS` |
+| Modules | `snake_case` | `code_gen` |
+
+**Conversion methods** follow `as_`, `to_`, `into_` conventions:
+- `as_*` — cheap, borrowed view (`&self → &T`)
+- `to_*` — expensive conversion (`&self → T`)
+- `into_*` — consuming conversion (`self → T`)
+
+```rust
+impl Token {
+    fn as_str(&self) -> &str { ... }      // Cheap borrow
+    fn to_string(&self) -> String { ... } // Allocates
+    fn into_span(self) -> Span { ... }    // Consumes self
+}
+```
+
+**Avoid weasel words** like `Manager`, `Service`, `Factory`. Be specific:
+```rust
+// Bad
+struct TokenManager;
+
+// Good
+struct TokenStream;
+struct Lexer;
+```
+
+### Common Trait Implementations
+
+All public types should implement these traits where applicable:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+```
+
+| Trait | When to implement |
+|-------|-------------------|
+| `Debug` | **Always** for public types |
+| `Clone` | If type can be cheaply cloned |
+| `PartialEq`, `Eq` | If equality comparison makes sense |
+| `Hash` | If type will be used in `HashMap`/`HashSet` |
+| `Default` | If a sensible default exists |
+| `Display` | If type is meant to be read by users |
+
+**Sensitive data** should have a custom `Debug` that redacts secrets:
+```rust
+impl Debug for ApiKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ApiKey(...)")
+    }
+}
+```
+
+### Documentation Standards
+
+**First sentence** is the summary — keep it under 15 words, one line:
+```rust
+/// Parses a message send expression from the token stream.
+///
+/// Extended description here...
+pub fn parse_message_send(&mut self) -> Result<Expression, ParseError> { ... }
+```
+
+**Canonical sections** when applicable:
+```rust
+/// Brief summary (< 15 words).
+///
+/// Extended description explaining behavior.
+///
+/// # Examples
+/// ```
+/// let parser = Parser::new(source);
+/// let expr = parser.parse_expression()?;
+/// ```
+///
+/// # Errors
+/// Returns `ParseError::UnexpectedToken` if...
+///
+/// # Panics  
+/// Panics if the parser is in an invalid state (programming error).
+pub fn parse_expression(&mut self) -> Result<Expression, ParseError> { ... }
+```
+
+**Module documentation** with `//!` at the top of each module:
+```rust
+//! Lexical analysis for Beamtalk source code.
+//!
+//! This module converts source text into a stream of tokens.
+//! The lexer handles error recovery for unterminated strings
+//! and unknown characters.
+
+pub struct Lexer { ... }
+```
 
 ### Error Handling
 
-- Return `Result<T, Error>` from all fallible functions
-- Use `?` operator for propagation; avoid `.unwrap()` except in tests
-- Attach source spans to all errors for diagnostic rendering
-- Group related errors; don't fail on first error when possible
+**Panics vs Results:** Detected programming bugs are panics, not errors. External failures return `Result`.
+
+```rust
+// Programming bug — panic
+fn get_token(&self, index: usize) -> &Token {
+    &self.tokens[index]  // Panics on out-of-bounds (caller's fault)
+}
+
+// External failure — Result
+fn parse_file(path: &Path) -> Result<Module, ParseError> {
+    let source = std::fs::read_to_string(path)?;
+    // ...
+}
+```
+
+**Error types** should be structs with context, not enums:
+```rust
+#[derive(Debug)]
+pub struct ParseError {
+    kind: ParseErrorKind,
+    span: Span,
+    backtrace: std::backtrace::Backtrace,
+}
+
+impl ParseError {
+    pub fn is_unexpected_token(&self) -> bool { 
+        matches!(self.kind, ParseErrorKind::UnexpectedToken { .. }) 
+    }
+    
+    pub fn span(&self) -> Span { self.span }
+}
+
+// Keep ErrorKind private for future flexibility
+#[derive(Debug)]
+pub(crate) enum ParseErrorKind {
+    UnexpectedToken { expected: TokenKind, found: TokenKind },
+    UnterminatedString,
+    // ...
+}
+```
+
+Use `thiserror` for error definitions, `miette` for user-facing diagnostics with source spans.
+
+### Type Safety
+
+**Use newtypes** to prevent type confusion:
+```rust
+// Bad — easy to mix up
+fn get_symbol(module: u32, function: u32) -> Symbol;
+
+// Good — compiler catches mistakes  
+pub struct ModuleId(u32);
+pub struct FunctionId(u32);
+
+fn get_symbol(module: ModuleId, function: FunctionId) -> Symbol;
+```
+
+**Avoid primitive obsession** — create domain types:
+```rust
+// Bad
+fn set_offset(offset: usize);
+fn set_line(line: usize);
+
+// Good  
+pub struct ByteOffset(usize);
+pub struct LineNumber(usize);
+
+fn set_offset(offset: ByteOffset);
+fn set_line(line: LineNumber);
+```
+
+**Builders** for types with 3+ optional parameters:
+```rust
+impl LexerBuilder {
+    pub fn source(mut self, source: &str) -> Self { ... }
+    pub fn file_id(mut self, id: FileId) -> Self { ... }
+    pub fn error_limit(mut self, limit: usize) -> Self { ... }
+    pub fn build(self) -> Lexer { ... }
+}
+
+// Usage
+let lexer = Lexer::builder()
+    .source(text)
+    .file_id(file_id)
+    .build();
+```
+
+### Code Style
+
+- Use `rustfmt` with default settings; run `cargo fmt` before committing
+- Prefer `ecow::EcoString` for AST string data (copy-on-write efficiency)
+- Use `camino::Utf8PathBuf` instead of `std::path::PathBuf`
+- Accept `impl AsRef<str>` or `impl AsRef<Path>` for flexibility
 
 ### Testing
 
@@ -137,6 +365,32 @@ All source code files must include the Apache 2.0 license header. Add this at th
 - Use `insta` for snapshot testing of parser output and codegen
 - Integration tests in `test-package-compiler/cases/` directories
 - Name test functions descriptively: `fn parse_message_send_with_multiple_keywords()`
+- Use `?` in examples, not `.unwrap()` or `try!`
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexer_tokenizes_keyword_message() {
+        let tokens = Lexer::new("array at: 1").collect::<Vec<_>>();
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[1].kind, TokenKind::Keyword("at:".into()));
+    }
+}
+```
+
+### AI-Friendly Design
+
+Following [M-DESIGN-FOR-AI](https://microsoft.github.io/rust-guidelines/guidelines/ai/):
+
+1. **Idiomatic patterns** — Follow standard Rust conventions so AI training data applies
+2. **Thorough docs** — Document all public items; AI agents rely on documentation
+3. **Examples** — Provide runnable examples in doc comments
+4. **Strong types** — Use newtypes and domain types; compiler errors guide AI
+5. **Testable APIs** — Design for unit testing; AI agents iterate via test feedback
+6. **Test coverage** — Good coverage enables AI refactoring with confidence
 
 ### Compiler-Specific Patterns
 
@@ -339,6 +593,7 @@ greeting := "Hello, {name}!"
 
 ## Resources
 
+### Beamtalk Design
 - [Design Principles](docs/beamtalk-principles.md) - Core philosophy guiding all decisions
 - [Language Features](docs/beamtalk-language-features.md) - Planned syntax and features
 - [Syntax Rationale](docs/beamtalk-syntax-rationale.md) - Why we keep/change Smalltalk conventions
@@ -347,7 +602,18 @@ greeting := "Hello, {name}!"
 - [BEAM Interop](docs/beamtalk-interop.md) - Erlang/Elixir integration specification
 - [Feasibility Assessment](docs/beamtalk-feasibility.md) - Technical and market analysis
 - [Agent Systems](docs/beamtalk-for-agents.md) - Multi-agent AI use cases
+
+### Rust Guidelines
+- [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/) - Pragmatic patterns for safety and maintainability
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html) - Naming, traits, documentation standards
+- [Rust Style Guide](https://doc.rust-lang.org/nightly/style-guide/) - Formatting conventions
+- [Rust Design Patterns](https://rust-unofficial.github.io/patterns/) - Common patterns and idioms
+
+### BEAM/Erlang
 - [Core Erlang specification](https://www.it.uu.se/research/group/hipe/cerl/)
 - [BEAM VM internals](https://blog.stenmans.org/theBeamBook/)
-- [Gleam compiler](https://github.com/gleam-lang/gleam) - reference implementation
-- [Newspeak language](https://newspeaklanguage.org/) - module system inspiration
+
+### Reference Implementations
+- [Gleam compiler](https://github.com/gleam-lang/gleam) - Rust-to-BEAM reference
+- [Newspeak language](https://newspeaklanguage.org/) - Module system inspiration
+- [TypeScript compiler](https://github.com/microsoft/TypeScript/wiki/Architectural-Overview) - Tooling-first architecture
