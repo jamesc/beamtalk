@@ -1,0 +1,8 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Transcript"), span: Span { start: 133, end: 143 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Simple hello world program for testing compilation pipeline"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("show:"), span: Span { start: 144, end: 149 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello, World!"), span: Span { start: 150, end: 165 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 166, end: 166 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

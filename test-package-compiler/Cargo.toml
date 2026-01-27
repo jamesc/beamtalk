@@ -1,0 +1,14 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "test-package-compiler"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Snapshot tests for beamtalk compiler"
+
+[dev-dependencies]
+beamtalk-core = { path = "../crates/beamtalk-core" }
+insta = { version = "1.40", features = ["glob"] }
+camino = "1.1"

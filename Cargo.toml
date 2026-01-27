@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "test-package-compiler"]
 
 [workspace.package]
 version = "0.1.0"
