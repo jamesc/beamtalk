@@ -15,6 +15,7 @@
 #![doc = include_str!("../../../README.md")]
 
 pub mod ast;
+pub mod erlang;
 pub mod parse;
 
 /// Re-export commonly used types.
