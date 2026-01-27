@@ -77,7 +77,11 @@ When the user types `/done`, execute this workflow:
    git push -u origin HEAD
    ```
 
-8. **Report success**: Confirm the commit was pushed with the branch name and commit hash.
+8. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
+
+9. **Update Linear state**: Mark the Linear issue as "In Review".
+
+10. **Report success**: Confirm the commit was pushed with the branch name and commit hash.
 
 ## Project Context
 
