@@ -25,23 +25,37 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
+//! use beamtalk_core::ast::*;
+//! use beamtalk_core::parse::Span;
+//!
 //! // Source: x := 3 + 4
-//! Module {
+//! let module = Module {
 //!     expressions: vec![
 //!         Expression::Assignment {
-//!             target: Identifier { name: "x".into(), span: ... },
+//!             target: Box::new(Expression::Identifier(Identifier {
+//!                 name: "x".into(),
+//!                 span: Span::new(0, 1),
+//!             })),
 //!             value: Box::new(Expression::MessageSend {
-//!                 receiver: Box::new(Expression::Literal(Literal::Integer(3))),
+//!                 receiver: Box::new(Expression::Literal(
+//!                     Literal::Integer(3),
+//!                     Span::new(5, 6)
+//!                 )),
 //!                 selector: MessageSelector::Binary("+".into()),
-//!                 arguments: vec![Expression::Literal(Literal::Integer(4))],
-//!                 span: ...
+//!                 arguments: vec![Expression::Literal(
+//!                     Literal::Integer(4),
+//!                     Span::new(9, 10)
+//!                 )],
+//!                 span: Span::new(5, 10),
 //!             }),
-//!             span: ...
+//!             span: Span::new(0, 10),
 //!         }
 //!     ],
-//!     span: ...
-//! }
+//!     span: Span::new(0, 10),
+//!     leading_comments: Vec::new(),
+//! };
+//! # assert_eq!(module.expressions.len(), 1);
 //! ```
 
 use crate::parse::Span;
