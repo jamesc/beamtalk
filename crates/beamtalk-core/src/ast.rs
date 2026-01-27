@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn literal_variants() {
         let _int = Literal::Integer(42);
-        let _float = Literal::Float(3.14);
+        let _float = Literal::Float(2.5);
         let _string = Literal::String("hello".into());
         let _symbol = Literal::Symbol("symbol".into());
         let _char = Literal::Character('a');
