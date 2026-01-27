@@ -17,7 +17,12 @@ fn read_test_case(case_name: &str) -> String {
         .join("cases")
         .join(case_name)
         .join("main.bt");
-    fs::read_to_string(path).expect("Failed to read test case")
+    fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read test case '{}' at {}: {}",
+            case_name, path, e
+        )
+    })
 }
 
 /// Test the lexer output for a given test case

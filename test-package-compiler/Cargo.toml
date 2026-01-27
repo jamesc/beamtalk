@@ -9,6 +9,6 @@ publish = false
 description = "Snapshot tests for beamtalk compiler"
 
 [dev-dependencies]
-beamtalk-core = { path = "../crates/beamtalk-core" }
-insta = { version = "1.40", features = ["glob"] }
-camino = "1.1"
+beamtalk-core = { workspace = true }
+insta = { workspace = true, features = ["glob"] }
+camino = { workspace = true }
