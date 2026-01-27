@@ -26,7 +26,7 @@
 //! Generated Core Erlang:
 //! ```erlang
 //! module 'counter' ['init'/0, 'handle_cast'/2]
-//!   attributes ['-behaviour'(['gen_server'])]
+//!   attributes ['behaviour' = ['gen_server']]
 //!
 //! 'init'/1 = fun (_Args) ->
 //!     let InitialState = #{
@@ -53,7 +53,7 @@
 //! - **Function calls**: `call 'module':'function'/arity(args)`
 //! - **Let bindings**: `let Var = Expr in Body`
 //! - **Case expressions**: `case Expr of Pattern -> Body end`
-//! - **Maps**: `#{'key' => value}`
+//! - **Maps**: `~{'key' => value}~`
 //! - **Tuples**: `{'tuple', 'elements'}`
 //! - **Lists**: `[1, 2, 3]` or `[Head | Tail]`
 //!
@@ -169,7 +169,7 @@ impl CoreErlangGenerator {
             "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0]",
             self.module_name
         )?;
-        writeln!(self.output, "  attributes ['-behaviour'(['gen_server'])]")?;
+        writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
         writeln!(self.output)?;
 
         // Generate init/1 function
@@ -749,5 +749,43 @@ mod tests {
 
         let generator = CoreErlangGenerator::new("simple");
         assert_eq!(generator.to_class_name(), "Simple");
+    }
+
+    #[test]
+    fn test_generated_core_erlang_compiles() {
+        use std::fs;
+        use std::process::Command;
+
+        // Generate a simple module
+        let module = Module::new(Vec::new(), Span::new(0, 0));
+        let core_erlang = generate(&module).expect("codegen should succeed");
+
+        // Write to temporary file
+        let temp_dir = std::env::temp_dir();
+        let core_file = temp_dir.join("test_beamtalk_module.core");
+        fs::write(&core_file, &core_erlang).expect("should write core erlang file");
+
+        // Try to compile with erlc
+        let output = Command::new("erlc")
+            .arg("+from_core")
+            .arg(&core_file)
+            .current_dir(&temp_dir)
+            .output()
+            .expect("erlc should be available");
+
+        // Clean up
+        let _ = fs::remove_file(&core_file);
+        let beam_file = temp_dir.join("test_beamtalk_module.beam");
+        let _ = fs::remove_file(&beam_file);
+
+        // Check compilation succeeded
+        if !output.status.success() {
+            panic!(
+                "erlc compilation failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+                core_erlang
+            );
+        }
     }
 }
