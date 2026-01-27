@@ -118,23 +118,67 @@ beamtalk/
 
 ### Compiler-Specific Patterns
 
+**Tooling-First Architecture (TypeScript Approach)**
+
+The compiler is the language service. Design for IDE responsiveness first, batch compilation second.
+
 ```rust
-// AST nodes should carry source location
+// AST nodes MUST carry source location - no exceptions
 pub struct Expression {
     pub kind: ExpressionKind,
     pub span: Span,
 }
 
+// Preserve trivia (comments, whitespace) for formatting
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+    pub leading_trivia: Vec<Trivia>,
+    pub trailing_trivia: Vec<Trivia>,
+}
+
+// Error recovery - parser continues after errors
+pub enum Expression {
+    // ... valid expressions ...
+    Error(ErrorNode),  // Placeholder for unparseable code
+}
+
 // Use newtypes for IDs to prevent mixing
 pub struct ModuleId(u32);
 pub struct FunctionId(u32);
+```
 
-// Visitor pattern for AST traversal
-pub trait AstVisitor {
-    fn visit_expression(&mut self, expr: &Expression);
-    fn visit_statement(&mut self, stmt: &Statement);
+**Query-Based Architecture**
+
+Consider using `salsa` or similar for incremental computation:
+
+```rust
+// Queries are cached and invalidated incrementally
+#[salsa::query_group(CompilerDatabase)]
+pub trait Compiler {
+    #[salsa::input]
+    fn source_text(&self, file: FileId) -> Arc<String>;
+
+    fn parse(&self, file: FileId) -> Arc<Module>;
+    fn diagnostics(&self, file: FileId) -> Vec<Diagnostic>;
+    fn completions(&self, file: FileId, position: Position) -> Vec<Completion>;
+    fn hover(&self, file: FileId, position: Position) -> Option<HoverInfo>;
 }
 ```
+
+**Error Recovery Requirements**
+
+- Parser MUST produce an AST even with syntax errors
+- Mark error regions, continue parsing
+- Lexer should handle unterminated strings, unknown characters gracefully
+- Never panic on malformed input
+
+**Performance Targets**
+
+- Keystroke response: <50ms
+- File save diagnostics: <100ms
+- Project-wide find references: <500ms
+- Full build: optimize for incremental, cold build secondary
 
 ### Dependencies
 
@@ -270,6 +314,8 @@ count := 0
 ## Resources
 
 - [Design Principles](docs/beamtalk-principles.md) - Core philosophy guiding all decisions
+- [Language Features](docs/beamtalk-language-features.md) - Planned syntax and features
+- [Agent Systems](docs/beamtalk-for-agents.md) - Multi-agent AI use cases
 - [Core Erlang specification](https://www.it.uu.se/research/group/hipe/cerl/)
 - [BEAM VM internals](https://blog.stenmans.org/theBeamBook/)
 - [Gleam compiler](https://github.com/gleam-lang/gleam) - reference implementation
