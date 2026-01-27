@@ -1,0 +1,19 @@
+# Build outputs
+/target/
+/build/
+*.beam
+*.core
+
+# IDE
+.vscode/mcp.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+Cargo.lock
+
+# Erlang
+erl_crash.dump
+*.ez

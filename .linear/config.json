@@ -1,0 +1,39 @@
+{
+  "$schema": "https://linear.app/schema/config.json",
+  "team": "Beamtalk",
+  "issuePrefix": "BT",
+  "labels": {
+    "workflow": [
+      "agent-ready",
+      "needs-spec",
+      "blocked",
+      "human-review"
+    ],
+    "area": [
+      "lexer",
+      "parser",
+      "codegen",
+      "cli",
+      "stdlib",
+      "docs"
+    ],
+    "complexity": [
+      "trivial",
+      "small",
+      "medium",
+      "large"
+    ]
+  },
+  "customFields": {
+    "filesToModify": {
+      "type": "text",
+      "description": "File paths this issue will touch"
+    },
+    "acceptanceCriteria": {
+      "type": "text",
+      "description": "Checkboxes for completion"
+    }
+  },
+  "gitBranchFormat": "{{issueIdentifier}}-{{issueTitleSlug}}",
+  "gitCommitFormat": "{{issueTitle}} {{issueIdentifier}}"
+}
