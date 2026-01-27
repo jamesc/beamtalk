@@ -1,5 +1,7 @@
 # Beamtalk
 
+[![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+
 **A live, interactive Smalltalk for the BEAM VM**
 
 Beamtalk brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. Write code in a running system, hot-reload behavior without restarts, and scale to millions of concurrent actors.

@@ -14,12 +14,15 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "serayuzgur.crates",
+        "fill-labs.dependi",
         "vadimcn.vscode-lldb",
         "usernamehw.errorlens",
         "eamodio.gitlens",
         "erlang-ls.erlang-ls",
-        "github.copilot"
+        "github.copilot",
+        "github.vscode-github-actions",
+        "github.vscode-pull-request-github",
+        "linear.linear"
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy",
