@@ -8,6 +8,8 @@
 use clap::{Parser, Subcommand};
 use miette::Result;
 
+mod commands;
+
 /// Beamtalk: A Smalltalk-inspired language for the BEAM VM
 #[derive(Debug, Parser)]
 #[command(name = "beamtalk")]
@@ -24,6 +26,19 @@ enum Command {
         /// Source file or directory to compile
         #[arg(default_value = ".")]
         path: String,
+    },
+
+    /// Compile and run a Beamtalk program
+    Run {
+        /// Source file or directory to compile and run
+        #[arg(default_value = ".")]
+        path: String,
+    },
+
+    /// Create a new Beamtalk project
+    New {
+        /// Name of the project to create
+        name: String,
     },
 
     /// Start an interactive REPL
@@ -51,20 +66,28 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    match cli.command {
-        Command::Build { path } => {
-            println!("Building: {path}");
-            println!("(Not yet implemented)");
-        }
+    let result = match cli.command {
+        Command::Build { path } => commands::build::build(&path),
+        Command::Run { path } => commands::run::run(&path),
+        Command::New { name } => commands::new::new_project(&name),
         Command::Repl => {
             println!("Beamtalk REPL");
             println!("(Not yet implemented)");
+            Ok(())
         }
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");
+            Ok(())
+        }
+    };
+
+    // Exit with appropriate code
+    match result {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("{e:?}");
+            std::process::exit(1);
         }
     }
-
-    Ok(())
 }
