@@ -33,6 +33,7 @@
       }
     }
   },
+  "postCreateCommand": "cargo fetch",
   "remoteUser": "vscode",
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
