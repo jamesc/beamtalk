@@ -166,7 +166,7 @@ impl CoreErlangGenerator {
         // Module header
         writeln!(
             self.output,
-            "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3]",
+            "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0]",
             self.module_name
         )?;
         writeln!(self.output, "  attributes ['-behaviour'(['gen_server'])]")?;
@@ -210,18 +210,25 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "'__methods__' => call '{}':'method_table'/0(){{}}",
+            "'__methods__' => call '{}':'method_table'/0()",
             self.module_name
         )?;
 
         // Initialize fields from module expressions (assignments at top level)
+        // Only literal values are supported for now - identifier references would need State
         for expr in &module.expressions {
             if let Expression::Assignment { target, value, .. } = expr {
                 if let Expression::Identifier(id) = target.as_ref() {
-                    self.write_indent()?;
-                    write!(self.output, ", '{}' => ", id.name)?;
-                    self.generate_expression(value)?;
-                    writeln!(self.output)?;
+                    // Only generate field if it's a simple literal or block
+                    if matches!(
+                        value.as_ref(),
+                        Expression::Literal(..) | Expression::Block(_)
+                    ) {
+                        self.write_indent()?;
+                        write!(self.output, ", '{}' => ", id.name)?;
+                        self.generate_expression(value)?;
+                        writeln!(self.output)?;
+                    }
                 }
             }
         }
@@ -330,12 +337,47 @@ impl CoreErlangGenerator {
                     write!(self.output, "'{}' ->", id.name)?;
                     writeln!(self.output)?;
                     self.indent += 1;
+
+                    // Bind block parameters from Args list
+                    if !block.parameters.is_empty() {
+                        self.write_indent()?;
+                        write!(self.output, "case Args of")?;
+                        writeln!(self.output)?;
+                        self.indent += 1;
+
+                        self.write_indent()?;
+                        write!(self.output, "[")?;
+                        for (i, param) in block.parameters.iter().enumerate() {
+                            if i > 0 {
+                                write!(self.output, ", ")?;
+                            }
+                            let var_name = self.fresh_var(&param.name);
+                            write!(self.output, "{var_name}")?;
+                        }
+                        write!(self.output, "] ->")?;
+                        writeln!(self.output)?;
+                        self.indent += 1;
+                    }
+
                     self.write_indent()?;
                     write!(self.output, "let Result = ")?;
                     self.generate_block_body(block)?;
                     writeln!(self.output)?;
                     self.write_indent()?;
                     writeln!(self.output, "in {{'reply', Result, State}}")?;
+
+                    if !block.parameters.is_empty() {
+                        self.indent -= 1;
+                        self.write_indent()?;
+                        writeln!(
+                            self.output,
+                            "_ -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+                        )?;
+                        self.indent -= 1;
+                        self.write_indent()?;
+                        writeln!(self.output, "end")?;
+                    }
+
                     self.indent -= 1;
                 }
             }

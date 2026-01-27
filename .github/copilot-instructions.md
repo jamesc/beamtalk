@@ -90,7 +90,7 @@ When the user types `/done`, execute this workflow:
    - Link to Linear issue: `https://linear.app/beamtalk/issue/BT-{number}`
    - Brief summary of what was implemented
    - List of key changes
-   
+
    This automatically requests GitHub Copilot to review the PR.
 
 9. **Update Linear acceptance criteria**: Get the Linear issue for the current branch, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
