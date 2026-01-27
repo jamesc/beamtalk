@@ -133,10 +133,15 @@ impl Parser {
 
     /// Returns the current token.
     fn current_token(&self) -> &Token {
-        self.tokens.get(self.current).unwrap_or_else(|| {
-            // Should never happen if lexer adds EOF token
-            panic!("Parser advanced past end of tokens")
-        })
+        if self.current < self.tokens.len() {
+            &self.tokens[self.current]
+        } else {
+            // If we've advanced past the end of the token stream, fall back to the last token
+            // (which should be EOF in well-formed input) rather than panicking.
+            self.tokens
+                .last()
+                .expect("Parser has no tokens; expected at least an EOF token")
+        }
     }
 
     /// Returns the current token kind.
@@ -208,14 +213,6 @@ impl Parser {
         self.diagnostics.push(Diagnostic::error(message, span));
     }
 
-    /// Creates an error expression node.
-    fn error_expression(&mut self, message: impl Into<EcoString>) -> Expression {
-        let span = self.current_token().span();
-        let msg: EcoString = message.into();
-        self.diagnostics.push(Diagnostic::error(msg.clone(), span));
-        Expression::Error { message: msg, span }
-    }
-
     /// Synchronizes parser to a safe recovery point.
     ///
     /// Advances until we find a statement boundary or synchronization point:
@@ -276,16 +273,16 @@ impl Parser {
 
         // Parse statements until EOF
         while !self.is_at_end() {
-            match self.parse_expression() {
-                expr if expr.is_error() => {
-                    // Error already reported, try to recover
-                    self.synchronize();
-                }
-                expr => {
-                    expressions.push(expr);
-                    // Optional statement terminator
-                    self.match_token(&TokenKind::Period);
-                }
+            let expr = self.parse_expression();
+            let is_error = expr.is_error();
+            expressions.push(expr);
+
+            // If we got an error, try to recover
+            if is_error {
+                self.synchronize();
+            } else {
+                // Optional statement terminator
+                self.match_token(&TokenKind::Period);
             }
         }
 
@@ -333,6 +330,22 @@ impl Parser {
 
         // Check for assignment operators
         if self.match_token(&TokenKind::Assign) {
+            // Validate assignment target
+            if !matches!(
+                expr,
+                Expression::Identifier(_) | Expression::FieldAccess { .. }
+            ) {
+                let span = expr.span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Assignment target must be an identifier or field access",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid assignment target".into(),
+                    span,
+                };
+            }
+
             let value = Box::new(self.parse_assignment());
             let span = expr.span().merge(value.span());
             return Expression::Assignment {
@@ -344,6 +357,22 @@ impl Parser {
 
         // Check for compound assignment (+=, -=, etc.)
         if let Some(op) = self.match_compound_operator() {
+            // Validate assignment target
+            if !matches!(
+                expr,
+                Expression::Identifier(_) | Expression::FieldAccess { .. }
+            ) {
+                let span = expr.span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Assignment target must be an identifier or field access",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid assignment target".into(),
+                    span,
+                };
+            }
+
             let value = Box::new(self.parse_assignment());
             let span = expr.span().merge(value.span());
             return Expression::CompoundAssignment {
@@ -582,12 +611,6 @@ impl Parser {
 
         // Parse chain of unary messages
         while let TokenKind::Identifier(name) = self.current_kind() {
-            // Check if this is actually a field access
-            if self.peek_kind() == Some(&TokenKind::Period) {
-                // This is the end of a statement, not a unary message
-                break;
-            }
-
             let selector = MessageSelector::Unary(name.clone());
             let tok = self.advance();
             let span = receiver.span().merge(tok.span());
@@ -610,6 +633,7 @@ impl Parser {
             TokenKind::Integer(_)
             | TokenKind::Float(_)
             | TokenKind::String(_)
+            | TokenKind::InterpolatedString(_)
             | TokenKind::Symbol(_)
             | TokenKind::Character(_) => self.parse_literal(),
 
@@ -622,11 +646,19 @@ impl Parser {
             // Parenthesized expression
             TokenKind::LeftParen => self.parse_parenthesized(),
 
-            // Unexpected token
-            _ => self.error_expression(format!(
-                "Unexpected token: expected expression, found {}",
-                self.current_kind()
-            )),
+            // Unexpected token - consume it to avoid getting stuck
+            _ => {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                let message: EcoString = format!(
+                    "Unexpected token: expected expression, found {}",
+                    bad_token.kind()
+                )
+                .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
+            }
         }
     }
 
@@ -664,6 +696,11 @@ impl Parser {
                 }
             }
             TokenKind::String(s) => Literal::String(s),
+            TokenKind::InterpolatedString(s) => {
+                // For now, treat interpolated strings as regular strings
+                // TODO: Implement proper string interpolation in AST
+                Literal::String(s)
+            }
             TokenKind::Symbol(s) => Literal::Symbol(s),
             TokenKind::Character(c) => Literal::Character(c),
             _ => unreachable!(),
@@ -683,12 +720,13 @@ impl Parser {
         let mut expr = Expression::Identifier(Identifier::new(name.clone(), span));
 
         // Check for field access: identifier.field
-        while self.match_token(&TokenKind::Period) {
-            // Make sure this isn't a statement terminator
-            if self.is_at_end() || !matches!(self.current_kind(), TokenKind::Identifier(_)) {
-                self.error("Expected field name after '.'");
-                break;
-            }
+        // Only treat a '.' as starting a field access if it is immediately
+        // followed by an identifier. This avoids consuming '.' that might be
+        // used as a statement terminator or for other syntax.
+        while self.check(&TokenKind::Period)
+            && matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+        {
+            self.advance(); // consume the period
 
             let field_token = self.advance();
             let TokenKind::Identifier(field_name) = field_token.kind() else {
@@ -1179,6 +1217,71 @@ mod tests {
                 ));
             }
             _ => panic!("Expected cascade expression"),
+        }
+    }
+
+    #[test]
+    fn parse_statement_with_period() {
+        // Test that unary messages followed by period work correctly
+        let module = parse_ok("obj foo.");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Unary(name),
+                ..
+            } => {
+                assert!(matches!(**receiver, Expression::Identifier(_)));
+                assert_eq!(name.as_str(), "foo");
+            }
+            _ => panic!("Expected unary message send"),
+        }
+    }
+
+    #[test]
+    fn parse_invalid_assignment_target() {
+        let diagnostics = parse_err("3 := 4");
+        assert!(!diagnostics.is_empty());
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("Assignment target must be an identifier or field access")
+        );
+    }
+
+    #[test]
+    fn parse_interpolated_string() {
+        let module = parse_ok("\"Hello, {name}!\"");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::Literal(Literal::String(s), _) if s == "Hello, {name}!" => {}
+            _ => panic!("Expected interpolated string parsed as string literal"),
+        }
+    }
+
+    #[test]
+    fn parse_error_preserved_in_ast() {
+        let tokens = lex_with_eof("x := @");
+        let (module, diagnostics) = parse(tokens);
+        assert!(!diagnostics.is_empty());
+        // Error expression should be preserved in the AST
+        // We expect 1 expression: the Assignment with an Error value
+        // (not the error discarded as before)
+        assert_eq!(module.expressions.len(), 1);
+        // The assignment should contain the error as its value
+        if let Expression::Assignment { value, .. } = &module.expressions[0] {
+            assert!(value.is_error());
+        }
+    }
+
+    #[test]
+    fn parse_field_access_with_period() {
+        // Test that field access doesn't consume statement terminator
+        let module = parse_ok("self.value.");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::FieldAccess { .. } => {}
+            _ => panic!("Expected field access"),
         }
     }
 }
