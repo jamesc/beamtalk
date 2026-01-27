@@ -247,7 +247,7 @@ pub fn parse_message_send(&mut self) -> Result<Expression, ParseError> { ... }
 /// # Errors
 /// Returns `ParseError::UnexpectedToken` if...
 ///
-/// # Panics  
+/// # Panics
 /// Panics if the parser is in an invalid state (programming error).
 pub fn parse_expression(&mut self) -> Result<Expression, ParseError> { ... }
 ```
@@ -290,10 +290,10 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    pub fn is_unexpected_token(&self) -> bool { 
-        matches!(self.kind, ParseErrorKind::UnexpectedToken { .. }) 
+    pub fn is_unexpected_token(&self) -> bool {
+        matches!(self.kind, ParseErrorKind::UnexpectedToken { .. })
     }
-    
+
     pub fn span(&self) -> Span { self.span }
 }
 
@@ -315,7 +315,7 @@ Use `thiserror` for error definitions, `miette` for user-facing diagnostics with
 // Bad — easy to mix up
 fn get_symbol(module: u32, function: u32) -> Symbol;
 
-// Good — compiler catches mistakes  
+// Good — compiler catches mistakes
 pub struct ModuleId(u32);
 pub struct FunctionId(u32);
 
@@ -328,7 +328,7 @@ fn get_symbol(module: ModuleId, function: FunctionId) -> Symbol;
 fn set_offset(offset: usize);
 fn set_line(line: usize);
 
-// Good  
+// Good
 pub struct ByteOffset(usize);
 pub struct LineNumber(usize);
 
