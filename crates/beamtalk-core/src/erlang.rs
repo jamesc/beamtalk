@@ -672,7 +672,10 @@ impl CoreErlangGenerator {
         // in let _ = call 'gen_server':'cast'/2(ReceiverPid, {Selector, Args, FuturePid})
         //    in FuturePid
 
-        write!(self.output, "let FuturePid = call 'beamtalk_future':'new'/0() in ")?;
+        write!(
+            self.output,
+            "let FuturePid = call 'beamtalk_future':'new'/0() in "
+        )?;
 
         // Build the message tuple: {Selector, Args, FuturePid}
         write!(self.output, "let _ = call 'gen_server':'cast'/2(")?;
