@@ -227,6 +227,17 @@ pub enum Expression {
         span: Span,
     },
 
+    /// An await expression (`future await`).
+    ///
+    /// Blocks until a future is resolved or rejected.
+    /// Syntax: `result await` or `(counter increment) await`
+    Await {
+        /// The future expression to await.
+        future: Box<Expression>,
+        /// Source location of the await expression.
+        span: Span,
+    },
+
     /// A pattern match expression.
     ///
     /// Example: `value match: [{#ok, x} -> x; {#error, e} -> nil]`
@@ -264,6 +275,7 @@ impl Expression {
             | Self::Cascade { span, .. }
             | Self::Parenthesized { span, .. }
             | Self::Pipe { span, .. }
+            | Self::Await { span, .. }
             | Self::Match { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,

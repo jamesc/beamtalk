@@ -131,6 +131,7 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
         Expression::Pipe { value, target, .. } => {
             find_hover_in_expr(value, offset).or_else(|| find_hover_in_expr(target, offset))
         }
+        Expression::Await { future, .. } => find_hover_in_expr(future, offset),
         Expression::Match { value, arms, .. } => find_hover_in_expr(value, offset).or_else(|| {
             arms.iter()
                 .find_map(|arm| find_hover_in_expr(&arm.body, offset))

@@ -510,6 +510,7 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
+            Expression::Await { future, .. } => self.generate_await(future),
             Expression::Assignment { .. } => {
                 // Assignments in expressions are not yet supported
                 Err(CodeGenError::UnsupportedFeature {
@@ -637,22 +638,40 @@ impl CoreErlangGenerator {
     }
 
     /// Generates code for a message send.
+    ///
+    /// Message sends are **asynchronous by default** and return futures.
+    /// This implements the async-first protocol:
+    /// 1. Create a future process
+    /// 2. Send message via `gen_server:cast` with `{Selector, Args, FuturePid}`
+    /// 3. Return the future reference
+    ///
+    /// The receiving actor's `handle_cast/2` will resolve the future when complete.
     fn generate_message_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        // For binary operators, use Erlang's built-in operators
+        // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             return self.generate_binary_op(op, receiver, arguments);
         }
 
-        // For other messages, route through the module's dispatch/3 function.
-        // This matches how methods are represented (via dispatch/3).
-        write!(self.output, "call '{}':'dispatch'/3(", self.module_name)?;
+        // Generate the async message send protocol:
+        // let FuturePid = call 'beamtalk_future':'new'/0()
+        // in let _ = call 'gen_server':'cast'/2(ReceiverPid, {Selector, Args, FuturePid})
+        //    in FuturePid
 
-        // First argument: the selector name as an atom.
+        write!(self.output, "let FuturePid = call 'beamtalk_future':'new'/0() in ")?;
+
+        // Build the message tuple: {Selector, Args, FuturePid}
+        write!(self.output, "let _ = call 'gen_server':'cast'/2(")?;
+
+        // Receiver evaluation
+        self.generate_expression(receiver)?;
+        write!(self.output, ", {{")?;
+
+        // First element: the selector name as an atom
         write!(self.output, "'")?;
         match selector {
             MessageSelector::Unary(name) => write!(self.output, "{name}")?,
@@ -669,7 +688,7 @@ impl CoreErlangGenerator {
         }
         write!(self.output, "', [")?;
 
-        // Second argument: list of message arguments.
+        // Second element: list of message arguments
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -677,9 +696,31 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        // Third argument: State (receiver is assumed to be self for now)
-        write!(self.output, "], State)")?;
+        // Third element: FuturePid
+        write!(self.output, "], FuturePid}}) in FuturePid")?;
 
+        Ok(())
+    }
+
+    /// Generates code for await expression.
+    ///
+    /// Await blocks until a future is resolved or rejected.
+    /// Implements the protocol from `beamtalk_future.erl`:
+    /// ```erlang
+    /// FuturePid ! {await, self()},
+    /// receive
+    ///     {future_resolved, FuturePid, Value} -> Value;
+    ///     {future_rejected, FuturePid, Reason} -> error(Reason)
+    /// after 30000 ->
+    ///     error(future_timeout)
+    /// end
+    /// ```
+    fn generate_await(&mut self, future: &Expression) -> Result<()> {
+        // Use beamtalk_future:await/1 for simplicity
+        // This is equivalent to the raw protocol but cleaner
+        write!(self.output, "call 'beamtalk_future':'await'/1(")?;
+        self.generate_expression(future)?;
+        write!(self.output, ")")?;
         Ok(())
     }
 
