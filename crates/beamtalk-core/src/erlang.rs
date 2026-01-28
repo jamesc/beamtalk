@@ -136,6 +136,28 @@ pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> 
     Ok(generator.output)
 }
 
+/// Generates Core Erlang for a REPL expression.
+///
+/// This creates a simple module that evaluates a single expression and
+/// returns its value. Used by the REPL for interactive evaluation.
+///
+/// The generated module has an `eval/1` function that takes a bindings map
+/// and returns the expression result.
+///
+/// # Arguments
+///
+/// * `expression` - The Beamtalk expression AST to evaluate
+/// * `module_name` - Unique module name (e.g., `repl_eval_42`)
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
+    let mut generator = CoreErlangGenerator::new(module_name);
+    generator.generate_repl_module(expression)?;
+    Ok(generator.output)
+}
+
 /// Core Erlang code generator.
 ///
 /// This struct maintains state during code generation, including
@@ -189,6 +211,13 @@ impl CoreErlangGenerator {
         None
     }
 
+    /// Binds an identifier to a Core Erlang variable name in the current scope.
+    fn bind_var(&mut self, name: &str, core_var: &str) {
+        if let Some(current_scope) = self.var_scopes.last_mut() {
+            current_scope.insert(name.to_string(), core_var.to_string());
+        }
+    }
+
     /// Generates a full module with `gen_server` behaviour.
     fn generate_module(&mut self, module: &Module) -> Result<()> {
         // Module header
@@ -226,6 +255,53 @@ impl CoreErlangGenerator {
 
         // Generate method table
         self.generate_method_table(module)?;
+
+        // Module end
+        writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates a simple REPL evaluation module.
+    ///
+    /// Creates a module with a single `eval/1` function that evaluates
+    /// an expression with the provided bindings map.
+    ///
+    /// # Arguments
+    ///
+    /// * `expression` - The expression to evaluate
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// module 'repl_eval_42' ['eval'/1]
+    ///   attributes []
+    ///
+    /// 'eval'/1 = fun (Bindings) ->
+    ///     <expression>
+    /// end
+    /// ```
+    fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
+        // Module header - simple module with just eval/1
+        writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
+        writeln!(self.output, "  attributes []")?;
+        writeln!(self.output)?;
+
+        // Generate eval/1 function
+        writeln!(self.output, "'eval'/1 = fun (Bindings) ->")?;
+        self.indent += 1;
+
+        // Register Bindings in scope for variable lookups
+        self.push_scope();
+        self.bind_var("__bindings__", "Bindings");
+
+        // Generate the expression
+        self.write_indent()?;
+        self.generate_expression(expression)?;
+        writeln!(self.output)?;
+
+        self.pop_scope();
+        self.indent -= 1;
 
         // Module end
         writeln!(self.output, "end")?;
@@ -581,15 +657,20 @@ impl CoreErlangGenerator {
             Literal::Integer(n) => write!(self.output, "{n}")?,
             Literal::Float(f) => write!(self.output, "{f}")?,
             Literal::String(s) => {
-                // Core Erlang strings are binaries
-                write!(self.output, "<<")?;
+                // Core Erlang binary syntax: #{segment, segment, ...}#
+                // Each segment is #<value>(size, units, type, flags)
+                write!(self.output, "#{{")?;
                 for (i, ch) in s.chars().enumerate() {
                     if i > 0 {
-                        write!(self.output, ", ")?;
+                        write!(self.output, ",")?;
                     }
-                    write!(self.output, "{}", ch as u32)?;
+                    write!(
+                        self.output,
+                        "#<{}>(8,1,'integer',['unsigned'|['big']])",
+                        ch as u32
+                    )?;
                 }
-                write!(self.output, ">>")?;
+                write!(self.output, "}}#")?;
             }
             Literal::Symbol(s) => write!(self.output, "'{s}'")?,
             Literal::Character(c) => write!(self.output, "{}", *c as u32)?,
@@ -609,12 +690,20 @@ impl CoreErlangGenerator {
 
     /// Generates code for an identifier reference.
     fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
-        // Check if it's a bound variable in current or outer scopes
-        if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
-            write!(self.output, "{var_name}")?;
-        } else {
-            // Field access from state
-            write!(self.output, "call 'maps':'get'/2('{}', State)", id.name)?;
+        // Handle special reserved identifiers as atoms
+        match id.name.as_str() {
+            "true" => write!(self.output, "'true'")?,
+            "false" => write!(self.output, "'false'")?,
+            "nil" => write!(self.output, "'nil'")?,
+            _ => {
+                // Check if it's a bound variable in current or outer scopes
+                if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
+                    write!(self.output, "{var_name}")?;
+                } else {
+                    // Field access from state
+                    write!(self.output, "call 'maps':'get'/2('{}', State)", id.name)?;
+                }
+            }
         }
         Ok(())
     }

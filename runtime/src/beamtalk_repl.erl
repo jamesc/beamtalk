@@ -595,8 +595,12 @@ compile_expression(Expression, ModuleName, _Bindings, State) ->
             {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
         {error, {compile_error, Diagnostics}} ->
             {error, format_daemon_diagnostics(Diagnostics)};
+        {error, {core_compile_error, Errors}} ->
+            {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Errors]))};
+        {error, {daemon_error, Msg}} ->
+            {error, iolist_to_binary([<<"Daemon error: ">>, Msg])};
         {error, Reason} ->
-            {error, iolist_to_binary(io_lib:format("Daemon error: ~p", [Reason]))}
+            {error, iolist_to_binary(io_lib:format("Compilation error: ~p", [Reason]))}
     end.
 
 %% @private
@@ -639,11 +643,14 @@ compile_via_daemon_socket(Expression, ModuleName, Socket) ->
     %% Note: Using simple string formatting since we don't have jsx dependency yet
     RequestId = erlang:unique_integer([positive]),
     ExpressionEscaped = escape_json_string(list_to_binary(Expression)),
+    ModuleNameBin = atom_to_binary(ModuleName, utf8),
     Request = iolist_to_binary([
         <<"{\"jsonrpc\":\"2.0\",\"id\":">>,
         integer_to_binary(RequestId),
-        <<",\"method\":\"compile\",\"params\":{\"path\":\"repl_eval.bt\",\"source\":\"">>,
+        <<",\"method\":\"compile_expression\",\"params\":{\"source\":\"">>,
         ExpressionEscaped,
+        <<"\",\"module_name\":\"">>,
+        ModuleNameBin,
         <<"\"}}\n">>
     ]),
     
@@ -698,11 +705,10 @@ parse_daemon_response(ResponseLine, ModuleName) ->
 %% @private
 %% Compile Core Erlang source to BEAM bytecode.
 -spec compile_core_erlang(binary(), atom()) -> {ok, binary()} | {error, term()}.
-compile_core_erlang(CoreErlangBin, _ModuleName) ->
-    %% Write Core Erlang to temp file
+compile_core_erlang(CoreErlangBin, ModuleName) ->
+    %% Write Core Erlang to temp file (filename must match module name)
     TempDir = os:getenv("TMPDIR", "/tmp"),
-    TempFile = filename:join(TempDir, 
-        "beamtalk_repl_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".core"),
+    TempFile = filename:join(TempDir, atom_to_list(ModuleName) ++ ".core"),
     try
         ok = file:write_file(TempFile, CoreErlangBin),
         %% Compile Core Erlang to BEAM
@@ -736,7 +742,7 @@ extract_json_field(Json, Field) ->
     end.
 
 %% @private
-%% Extract a JSON string value.
+%% Extract a JSON string value (with unescaping).
 -spec extract_json_string(binary(), binary()) -> {ok, binary()} | error.
 extract_json_string(Json, Field) ->
     Pattern = <<"\"", Field/binary, "\":\"">>,
@@ -747,7 +753,8 @@ extract_json_string(Json, Field) ->
             %% Find closing quote (handling escapes)
             case find_string_end(Rest, 0) of
                 {ok, EndPos} ->
-                    {ok, binary:part(Rest, 0, EndPos)};
+                    EscapedStr = binary:part(Rest, 0, EndPos),
+                    {ok, unescape_json_string(EscapedStr)};
                 error ->
                     error
             end;
@@ -767,6 +774,27 @@ find_string_end(<<"\"", _/binary>>, Pos) ->
     {ok, Pos};
 find_string_end(<<_, Rest/binary>>, Pos) ->
     find_string_end(Rest, Pos + 1).
+
+%% @private
+%% Unescape JSON string escape sequences.
+-spec unescape_json_string(binary()) -> binary().
+unescape_json_string(Str) ->
+    unescape_json_string(Str, <<>>).
+
+unescape_json_string(<<>>, Acc) ->
+    Acc;
+unescape_json_string(<<"\\n", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\n>>);
+unescape_json_string(<<"\\r", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\r>>);
+unescape_json_string(<<"\\t", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\t>>);
+unescape_json_string(<<"\\\"", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\">>);
+unescape_json_string(<<"\\\\", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\\>>);
+unescape_json_string(<<C, Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, C>>).
 
 %% @private
 %% Extract a JSON boolean value.
