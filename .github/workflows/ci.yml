@@ -52,3 +52,14 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets
+
+      - name: Compile Erlang runtime
+        run: |
+          cd runtime
+          erlc beamtalk_future.erl
+          erlc -o . test/beamtalk_future_tests.erl
+
+      - name: Test Erlang runtime
+        run: |
+          cd runtime
+          erl -noshell -pa . -eval 'eunit:test(beamtalk_future_tests, [verbose])' -s init stop
