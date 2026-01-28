@@ -172,8 +172,9 @@ handle_info(accept, State = #state{listen_socket = ListenSocket}) ->
     case gen_tcp:accept(ListenSocket, ?ACCEPT_TIMEOUT) of
         {ok, ClientSocket} ->
             %% Handle client in a separate process
+            %% Use spawn (not spawn_link) so client crashes don't take down the server
             Self = self(),
-            spawn_link(fun() -> handle_client(ClientSocket, Self) end),
+            spawn(fun() -> handle_client(ClientSocket, Self) end),
             %% Continue accepting
             self() ! accept,
             {noreply, State};
@@ -443,7 +444,7 @@ format_value(Value) when is_list(Value) ->
 format_value(Value) when is_pid(Value) ->
     %% Format pid as string
     PidStr = pid_to_list(Value),
-    iolist_to_binary([<<"\"#<pid ">>, list_to_binary(PidStr), <<"\">">>]);
+    iolist_to_binary([<<"\"#<pid ">>, list_to_binary(PidStr), <<">\"">>]);
 format_value(Value) when is_map(Value) ->
     %% Format map as JSON object
     Pairs = maps:fold(
@@ -637,7 +638,7 @@ parse_float_or_string(Expr, Bindings) ->
 
 parse_string_or_symbol(Expr, Bindings) ->
     %% String literal (single or double quoted)
-    case re:run(Expr, "^['\"](.*)['\"]\$", [{capture, [1], list}]) of
+    case re:run(Expr, "^['\"](.*)['\"]$", [{capture, [1], list}]) of
         {match, [StrValue]} ->
             {ok, {literal, list_to_binary(StrValue)}};
         nomatch ->
