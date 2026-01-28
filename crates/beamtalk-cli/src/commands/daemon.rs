@@ -313,7 +313,7 @@ fn run_daemon_server() -> Result<()> {
         match listener.accept() {
             Ok((stream, _addr)) => {
                 debug!("Accepted connection");
-                if let Err(e) = handle_connection(stream, &mut service) {
+                if let Err(e) = handle_connection(stream, &mut service, &running) {
                     error!("Error handling connection: {e}");
                 }
             }
@@ -333,11 +333,16 @@ fn run_daemon_server() -> Result<()> {
 }
 
 /// Handle a single client connection.
+#[cfg(unix)]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "UnixStream needs to be passed by value for the lifetime of the connection"
 )]
-fn handle_connection(stream: UnixStream, service: &mut SimpleLanguageService) -> Result<()> {
+fn handle_connection(
+    stream: UnixStream,
+    service: &mut SimpleLanguageService,
+    running: &Arc<AtomicBool>,
+) -> Result<()> {
     stream.set_nonblocking(false).into_diagnostic()?;
 
     let mut reader = BufReader::new(&stream);
@@ -352,7 +357,7 @@ fn handle_connection(stream: UnixStream, service: &mut SimpleLanguageService) ->
                 break;
             }
             Ok(_) => {
-                let response = handle_request(&line, service);
+                let response = handle_request(&line, service, running);
                 writeln!(writer, "{response}").into_diagnostic()?;
                 writer.flush().into_diagnostic()?;
             }
@@ -433,7 +438,11 @@ impl JsonRpcResponse {
 }
 
 /// Handle a JSON-RPC request and return the response as a JSON string.
-fn handle_request(request_str: &str, service: &mut SimpleLanguageService) -> String {
+fn handle_request(
+    request_str: &str,
+    service: &mut SimpleLanguageService,
+    running: &Arc<AtomicBool>,
+) -> String {
     let request: JsonRpcRequest = match serde_json::from_str(request_str) {
         Ok(r) => r,
         Err(e) => {
@@ -455,7 +464,13 @@ fn handle_request(request_str: &str, service: &mut SimpleLanguageService) -> Str
         .unwrap_or_default();
     }
 
-    let response = dispatch_method(&request.method, request.params, request.id.clone(), service);
+    let response = dispatch_method(
+        &request.method,
+        request.params,
+        request.id.clone(),
+        service,
+        running,
+    );
 
     serde_json::to_string(&response).unwrap_or_default()
 }
@@ -466,6 +481,7 @@ fn dispatch_method(
     params: serde_json::Value,
     id: Option<serde_json::Value>,
     service: &mut SimpleLanguageService,
+    running: &Arc<AtomicBool>,
 ) -> JsonRpcResponse {
     debug!("Dispatching method: {method}");
 
@@ -473,7 +489,8 @@ fn dispatch_method(
         "compile" => handle_compile(params, id, service),
         "diagnostics" => handle_diagnostics(params, id, service),
         "shutdown" => {
-            info!("Received shutdown request");
+            info!("Received shutdown request, stopping daemon");
+            running.store(false, Ordering::SeqCst);
             JsonRpcResponse::success(id, serde_json::json!(null))
         }
         "ping" => JsonRpcResponse::success(id, serde_json::json!("pong")),
@@ -663,19 +680,30 @@ fn handle_diagnostics(
 mod tests {
     use super::*;
 
+    fn make_running() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(true))
+    }
+
     #[test]
     fn test_ping_method() {
         let mut service = SimpleLanguageService::new();
-        let response = handle_request(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#, &mut service);
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#,
+            &mut service,
+            &running,
+        );
         assert!(response.contains("pong"));
     }
 
     #[test]
     fn test_method_not_found() {
         let mut service = SimpleLanguageService::new();
+        let running = make_running();
         let response = handle_request(
             r#"{"jsonrpc":"2.0","id":1,"method":"unknown"}"#,
             &mut service,
+            &running,
         );
         assert!(response.contains("Method not found"));
     }
@@ -683,9 +711,11 @@ mod tests {
     #[test]
     fn test_compile_with_source() {
         let mut service = SimpleLanguageService::new();
+        let running = make_running();
         let response = handle_request(
             r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"test.bt","source":"x := 42"}}"#,
             &mut service,
+            &running,
         );
         assert!(response.contains("success"));
         assert!(response.contains("true"));
@@ -694,9 +724,11 @@ mod tests {
     #[test]
     fn test_compile_with_errors() {
         let mut service = SimpleLanguageService::new();
+        let running = make_running();
         let response = handle_request(
             r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"test.bt","source":"x := :="}}"#,
             &mut service,
+            &running,
         );
         assert!(response.contains("success"));
         assert!(response.contains("false")); // Should fail
@@ -706,9 +738,11 @@ mod tests {
     #[test]
     fn test_diagnostics_method() {
         let mut service = SimpleLanguageService::new();
+        let running = make_running();
         let response = handle_request(
             r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"test.bt","source":"x := 42"}}"#,
             &mut service,
+            &running,
         );
         assert!(response.contains("[]")); // No diagnostics
     }
@@ -716,26 +750,37 @@ mod tests {
     #[test]
     fn test_invalid_json() {
         let mut service = SimpleLanguageService::new();
-        let response = handle_request("not json", &mut service);
+        let running = make_running();
+        let response = handle_request("not json", &mut service, &running);
         assert!(response.contains("Parse error"));
     }
 
     #[test]
     fn test_invalid_jsonrpc_version() {
         let mut service = SimpleLanguageService::new();
-        let response = handle_request(r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#, &mut service);
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
+            &mut service,
+            &running,
+        );
         assert!(response.contains("Invalid JSON-RPC version"));
     }
 
     #[test]
     fn test_shutdown_method() {
         let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        assert!(running.load(Ordering::SeqCst)); // Running initially true
         let response = handle_request(
             r#"{"jsonrpc":"2.0","id":1,"method":"shutdown"}"#,
             &mut service,
+            &running,
         );
         // Shutdown should return a success response with null result
         assert!(response.contains(r#""result":null"#));
         assert!(!response.contains("error"));
+        // Shutdown should set running to false
+        assert!(!running.load(Ordering::SeqCst));
     }
 }
