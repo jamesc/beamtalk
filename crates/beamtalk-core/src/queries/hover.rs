@@ -120,12 +120,40 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 return Some(hover);
             }
 
-            // If we're in the message send span but not in receiver/arguments,
-            // we're likely hovering on the selector
-            if offset >= span.start() && offset < span.end() {
-                // Provide hover info for the selector
-                let hover_info = selector_hover_info(selector, *span);
-                return Some(hover_info);
+            // At this point we know we're not hovering over the receiver or any argument.
+            // Compute a more precise selector span based on selector type.
+            let receiver_span = receiver.span();
+            let in_selector = match selector {
+                // For unary and binary messages, the selector appears between the end
+                // of the receiver and the start of the first argument (if any), or
+                // up to the end of the message send when there are no arguments.
+                MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                    let start = receiver_span.end();
+                    let end = arguments
+                        .first()
+                        .map_or_else(|| span.end(), |arg| arg.span().start());
+                    offset >= start && offset < end
+                }
+                // For keyword messages, selector parts are interleaved with arguments.
+                // We approximate by treating any position within the message send span
+                // (that's not the receiver or an argument) as being over the selector.
+                MessageSelector::Keyword(_) => offset >= span.start() && offset < span.end(),
+            };
+
+            if in_selector {
+                // Compute a span for the selector region
+                let selector_span = match selector {
+                    MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                        let start = receiver_span.end();
+                        let end = arguments
+                            .first()
+                            .map_or_else(|| span.end(), |arg| arg.span().start());
+                        Span::new(start, end)
+                    }
+                    // For keyword messages, use the full span since parts are interleaved
+                    MessageSelector::Keyword(_) => *span,
+                };
+                return Some(selector_hover_info(selector, selector_span));
             }
             None
         }
@@ -158,7 +186,7 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
             }
             // Check each cascaded message
             for msg in messages {
-                // Check arguments
+                // Check arguments first
                 if let Some(hover) = msg
                     .arguments
                     .iter()
@@ -166,9 +194,18 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 {
                     return Some(hover);
                 }
-                // Check if offset is within this message's span (selector area)
+                // Compute selector span: from message start to first argument (or message end)
                 if offset >= msg.span.start() && offset < msg.span.end() {
-                    return Some(selector_hover_info(&msg.selector, msg.span));
+                    let selector_end = msg
+                        .arguments
+                        .first()
+                        .map_or_else(|| msg.span.end(), |arg| arg.span().start());
+                    let selector_span = Span::new(msg.span.start(), selector_end);
+
+                    // Only show hover if we're in the selector region (before first arg)
+                    if offset >= msg.span.start() && offset < selector_end {
+                        return Some(selector_hover_info(&msg.selector, selector_span));
+                    }
                 }
             }
             None
