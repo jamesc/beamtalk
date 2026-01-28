@@ -510,7 +510,6 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
-            Expression::Await { future, .. } => self.generate_await(future),
             Expression::Assignment { .. } => {
                 // Assignments in expressions are not yet supported
                 Err(CodeGenError::UnsupportedFeature {
@@ -668,16 +667,19 @@ impl CoreErlangGenerator {
         }
 
         // Generate the async message send protocol:
-        // let FuturePid = call 'beamtalk_future':'new'/0()
-        // in let _ = call 'gen_server':'cast'/2(ReceiverPid, {Selector, Args, FuturePid})
-        //    in FuturePid
+        // let Future1 = call 'beamtalk_future':'new'/0()
+        // in let _ = call 'gen_server':'cast'/2(ReceiverPid, {Selector, Args, Future1})
+        //    in Future1
+        //
+        // Use fresh_var to avoid shadowing in nested message sends
 
+        let future_var = self.fresh_var("Future");
         write!(
             self.output,
-            "let FuturePid = call 'beamtalk_future':'new'/0() in "
+            "let {future_var} = call 'beamtalk_future':'new'/0() in "
         )?;
 
-        // Build the message tuple: {Selector, Args, FuturePid}
+        // Build the message tuple: {Selector, Args, Future}
         write!(self.output, "let _ = call 'gen_server':'cast'/2(")?;
 
         // Receiver evaluation
@@ -709,28 +711,28 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        // Third element: FuturePid
-        write!(self.output, "], FuturePid}}) in FuturePid")?;
+        // Third element: the future variable
+        write!(self.output, "], {future_var}}}) in {future_var}")?;
 
         Ok(())
     }
 
     /// Generates code for await expression.
     ///
-    /// Await blocks until a future is resolved or rejected.
-    /// Implements the protocol from `beamtalk_future.erl`:
+    /// Delegates to `beamtalk_future:await/1`, which implements roughly:
     /// ```erlang
     /// FuturePid ! {await, self()},
     /// receive
-    ///     {future_resolved, FuturePid, Value} -> Value;
-    ///     {future_rejected, FuturePid, Reason} -> error(Reason)
-    /// after 30000 ->
-    ///     error(future_timeout)
+    ///     {future_resolved, FuturePid, Value} ->
+    ///         Value;
+    ///     {future_rejected, FuturePid, Reason} ->
+    ///         throw({future_rejected, Reason})
     /// end
     /// ```
+    ///
+    /// For a timed await with timeout handling, use `beamtalk_future:await/2`.
     fn generate_await(&mut self, future: &Expression) -> Result<()> {
-        // Use beamtalk_future:await/1 for simplicity
-        // This is equivalent to the raw protocol but cleaner
+        // Delegate to beamtalk_future:await/1, which blocks until resolution/rejection
         write!(self.output, "call 'beamtalk_future':'await'/1(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
@@ -928,5 +930,157 @@ mod tests {
                 println!("Skipping test - erlc not installed in CI environment");
             }
         }
+    }
+
+    #[test]
+    fn test_generate_unary_message_send_creates_future() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: receiver unarySelector
+        let receiver = Expression::Identifier(Identifier::new("counter", Span::new(0, 7)));
+        let selector = MessageSelector::Unary("increment".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Check async protocol: create future, cast, return future
+        assert!(
+            output.contains("beamtalk_future':'new'/0"),
+            "Should create a future with beamtalk_future:new/0. Got: {output}"
+        );
+        assert!(
+            output.contains("gen_server':'cast'/2"),
+            "Should send via gen_server:cast/2. Got: {output}"
+        );
+        assert!(
+            output.contains("'increment'"),
+            "Should include selector atom. Got: {output}"
+        );
+        // Check that a fresh future variable is used (pattern: _Future + number)
+        assert!(
+            output.contains("_Future") && output.matches("_Future").count() == 3,
+            "Should use a fresh future variable 3 times (bind, send, return). Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_keyword_message_send_creates_future() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: array at: 1 put: 'x'
+        let receiver = Expression::Identifier(Identifier::new("array", Span::new(0, 5)));
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("at:", Span::new(6, 9)),
+            KeywordPart::new("put:", Span::new(12, 16)),
+        ]);
+        // Arguments are passed separately to generate_message_send
+        let arguments = vec![
+            Expression::Literal(Literal::Integer(1), Span::new(10, 11)),
+            Expression::Literal(Literal::String("x".into()), Span::new(17, 20)),
+        ];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Check async protocol
+        assert!(
+            output.contains("beamtalk_future':'new'/0"),
+            "Should create a future. Got: {output}"
+        );
+        assert!(
+            output.contains("gen_server':'cast'/2"),
+            "Should send via gen_server:cast/2. Got: {output}"
+        );
+        assert!(
+            output.contains("'at:put:'"),
+            "Should include combined keyword selector. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_await_message_uses_future_await() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: future await (special case - should NOT create new future)
+        let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
+        let selector = MessageSelector::Unary("await".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Special case: await uses beamtalk_future:await/1, not the async protocol
+        assert!(
+            output.contains("beamtalk_future':'await'/1"),
+            "Should call beamtalk_future:await/1. Got: {output}"
+        );
+        assert!(
+            !output.contains("gen_server':'cast'"),
+            "Should NOT use gen_server:cast for await. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_binary_op_is_synchronous() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: 3 + 4 (binary ops are synchronous, not async)
+        let receiver = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
+        let selector = MessageSelector::Binary("+".into());
+        let arguments = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Binary ops use erlang's built-in operators - synchronous
+        assert!(
+            output.contains("erlang':'+'/2"),
+            "Should use erlang:+/2. Got: {output}"
+        );
+        assert!(
+            !output.contains("beamtalk_future':'new'"),
+            "Binary ops should NOT create futures. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_nested_message_sends_use_unique_variables() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: (counter new) increment
+        // This is a nested message send: receiver is also a message send
+        let inner_receiver = Expression::Identifier(Identifier::new("counter", Span::new(0, 7)));
+        let inner_selector = MessageSelector::Unary("new".into());
+        let inner_send = Expression::MessageSend {
+            receiver: Box::new(inner_receiver),
+            selector: inner_selector,
+            arguments: vec![],
+            span: Span::new(0, 11),
+        };
+
+        let outer_selector = MessageSelector::Unary("increment".into());
+        let result = generator.generate_message_send(&inner_send, &outer_selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Should have TWO different future variables: _Future1 and _Future2
+        assert!(
+            output.contains("_Future1") && output.contains("_Future2"),
+            "Nested message sends should use unique future variables. Got: {output}"
+        );
+        // Each variable should appear 3 times (bind, send arg, return)
+        assert_eq!(
+            output.matches("_Future1").count(),
+            3,
+            "Inner future variable should appear 3 times. Got: {output}"
+        );
+        assert_eq!(
+            output.matches("_Future2").count(),
+            3,
+            "Outer future variable should appear 3 times. Got: {output}"
+        );
     }
 }
