@@ -791,9 +791,11 @@ generate_expr_code({literal, Value}) when is_integer(Value) ->
 generate_expr_code({literal, Value}) when is_float(Value) ->
     io_lib:format("~p", [Value]);
 generate_expr_code({literal, Value}) when is_atom(Value) ->
-    io_lib:format("'~s'", [Value]);
+    %% Use ~p for safe escaping of atom names with special characters
+    io_lib:format("~p", [Value]);
 generate_expr_code({literal, Value}) when is_binary(Value) ->
-    io_lib:format("<<\"~s\">>", [Value]);
+    %% Use ~p for safe escaping to prevent code injection
+    io_lib:format("~p", [Value]);
 generate_expr_code({var, Name}) ->
     %% Use helper function to look up binding (avoids Erlang single-assignment issues)
     io_lib:format("get_binding('~s', Bindings)", [Name]);
@@ -829,7 +831,11 @@ generate_expr_code(Other) ->
 compile_source(Source) ->
     %% Write to temporary file and compile
     %% Alternative: use compile:forms/2 with erl_scan/erl_parse
-    TempFile = "/tmp/beamtalk_repl_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".erl",
+    TempDir = os:getenv("TMPDIR", "/tmp"),
+    TempFile = filename:join(
+        TempDir,
+        "beamtalk_repl_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".erl"
+    ),
     try
         ok = file:write_file(TempFile, Source),
         case compile:file(TempFile, [binary, return_errors]) of
