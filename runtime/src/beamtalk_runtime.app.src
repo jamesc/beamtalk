@@ -1,0 +1,7 @@
+{application, beamtalk_runtime, [
+    {description, "Beamtalk Runtime - Actor and Future implementations"},
+    {vsn, "0.1.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib]}
+]}.

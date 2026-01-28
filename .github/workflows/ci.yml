@@ -27,8 +27,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           otp-version: '27.0'
-          install-rebar: false
-          install-hex: false
+          rebar3-version: '3.23'
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -53,13 +52,7 @@ jobs:
       - name: Test
         run: cargo test --all-targets
 
-      - name: Compile Erlang runtime
-        run: |
-          cd runtime
-          erlc beamtalk_future.erl
-          erlc -o . test/beamtalk_future_tests.erl
-
       - name: Test Erlang runtime
         run: |
           cd runtime
-          erl -noshell -pa . -eval 'eunit:test(beamtalk_future_tests, [verbose])' -s init stop
+          rebar3 eunit
