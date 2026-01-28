@@ -33,6 +33,9 @@
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::process;
@@ -80,6 +83,14 @@ fn lockfile_path() -> Result<PathBuf> {
 }
 
 /// Check if daemon is currently running.
+///
+/// Uses POSIX-compliant `kill(pid, 0)` to check process existence,
+/// which works on Linux, macOS, and other Unix systems.
+#[cfg(unix)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "PID values are always positive and fit in i32"
+)]
 fn is_daemon_running() -> Result<Option<u32>> {
     let lockfile = lockfile_path()?;
     if !lockfile.exists() {
@@ -89,9 +100,11 @@ fn is_daemon_running() -> Result<Option<u32>> {
     let pid_str = fs::read_to_string(&lockfile).into_diagnostic()?;
     let pid: u32 = pid_str.trim().parse().into_diagnostic()?;
 
-    // Check if process exists
-    let proc_path = PathBuf::from(format!("/proc/{pid}"));
-    if proc_path.exists() {
+    // Check if process exists using POSIX kill(pid, 0)
+    // This is portable across Linux, macOS, and BSD systems
+    // SAFETY: kill with signal 0 only checks if process exists, doesn't send a signal
+    let exists = unsafe { libc::kill(pid as i32, 0) == 0 };
+    if exists {
         Ok(Some(pid))
     } else {
         // Stale lockfile, clean up
@@ -101,10 +114,39 @@ fn is_daemon_running() -> Result<Option<u32>> {
     }
 }
 
-/// Write current PID to lockfile.
-fn write_lockfile() -> Result<()> {
+/// Check if daemon is currently running (Windows stub).
+#[cfg(not(unix))]
+fn is_daemon_running() -> Result<Option<u32>> {
+    // Windows support not yet implemented
+    Ok(None)
+}
+
+/// Write current PID to lockfile atomically using `O_EXCL`.
+///
+/// This prevents race conditions where two processes both pass the
+/// `is_daemon_running` check and try to create lockfiles simultaneously.
+#[cfg(unix)]
+fn write_lockfile_atomic() -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
     let lockfile = lockfile_path()?;
-    fs::write(&lockfile, process::id().to_string()).into_diagnostic()?;
+
+    // Use O_CREAT | O_EXCL to atomically create the file only if it doesn't exist
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true) // This is O_CREAT | O_EXCL
+        .mode(0o644)
+        .open(&lockfile)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                miette!("Daemon lockfile already exists. Another instance may be starting.")
+            } else {
+                miette!("Failed to create lockfile: {e}")
+            }
+        })?;
+
+    write!(file, "{}", process::id()).into_diagnostic()?;
     Ok(())
 }
 
@@ -125,6 +167,7 @@ pub fn run(action: DaemonAction) -> Result<()> {
 }
 
 /// Start the compiler daemon.
+#[cfg(unix)]
 fn start_daemon(foreground: bool) -> Result<()> {
     // Check if already running
     if let Some(pid) = is_daemon_running()? {
@@ -141,17 +184,24 @@ fn start_daemon(foreground: bool) -> Result<()> {
         info!("Starting compiler daemon in foreground");
         run_daemon_server()
     } else {
-        // Fork to background
-        // For now, just run in foreground with a message
-        // TODO: Implement proper daemonization with fork()
-        println!("Starting compiler daemon...");
-        init_logging();
-        info!("Starting compiler daemon");
-        run_daemon_server()
+        // Background mode is not yet implemented; avoid misleading behavior.
+        // When proper daemonization is implemented, this branch should be updated.
+        Err(miette!(
+            "Background mode is not yet supported. Please rerun with --foreground."
+        ))
     }
 }
 
+/// Start the compiler daemon (Windows stub).
+#[cfg(not(unix))]
+fn start_daemon(_foreground: bool) -> Result<()> {
+    Err(miette!(
+        "Daemon is not yet supported on this platform. Unix socket support requires Unix."
+    ))
+}
+
 /// Stop the running daemon.
+#[cfg(unix)]
 #[expect(
     clippy::cast_possible_wrap,
     reason = "PID values are always positive and small"
@@ -160,7 +210,6 @@ fn stop_daemon() -> Result<()> {
     if let Some(pid) = is_daemon_running()? {
         // SAFETY: libc::kill is safe to call with any pid and signal number.
         // If the pid doesn't exist, it returns an error which we ignore.
-        #[cfg(unix)]
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
@@ -177,6 +226,12 @@ fn stop_daemon() -> Result<()> {
         println!("Daemon is not running");
     }
     Ok(())
+}
+
+/// Stop the running daemon (Windows stub).
+#[cfg(not(unix))]
+fn stop_daemon() -> Result<()> {
+    Err(miette!("Daemon is not yet supported on this platform."))
 }
 
 /// Show daemon status.
@@ -199,14 +254,30 @@ fn init_logging() {
 
     tracing_subscriber::registry()
         .with(fmt::layer())
-        .with(EnvFilter::from_default_env().add_directive("beamtalk=debug".parse().unwrap()))
+        .with(
+            EnvFilter::from_default_env().add_directive(
+                "beamtalk=debug"
+                    .parse()
+                    .expect("Failed to parse tracing directive"),
+            ),
+        )
         .init();
 }
 
 /// Run the main daemon server loop.
+///
+/// # Limitations
+///
+/// - **Single connection**: The daemon handles one connection at a time. Subsequent
+///   clients will queue at the socket level until the current client disconnects.
+///   For concurrent LSP and REPL support, consider spawning threads per connection
+///   or using an async runtime.
+/// - **Shared state**: The `SimpleLanguageService` is mutably borrowed for the
+///   duration of each connection. Concurrent access would require `Arc<Mutex<...>>`.
+#[cfg(unix)]
 fn run_daemon_server() -> Result<()> {
-    // Write lockfile
-    write_lockfile()?;
+    // Write lockfile atomically using O_EXCL to prevent race conditions
+    write_lockfile_atomic()?;
 
     // Set up signal handling for graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
@@ -225,6 +296,11 @@ fn run_daemon_server() -> Result<()> {
     }
 
     let listener = UnixListener::bind(&socket).into_diagnostic()?;
+
+    // Set restrictive permissions (owner only) on the socket
+    // This prevents other users on the system from connecting
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).into_diagnostic()?;
+
     listener.set_nonblocking(true).into_diagnostic()?;
 
     info!("Daemon listening on {}", socket.display());
@@ -504,7 +580,17 @@ fn handle_compile(
         diagnostics,
     };
 
-    JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+    match serde_json::to_value(result) {
+        Ok(value) => JsonRpcResponse::success(id, value),
+        Err(e) => {
+            error!("Failed to serialize compile result: {e}");
+            JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                format!("Failed to serialize result: {e}"),
+            )
+        }
+    }
 }
 
 /// Parameters for the diagnostics method.
@@ -560,7 +646,17 @@ fn handle_diagnostics(
         })
         .collect();
 
-    JsonRpcResponse::success(id, serde_json::to_value(diagnostics).unwrap())
+    match serde_json::to_value(diagnostics) {
+        Ok(value) => JsonRpcResponse::success(id, value),
+        Err(e) => {
+            error!("Failed to serialize diagnostics: {e}");
+            JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                format!("Failed to serialize diagnostics: {e}"),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -629,5 +725,17 @@ mod tests {
         let mut service = SimpleLanguageService::new();
         let response = handle_request(r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#, &mut service);
         assert!(response.contains("Invalid JSON-RPC version"));
+    }
+
+    #[test]
+    fn test_shutdown_method() {
+        let mut service = SimpleLanguageService::new();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"shutdown"}"#,
+            &mut service,
+        );
+        // Shutdown should return a success response with null result
+        assert!(response.contains(r#""result":null"#));
+        assert!(!response.contains("error"));
     }
 }
