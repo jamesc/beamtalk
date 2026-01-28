@@ -60,7 +60,7 @@
 
 %% Public API
 -export([start_link/1, start_link/2, stop/1]).
--export([eval/2, get_bindings/1, clear_bindings/1]).
+-export([eval/2, get_bindings/1, clear_bindings/1, get_port/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -120,6 +120,12 @@ get_bindings(Pid) ->
 clear_bindings(Pid) ->
     gen_server:call(Pid, clear_bindings).
 
+%% @doc Get the actual port the server is listening on.
+%% Useful when started with port 0 (OS assigns port).
+-spec get_port(pid()) -> inet:port_number().
+get_port(Pid) ->
+    gen_server:call(Pid, get_port).
+
 %%% gen_server callbacks
 
 %% @private
@@ -130,11 +136,13 @@ init({Port, Options}) ->
     %% Open TCP listen socket
     case gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {packet, line}]) of
         {ok, ListenSocket} ->
+            %% Get actual port (important when Port=0)
+            {ok, ActualPort} = inet:port(ListenSocket),
             %% Start accepting connections asynchronously
             self() ! accept,
             {ok, #state{
                 listen_socket = ListenSocket,
-                port = Port,
+                port = ActualPort,
                 bindings = #{},
                 compiler_host = CompilerHost,
                 compiler_port = CompilerPort,
@@ -158,6 +166,9 @@ handle_call(get_bindings, _From, State) ->
 
 handle_call(clear_bindings, _From, State) ->
     {reply, ok, State#state{bindings = #{}}};
+
+handle_call(get_port, _From, State) ->
+    {reply, State#state.port, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

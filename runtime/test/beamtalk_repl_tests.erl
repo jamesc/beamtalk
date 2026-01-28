@@ -282,3 +282,117 @@ eval_identifier_with_numbers_test() ->
     {ok, 99} = beamtalk_repl:eval(Pid, "var123 := 99"),
     ?assertMatch({ok, 99}, beamtalk_repl:eval(Pid, "var123")),
     beamtalk_repl:stop(Pid).
+
+%%% End-to-End TCP Tests
+
+tcp_eval_integer_test() ->
+    %% Start REPL server on random port
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    %% Connect via TCP
+    {ok, Socket} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% Send JSON eval request
+    Request = <<"{\"type\":\"eval\",\"expression\":\"42\"}\n">>,
+    ok = gen_tcp:send(Socket, Request),
+    
+    %% Receive response
+    {ok, Response} = gen_tcp:recv(Socket, 0, 5000),
+    
+    %% Verify response contains result
+    ?assert(binary:match(Response, <<"\"type\":\"result\"">>) =/= nomatch),
+    ?assert(binary:match(Response, <<"42">>) =/= nomatch),
+    
+    gen_tcp:close(Socket),
+    beamtalk_repl:stop(Pid).
+
+tcp_eval_string_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    {ok, Socket} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% Send string expression
+    Request = <<"{\"type\":\"eval\",\"expression\":\"'hello world'\"}\n">>,
+    ok = gen_tcp:send(Socket, Request),
+    
+    {ok, Response} = gen_tcp:recv(Socket, 0, 5000),
+    ?assert(binary:match(Response, <<"\"type\":\"result\"">>) =/= nomatch),
+    ?assert(binary:match(Response, <<"hello world">>) =/= nomatch),
+    
+    gen_tcp:close(Socket),
+    beamtalk_repl:stop(Pid).
+
+tcp_eval_assignment_and_reference_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    {ok, Socket} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% First: assign variable
+    ok = gen_tcp:send(Socket, <<"{\"type\":\"eval\",\"expression\":\"x := 100\"}\n">>),
+    {ok, Response1} = gen_tcp:recv(Socket, 0, 5000),
+    ?assert(binary:match(Response1, <<"100">>) =/= nomatch),
+    
+    %% Second: reference variable
+    ok = gen_tcp:send(Socket, <<"{\"type\":\"eval\",\"expression\":\"x\"}\n">>),
+    {ok, Response2} = gen_tcp:recv(Socket, 0, 5000),
+    ?assert(binary:match(Response2, <<"100">>) =/= nomatch),
+    
+    gen_tcp:close(Socket),
+    beamtalk_repl:stop(Pid).
+
+tcp_eval_error_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    {ok, Socket} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% Request undefined variable
+    ok = gen_tcp:send(Socket, <<"{\"type\":\"eval\",\"expression\":\"undefinedVar\"}\n">>),
+    {ok, Response} = gen_tcp:recv(Socket, 0, 5000),
+    
+    %% Should get error response
+    ?assert(binary:match(Response, <<"\"type\":\"error\"">>) =/= nomatch),
+    
+    gen_tcp:close(Socket),
+    beamtalk_repl:stop(Pid).
+
+tcp_raw_expression_test() ->
+    %% Test sending raw expression (not JSON) - backwards compatibility
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    {ok, Socket} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% Send raw expression (not JSON)
+    ok = gen_tcp:send(Socket, <<"123\n">>),
+    {ok, Response} = gen_tcp:recv(Socket, 0, 5000),
+    
+    ?assert(binary:match(Response, <<"123">>) =/= nomatch),
+    
+    gen_tcp:close(Socket),
+    beamtalk_repl:stop(Pid).
+
+tcp_multiple_clients_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Port = beamtalk_repl:get_port(Pid),
+    
+    %% Connect two clients
+    {ok, Socket1} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    {ok, Socket2} = gen_tcp:connect("localhost", Port, [binary, {active, false}, {packet, line}]),
+    
+    %% Both can evaluate
+    ok = gen_tcp:send(Socket1, <<"1\n">>),
+    ok = gen_tcp:send(Socket2, <<"2\n">>),
+    
+    {ok, Response1} = gen_tcp:recv(Socket1, 0, 5000),
+    {ok, Response2} = gen_tcp:recv(Socket2, 0, 5000),
+    
+    ?assert(binary:match(Response1, <<"1">>) =/= nomatch),
+    ?assert(binary:match(Response2, <<"2">>) =/= nomatch),
+    
+    gen_tcp:close(Socket1),
+    gen_tcp:close(Socket2),
+    beamtalk_repl:stop(Pid).
