@@ -66,6 +66,8 @@ Block
   value: arg1 value: arg2 value: arg3 => // implemented by compiler
 
   // Loop while this block evaluates to true
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to an iterative loop to avoid stack overflow.
   whileTrue: bodyBlock =>
     self value ifTrue: [
       bodyBlock value.
@@ -73,6 +75,8 @@ Block
     ]
 
   // Loop while this block evaluates to false
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to an iterative loop to avoid stack overflow.
   whileFalse: bodyBlock =>
     self value ifFalse: [
       bodyBlock value.
@@ -80,6 +84,8 @@ Block
     ]
 
   // Loop forever (until return, break, or error)
+  // Note: This is a compiler primitive. The compiler must recognize this
+  // pattern and generate tail-recursive code to avoid stack overflow.
   repeat =>
     self value.
     self repeat

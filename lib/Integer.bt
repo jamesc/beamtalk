@@ -107,6 +107,8 @@ Integer
   asString => // implemented by compiler - integer_to_binary
 
   // Iteration - execute block N times
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to an iterative loop to avoid stack overflow for large N.
   timesRepeat: block =>
     self > 0 ifTrue: [
       block value.
@@ -114,6 +116,8 @@ Integer
     ]
 
   // Iterate from self to end (inclusive)
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to an iterative loop to avoid stack overflow for large ranges.
   to: end do: block =>
     self <= end ifTrue: [
       block value: self.
@@ -121,6 +125,8 @@ Integer
     ]
 
   // Iterate with custom step
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to an iterative loop to avoid stack overflow for large ranges.
   to: end by: step do: block =>
     (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]] ifTrue: [
       block value: self.

@@ -128,7 +128,8 @@ String
 
   indexOf: substring =>
     // implemented by compiler - binary:match
-    // Returns 0 if not found (Smalltalk convention)
+    // Returns 0 if not found (Smalltalk convention - note this differs from
+    // 1-based indexing used elsewhere, as 0 is a natural "not found" sentinel)
     // Returns 1-based index if found
 
   // Splitting and joining
@@ -136,6 +137,8 @@ String
   splitOn: pattern => // implemented by compiler - string:split with regex
 
   // Repeat string N times
+  // Note: Reference implementation using recursion. The compiler should
+  // optimize this to avoid stack overflow for large N or use string builder.
   repeat: n =>
     n = 0 ifTrue: [^''].
     n = 1 ifTrue: [^self].

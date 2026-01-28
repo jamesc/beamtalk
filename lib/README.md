@@ -167,14 +167,16 @@ This allows the compiler to optimize primitive operations while maintaining the 
 
 Each Beamtalk class maps to BEAM/Erlang concepts:
 
-| Beamtalk | Erlang/BEAM |
-|----------|-------------|
-| `Actor` | `gen_server` process with state map |
-| `True` / `False` | Atoms `true` / `false` |
-| `Block` | Anonymous fun (closure) |
-| `Integer` | Erlang integer (bignum support) |
-| `String` | Binary `<<"UTF-8">>` |
-| `Collection` | Tuple `{...}`, List `[...]`, Map `#{...}` |
+| Beamtalk | Erlang/BEAM | Notes |
+|----------|-------------|-------|
+| `Actor` | `gen_server` process with state map | Each actor is a separate process |
+| `True` / `False` | Atoms `true` / `false` | Optimized by compiler |
+| `Block` | Anonymous fun (closure) | Captures lexical scope |
+| `Integer` | Erlang integer (bignum support) | Arbitrary precision |
+| `String` | Binary `<<"UTF-8">>` | UTF-8 encoded, not charlist |
+| `Collection` | Tuple `{...}` (primary), List `[...]`, Map `#{...}` | Tuples preferred for arrays |
+
+**Note on Collections:** Beamtalk uses tuples (Erlang `{...}`) as the primary array representation for efficiency. Lists are supported for interop but tuples are recommended for most use cases. See the Collection.bt documentation for details.
 
 ## Implementation Status
 
