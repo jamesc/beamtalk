@@ -11,6 +11,9 @@
 %%% - resolved: has a successful value
 %%% - rejected: has an error
 %%%
+%%% Completed futures (resolved or rejected) will automatically terminate after
+%%% 5 minutes of inactivity to prevent memory leaks.
+%%%
 %%% ## Protocol
 %%%
 %%% Messages sent to a future process:
@@ -171,6 +174,7 @@ pending(Waiters) ->
 
 %% @private
 %% Resolved state: has a value
+%% Terminates after 5 minutes of inactivity to prevent memory leaks.
 resolved(Value) ->
     receive
         {resolve, _} ->
@@ -197,10 +201,14 @@ resolved(Value) ->
         {add_callback, rejected, _Callback} ->
             %% Ignore rejected callback
             resolved(Value)
+    after 300000 ->
+        %% Terminate after 5 minutes of inactivity
+        ok
     end.
 
 %% @private
 %% Rejected state: has an error reason
+%% Terminates after 5 minutes of inactivity to prevent memory leaks.
 rejected(Reason) ->
     receive
         {resolve, _} ->
@@ -227,6 +235,9 @@ rejected(Reason) ->
         {add_callback, resolved, _Callback} ->
             %% Ignore resolved callback
             rejected(Reason)
+    after 300000 ->
+        %% Terminate after 5 minutes of inactivity
+        ok
     end.
 
 %% @private
@@ -260,9 +271,10 @@ execute_callback(Callback, Value) ->
         try
             Callback(Value)
         catch
-            Class:Reason:Stacktrace ->
+            Class:Reason:_Stacktrace ->
+                %% Log error without stack trace to avoid leaking sensitive data
                 io:format(standard_error,
-                    "Error in future callback: ~p:~p~n~p~n",
-                    [Class, Reason, Stacktrace])
+                    "Error in future callback: ~p:~p~n",
+                    [Class, Reason])
         end
     end).

@@ -12,7 +12,7 @@
 //! The compilation process:
 //! 1. Generate Core Erlang from AST using `beamtalk_core::erlang`
 //! 2. Write .core files to build directory
-//! 3. Invoke compile.erl escript to batch compile .core → .beam
+//! 3. Invoke compile.escript to batch compile .core → .beam
 //! 4. Collect results and report success/failure
 //!
 //! # Example
@@ -34,15 +34,27 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
-/// Embedded compile.erl escript for batch compilation.
-const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.erl");
+/// Embedded compile.escript for batch compilation.
+const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
 
 /// Escapes a string for use in an Erlang term.
 ///
-/// This escapes backslashes and quotes to prevent injection attacks
-/// when constructing Erlang terms from file paths.
+/// This escapes backslashes, quotes, and control characters to prevent
+/// injection attacks and ensure valid Erlang term syntax when constructing
+/// Erlang terms from file paths.
 fn escape_erlang_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '"' => result.push_str("\\\""),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            _ => result.push(c),
+        }
+    }
+    result
 }
 
 /// Validates that a module name contains only safe identifier characters.
@@ -56,7 +68,7 @@ fn is_valid_module_name(name: &str) -> bool {
 /// BEAM bytecode compiler.
 ///
 /// Handles compilation of Core Erlang to BEAM bytecode using the embedded
-/// compile.erl escript and the system's erlc compiler.
+/// compile.escript and the system's erlc compiler.
 #[derive(Debug)]
 pub struct BeamCompiler {
     /// Output directory for BEAM files.
@@ -85,7 +97,7 @@ impl BeamCompiler {
     /// Compiles Core Erlang files to BEAM bytecode.
     ///
     /// This method batch compiles multiple .core files in parallel using the
-    /// embedded compile.erl escript.
+    /// embedded compile.escript.
     ///
     /// # Arguments
     ///
@@ -126,9 +138,10 @@ impl BeamCompiler {
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
-        // Write compile.erl to a temporary file with unique name
+        // Write compile.escript to a temporary file with unique name
         let temp_dir = std::env::temp_dir();
-        let escript_path = temp_dir.join(format!("beamtalk_compile_{}.erl", std::process::id()));
+        let escript_path =
+            temp_dir.join(format!("beamtalk_compile_{}.escript", std::process::id()));
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
             .wrap_err("Failed to write compile escript")?;
@@ -319,6 +332,14 @@ pub fn write_core_erlang(
     module_name: &str,
     output_path: &Utf8Path,
 ) -> Result<()> {
+    // Validate module name to prevent path traversal and injection
+    if !is_valid_module_name(module_name) {
+        miette::bail!(
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            module_name
+        );
+    }
+
     // Generate Core Erlang
     let core_erlang = beamtalk_core::erlang::generate_with_name(module, module_name)
         .into_diagnostic()
@@ -426,5 +447,108 @@ end
         if let Err(e) = result {
             println!("Compilation failed (expected in CI): {e:?}");
         }
+    }
+
+    // Tests for escape_erlang_string
+    #[test]
+    fn test_escape_erlang_string_empty() {
+        assert_eq!(escape_erlang_string(""), "");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_no_special_chars() {
+        assert_eq!(escape_erlang_string("hello"), "hello");
+        assert_eq!(escape_erlang_string("foo_bar"), "foo_bar");
+        assert_eq!(escape_erlang_string("path/to/file"), "path/to/file");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_backslashes() {
+        assert_eq!(escape_erlang_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_erlang_string("\\\\"), "\\\\\\\\");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_quotes() {
+        assert_eq!(escape_erlang_string("a\"b"), "a\\\"b");
+        assert_eq!(escape_erlang_string("\"test\""), "\\\"test\\\"");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_newlines() {
+        assert_eq!(escape_erlang_string("line1\nline2"), "line1\\nline2");
+        assert_eq!(escape_erlang_string("\r\n"), "\\r\\n");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_tabs() {
+        assert_eq!(escape_erlang_string("col1\tcol2"), "col1\\tcol2");
+    }
+
+    #[test]
+    fn test_escape_erlang_string_combined() {
+        assert_eq!(
+            escape_erlang_string("path\\to\\\"file\"\n"),
+            "path\\\\to\\\\\\\"file\\\"\\n"
+        );
+    }
+
+    // Tests for is_valid_module_name
+    #[test]
+    fn test_is_valid_module_name_valid() {
+        assert!(is_valid_module_name("hello"));
+        assert!(is_valid_module_name("hello_world"));
+        assert!(is_valid_module_name("HelloWorld"));
+        assert!(is_valid_module_name("test123"));
+        assert!(is_valid_module_name("_private"));
+        assert!(is_valid_module_name("a"));
+    }
+
+    #[test]
+    fn test_is_valid_module_name_empty() {
+        assert!(!is_valid_module_name(""));
+    }
+
+    #[test]
+    fn test_is_valid_module_name_path_traversal() {
+        assert!(!is_valid_module_name(".."));
+        assert!(!is_valid_module_name("../secret"));
+        assert!(!is_valid_module_name("foo/bar"));
+        assert!(!is_valid_module_name("foo\\bar"));
+    }
+
+    #[test]
+    fn test_is_valid_module_name_special_chars() {
+        assert!(!is_valid_module_name("foo-bar"));
+        assert!(!is_valid_module_name("foo.bar"));
+        assert!(!is_valid_module_name("foo bar"));
+        assert!(!is_valid_module_name("foo@bar"));
+    }
+
+    #[test]
+    fn test_is_valid_module_name_unicode() {
+        assert!(!is_valid_module_name("héllo"));
+        assert!(!is_valid_module_name("日本語"));
+        assert!(!is_valid_module_name("emoji🎉"));
+    }
+
+    // Test write_core_erlang with invalid module name
+    #[test]
+    fn test_write_core_erlang_invalid_module_name() {
+        let temp = TempDir::new().unwrap();
+        let output_path = Utf8PathBuf::from_path_buf(temp.path().join("test.core")).unwrap();
+        let module = Module::new(Vec::new(), Span::new(0, 0));
+
+        // Empty name
+        let result = write_core_erlang(&module, "", &output_path);
+        assert!(result.is_err());
+
+        // Path traversal attempt
+        let result = write_core_erlang(&module, "../evil", &output_path);
+        assert!(result.is_err());
+
+        // Special characters
+        let result = write_core_erlang(&module, "foo-bar", &output_path);
+        assert!(result.is_err());
     }
 }

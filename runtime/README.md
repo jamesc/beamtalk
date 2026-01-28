@@ -125,7 +125,7 @@ eunit:test([beamtalk_actor_tests, beamtalk_future_tests], [verbose]).
 Once BT-13 (erlc integration) is complete, the Rust compiler will:
 
 1. Generate `.core` files from `.bt` source
-2. Use the `compile.erl` escript to compile `.core` → `.beam`
+2. Use the `compile.escript` to compile `.core` → `.beam`
 3. Hot-load the `.beam` files into the running BEAM node
 4. The runtime modules (`beamtalk_future`) will be available to generated code
 
