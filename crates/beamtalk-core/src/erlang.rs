@@ -646,6 +646,9 @@ impl CoreErlangGenerator {
     /// 3. Return the future reference
     ///
     /// The receiving actor's `handle_cast/2` will resolve the future when complete.
+    ///
+    /// **Special case: `await`** - When the selector is "await", this generates
+    /// a blocking await operation instead of an async message send.
     fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -655,6 +658,13 @@ impl CoreErlangGenerator {
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             return self.generate_binary_op(op, receiver, arguments);
+        }
+
+        // Special case: "await" is a blocking operation on a future
+        if let MessageSelector::Unary(name) = selector {
+            if name == "await" && arguments.is_empty() {
+                return self.generate_await(receiver);
+            }
         }
 
         // Generate the async message send protocol:

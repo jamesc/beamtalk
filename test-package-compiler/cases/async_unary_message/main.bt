@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test async unary message send within a method
+// Returns future from counter increment
+run := [ ^counter increment ]

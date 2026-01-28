@@ -1,0 +1,12 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("run"), span: Span { start: 160, end: 163 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test async unary message send within a method"), Whitespace("\n"), LineComment("// Returns future from counter increment"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 164, end: 166 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 167, end: 168 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 169, end: 170 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("counter"), span: Span { start: 170, end: 177 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("increment"), span: Span { start: 178, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 188, end: 189 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 190, end: 190 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

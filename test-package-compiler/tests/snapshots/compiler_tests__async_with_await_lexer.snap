@@ -1,0 +1,12 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("waitFor"), span: Span { start: 134, end: 141 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test await on a future"), Whitespace("\n"), LineComment("// Await blocks until future resolves"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 142, end: 144 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 145, end: 146 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 147, end: 148 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("future"), span: Span { start: 148, end: 154 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("await"), span: Span { start: 155, end: 160 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 161, end: 162 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 163, end: 163 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
