@@ -4,6 +4,24 @@ This directory contains the Erlang runtime components for Beamtalk.
 
 ## Components
 
+### beamtalk_actor.erl
+
+The Actor runtime implementation. Every Beamtalk actor is a BEAM process running a `gen_server`.
+
+Each actor maintains state in a map with:
+- `__class__`: The actor's class name (atom)
+- `__methods__`: A map from selector (atom) to method function
+- User-defined state fields
+
+Key features:
+- **Message dispatch**: Routes messages to methods via `__methods__` map lookup
+- **doesNotUnderstand**: Fallback handler for unknown messages (metaprogramming)
+- **Sync and async**: Supports both `gen_server:call` (blocking) and `gen_server:cast` (with futures)
+- **Hot reload**: Implements `code_change/3` for state migration during code updates
+- **Helper functions**: `start_link/2`, `spawn_actor/2` for creating actors
+
+See module documentation in `beamtalk_actor.erl` for the complete protocol and API.
+
 ### beamtalk_future.erl
 
 The Future/Promise runtime implementation. Beamtalk is async-first: message sends return futures by default.
@@ -21,10 +39,10 @@ To compile the runtime modules (requires Erlang/OTP installed):
 
 ```bash
 cd runtime
-erlc beamtalk_future.erl
+erlc beamtalk_actor.erl beamtalk_future.erl
 ```
 
-This produces `beamtalk_future.beam` bytecode.
+This produces `.beam` bytecode files.
 
 ## Testing
 
@@ -32,24 +50,35 @@ The tests use EUnit. To run them:
 
 ```bash
 cd runtime
-erlc beamtalk_future.erl
-erlc -o . test/beamtalk_future_tests.erl
-erl -noshell -pa . -eval 'eunit:test(beamtalk_future_tests, [verbose])' -s init stop
+
+# Compile runtime modules
+erlc beamtalk_actor.erl beamtalk_future.erl
+
+# Compile test modules
+erlc -o test test/test_counter.erl test/test_proxy.erl
+erlc -o test test/beamtalk_future_tests.erl test/beamtalk_actor_tests.erl
+
+# Run tests
+erl -noshell -pa . -pa test -eval 'eunit:test([beamtalk_future_tests, beamtalk_actor_tests], [verbose])' -s init stop
 ```
 
 Or interactively:
 
 ```bash
 cd runtime
-erl -pa .
+erl -pa . -pa test
 ```
 
 Then in the Erlang shell:
 
 ```erlang
+c(beamtalk_actor).
 c(beamtalk_future).
+c("test/test_counter").
+c("test/test_proxy").
+c("test/beamtalk_actor_tests").
 c("test/beamtalk_future_tests").
-eunit:test(beamtalk_future_tests, [verbose]).
+eunit:test([beamtalk_actor_tests, beamtalk_future_tests], [verbose]).
 ```
 
 ## Integration with Beamtalk Compiler
