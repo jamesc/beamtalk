@@ -31,9 +31,27 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
 
 /// Embedded compile.erl escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.erl");
+
+/// Escapes a string for use in an Erlang term.
+///
+/// This escapes backslashes and quotes to prevent injection attacks
+/// when constructing Erlang terms from file paths.
+fn escape_erlang_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Validates that a module name contains only safe identifier characters.
+///
+/// Module names should only contain ASCII alphanumeric characters and underscores
+/// to prevent path traversal vulnerabilities.
+fn is_valid_module_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
 
 /// BEAM bytecode compiler.
 ///
@@ -98,6 +116,7 @@ impl BeamCompiler {
     /// let beam_files = compiler.compile_batch(&core_files)?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[allow(clippy::too_many_lines)]
     pub fn compile_batch(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
         // Check if escript is available
         check_escript_available()?;
@@ -149,13 +168,14 @@ impl BeamCompiler {
             .ok_or_else(|| miette::miette!("Failed to capture escript stderr"))?;
 
         // Prepare input: {OutputDir, [CoreFile1, CoreFile2, ...]}
+        // Escape paths to prevent injection attacks
         let core_files_str: Vec<String> = core_files
             .iter()
-            .map(|p| format!("\"{}\"", p.as_str()))
+            .map(|p| format!("\"{}\"", escape_erlang_string(p.as_str())))
             .collect();
         let input = format!(
             "{{\"{}\",[{}]}}.\n",
-            self.output_dir.as_str(),
+            escape_erlang_string(self.output_dir.as_str()),
             core_files_str.join(",")
         );
 
@@ -166,7 +186,20 @@ impl BeamCompiler {
             .wrap_err("Failed to write to escript stdin")?;
         drop(stdin); // Close stdin to signal end of input
 
-        // Read output
+        // Read stderr concurrently to avoid deadlock
+        let (stderr_tx, stderr_rx) = mpsc::channel();
+        let stderr_thread = thread::spawn(move || {
+            let stderr_reader = BufReader::new(stderr);
+            let mut error_messages = Vec::new();
+            for line in stderr_reader.lines().map_while(Result::ok) {
+                if !line.is_empty() {
+                    error_messages.push(line);
+                }
+            }
+            stderr_tx.send(error_messages).ok();
+        });
+
+        // Read stdout for compilation results
         let reader = BufReader::new(stdout);
         let mut compiled_modules = Vec::new();
         let mut compilation_ok = false;
@@ -179,9 +212,12 @@ impl BeamCompiler {
                     .ok_or_else(|| miette::miette!("Invalid compile output format"))?;
 
                 if module_name.is_empty() {
-                    return Err(miette::miette!(
-                        "Compilation produced module with empty name"
-                    ))?;
+                    miette::bail!("Compilation produced module with empty name");
+                }
+
+                // Validate module name to prevent path traversal
+                if !is_valid_module_name(module_name) {
+                    miette::bail!("Compilation produced module with invalid name: {module_name}");
                 }
 
                 let beam_file = self.output_dir.join(format!("{module_name}.beam"));
@@ -193,15 +229,9 @@ impl BeamCompiler {
             }
         }
 
-        // Read stderr for error messages
-        let stderr_reader = BufReader::new(stderr);
-        let mut error_messages = Vec::new();
-        for line in stderr_reader.lines() {
-            let line = line.into_diagnostic()?;
-            if !line.is_empty() {
-                error_messages.push(line);
-            }
-        }
+        // Wait for stderr thread to complete and collect error messages
+        let error_messages = stderr_rx.recv().unwrap_or_else(|_| Vec::new());
+        let _ = stderr_thread.join();
 
         // Wait for process to complete
         let status = child
@@ -210,7 +240,12 @@ impl BeamCompiler {
             .wrap_err("Failed to wait for escript process")?;
 
         // Clean up temporary escript file
-        let _ = std::fs::remove_file(&escript_path);
+        if let Err(err) = std::fs::remove_file(&escript_path) {
+            eprintln!(
+                "Warning: failed to remove temporary escript file '{}': {err}",
+                escript_path.display()
+            );
+        }
 
         // Check results
         if !status.success() || !compilation_ok {

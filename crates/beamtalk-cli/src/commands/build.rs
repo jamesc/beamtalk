@@ -35,6 +35,18 @@ pub fn build(path: &str) -> Result<()> {
         let module_name = file
             .file_stem()
             .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
+
+        // Validate module name contains only safe characters
+        if !module_name
+            .chars()
+            .all(|c| c == '_' || c.is_ascii_alphanumeric())
+        {
+            miette::bail!(
+                "Invalid module name '{}': must contain only alphanumeric characters and underscores",
+                module_name
+            );
+        }
+
         let core_file = build_dir.join(format!("{module_name}.core"));
 
         compile_file(file, module_name, &core_file)?;

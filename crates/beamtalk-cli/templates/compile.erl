@@ -64,25 +64,25 @@ compile_modules(OutDir, CoreFiles) ->
             Workers = start_compiler_workers(OutDir),
             ok = producer_loop(CoreFiles, Workers),
             
-            %% Collect results
-            collect_results({true, []});
+            %% Collect results - wait for all files to be compiled
+            collect_results(length(CoreFiles), {true, []});
         {error, Reason} ->
             io:put_chars(standard_error, 
                 io_lib:format("Error creating output directory: ~p~n", [Reason])),
             error
     end.
 
-collect_results(Acc = {Result, Modules}) ->
+collect_results(0, {Result, Modules}) ->
+    case Result of
+        true -> {ok, Modules};
+        false -> error
+    end;
+collect_results(ExpectedCount, {Result, Modules}) when ExpectedCount > 0 ->
     receive
         {compiled, ModuleName} -> 
-            collect_results({Result, [ModuleName | Modules]});
+            collect_results(ExpectedCount - 1, {Result, [ModuleName | Modules]});
         failed -> 
-            collect_results({false, Modules})
-    after 0 -> 
-        case Result of
-            true -> {ok, Modules};
-            false -> error
-        end
+            collect_results(ExpectedCount - 1, {false, Modules})
     end.
 
 producer_loop([], 0) ->
@@ -104,8 +104,8 @@ start_compiler_workers(OutDir) ->
     SpawnWorker = fun(_) ->
         erlang:spawn_link(fun() -> worker_loop(Parent, OutDir) end)
     end,
-    lists:foreach(SpawnWorker, lists:seq(1, NumSchedulers)),
-    NumSchedulers.
+    Workers = [SpawnWorker(I) || I <- lists:seq(1, NumSchedulers)],
+    length(Workers).
 
 worker_loop(Parent, OutDir) ->
     %% Compile options for Core Erlang
