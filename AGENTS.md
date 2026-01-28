@@ -39,6 +39,9 @@ We use a label group called **Agent State** to track work status:
 - `needs-spec` - Requires human to clarify requirements before work begins
 - `blocked` - Waiting on external dependency or another issue
 - `human-review` - Agent completed work, needs human verification
+- `done` - Issue is complete and closed
+
+**When creating issues:** Always set the appropriate agent-state label based on whether the issue has all requirements specified (`agent-ready`) or needs clarification (`needs-spec`).
 
 ### Writing Agent-Ready Issues
 
@@ -49,6 +52,7 @@ For an issue to be `agent-ready`, include:
 3. **Files to Modify** - Explicit paths to relevant files
 4. **Dependencies** - Other issues that must complete first
 5. **References** - Links to specs, examples, or related code
+6. **Blocking Relationships** - Use Linear's "blocks" relationship for dependencies
 
 Example:
 ```
@@ -75,6 +79,37 @@ Dependencies: None
 References:
 - See Gleam lexer: github.com/gleam-lang/gleam/blob/main/compiler-core/src/parse/lexer.rs
 ```
+
+### Creating Issue Blocking Relationships
+
+When creating issues with dependencies, **always** set up Linear's "blocks" relationships:
+
+```typescript
+// After creating issues BT-X and BT-Y, where BT-X blocks BT-Y:
+mutation {
+  issueRelationCreate(input: {
+    issueId: "<BT-X issue ID>"
+    relatedIssueId: "<BT-Y issue ID>"
+    type: blocks
+  }) {
+    success
+  }
+}
+```
+
+**Rules:**
+- If issue A must be completed before issue B can start, then A "blocks" B
+- Always create blocking relationships when dependencies are mentioned
+- Linear automatically shows blocked/blocking status in the UI
+- Use GraphQL to create relationships after issue creation
+- **Set agent-state label** when creating issues:
+  - `agent-ready` if fully specified with all acceptance criteria
+  - `needs-spec` if human clarification needed first
+
+**Example:** For stdlib implementation issues:
+- BT-21 (API definitions) blocks BT-32, BT-33, BT-34, BT-35, BT-36, BT-37
+- BT-32 (block evaluation) blocks BT-35 (iteration uses blocks) and BT-37 (collections use blocks)
+- All new issues marked with `agent-ready` label
 
 ---
 

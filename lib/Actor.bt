@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Actor - Base class for all actors in Beamtalk
+//
+// Every object in Beamtalk is an actor (BEAM process). This is the root
+// of the class hierarchy, providing core message protocols for spawning,
+// introspection, and debugging.
+//
+// ## Core Messages
+//
+// - `spawn` - Create a new instance of this actor (implemented by compiler)
+// - `class` - Returns the actor's class name
+// - `inspect` - Show a textual representation on Transcript
+// - `describe` - Returns a string description of this actor
+//
+// ## Implementation Notes
+//
+// The `spawn` message is a compiler primitive that generates:
+// ```erlang
+// beamtalk_actor:spawn_actor(ModuleName, InitArgs)
+// ```
+//
+// All other actors should inherit from Actor and override `describe`
+// to provide meaningful debugging output.
+
+Actor
+  // Returns the actor's class (compiler intrinsic)
+  class => ^self.__class__
+
+  // Show this actor's description on the Transcript
+  inspect => Transcript show: self describe
+
+  // Returns a textual description of this actor
+  // Subclasses should override to provide detailed info
+  describe => 'an Actor'
+
+  // Spawn a new instance (compiler primitive)
+  // Generated code: beamtalk_actor:spawn_actor(ClassName, [])
+  spawn => // implemented by compiler

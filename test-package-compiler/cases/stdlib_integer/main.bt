@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test integer arithmetic and operations
+
+// Basic arithmetic
+sum := 5 + 3
+difference := 10 - 4
+product := 6 * 7
+quotient := 20 / 4
+
+// Integer division and modulo
+intDiv := 17 // 5
+remainder := 17 % 5
+
+// Comparison
+isLess := 3 < 5
+isGreater := 10 > 5
+isEqual := 7 = 7
+
+// Iteration - times repeat
+counter := 0
+5 timesRepeat: [counter := counter + 1]
+
+// Range iteration
+sum := 0
+1 to: 10 do: [:n | sum := sum + n]
+
+// Number tests
+isEven := 4 isEven
+isOdd := 7 isOdd
+isZero := 0 isZero

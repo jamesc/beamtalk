@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════
+
+// True - The true boolean value
+//
+// Implements control flow messages for the true case. In Smalltalk tradition,
+// conditionals are implemented as messages to boolean objects, not special
+// syntax.
+//
+// ## Control Flow Messages
+//
+// - `ifTrue: trueBlock ifFalse: falseBlock` - Evaluates trueBlock
+// - `and: aBlock` - Evaluates aBlock (logical AND)
+// - `or: aBlock` - Returns self without evaluating (short-circuit OR)
+// - `not` - Returns false
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Conditional execution
+// isValid ifTrue: [self process] ifFalse: [self reject]
+//
+// // Logical operations
+// (x > 0) and: [y > 0]
+// (found) or: [self search]
+//
+// // Negation
+// enabled not
+// ```
+//
+// ## BEAM Mapping
+//
+// True is represented as the Erlang atom `true`. The compiler optimizes
+// these message sends to direct conditional jumps where possible, but
+// the message-based API allows treating booleans as first-class objects.
+
+True
+  // Evaluate the true block and ignore the false block
+  ifTrue: trueBlock ifFalse: falseBlock => trueBlock value
+
+  // Evaluate the true block (single argument version)
+  ifTrue: trueBlock => trueBlock value
+
+  // Ignore the false block (single argument version)
+  ifFalse: falseBlock => ^self
+
+  // Logical AND - evaluate the block (might return false)
+  and: aBlock => aBlock value
+
+  // Logical OR - return self without evaluating (short-circuit)
+  or: aBlock => ^self
+
+  // Logical NOT - return false
+  not => ^false
+
+  // Identity test
+  isTrue => ^true
+  isFalse => ^false
+
+  // String representation
+  describe => 'true'

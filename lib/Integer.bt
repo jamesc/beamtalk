@@ -1,0 +1,150 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Integer - Whole number arithmetic and operations
+//
+// Integers in Beamtalk are arbitrary precision (Erlang integers), supporting
+// both small integers (fixnums) and bignums automatically.
+//
+// ## Arithmetic Messages
+//
+// Binary operators (standard math precedence):
+// - `+` - Addition
+// - `-` - Subtraction
+// - `*` - Multiplication
+// - `/` - Division (float result)
+// - `//` - Integer division (truncated)
+// - `%` or `mod:` - Modulo (remainder)
+// - `**` - Exponentiation
+//
+// ## Comparison Messages
+//
+// - `=` - Equality
+// - `~=` - Inequality
+// - `<` - Less than
+// - `<=` - Less than or equal
+// - `>` - Greater than
+// - `>=` - Greater than or equal
+//
+// ## Conversion Messages
+//
+// - `asFloat` - Convert to floating point
+// - `asString` - Convert to string representation
+// - `toBinaryString` - Base 2 representation
+// - `toHexString` - Base 16 representation
+//
+// ## Iteration Messages
+//
+// - `timesRepeat: block` - Execute block N times
+// - `to: end do: block` - Iterate from self to end
+// - `to: end by: step do: block` - Iterate with custom step
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Arithmetic
+// result := 5 + 3 * 2  // => 11 (standard precedence)
+// quotient := 17 // 5   // => 3 (integer division)
+// remainder := 17 % 5   // => 2
+//
+// // Comparison
+// (x > 10) ifTrue: [self process: x]
+//
+// // Iteration
+// 10 timesRepeat: [Transcript show: 'Hello']
+// 1 to: 100 do: [:n | sum := sum + n]
+// 0 to: 100 by: 10 do: [:n | Transcript show: n]
+// ```
+//
+// ## BEAM Mapping
+//
+// Beamtalk integers map directly to Erlang integers (arbitrary precision).
+// The compiler generates calls to Erlang's BIF operators:
+// ```erlang
+// X + Y    % addition
+// X * Y    % multiplication
+// X div Y  % integer division (// in Beamtalk)
+// X rem Y  % modulo (% in Beamtalk)
+// ```
+
+Integer
+  // Arithmetic operations (binary messages)
+  + other => // implemented by compiler - erlang:'+'
+  - other => // implemented by compiler - erlang:'-'
+  * other => // implemented by compiler - erlang:'*'
+  / other => // implemented by compiler - erlang:'/'
+  
+  // Integer division - TODO: syntax conflict with line comments
+  // The '//' operator is defined here but conflicts with comment syntax.
+  // The compiler must recognize this as a binary operator, not a comment.
+  // other => // implemented by compiler - erlang:'div'
+  
+  % other => // implemented by compiler - erlang:'rem'
+  ** other => // implemented by compiler - math:pow
+
+  // Unary minus
+  negated => 0 - self
+
+  // Absolute value
+  abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
+
+  // Comparison operations
+  = other => // implemented by compiler - erlang:'=:='
+  ~= other => // implemented by compiler - erlang:'=/='
+  < other => // implemented by compiler - erlang:'<'
+  <= other => // implemented by compiler - erlang:'=<'
+  > other => // implemented by compiler - erlang:'>'
+  >= other => // implemented by compiler - erlang:'>='
+
+  // Min/max
+  min: other => (self < other) ifTrue: [^self] ifFalse: [^other]
+  max: other => (self > other) ifTrue: [^self] ifFalse: [^other]
+
+  // Number test
+  isZero => self = 0
+  isPositive => self > 0
+  isNegative => self < 0
+  isEven => (self % 2) = 0
+  isOdd => (self % 2) ~= 0
+
+  // Conversion
+  asFloat => // implemented by compiler - float conversion
+  asString => // implemented by compiler - integer_to_binary
+
+  // Iteration - execute block N times
+  // The compiler MUST implement this as a native loop construct.
+  timesRepeat: block => // implemented by compiler
+    // Reference semantics:
+    // self > 0 ifTrue: [
+    //   block value.
+    //   (self - 1) timesRepeat: block
+    // ]
+
+  // Iterate from self to end (inclusive)
+  // The compiler MUST implement this as a native loop construct.
+  to: end do: block => // implemented by compiler
+    // Reference semantics:
+    // self <= end ifTrue: [
+    //   block value: self.
+    //   (self + 1) to: end do: block
+    // ]
+
+  // Iterate with custom step
+  // The compiler MUST implement this as a native loop construct.
+  to: end by: step do: block => // implemented by compiler
+    // Reference semantics:
+    // (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]] ifTrue: [
+    //   block value: self.
+    //   (self + step) to: end by: step do: block
+    // ]
+
+  // String representation
+  describe => self asString
