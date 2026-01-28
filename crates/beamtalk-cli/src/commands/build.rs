@@ -3,6 +3,7 @@
 
 //! Build beamtalk projects.
 
+use crate::beam_compiler::{BeamCompiler, write_core_erlang};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
@@ -22,12 +23,46 @@ pub fn build(path: &str) -> Result<()> {
 
     println!("Building {} file(s)...", source_files.len());
 
-    // Parse each file
+    // Create build directory
+    let build_dir = Utf8PathBuf::from("build");
+    std::fs::create_dir_all(&build_dir)
+        .into_diagnostic()
+        .wrap_err("Failed to create build directory")?;
+
+    // Compile each file to Core Erlang
+    let mut core_files = Vec::new();
     for file in &source_files {
-        compile_file(file)?;
+        let module_name = file
+            .file_stem()
+            .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
+
+        // Validate module name contains only safe characters
+        if !module_name
+            .chars()
+            .all(|c| c == '_' || c.is_ascii_alphanumeric())
+        {
+            miette::bail!(
+                "Invalid module name '{}': must contain only alphanumeric characters and underscores",
+                module_name
+            );
+        }
+
+        let core_file = build_dir.join(format!("{module_name}.core"));
+
+        compile_file(file, module_name, &core_file)?;
+        core_files.push(core_file);
     }
 
+    // Batch compile Core Erlang to BEAM
+    println!("  Compiling to BEAM bytecode...");
+    let compiler = BeamCompiler::new(build_dir);
+    let beam_files = compiler
+        .compile_batch(&core_files)
+        .wrap_err("Failed to compile Core Erlang to BEAM")?;
+
     println!("Build complete");
+    println!("  Generated {} BEAM file(s) in build/", beam_files.len());
+
     Ok(())
 }
 
@@ -68,7 +103,7 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
-fn compile_file(path: &Utf8Path) -> Result<()> {
+fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Result<()> {
     println!("  Compiling {path}...");
 
     // Read source file
@@ -77,9 +112,8 @@ fn compile_file(path: &Utf8Path) -> Result<()> {
         .wrap_err_with(|| format!("Failed to read file '{path}'"))?;
 
     // Lex and parse the source using beamtalk-core
-    // Note: Full compilation will be implemented once codegen (BT-10) is complete
     let tokens = beamtalk_core::parse::lex_with_eof(&source);
-    let (_module, diagnostics) = beamtalk_core::parse::parse(tokens);
+    let (module, diagnostics) = beamtalk_core::parse::parse(tokens);
 
     // Check for errors
     let has_errors = diagnostics
@@ -105,8 +139,12 @@ fn compile_file(path: &Utf8Path) -> Result<()> {
     }
 
     println!("    ✓ Parsed successfully");
-    // TODO: Generate Core Erlang once codegen is implemented
-    // TODO: Invoke erlc to compile to BEAM
+
+    // Generate Core Erlang
+    write_core_erlang(&module, module_name, core_file)
+        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{path}'"))?;
+
+    println!("    ✓ Generated Core Erlang: {core_file}");
 
     Ok(())
 }
@@ -190,10 +228,12 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_path = create_test_project(&temp);
         let test_file = project_path.join("test.bt");
+        let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + 2].");
 
-        let result = compile_file(&test_file);
+        let result = compile_file(&test_file, "test", &core_file);
         assert!(result.is_ok());
+        assert!(core_file.exists());
     }
 
     #[test]
@@ -201,9 +241,10 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_path = create_test_project(&temp);
         let test_file = project_path.join("test.bt");
+        let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + ]."); // Syntax error
 
-        let result = compile_file(&test_file);
+        let result = compile_file(&test_file, "test", &core_file);
         assert!(result.is_err());
     }
 
@@ -224,7 +265,17 @@ mod tests {
         write_test_file(&src_path.join("main.bt"), "main := [42].");
 
         let result = build(project_path.as_str());
-        assert!(result.is_ok());
+
+        // If escript is not available, the test should fail at the BEAM compilation stage
+        // We allow this in CI environments
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                println!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
     }
 
     #[test]
@@ -237,6 +288,16 @@ mod tests {
         write_test_file(&src_path.join("file2.bt"), "test2 := [2].");
 
         let result = build(project_path.as_str());
-        assert!(result.is_ok());
+
+        // If escript is not available, the test should fail at the BEAM compilation stage
+        // We allow this in CI environments
+        if let Err(e) = result {
+            let error_msg = format!("{e:?}");
+            if error_msg.contains("escript not found") {
+                println!("Skipping test - escript not installed in CI environment");
+                return;
+            }
+            panic!("Build failed with unexpected error: {e:?}");
+        }
     }
 }
