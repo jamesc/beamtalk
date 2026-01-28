@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test actor spawn compilation
+// The syntax "Counter spawn" should compile to gen_server:start_link
+
+value := 0.
+increment := [ self.value := self.value + 1 ].
+
+counter := Counter spawn

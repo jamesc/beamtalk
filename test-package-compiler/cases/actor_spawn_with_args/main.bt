@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test actor spawn with keyword arguments
+// The syntax "Counter spawn initial: 10" should pass arguments to init
+
+value := 0.
+increment := [ self.value := self.value + 1 ].
+
+counter := Counter spawn initial: 10
