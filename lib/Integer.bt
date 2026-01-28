@@ -81,7 +81,12 @@ Integer
   - other => // implemented by compiler - erlang:'-'
   * other => // implemented by compiler - erlang:'*'
   / other => // implemented by compiler - erlang:'/'
+  
+  // Integer division - TODO: syntax conflict with line comments
+  // The '//' operator is defined here but conflicts with comment syntax.
+  // The compiler must recognize this as a binary operator, not a comment.
   // other => // implemented by compiler - erlang:'div'
+  
   % other => // implemented by compiler - erlang:'rem'
   ** other => // implemented by compiler - math:pow
 
@@ -115,31 +120,31 @@ Integer
   asString => // implemented by compiler - integer_to_binary
 
   // Iteration - execute block N times
-  // Note: Reference implementation using recursion. The compiler should
-  // optimize this to an iterative loop to avoid stack overflow for large N.
-  timesRepeat: block =>
-    self > 0 ifTrue: [
-      block value.
-      (self - 1) timesRepeat: block
-    ]
+  // The compiler MUST implement this as a native loop construct.
+  timesRepeat: block => // implemented by compiler
+    // Reference semantics:
+    // self > 0 ifTrue: [
+    //   block value.
+    //   (self - 1) timesRepeat: block
+    // ]
 
   // Iterate from self to end (inclusive)
-  // Note: Reference implementation using recursion. The compiler should
-  // optimize this to an iterative loop to avoid stack overflow for large ranges.
-  to: end do: block =>
-    self <= end ifTrue: [
-      block value: self.
-      (self + 1) to: end do: block
-    ]
+  // The compiler MUST implement this as a native loop construct.
+  to: end do: block => // implemented by compiler
+    // Reference semantics:
+    // self <= end ifTrue: [
+    //   block value: self.
+    //   (self + 1) to: end do: block
+    // ]
 
   // Iterate with custom step
-  // Note: Reference implementation using recursion. The compiler should
-  // optimize this to an iterative loop to avoid stack overflow for large ranges.
-  to: end by: step do: block =>
-    (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]] ifTrue: [
-      block value: self.
-      (self + step) to: end by: step do: block
-    ]
+  // The compiler MUST implement this as a native loop construct.
+  to: end by: step do: block => // implemented by compiler
+    // Reference semantics:
+    // (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]] ifTrue: [
+    //   block value: self.
+    //   (self + step) to: end by: step do: block
+    // ]
 
   // String representation
   describe => self asString

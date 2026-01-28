@@ -145,12 +145,12 @@ String
   splitOn: pattern => // implemented by compiler - string:split with regex
 
   // Repeat string N times
-  // Note: Reference implementation using recursion. The compiler should
-  // optimize this to avoid stack overflow for large N or use string builder.
-  repeat: n =>
-    n = 0 ifTrue: [^''].
-    n = 1 ifTrue: [^self].
-    ^(self ++ (self repeat: (n - 1)))
+  // The compiler SHOULD optimize this or provide a more efficient implementation.
+  repeat: n => // implemented by compiler
+    // Reference semantics (inefficient for large N):
+    // n = 0 ifTrue: [^''].
+    // n = 1 ifTrue: [^self].
+    // ^(self ++ (self repeat: (n - 1)))
 
   // Test if empty
   isEmpty => self length = 0

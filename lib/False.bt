@@ -46,6 +46,12 @@ False
   // Evaluate the false block and ignore the true block
   ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
 
+  // Ignore the true block (single argument version)
+  ifTrue: trueBlock => ^self
+
+  // Evaluate the false block (single argument version)
+  ifFalse: falseBlock => falseBlock value
+
   // Logical AND - return self without evaluating (short-circuit)
   and: aBlock => ^self
 
