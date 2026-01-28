@@ -4,12 +4,6 @@
 *.beam
 *.core
 
-# Erlang
-erl_crash.dump
-*.ez
-_build/
-.rebar3/
-
 # IDE
 .vscode/mcp.json
 
@@ -27,3 +21,6 @@ Cargo.lock
 # Erlang
 erl_crash.dump
 *.ez
+_build/
+.rebar3/
+rebar.lock
