@@ -16,10 +16,16 @@
 
 pub mod ast;
 pub mod erlang;
+pub mod language_service;
 pub mod parse;
+mod queries;
 
 /// Re-export commonly used types.
 pub mod prelude {
     pub use crate::ast::{Expression, Identifier, Literal, Module};
+    pub use crate::language_service::{
+        Completion, CompletionKind, HoverInfo, LanguageService, Location, Position,
+        SimpleLanguageService,
+    };
     pub use crate::parse::Span;
 }
