@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test block evaluation and control flow
+
+// Simple block evaluation
+block := [42]
+result := block value
+
+// Block with one argument
+increment := [:x | x + 1]
+result2 := increment value: 5
+
+// Block with two arguments
+add := [:x :y | x + y]
+result3 := add value: 3 value: 4
+
+// While loop
+counter := 0
+[counter < 5] whileTrue: [counter := counter + 1]
+
+// Block captures variables
+outer := 10
+captureBlock := [outer + 5]
+result4 := captureBlock value

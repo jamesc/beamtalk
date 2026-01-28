@@ -1,0 +1,187 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Collection - Protocol for collections (arrays, lists, sets, etc.)
+//
+// This defines the common message protocol that all collection types
+// implement. In Beamtalk, collections can be:
+// - Arrays (fixed-size Erlang tuples)
+// - Lists (Erlang lists)
+// - Sets (ordsets or gb_sets)
+// - Maps (Erlang maps for key-value pairs)
+//
+// ## Size and Access Messages
+//
+// - `size` - Number of elements
+// - `isEmpty` - Test if collection has no elements
+// - `at: index` - Get element at index (1-based for arrays/lists)
+// - `at: index put: value` - Set element at index
+//
+// ## Adding and Removing Messages
+//
+// - `add: element` - Add element to collection
+// - `remove: element` - Remove element from collection
+// - `removeAt: index` - Remove element at index
+//
+// ## Iteration Messages (Higher-Order)
+//
+// - `each: block` - Iterate over elements
+// - `collect: block` - Transform each element (map)
+// - `select: block` - Filter elements by predicate
+// - `reject: block` - Filter out elements by predicate
+// - `detect: block` - Find first element matching predicate
+// - `inject: initial into: block` - Reduce/fold
+//
+// ## Testing Messages
+//
+// - `includes: element` - Test if element is present
+// - `allSatisfy: block` - Test if all elements match predicate
+// - `anySatisfy: block` - Test if any element matches predicate
+//
+// ## Conversion Messages
+//
+// - `asArray` - Convert to array (tuple)
+// - `asList` - Convert to list
+// - `asSet` - Convert to set (unique elements)
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Array creation (tuples in Erlang)
+// numbers := {1, 2, 3, 4, 5}
+// first := numbers at: 1  // => 1
+//
+// // List iteration
+// numbers each: [:n | Transcript show: n]
+//
+// // Transformation
+// doubled := numbers collect: [:n | n * 2]  // => {2, 4, 6, 8, 10}
+//
+// // Filtering
+// evens := numbers select: [:n | n isEven]  // => {2, 4}
+//
+// // Reduction
+// sum := numbers inject: 0 into: [:acc :n | acc + n]  // => 15
+//
+// // Testing
+// (numbers includes: 3) ifTrue: [Transcript show: 'Found 3']
+// (numbers allSatisfy: [:n | n > 0]) ifTrue: [Transcript show: 'All positive']
+// ```
+//
+// ## BEAM Mapping
+//
+// Collections map to different Erlang data structures:
+// - **Arrays**: Erlang tuples `{1, 2, 3}`
+// - **Lists**: Erlang lists `[1, 2, 3]` (but use arrays for most cases)
+// - **Sets**: `ordsets` or `gb_sets`
+// - **Maps**: Erlang maps `#{key => value}`
+//
+// The compiler optimizes collection operations where possible:
+// ```erlang
+// {1, 2, 3}                    % tuple (array)
+// [H|T]                        % list (cons cell)
+// ordsets:add_element(X, Set)  % set operation
+// maps:put(K, V, Map)          % map operation
+// ```
+
+Collection
+  // Size and emptiness
+  size => // implemented by compiler - tuple_size/list length
+  isEmpty => self size = 0
+  isNotEmpty => self size > 0
+
+  // Access by index (1-based for arrays/lists)
+  at: index => // implemented by compiler - element/lists:nth
+  at: index put: value => // implemented by compiler - setelement
+
+  // First and last
+  first => self at: 1
+  last => self at: self size
+
+  // Adding elements
+  add: element => // implemented by compiler - list cons or tuple append
+  addAll: otherCollection => // implemented by compiler - list append
+  
+  // Removing elements
+  remove: element => // implemented by compiler - list delete
+  removeAt: index => // implemented by compiler - tuple delete at index
+
+  // Testing membership
+  includes: element => // implemented by compiler - lists:member
+  
+  // Iteration - execute block for each element
+  each: block =>
+    // implemented by compiler
+    // Iterates and calls block value: element for each
+
+  // Transformation - apply block to each element
+  collect: block =>
+    // implemented by compiler - lists:map or tuple transform
+    // Returns new collection with transformed elements
+
+  // Filtering - keep elements where block returns true
+  select: block =>
+    // implemented by compiler - lists:filter
+    // Returns new collection with selected elements
+
+  // Filtering - remove elements where block returns true
+  reject: block =>
+    // implemented by compiler - inverse of select
+    // Returns new collection without rejected elements
+
+  // Find first element matching predicate
+  detect: block =>
+    // implemented by compiler
+    // Returns first element where block value: element is true
+    // Returns nil if none found
+
+  // Find first element matching predicate, or default
+  detect: block ifNone: defaultBlock =>
+    result := self detect: block.
+    result = nil ifTrue: [^defaultBlock value] ifFalse: [^result]
+
+  // Reduction - fold over collection with accumulator
+  inject: initial into: block =>
+    // implemented by compiler - lists:foldl
+    // Calls block value: accumulator value: element for each
+    // Returns final accumulator value
+
+  // Test if all elements satisfy predicate
+  allSatisfy: block =>
+    // implemented by compiler
+    // Returns true if block value: element is true for ALL elements
+    self inject: true into: [:acc :elem |
+      acc and: [block value: elem]
+    ]
+
+  // Test if any element satisfies predicate
+  anySatisfy: block =>
+    // implemented by compiler
+    // Returns true if block value: element is true for ANY element
+    self inject: false into: [:acc :elem |
+      acc or: [block value: elem]
+    ]
+
+  // Count elements matching predicate
+  count: block =>
+    self inject: 0 into: [:acc :elem |
+      (block value: elem) ifTrue: [acc + 1] ifFalse: [acc]
+    ]
+
+  // Conversion between collection types
+  asArray => // implemented by compiler - list_to_tuple
+  asList => // implemented by compiler - tuple_to_list
+  asSet => // implemented by compiler - ordsets:from_list
+
+  // Sorting
+  sorted => // implemented by compiler - lists:sort
+  sortedBy: block => // implemented by compiler - lists:sort with comparator
+
+  // Reverse
+  reversed => // implemented by compiler - lists:reverse or tuple reverse
+
+  // Concatenation
+  ++ other => // implemented by compiler - list/tuple concatenation
+
+  // String representation
+  describe => // implemented by compiler - format as string

@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test boolean control flow with True and False
+
+// Test ifTrue:ifFalse: with true
+true ifTrue: [Transcript show: 'yes'] ifFalse: [Transcript show: 'no']
+
+// Test ifTrue:ifFalse: with false
+false ifTrue: [Transcript show: 'yes'] ifFalse: [Transcript show: 'no']
+
+// Test logical AND
+result1 := true and: [true]
+result2 := true and: [false]
+result3 := false and: [true]
+
+// Test logical OR
+result4 := true or: [false]
+result5 := false or: [true]
+result6 := false or: [false]
+
+// Test logical NOT
+result7 := true not
+result8 := false not

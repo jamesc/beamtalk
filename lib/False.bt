@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// False - The false boolean value
+//
+// Implements control flow messages for the false case. In Smalltalk tradition,
+// conditionals are implemented as messages to boolean objects, not special
+// syntax.
+//
+// ## Control Flow Messages
+//
+// - `ifTrue: trueBlock ifFalse: falseBlock` - Evaluates falseBlock
+// - `and: aBlock` - Returns self without evaluating (short-circuit AND)
+// - `or: aBlock` - Evaluates aBlock (logical OR)
+// - `not` - Returns true
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Conditional execution
+// isEmpty ifTrue: [self fill] ifFalse: [self process]
+//
+// // Logical operations
+// (x < 0) and: [self reject]  // Short-circuits, doesn't evaluate block
+// (found) or: [self searchAgain]
+//
+// // Negation
+// disabled not
+// ```
+//
+// ## BEAM Mapping
+//
+// False is represented as the Erlang atom `false`. The compiler optimizes
+// these message sends to direct conditional jumps where possible, but
+// the message-based API allows treating booleans as first-class objects.
+
+False
+  // Evaluate the false block and ignore the true block
+  ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
+
+  // Logical AND - return self without evaluating (short-circuit)
+  and: aBlock => ^self
+
+  // Logical OR - evaluate the block (might return true)
+  or: aBlock => aBlock value
+
+  // Logical NOT - return true
+  not => ^true
+
+  // Identity test
+  isTrue => ^false
+  isFalse => ^true
+
+  // String representation
+  describe => 'false'
