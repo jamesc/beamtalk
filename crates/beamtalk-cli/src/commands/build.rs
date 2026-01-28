@@ -32,7 +32,9 @@ pub fn build(path: &str) -> Result<()> {
     // Compile each file to Core Erlang
     let mut core_files = Vec::new();
     for file in &source_files {
-        let module_name = file.file_stem().unwrap_or("beamtalk_module");
+        let module_name = file
+            .file_stem()
+            .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
         let core_file = build_dir.join(format!("{module_name}.core"));
 
         compile_file(file, module_name, &core_file)?;

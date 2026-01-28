@@ -83,11 +83,7 @@ impl BeamCompiler {
     /// - escript is not found in PATH
     /// - The escript fails to execute
     /// - Compilation errors occur in any module
-    ///
-    /// # Panics
-    ///
-    /// Panics if stdin, stdout, or stderr cannot be captured from the escript process.
-    /// This is a programming error and should not happen in normal usage.
+    /// - stdin, stdout, or stderr cannot be captured from the escript process
     ///
     /// # Example
     ///
@@ -111,9 +107,9 @@ impl BeamCompiler {
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
-        // Write compile.erl to a temporary file
+        // Write compile.erl to a temporary file with unique name
         let temp_dir = std::env::temp_dir();
-        let escript_path = temp_dir.join("beamtalk_compile.erl");
+        let escript_path = temp_dir.join(format!("beamtalk_compile_{}.erl", std::process::id()));
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
             .wrap_err("Failed to write compile escript")?;
@@ -139,9 +135,18 @@ impl BeamCompiler {
             .into_diagnostic()
             .wrap_err("Failed to spawn escript process")?;
 
-        let mut stdin = child.stdin.take().expect("Failed to open stdin");
-        let stdout = child.stdout.take().expect("Failed to open stdout");
-        let stderr = child.stderr.take().expect("Failed to open stderr");
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| miette::miette!("Failed to capture escript stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| miette::miette!("Failed to capture escript stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| miette::miette!("Failed to capture escript stderr"))?;
 
         // Prepare input: {OutputDir, [CoreFile1, CoreFile2, ...]}
         let core_files_str: Vec<String> = core_files
@@ -169,7 +174,16 @@ impl BeamCompiler {
         for line in reader.lines() {
             let line = line.into_diagnostic()?;
             if line.starts_with("beamtalk-compile-module:") {
-                let module_name = line.strip_prefix("beamtalk-compile-module:").unwrap_or("");
+                let module_name = line
+                    .strip_prefix("beamtalk-compile-module:")
+                    .ok_or_else(|| miette::miette!("Invalid compile output format"))?;
+
+                if module_name.is_empty() {
+                    return Err(miette::miette!(
+                        "Compilation produced module with empty name"
+                    ))?;
+                }
+
                 let beam_file = self.output_dir.join(format!("{module_name}.beam"));
                 compiled_modules.push(beam_file);
             } else if line == "beamtalk-compile-result-ok" {

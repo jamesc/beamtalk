@@ -58,14 +58,19 @@ compile_loop() ->
 
 compile_modules(OutDir, CoreFiles) ->
     %% Ensure output directory exists
-    ok = filelib:ensure_dir(filename:join(OutDir, "dummy")),
-    
-    %% Start parallel compiler workers
-    Workers = start_compiler_workers(OutDir),
-    ok = producer_loop(CoreFiles, Workers),
-    
-    %% Collect results
-    collect_results({true, []}).
+    case filelib:ensure_dir(filename:join(OutDir, "dummy")) of
+        ok ->
+            %% Start parallel compiler workers
+            Workers = start_compiler_workers(OutDir),
+            ok = producer_loop(CoreFiles, Workers),
+            
+            %% Collect results
+            collect_results({true, []});
+        {error, Reason} ->
+            io:put_chars(standard_error, 
+                io_lib:format("Error creating output directory: ~p~n", [Reason])),
+            error
+    end.
 
 collect_results(Acc = {Result, Modules}) ->
     receive
