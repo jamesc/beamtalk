@@ -33,7 +33,7 @@ The tests use EUnit. To run them:
 ```bash
 cd runtime
 erlc beamtalk_future.erl
-erlc -pa . test/beamtalk_future_tests.erl
+erlc -o . test/beamtalk_future_tests.erl
 erl -noshell -pa . -eval 'eunit:test(beamtalk_future_tests, [verbose])' -s init stop
 ```
 
