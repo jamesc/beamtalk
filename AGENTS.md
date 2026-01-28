@@ -39,6 +39,9 @@ We use a label group called **Agent State** to track work status:
 - `needs-spec` - Requires human to clarify requirements before work begins
 - `blocked` - Waiting on external dependency or another issue
 - `human-review` - Agent completed work, needs human verification
+- `done` - Issue is complete and closed
+
+**When creating issues:** Always set the appropriate agent-state label based on whether the issue has all requirements specified (`agent-ready`) or needs clarification (`needs-spec`).
 
 ### Writing Agent-Ready Issues
 
@@ -99,10 +102,14 @@ mutation {
 - Always create blocking relationships when dependencies are mentioned
 - Linear automatically shows blocked/blocking status in the UI
 - Use GraphQL to create relationships after issue creation
+- **Set agent-state label** when creating issues:
+  - `agent-ready` if fully specified with all acceptance criteria
+  - `needs-spec` if human clarification needed first
 
 **Example:** For stdlib implementation issues:
 - BT-21 (API definitions) blocks BT-32, BT-33, BT-34, BT-35, BT-36, BT-37
 - BT-32 (block evaluation) blocks BT-35 (iteration uses blocks) and BT-37 (collections use blocks)
+- All new issues marked with `agent-ready` label
 
 ---
 

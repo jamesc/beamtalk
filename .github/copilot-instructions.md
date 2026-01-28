@@ -99,6 +99,10 @@ When the user types `/done`, execute this workflow:
 
 11. **Report success**: Confirm the commit was pushed, PR was created with Copilot reviewer (include PR URL), and Linear was updated.
 
+**When PR is merged:**
+- Update issue state to "Done"
+- Add `done` agent-state label to indicate completion
+
 ---
 
 ### Creating Linear Issues
@@ -106,7 +110,10 @@ When the user types `/done`, execute this workflow:
 When creating Linear issues with dependencies:
 
 1. **Create the issues** with full context, acceptance criteria, and files to modify
-2. **Always set up blocking relationships** using Linear's GraphQL API:
+2. **Set agent-state label**:
+   - `agent-ready` if fully specified (all acceptance criteria clear)
+   - `needs-spec` if human clarification needed before work can start
+3. **Always set up blocking relationships** using Linear's GraphQL API:
    ```graphql
    mutation {
      issueRelationCreate(input: {
@@ -116,8 +123,8 @@ When creating Linear issues with dependencies:
      }) { success }
    }
    ```
-3. **Add to relevant projects** if applicable
-4. **Set priority** based on urgency
+4. **Add to relevant projects** if applicable
+5. **Set priority** based on urgency
 
 See [AGENTS.md](../AGENTS.md) "Creating Issue Blocking Relationships" section for details.
 
