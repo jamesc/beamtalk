@@ -23,8 +23,17 @@ pub fn build(path: &str) -> Result<()> {
 
     println!("Building {} file(s)...", source_files.len());
 
-    // Create build directory
-    let build_dir = Utf8PathBuf::from("build");
+    // Determine project root (for directory input, use the path; for file input, use parent)
+    let project_root = if source_path.is_dir() {
+        source_path.clone()
+    } else {
+        source_path
+            .parent()
+            .map_or_else(|| Utf8PathBuf::from("."), Utf8Path::to_path_buf)
+    };
+
+    // Create build directory relative to project root
+    let build_dir = project_root.join("build");
     std::fs::create_dir_all(&build_dir)
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;

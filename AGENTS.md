@@ -33,6 +33,8 @@ git commit -m "Implement lexer tokens BT-123"
 
 ### Labels
 
+We use a label group called **Agent State** to track work status:
+
 - `agent-ready` - Task is fully specified, agent can start immediately
 - `needs-spec` - Requires human to clarify requirements before work begins
 - `blocked` - Waiting on external dependency or another issue

@@ -1,0 +1,229 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "value",
+                    span: Span {
+                        start: 186,
+                        end: 191,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    0,
+                ),
+                Span {
+                    start: 195,
+                    end: 196,
+                },
+            ),
+            span: Span {
+                start: 186,
+                end: 196,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "increment",
+                    span: Span {
+                        start: 198,
+                        end: 207,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 213,
+                                            end: 217,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 218,
+                                        end: 223,
+                                    },
+                                },
+                                span: Span {
+                                    start: 213,
+                                    end: 223,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 227,
+                                                end: 231,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 232,
+                                            end: 237,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 227,
+                                        end: 237,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 240,
+                                            end: 241,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 227,
+                                    end: 241,
+                                },
+                            },
+                            span: Span {
+                                start: 213,
+                                end: 241,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 211,
+                        end: 243,
+                    },
+                },
+            ),
+            span: Span {
+                start: 198,
+                end: 243,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "counter",
+                    span: Span {
+                        start: 246,
+                        end: 253,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "Counter",
+                            span: Span {
+                                start: 257,
+                                end: 264,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "spawn",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 257,
+                        end: 270,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "initial:",
+                            span: Span {
+                                start: 271,
+                                end: 279,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 280,
+                            end: 282,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 257,
+                    end: 282,
+                },
+            },
+            span: Span {
+                start: 246,
+                end: 282,
+            },
+        },
+    ],
+    span: Span {
+        start: 186,
+        end: 282,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test actor spawn with keyword arguments",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// The syntax \"Counter spawn initial: 10\" should pass arguments to init",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+    ],
+}
