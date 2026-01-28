@@ -4,5 +4,6 @@
 //! CLI command implementations.
 
 pub mod build;
+pub mod daemon;
 pub mod new;
 pub mod run;
