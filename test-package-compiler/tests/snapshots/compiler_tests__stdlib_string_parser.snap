@@ -1,0 +1,80 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "greeting",
+                    span: Span {
+                        start: 116,
+                        end: 124,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Invalid assignment target",
+                span: Span {
+                    start: 128,
+                    end: 140,
+                },
+            },
+            span: Span {
+                start: 116,
+                end: 140,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 144,
+                end: 177,
+            },
+        },
+    ],
+    span: Span {
+        start: 116,
+        end: 580,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 116,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 116,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test string operations",
+            span: Span {
+                start: 116,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// String literals",
+            span: Span {
+                start: 116,
+                end: 124,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 128, end: 140 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 144, end: 177 } }
