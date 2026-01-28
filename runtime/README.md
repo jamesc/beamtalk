@@ -46,7 +46,18 @@ This produces `.beam` bytecode files.
 
 ## Testing
 
-The tests use EUnit. To run them:
+The tests use EUnit with rebar3 for automatic test discovery.
+
+### Running all tests with rebar3
+
+```bash
+cd runtime
+rebar3 eunit
+```
+
+This automatically discovers and runs all `*_tests.erl` modules.
+
+### Running tests manually
 
 ```bash
 cd runtime
@@ -55,14 +66,17 @@ cd runtime
 erlc beamtalk_actor.erl beamtalk_future.erl
 
 # Compile test modules
-erlc -o test test/test_counter.erl test/test_proxy.erl
+erlc -o test test/test_counter.erl test/test_proxy.erl test/test_throwing_actor.erl test/test_invalid_method_actor.erl test/test_throwing_dnu_actor.erl
 erlc -o test test/beamtalk_future_tests.erl test/beamtalk_actor_tests.erl
 
-# Run tests
+# Run specific test module
+erl -noshell -pa . -pa test -eval 'eunit:test(beamtalk_actor_tests, [verbose])' -s init stop
+
+# Run all tests
 erl -noshell -pa . -pa test -eval 'eunit:test([beamtalk_future_tests, beamtalk_actor_tests], [verbose])' -s init stop
 ```
 
-Or interactively:
+### Interactive testing
 
 ```bash
 cd runtime

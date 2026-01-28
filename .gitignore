@@ -4,6 +4,12 @@
 *.beam
 *.core
 
+# Erlang
+erl_crash.dump
+*.ez
+_build/
+.rebar3/
+
 # IDE
 .vscode/mcp.json
 

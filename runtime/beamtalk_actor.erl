@@ -161,7 +161,9 @@ init(State) when is_map(State) ->
             {stop, {missing_key, '__class__'}};
         {_, false} ->
             {stop, {missing_key, '__methods__'}}
-    end.
+    end;
+init(_NonMapState) ->
+    {stop, {invalid_state, not_a_map}}.
 
 %% @doc Handle asynchronous messages (cast).
 %% Message format: {Selector, Args, FuturePid}
@@ -248,11 +250,11 @@ dispatch(Selector, Args, State) ->
             try
                 Fun(Args, State)
             catch
-                Class:Reason:Stacktrace ->
-                    %% Method threw an exception
+                Class:Reason:_Stacktrace ->
+                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
                     io:format(standard_error,
-                        "Error in method ~p: ~p:~p~n~p~n",
-                        [Selector, Class, Reason, Stacktrace]),
+                        "Error in method ~p: ~p:~p~n",
+                        [Selector, Class, Reason]),
                     {error, {method_error, Selector, Reason}, State}
             end;
         {ok, _NotAFunction} ->
@@ -277,10 +279,11 @@ handle_dnu(Selector, Args, State) ->
             try
                 DnuFun([Selector, Args], State)
             catch
-                Class:Reason:Stacktrace ->
+                Class:Reason:_Stacktrace ->
+                    %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
                     io:format(standard_error,
-                        "Error in doesNotUnderstand handler: ~p:~p~n~p~n",
-                        [Class, Reason, Stacktrace]),
+                        "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
+                        [Selector, Class, Reason]),
                     {error, {dnu_handler_error, Reason}, State}
             end;
         _ ->
