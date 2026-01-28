@@ -18,7 +18,7 @@ pub mod ast;
 pub mod erlang;
 pub mod language_service;
 pub mod parse;
-pub mod queries;
+mod queries;
 
 /// Re-export commonly used types.
 pub mod prelude {

@@ -10,9 +10,9 @@
 //!
 //! The language service provides a query-based interface to compiler internals:
 //!
-//! - **Diagnostics** - Syntax and semantic errors with precise spans
-//! - **Completions** - Context-aware code completion suggestions
-//! - **Hover** - Type information and documentation on hover
+//! - **Diagnostics** - Syntax errors with precise spans (semantic analysis planned)
+//! - **Completions** - Code completion suggestions with keywords, identifiers, and messages
+//! - **Hover** - Symbol information on hover (type information planned)
 //! - **Go to Definition** - Navigate to symbol definitions
 //! - **Find References** - Locate all usages of a symbol
 //!
@@ -32,7 +32,6 @@
 //!
 //! ```
 //! use beamtalk_core::language_service::{LanguageService, SimpleLanguageService};
-//! use beamtalk_core::parse::{lex_with_eof, parse};
 //! use camino::Utf8PathBuf;
 //!
 //! // Create a language service instance
@@ -55,11 +54,16 @@ use ecow::EcoString;
 use std::collections::HashMap;
 
 /// A position in a source file (line and column, both 0-indexed).
+///
+/// The `column` field is a **byte offset within the line**, not a character
+/// count. Callers must ensure that it always lies on a valid UTF-8 character
+/// boundary in the corresponding source line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {
     /// Line number (0-indexed).
     pub line: u32,
-    /// Column offset in bytes (0-indexed).
+    /// Column offset in bytes from the start of the line (0-indexed).
+    /// Must be at a valid UTF-8 character boundary.
     pub column: u32,
 }
 
@@ -502,38 +506,31 @@ impl LanguageService for SimpleLanguageService {
 
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {
         self.get_file(file)
-            .map(|data| data.diagnostics.clone())
+            .map(|data| {
+                crate::queries::diagnostics::compute_diagnostics(
+                    &data.module,
+                    data.diagnostics.clone(),
+                )
+            })
             .unwrap_or_default()
     }
 
-    fn completions(&self, file: &Utf8PathBuf, _position: Position) -> Vec<Completion> {
-        let file_data = self.get_file(file);
-        if file_data.is_none() {
+    fn completions(&self, file: &Utf8PathBuf, position: Position) -> Vec<Completion> {
+        let Some(file_data) = self.get_file(file) else {
             return Vec::new();
-        }
+        };
 
-        // Basic keyword completions for now
-        let keywords = [
-            "self",
-            "super",
-            "true",
-            "false",
-            "nil",
-            "match:",
-            "if:then:else:",
-        ];
-
-        keywords
-            .iter()
-            .map(|&kw| Completion::new(kw, CompletionKind::Keyword))
-            .collect()
+        crate::queries::completions::compute_completions(
+            &file_data.module,
+            &file_data.source,
+            position,
+        )
     }
 
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
-        let (ident, span) = self.find_identifier_at_position(file, position)?;
+        let file_data = self.get_file(file)?;
 
-        // Basic hover info - just show the identifier name
-        Some(HoverInfo::new(format!("Identifier: {}", ident.name), span))
+        crate::queries::hover::compute_hover(&file_data.module, &file_data.source, position)
     }
 
     fn goto_definition(&self, file: &Utf8PathBuf, position: Position) -> Option<Location> {
@@ -646,6 +643,20 @@ mod tests {
                 .iter()
                 .any(|c| c.label == "self" && c.kind == CompletionKind::Keyword)
         );
+
+        // Should have identifier completions from source
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "x" && c.kind == CompletionKind::Variable)
+        );
+
+        // Should have message completions
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "at:" && c.kind == CompletionKind::Function)
+        );
     }
 
     #[test]
@@ -660,6 +671,12 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains('x'));
+
+        // Hover on literal '42' at position 5
+        let hover_literal = service.hover(&file, Position::new(0, 5));
+        assert!(hover_literal.is_some());
+        let hover_literal = hover_literal.unwrap();
+        assert!(hover_literal.contents.contains("42"));
     }
 
     #[test]

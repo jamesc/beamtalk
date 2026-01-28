@@ -34,15 +34,11 @@ use std::collections::HashSet;
 ///
 /// A list of completion suggestions appropriate for the context.
 #[must_use]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB are not supported"
-)]
 pub fn compute_completions(module: &Module, source: &str, position: Position) -> Vec<Completion> {
-    let _offset = match position.to_offset(source) {
-        Some(o) => o as u32,
-        None => return Vec::new(),
-    };
+    // Validate position is within bounds
+    if position.to_offset(source).is_none() {
+        return Vec::new();
+    }
 
     let mut completions = Vec::new();
 
