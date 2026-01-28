@@ -127,24 +127,31 @@ start_link(Name, Module, Args) ->
     gen_server:start_link(Name, Module, Args, []).
 
 %% @doc Spawn an actor outside of a supervision tree.
-%% Returns the pid directly (no {ok, Pid} tuple).
+%% Returns the pid directly on success, crashes on failure.
 %% Useful for ad-hoc actor creation in the REPL.
+%% For production use with error handling, use start_link/2 instead.
 -spec spawn_actor(module(), term()) -> pid().
 spawn_actor(Module, Args) ->
-    {ok, Pid} = gen_server:start(Module, Args, []),
-    Pid.
+    case gen_server:start(Module, Args, []) of
+        {ok, Pid} -> Pid;
+        {error, Reason} -> error({spawn_failed, Reason})
+    end.
 
 %% @doc Spawn a registered actor outside of a supervision tree.
+%% Returns the pid directly on success, crashes on failure.
+%% For production use with error handling, use start_link/3 instead.
 -spec spawn_actor(term(), module(), term()) -> pid().
 spawn_actor(Name, Module, Args) ->
-    {ok, Pid} = gen_server:start(Name, Module, Args, []),
-    Pid.
+    case gen_server:start(Name, Module, Args, []) of
+        {ok, Pid} -> Pid;
+        {error, Reason} -> error({spawn_failed, Reason})
+    end.
 
 %%% gen_server callbacks
 
 %% @doc Initialize actor with state map.
 %% State must be a map containing '__class__' and '__methods__' keys.
--spec init(map()) -> {ok, map()}.
+-spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
     %% Validate required keys
     case {maps:is_key('__class__', State), maps:is_key('__methods__', State)} of
@@ -159,6 +166,7 @@ init(State) when is_map(State) ->
 %% @doc Handle asynchronous messages (cast).
 %% Message format: {Selector, Args, FuturePid}
 %% Dispatches to method and resolves/rejects the future.
+%% Errors are communicated via the future (rejection) rather than crash.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
 handle_cast({Selector, Args, FuturePid}, State) ->
     case dispatch(Selector, Args, State) of
@@ -183,7 +191,7 @@ handle_cast(Msg, State) ->
 %% @doc Handle synchronous messages (call).
 %% Message format: {Selector, Args}
 %% Dispatches to method and returns result immediately.
--spec handle_call(term(), term(), map()) -> {reply, term(), map()} | {stop, term(), map()}.
+-spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
 handle_call({Selector, Args}, _From, State) ->
     case dispatch(Selector, Args, State) of
         {reply, Result, NewState} ->

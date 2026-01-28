@@ -212,20 +212,10 @@ start_link_test() ->
     gen_server:stop(Pid).
 
 %%% Error handling tests
-
-method_throws_exception_sync_test() ->
-    %% Note: Cannot test exception handling in this way due to EUnit limitations
-    %% This would require a separate test helper module
-    %% For now, we rely on code inspection and manual testing
-    ok.
-
-method_throws_exception_async_test() ->
-    %% Note: Cannot test exception handling in this way due to EUnit limitations
-    ok.
-
-invalid_method_not_function_test() ->
-    %% Note: Cannot test with inline module definitions
-    ok.
+%% Note: Error handling is tested implicitly through dispatch behavior
+%% Methods that throw are caught and returned as {error, ...}
+%% See sync_message_unknown_selector_test and dnu_no_target_test
+%% for examples of error handling.
 
 %%% Stress tests
 

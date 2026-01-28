@@ -40,6 +40,8 @@ terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
 
 %% Method implementations
 handle_increment([], State) ->
+    %% Note: Returns {noreply, NewState} - no return value
+    %% When called sync, will receive 'nil' as reply
     Value = maps:get(value, State),
     NewValue = Value + 1,
     NewState = maps:put(value, NewValue, State),
