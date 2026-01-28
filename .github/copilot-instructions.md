@@ -99,6 +99,30 @@ When the user types `/done`, execute this workflow:
 
 11. **Report success**: Confirm the commit was pushed, PR was created with Copilot reviewer (include PR URL), and Linear was updated.
 
+---
+
+### Creating Linear Issues
+
+When creating Linear issues with dependencies:
+
+1. **Create the issues** with full context, acceptance criteria, and files to modify
+2. **Always set up blocking relationships** using Linear's GraphQL API:
+   ```graphql
+   mutation {
+     issueRelationCreate(input: {
+       issueId: "<blocker issue ID>"
+       relatedIssueId: "<blocked issue ID>"
+       type: blocks
+     }) { success }
+   }
+   ```
+3. **Add to relevant projects** if applicable
+4. **Set priority** based on urgency
+
+See [AGENTS.md](../AGENTS.md) "Creating Issue Blocking Relationships" section for details.
+
+---
+
 ## Project Context
 
 This is the Beamtalk compiler project - a Smalltalk-inspired language targeting the BEAM VM. See [AGENTS.md](../AGENTS.md) for full development guidelines.
