@@ -23,7 +23,14 @@ fn main() {
     service.update_file(file.clone(), "x := 42".to_string());
 
     let diagnostics = service.diagnostics(&file);
-    println!("   Diagnostics: {}", if diagnostics.is_empty() { "None ✓" } else { "Some errors" });
+    println!(
+        "   Diagnostics: {}",
+        if diagnostics.is_empty() {
+            "None ✓"
+        } else {
+            "Some errors"
+        }
+    );
     println!();
 
     // Example 2: Parse invalid code and get diagnostics
@@ -67,7 +74,11 @@ fn main() {
     println!("   Finding definition of 'count' at position (1, 10)");
 
     if let Some(location) = service.goto_definition(&file, Position::new(1, 10)) {
-        println!("   Definition found at: {}:{}", location.file, location.span.start());
+        println!(
+            "   Definition found at: {}:{}",
+            location.file,
+            location.span.start()
+        );
     } else {
         println!("   Definition not found");
     }
