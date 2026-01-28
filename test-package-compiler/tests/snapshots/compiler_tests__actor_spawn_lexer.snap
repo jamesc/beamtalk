@@ -1,0 +1,27 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("value"), span: Span { start: 173, end: 178 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test actor spawn compilation"), Whitespace("\n"), LineComment("// The syntax \"Counter spawn\" should compile to gen_server:start_link"), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 179, end: 181 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 182, end: 183 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 183, end: 184 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("increment"), span: Span { start: 185, end: 194 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 195, end: 197 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 198, end: 199 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 200, end: 204 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 204, end: 205 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 205, end: 210 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 211, end: 213 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 214, end: 218 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 218, end: 219 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 219, end: 224 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 225, end: 226 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 227, end: 228 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 229, end: 230 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 230, end: 231 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("counter"), span: Span { start: 233, end: 240 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 241, end: 243 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Counter"), span: Span { start: 244, end: 251 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("spawn"), span: Span { start: 252, end: 257 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 258, end: 258 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
