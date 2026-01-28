@@ -251,7 +251,7 @@ mod tests {
         write_test_file(&src_path.join("main.bt"), "main := [42].");
 
         let result = build(project_path.as_str());
-        
+
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
         if let Err(e) = result {
@@ -274,7 +274,7 @@ mod tests {
         write_test_file(&src_path.join("file2.bt"), "test2 := [2].");
 
         let result = build(project_path.as_str());
-        
+
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
         if let Err(e) = result {

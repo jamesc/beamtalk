@@ -85,7 +85,7 @@ mod tests {
         let project_path = create_test_project(&temp);
 
         let result = run(&project_path);
-        
+
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
         if let Err(e) = result {
