@@ -1,0 +1,132 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "update",
+                    span: Span {
+                        start: 157,
+                        end: 163,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Return {
+                            value: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "array",
+                                        span: Span {
+                                            start: 170,
+                                            end: 175,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "at:",
+                                            span: Span {
+                                                start: 176,
+                                                end: 179,
+                                            },
+                                        },
+                                        KeywordPart {
+                                            keyword: "put:",
+                                            span: Span {
+                                                start: 182,
+                                                end: 186,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 180,
+                                            end: 181,
+                                        },
+                                    ),
+                                    Literal(
+                                        String(
+                                            "hello",
+                                        ),
+                                        Span {
+                                            start: 187,
+                                            end: 194,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 170,
+                                    end: 194,
+                                },
+                            },
+                            span: Span {
+                                start: 169,
+                                end: 194,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 167,
+                        end: 196,
+                    },
+                },
+            ),
+            span: Span {
+                start: 157,
+                end: 196,
+            },
+        },
+    ],
+    span: Span {
+        start: 157,
+        end: 196,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 157,
+                end: 163,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 157,
+                end: 163,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test async keyword message send within a method",
+            span: Span {
+                start: 157,
+                end: 163,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Returns future from array update",
+            span: Span {
+                start: 157,
+                end: 163,
+            },
+            kind: Line,
+        },
+    ],
+}
