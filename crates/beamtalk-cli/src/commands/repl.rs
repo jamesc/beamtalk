@@ -168,6 +168,41 @@ fn history_path() -> Result<PathBuf> {
     Ok(dir.join("repl_history"))
 }
 
+/// Find the runtime directory by checking multiple possible locations.
+fn find_runtime_dir() -> Result<PathBuf> {
+    // Candidates in order of preference
+    let candidates = [
+        // 1. CARGO_MANIFEST_DIR (when running via cargo run)
+        std::env::var("CARGO_MANIFEST_DIR")
+            .ok()
+            .map(|d| PathBuf::from(d).join("../../runtime")),
+        // 2. Current working directory (running from repo root)
+        Some(PathBuf::from("runtime")),
+        // 3. Relative to executable (installed location)
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk/runtime"))),
+        // 4. Executable's grandparent (target/debug/beamtalk -> repo root)
+        std::env::current_exe().ok().and_then(|exe| {
+            exe.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+                .map(|p| p.join("runtime"))
+        }),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.join("rebar.config").exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(miette!(
+        "Could not find Beamtalk runtime directory.\n\
+        Please run from the repository root or set BEAMTALK_RUNTIME_DIR."
+    ))
+}
+
 /// Check if the compiler daemon is running.
 #[cfg(unix)]
 fn is_daemon_running() -> bool {
@@ -226,17 +261,9 @@ fn start_daemon() -> Result<()> {
 
 /// Start the BEAM node with REPL backend.
 fn start_beam_node(port: u16) -> Result<Child> {
-    // Find runtime directory
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
-    let runtime_dir = if let Some(dir) = manifest_dir {
-        PathBuf::from(dir).join("../../runtime")
-    } else {
-        // Try relative to executable
-        let exe = std::env::current_exe().into_diagnostic()?;
-        exe.parent()
-            .unwrap_or(std::path::Path::new("."))
-            .join("../runtime")
-    };
+    // Find runtime directory - try multiple locations
+    let runtime_dir = find_runtime_dir()?;
+    eprintln!("Using runtime at: {}", runtime_dir.display());
 
     // Build runtime first
     let runtime_beam_dir = runtime_dir.join("_build/default/lib/beamtalk_runtime/ebin");
