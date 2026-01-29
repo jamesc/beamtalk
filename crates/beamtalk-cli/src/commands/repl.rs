@@ -285,6 +285,7 @@ fn start_beam_node(port: u16) -> Result<Child> {
     eprintln!("Starting BEAM node with REPL backend on port {port}...");
 
     // Start erl with beamtalk_repl running
+    // The receive loop keeps the BEAM VM alive while REPL is running
     let child = Command::new("erl")
         .args([
             "-noshell",
@@ -292,12 +293,12 @@ fn start_beam_node(port: u16) -> Result<Child> {
             runtime_beam_dir.to_str().unwrap_or(""),
             "-eval",
             &format!(
-                "{{ok, _}} = beamtalk_repl:start_link({port}), io:format(\"REPL backend started on port {port}~n\")."
+                "{{ok, _}} = beamtalk_repl:start_link({port}), io:format(\"REPL backend started on port {port}~n\"), receive stop -> ok end."
             ),
         ])
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::inherit())  // Show BEAM output for debugging
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
