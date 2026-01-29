@@ -49,4 +49,4 @@ When class definitions are added to the language, examples will include:
 - Examples currently generate actor-based gen_server modules
 - Class metadata will be extracted once class definitions are added to the AST
 - Loaded modules persist for the REPL session (unlike eval expressions)
-- Module names are prefixed with `bt_` (e.g., `hello.bt` → `bt_hello`)
+- Module names use the file basename directly (e.g., `hello.bt` → `hello`)

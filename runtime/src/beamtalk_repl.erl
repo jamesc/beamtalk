@@ -524,6 +524,12 @@ format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)]);
 format_error_message({load_error, Reason}) ->
     iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)]);
+format_error_message({file_not_found, Path}) ->
+    iolist_to_binary([<<"File not found: ">>, format_name(Path)]);
+format_error_message({read_error, Reason}) ->
+    iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]);
+format_error_message(daemon_unavailable) ->
+    <<"Unable to connect to compiler daemon. Start with: beamtalk daemon start --foreground">>;
 format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
@@ -788,9 +794,13 @@ handle_load(Path, State = #state{loaded_modules = LoadedModules}) ->
                                 {module, ModuleName} ->
                                     %% Register classes with beamtalk_classes
                                     register_classes(ClassNames, ModuleName),
-                                    %% Track loaded module
+                                    %% Track loaded module (avoid duplicates on reload)
+                                    NewLoadedModules = case lists:member(ModuleName, LoadedModules) of
+                                        true -> LoadedModules;
+                                        false -> [ModuleName | LoadedModules]
+                                    end,
                                     NewState = State#state{
-                                        loaded_modules = [ModuleName | LoadedModules]
+                                        loaded_modules = NewLoadedModules
                                     },
                                     {ok, ClassNames, NewState};
                                 {error, Reason} ->
@@ -805,8 +815,24 @@ handle_load(Path, State = #state{loaded_modules = LoadedModules}) ->
 %% @private
 %% Derive module name from file path.
 %% Example: "examples/counter.bt" -> counter
-%% Note: Runtime modules use `beamtalk_*` prefix, so user modules can safely
-%% use short names without collision risk.
+%%
+%% ## Module Name Collision Warning
+%% User-loaded modules use the file basename directly as the module name.
+%% This could theoretically collide with system modules if a user loads a file
+%% named after a built-in module (e.g., `beamtalk_repl.bt`). However:
+%% - Runtime modules consistently use `beamtalk_*` prefix
+%% - Eval modules use `beamtalk_repl_eval_N` pattern
+%% - Users are unlikely to name files with `beamtalk_` prefix
+%%
+%% If this becomes a problem in practice, we could add a prefix (e.g., `user_`)
+%% or check against a blocklist of system module names.
+%% See: https://linear.app/beamtalk/issue/BT-88 (TODO: create follow-up issue)
+%%
+%% ## Path Security Note
+%% The file path is accepted as-is without validation. In a trusted REPL
+%% environment this is acceptable, but be aware that relative paths like
+%% `../../sensitive/file.bt` would be processed. The REPL is intended for
+%% local development use where the user has filesystem access anyway.
 -spec derive_module_name(string()) -> atom().
 derive_module_name(Path) ->
     %% Get base filename without extension
