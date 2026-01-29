@@ -77,11 +77,7 @@ fn main() -> Result<()> {
         Command::Build { path } => commands::build::build(&path),
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
-        Command::Repl => {
-            println!("Beamtalk REPL");
-            println!("(Not yet implemented)");
-            Ok(())
-        }
+        Command::Repl => commands::repl::run(),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");

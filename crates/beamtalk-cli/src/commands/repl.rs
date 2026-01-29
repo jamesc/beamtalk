@@ -1,0 +1,514 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! REPL CLI client for interactive Beamtalk evaluation.
+//!
+//! This module implements the `beamtalk repl` command, which provides an
+//! interactive read-eval-print loop for Beamtalk expressions.
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌─────────────────┐     ┌──────────────────────┐
+//! │  REPL CLI       │     │   BEAM Node          │
+//! │  (this module)  │────▶│  beamtalk_repl.erl   │
+//! │                 │ TCP │                      │
+//! │  rustyline      │     │  Compiler Daemon ◀───┤
+//! └─────────────────┘     └──────────────────────┘
+//!       │                           │
+//!   localhost:9000            Unix socket
+//! ```
+//!
+//! # Usage
+//!
+//! ```bash
+//! beamtalk repl           # Start interactive REPL
+//! ```
+//!
+//! # Protocol
+//!
+//! The REPL CLI communicates with the Erlang backend using JSON over TCP:
+//!
+//! ```json
+//! // Request
+//! {"type": "eval", "expression": "x := 42"}
+//!
+//! // Response (success)
+//! {"type": "result", "value": "42"}
+//!
+//! // Response (error)
+//! {"type": "error", "message": "Undefined variable: foo"}
+//! ```
+
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::time::Duration;
+
+use miette::{IntoDiagnostic, Result, miette};
+use rustyline::error::ReadlineError;
+use rustyline::history::FileHistory;
+use rustyline::{DefaultEditor, Editor};
+use serde::Deserialize;
+
+/// Default port for the REPL backend.
+const REPL_PORT: u16 = 9000;
+
+/// Connection timeout in milliseconds.
+const CONNECT_TIMEOUT_MS: u64 = 5000;
+
+/// Maximum retries when connecting to REPL backend.
+const MAX_CONNECT_RETRIES: u32 = 10;
+
+/// Delay between connection retries in milliseconds.
+const RETRY_DELAY_MS: u64 = 500;
+
+/// JSON response from the REPL backend.
+#[derive(Debug, Deserialize)]
+struct ReplResponse {
+    #[serde(rename = "type")]
+    response_type: String,
+    value: Option<serde_json::Value>,
+    message: Option<String>,
+    bindings: Option<serde_json::Value>,
+}
+
+/// REPL client state.
+struct ReplClient {
+    stream: TcpStream,
+    reader: BufReader<TcpStream>,
+}
+
+impl ReplClient {
+    /// Connect to the REPL backend.
+    fn connect(port: u16) -> Result<Self> {
+        let addr = format!("127.0.0.1:{port}");
+        let stream = TcpStream::connect_timeout(
+            &addr.parse().into_diagnostic()?,
+            Duration::from_millis(CONNECT_TIMEOUT_MS),
+        )
+        .map_err(|e| miette!("Failed to connect to REPL backend at {addr}: {e}"))?;
+
+        // Clone for reader
+        let reader_stream = stream.try_clone().into_diagnostic()?;
+        let reader = BufReader::new(reader_stream);
+
+        Ok(Self { stream, reader })
+    }
+
+    /// Send an eval request and receive the response.
+    fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
+        // Build JSON request
+        let request = serde_json::json!({
+            "type": "eval",
+            "expression": expression
+        });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        // Send request
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        // Receive response
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        // Parse response
+        serde_json::from_str(&response_line)
+            .map_err(|e| miette!("Failed to parse REPL response: {e}\nRaw: {response_line}"))
+    }
+
+    /// Send a clear bindings request.
+    fn clear_bindings(&mut self) -> Result<ReplResponse> {
+        let request = serde_json::json!({ "type": "clear" });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+
+    /// Get current bindings.
+    fn get_bindings(&mut self) -> Result<ReplResponse> {
+        let request = serde_json::json!({ "type": "bindings" });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+}
+
+/// Directory for beamtalk state files.
+fn beamtalk_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
+    Ok(home.join(".beamtalk"))
+}
+
+/// Path to REPL history file.
+fn history_path() -> Result<PathBuf> {
+    let dir = beamtalk_dir()?;
+    fs::create_dir_all(&dir).into_diagnostic()?;
+    Ok(dir.join("repl_history"))
+}
+
+/// Check if the compiler daemon is running.
+#[cfg(unix)]
+fn is_daemon_running() -> bool {
+    let Ok(dir) = beamtalk_dir() else {
+        return false;
+    };
+    let lockfile = dir.join("daemon.lock");
+    if !lockfile.exists() {
+        return false;
+    }
+
+    let Ok(pid_str) = fs::read_to_string(&lockfile) else {
+        return false;
+    };
+    let Ok(pid) = pid_str.trim().parse::<i32>() else {
+        return false;
+    };
+
+    // Check if process exists using kill(pid, 0)
+    // SAFETY: kill with signal 0 only checks existence
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn is_daemon_running() -> bool {
+    false
+}
+
+/// Start the compiler daemon in the background.
+fn start_daemon() -> Result<()> {
+    eprintln!("Starting compiler daemon...");
+
+    // Get path to beamtalk binary (ourselves)
+    let exe = std::env::current_exe().into_diagnostic()?;
+
+    Command::new(exe)
+        .args(["daemon", "start"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .into_diagnostic()?;
+
+    // Wait a moment for daemon to start
+    std::thread::sleep(Duration::from_millis(500));
+
+    if !is_daemon_running() {
+        return Err(miette!(
+            "Failed to start compiler daemon. Try: beamtalk daemon start --foreground"
+        ));
+    }
+
+    eprintln!("Compiler daemon started.");
+    Ok(())
+}
+
+/// Start the BEAM node with REPL backend.
+fn start_beam_node(port: u16) -> Result<Child> {
+    // Find runtime directory
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").ok();
+    let runtime_dir = if let Some(dir) = manifest_dir {
+        PathBuf::from(dir).join("../../runtime")
+    } else {
+        // Try relative to executable
+        let exe = std::env::current_exe().into_diagnostic()?;
+        exe.parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("../runtime")
+    };
+
+    // Build runtime first
+    let runtime_beam_dir = runtime_dir.join("_build/default/lib/beamtalk_runtime/ebin");
+
+    // Check if runtime is built
+    if !runtime_beam_dir.exists() {
+        eprintln!("Building Beamtalk runtime...");
+        let status = Command::new("rebar3")
+            .arg("compile")
+            .current_dir(&runtime_dir)
+            .status()
+            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
+
+        if !status.success() {
+            return Err(miette!("Failed to build Beamtalk runtime"));
+        }
+    }
+
+    eprintln!("Starting BEAM node with REPL backend on port {port}...");
+
+    // Start erl with beamtalk_repl running
+    let child = Command::new("erl")
+        .args([
+            "-noshell",
+            "-pa",
+            runtime_beam_dir.to_str().unwrap_or(""),
+            "-eval",
+            &format!(
+                "{{ok, _}} = beamtalk_repl:start_link({port}), io:format(\"REPL backend started on port {port}~n\")."
+            ),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
+
+    Ok(child)
+}
+
+/// Connect to REPL backend with retries.
+fn connect_with_retries(port: u16) -> Result<ReplClient> {
+    for attempt in 1..=MAX_CONNECT_RETRIES {
+        match ReplClient::connect(port) {
+            Ok(client) => return Ok(client),
+            Err(e) => {
+                if attempt == MAX_CONNECT_RETRIES {
+                    return Err(e);
+                }
+                std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+            }
+        }
+    }
+    Err(miette!("Failed to connect to REPL backend"))
+}
+
+/// Format a value for display.
+fn format_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => {
+            // Check for special formatting
+            if s.starts_with("#<pid ") {
+                // Actor reference - format nicely
+                s.replace("#<pid ", "#Actor<").replace(">\"", ">")
+            } else {
+                s.clone()
+            }
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "nil".to_string(),
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(format_value).collect();
+            format!("[{}]", items.join(", "))
+        }
+        serde_json::Value::Object(obj) => {
+            // Check for tuple marker
+            if let Some(serde_json::Value::Array(items)) = obj.get("__tuple__") {
+                let formatted: Vec<String> = items.iter().map(format_value).collect();
+                return format!("({})", formatted.join(", "));
+            }
+            // Regular object
+            let pairs: Vec<String> = obj
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", format_value(v)))
+                .collect();
+            format!("{{{}}}", pairs.join(", "))
+        }
+    }
+}
+
+/// Print help message.
+fn print_help() {
+    println!("Beamtalk REPL Commands:");
+    println!();
+    println!("  :help, :h     Show this help message");
+    println!("  :exit, :q     Exit the REPL");
+    println!("  :clear        Clear all variable bindings");
+    println!("  :bindings     Show current variable bindings");
+    println!();
+    println!("Expression examples:");
+    println!("  x := 42              # Variable assignment");
+    println!("  x + 10               # Arithmetic");
+    println!("  Counter spawn        # Spawn an actor");
+    println!("  counter increment    # Send a message");
+}
+
+/// Run the REPL.
+pub fn run() -> Result<()> {
+    println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
+    println!("Type :help for available commands, :exit to quit.");
+    println!();
+
+    // Ensure compiler daemon is running
+    if !is_daemon_running() {
+        start_daemon()?;
+    }
+
+    // Start BEAM node with REPL backend
+    let mut beam_child = start_beam_node(REPL_PORT)?;
+
+    // Connect to REPL backend
+    let mut client = match connect_with_retries(REPL_PORT) {
+        Ok(c) => c,
+        Err(e) => {
+            // Kill the BEAM node on failure
+            let _ = beam_child.kill();
+            return Err(e);
+        }
+    };
+
+    println!("Connected to REPL backend.");
+    println!();
+
+    // Set up rustyline editor
+    let mut rl: Editor<(), FileHistory> = DefaultEditor::new().into_diagnostic()?;
+
+    // Load history
+    let history_file = history_path()?;
+    let _ = rl.load_history(&history_file);
+
+    // Main REPL loop
+    loop {
+        match rl.readline("> ") {
+            Ok(line) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Add to history
+                let _ = rl.add_history_entry(line);
+
+                // Handle special commands
+                match line {
+                    ":exit" | ":quit" | ":q" => {
+                        println!("Goodbye!");
+                        break;
+                    }
+                    ":help" | ":h" | ":?" => {
+                        print_help();
+                        continue;
+                    }
+                    ":clear" => {
+                        match client.clear_bindings() {
+                            Ok(_) => println!("Bindings cleared."),
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":bindings" | ":b" => {
+                        match client.get_bindings() {
+                            Ok(response) => {
+                                if let Some(serde_json::Value::Object(map)) = response.bindings {
+                                    if map.is_empty() {
+                                        println!("No bindings.");
+                                    } else {
+                                        for (name, value) in map {
+                                            println!("  {name} = {}", format_value(&value));
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                // Evaluate expression
+                match client.eval(line) {
+                    Ok(response) => {
+                        if response.response_type == "result" {
+                            if let Some(value) = response.value {
+                                println!("{}", format_value(&value));
+                            }
+                        } else if response.response_type == "error" {
+                            if let Some(msg) = response.message {
+                                eprintln!("Error: {msg}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Communication error: {e}");
+                        eprintln!("The REPL backend may have crashed. Exiting.");
+                        break;
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                // Ctrl+C - just print newline and continue
+                println!();
+            }
+            Err(ReadlineError::Eof) => {
+                // Ctrl+D - exit
+                println!("Goodbye!");
+                break;
+            }
+            Err(e) => {
+                eprintln!("Readline error: {e}");
+                break;
+            }
+        }
+    }
+
+    // Save history
+    let _ = rl.save_history(&history_file);
+
+    // Clean up - stop BEAM node
+    let _ = beam_child.kill();
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_value_string() {
+        let value = serde_json::json!("hello");
+        assert_eq!(format_value(&value), "hello");
+    }
+
+    #[test]
+    fn format_value_number() {
+        let value = serde_json::json!(42);
+        assert_eq!(format_value(&value), "42");
+    }
+
+    #[test]
+    fn format_value_bool() {
+        let value = serde_json::json!(true);
+        assert_eq!(format_value(&value), "true");
+    }
+
+    #[test]
+    fn format_value_array() {
+        let value = serde_json::json!([1, 2, 3]);
+        assert_eq!(format_value(&value), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn format_value_pid() {
+        let value = serde_json::json!("#<pid <0.123.0>>");
+        assert_eq!(format_value(&value), "#Actor<<0.123.0>>");
+    }
+
+    #[test]
+    fn format_value_tuple() {
+        let value = serde_json::json!({"__tuple__": [1, "hello"]});
+        assert_eq!(format_value(&value), "(1, hello)");
+    }
+}

@@ -43,6 +43,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ctrlc = "3"
 libc = "0.2"
 
+# Line editing
+rustyline = { version = "15", features = ["derive"] }
+
 # Testing
 insta = { version = "1", features = ["yaml"] }
 
