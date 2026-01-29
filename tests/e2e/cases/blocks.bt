@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for block (closure) operations
+// Each expression is followed by its expected result
+
+// Block with one argument
+[:x | x + 1] value: 5
+// => 6
+
+// Block with two arguments
+[:x :y | x + y] value: 3 value: 4
+// => 7
+
+// Block with no arguments (value message)
+[42] value
+// => 42
+
+// Block with expression body
+[:n | n * n] value: 5
+// => 25
+
+// Nested arithmetic in block
+[:a | a + a * 2] value: 3
+// => 9
+
+// Block returning constant
+[:x | 100] value: 999
+// => 100
+
+// Block with subtraction
+[:a :b | a - b] value: 10 value: 3
+// => 7
