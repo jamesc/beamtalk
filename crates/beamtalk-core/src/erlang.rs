@@ -1762,16 +1762,17 @@ end
     fn test_generate_keyword_message_send_creates_future() {
         let mut generator = CoreErlangGenerator::new("test");
 
-        // Build: array at: 1 put: 'x'
-        let receiver = Expression::Identifier(Identifier::new("array", Span::new(0, 5)));
+        // Build: object foo: 1 bar: 'x'
+        // (using a non-Dictionary selector to avoid interception)
+        let receiver = Expression::Identifier(Identifier::new("object", Span::new(0, 6)));
         let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::new(6, 9)),
-            KeywordPart::new("put:", Span::new(12, 16)),
+            KeywordPart::new("foo:", Span::new(7, 11)),
+            KeywordPart::new("bar:", Span::new(14, 18)),
         ]);
         // Arguments are passed separately to generate_message_send
         let arguments = vec![
-            Expression::Literal(Literal::Integer(1), Span::new(10, 11)),
-            Expression::Literal(Literal::String("x".into()), Span::new(17, 20)),
+            Expression::Literal(Literal::Integer(1), Span::new(12, 13)),
+            Expression::Literal(Literal::String("x".into()), Span::new(19, 22)),
         ];
 
         let result = generator.generate_message_send(&receiver, &selector, &arguments);
@@ -1788,7 +1789,7 @@ end
             "Should send via gen_server:cast(). Got: {output}"
         );
         assert!(
-            output.contains("'at:put:'"),
+            output.contains("'foo:bar:'"),
             "Should include combined keyword selector. Got: {output}"
         );
     }
