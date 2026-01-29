@@ -62,11 +62,35 @@ jobs:
           # Start compiler daemon in background
           ./target/debug/beamtalk daemon start --foreground &
           DAEMON_PID=$!
-          sleep 2
+          
+          # Ensure cleanup happens even if tests fail
+          cleanup() {
+            kill $DAEMON_PID 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          
+          # Wait for daemon to initialize and verify it stays alive
+          # Poll for up to 10 seconds to ensure daemon is ready
+          echo "Waiting for daemon to initialize..."
+          for i in $(seq 1 10); do
+            if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+              echo "Daemon process exited before integration tests could run"
+              exit 1
+            fi
+            # Check if socket is ready (daemon creates ~/.beamtalk/daemon.sock)
+            if [ -S "$HOME/.beamtalk/daemon.sock" ]; then
+              echo "Daemon is ready (socket exists)"
+              break
+            fi
+            sleep 1
+          done
+          
+          # Final verification that daemon is still running
+          if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+            echo "Compiler daemon failed to start or exited prematurely"
+            exit 1
+          fi
           
           # Run integration tests
           cd runtime
           rebar3 eunit --module=beamtalk_repl_integration_tests
-          
-          # Cleanup
-          kill $DAEMON_PID 2>/dev/null || true
