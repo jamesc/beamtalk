@@ -972,20 +972,24 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Generates a block value call: `apply Fun (Args...)`.
+    /// Generates a block value call: `let _Fun = <receiver> in apply _Fun (Args...)`.
     ///
-    /// In Core Erlang, function application is:
+    /// In Core Erlang, we bind the receiver to a variable first to ensure proper
+    /// evaluation order and handle complex receiver expressions correctly.
+    ///
     /// ```erlang
-    /// apply Fun (Arg1, Arg2, ...)
+    /// let _Fun1 = <receiver-expr> in apply _Fun1 (Arg1, Arg2, ...)
     /// ```
     fn generate_block_value_call(
         &mut self,
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<()> {
-        write!(self.output, "apply ")?;
+        // Bind receiver to a variable first for proper evaluation
+        let fun_var = self.fresh_var("Fun");
+        write!(self.output, "let {fun_var} = ")?;
         self.generate_expression(receiver)?;
-        write!(self.output, " (")?;
+        write!(self.output, " in apply {fun_var} (")?;
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -1728,7 +1732,7 @@ end
 
     #[test]
     fn test_block_value_message_no_args() {
-        // [42] value → apply Fun ()
+        // [42] value → let _Fun = fun () -> 42 in apply _Fun ()
         let mut generator = CoreErlangGenerator::new("test");
 
         let block = Block::new(
@@ -1744,8 +1748,8 @@ end
 
         let output = &generator.output;
         assert!(
-            output.contains("apply fun () -> 42 ()"),
-            "Should generate apply Fun (). Got: {output}"
+            output.contains("let _Fun1 = fun () -> 42 in apply _Fun1 ()"),
+            "Should generate let binding with apply. Got: {output}"
         );
         // Should NOT use async protocol
         assert!(
@@ -1756,7 +1760,7 @@ end
 
     #[test]
     fn test_block_value_message_one_arg() {
-        // [:x | x + 1] value: 5 → apply Fun (5)
+        // [:x | x + 1] value: 5 → let _Fun = ... in apply _Fun (5)
         let mut generator = CoreErlangGenerator::new("test");
 
         let block = Block::new(
@@ -1782,8 +1786,12 @@ end
 
         let output = &generator.output;
         assert!(
-            output.contains("apply"),
-            "Should use apply for block evaluation. Got: {output}"
+            output.contains("let _Fun"),
+            "Should use let binding for block evaluation. Got: {output}"
+        );
+        assert!(
+            output.contains("apply _Fun"),
+            "Should use apply on bound fun variable. Got: {output}"
         );
         assert!(
             output.contains("(5)"),
