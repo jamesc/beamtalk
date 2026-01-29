@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for keyword message sends
+// Keyword messages have one or more keywords (identifiers ending in :)
+
+// ===========================================================================
+// SINGLE KEYWORD MESSAGES
+// ===========================================================================
+
+// Block value: with one argument
+[:x | x] value: 42
+// => 42
+
+// Block with computation
+[:x | x + 10] value: 5
+// => 15
+
+// Block with multiplication
+[:n | n * n] value: 4
+// => 16
+
+// ===========================================================================
+// MULTI-KEYWORD MESSAGES
+// ===========================================================================
+
+// Block value:value: with two arguments
+[:x :y | x + y] value: 3 value: 4
+// => 7
+
+// Two-arg block with subtraction
+[:a :b | a - b] value: 10 value: 3
+// => 7
+
+// Two-arg block with multiplication
+[:x :y | x * y] value: 6 value: 7
+// => 42
+
+// ===========================================================================
+// THREE-KEYWORD MESSAGES
+// ===========================================================================
+
+// Block with three arguments
+[:a :b :c | a + b + c] value: 1 value: 2 value: 3
+// => 6
+
+// Three-arg block with mixed operations
+[:x :y :z | x * y + z] value: 2 value: 3 value: 4
+// => 10

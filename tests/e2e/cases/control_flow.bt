@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for control flow constructs
+//
+// NOTE: Control flow constructs like whileTrue:, whileFalse:, and timesRepeat:
+// are implemented in the compiler but require variable bindings to persist
+// across REPL expressions, which is a work in progress.
+//
+// These tests demonstrate the intended syntax. Full E2E testing of stateful
+// control flow requires the REPL to support multi-line expressions or
+// variable persistence across lines.
+
+// ===========================================================================
+// BLOCK CONTROL FLOW (single-expression tests)
+// ===========================================================================
+
+// Block that returns a value (no state change needed)
+[5 + 3] value
+// => 8
+
+// Block with argument that returns computed value
+[:x | x * 2] value: 7
+// => 14
+
+// Block with two arguments
+[:a :b | a + b] value: 10 value: 20
+// => 30
+

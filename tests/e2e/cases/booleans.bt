@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for boolean values
+// Tests for boolean literals (true and false)
+//
+// NOTE: Boolean methods like ifTrue:ifFalse:, and:, or:, not are implemented
+// but currently return futures in the REPL. Direct boolean literals work.
+
+// ===========================================================================
+// BOOLEAN LITERALS
+// ===========================================================================
+
+// True literal
+true
+// => true
+
+// False literal
+false
+// => false
+

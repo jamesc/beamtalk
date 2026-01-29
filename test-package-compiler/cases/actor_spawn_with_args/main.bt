@@ -1,10 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Test actor spawn with keyword arguments
-// The syntax "Counter spawn initial: 10" should pass arguments to init
+// Test actor spawn with initialization arguments
+// Counter spawnWith: passes initialization arguments to init/1
+// which merges them with default field values.
+//
+// Once map literals are supported, use:
+//   counter := Counter spawnWith: #{value => 10}
+//
+// For now, test with a simple value:
 
 value := 0.
 increment := [ self.value := self.value + 1 ].
 
-counter := Counter spawn initial: 10
+// Spawn with default values (value = 0)
+counter1 := Counter spawn
+
+// TODO: When map literal syntax #{key => value} is implemented:
+// counter2 := Counter spawnWith: #{value => 10}

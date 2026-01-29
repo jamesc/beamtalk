@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for cascade message sends
+// Cascades send multiple messages to the same receiver using semicolon (;)
+//
+// SYNTAX: receiver msg1; msg2; msg3
+//
+// NOTE: Cascade syntax is parsed but code generation is not yet implemented.
+// These tests document the intended syntax for future implementation.
+//
+// Cascades are useful for initialization patterns:
+//   collection add: 1; add: 2; add: 3
+//   stream write: 'hello'; nl; write: 'world'
+//
+// The parser recognizes cascade syntax, but the REPL doesn't yet evaluate it.
+// See: Expression::Cascade in crates/beamtalk-core/src/ast.rs
