@@ -2,6 +2,7 @@
     {description, "Beamtalk Runtime - Actor and Future implementations"},
     {vsn, "0.1.0"},
     {modules, []},
-    {registered, []},
-    {applications, [kernel, stdlib]}
+    {registered, [beamtalk_classes]},
+    {applications, [kernel, stdlib]},
+    {mod, {beamtalk_runtime_app, []}}
 ]}.
