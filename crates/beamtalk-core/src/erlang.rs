@@ -1043,10 +1043,42 @@ impl CoreErlangGenerator {
                 write!(self.output, "let _ = ")?;
             }
 
-            // Generate the message send to the receiver variable
-            let receiver_expr =
-                Expression::Identifier(crate::ast::Identifier::new(&receiver_var, message.span));
-            self.generate_message_send(&receiver_expr, &message.selector, &message.arguments)?;
+            // Generate async message send to the receiver variable
+            let future_var = self.fresh_var("Future");
+            write!(
+                self.output,
+                "let {future_var} = call 'beamtalk_future':'new'() in "
+            )?;
+            write!(
+                self.output,
+                "let _ = call 'gen_server':'cast'({receiver_var}, {{"
+            )?;
+
+            // Selector
+            write!(self.output, "'")?;
+            match &message.selector {
+                crate::ast::MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+                crate::ast::MessageSelector::Keyword(parts) => {
+                    let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                    write!(self.output, "{name}")?;
+                }
+                crate::ast::MessageSelector::Binary(_) => {
+                    return Err(CodeGenError::Internal(
+                        "binary selectors cannot be used in cascades".to_string(),
+                    ));
+                }
+            }
+            write!(self.output, "', [")?;
+
+            // Arguments
+            for (j, arg) in message.arguments.iter().enumerate() {
+                if j > 0 {
+                    write!(self.output, ", ")?;
+                }
+                self.generate_expression(arg)?;
+            }
+
+            write!(self.output, "], {future_var}}}) in {future_var}")?;
 
             if !is_last {
                 write!(self.output, " in ")?;
