@@ -394,6 +394,8 @@ struct BeamChildGuard {
 impl Drop for BeamChildGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        // Wait to reap the process and prevent zombies
+        let _ = self.child.wait();
     }
 }
 
@@ -602,5 +604,42 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("does not contain a valid runtime"));
+    }
+
+    #[test]
+    fn beam_child_guard_kills_process_on_drop() {
+        use std::process::Command;
+
+        // Spawn a long-running process (sleep for 60 seconds)
+        let child = Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("Failed to spawn sleep process");
+
+        let pid = child.id();
+
+        // Wrap in guard and drop it
+        {
+            let _guard = BeamChildGuard { child };
+            // Guard is dropped here
+        }
+
+        // Give it a moment to clean up
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Verify the process is no longer running
+        // On Unix, kill -0 returns success if process exists, failure if it doesn't
+        #[cfg(unix)]
+        {
+            let result = Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .output()
+                .expect("Failed to run kill -0");
+            // kill -0 returns exit code 0 if process exists, non-zero if it doesn't
+            assert!(
+                !result.status.success(),
+                "Process should have been killed (kill -0 should fail)"
+            );
+        }
     }
 }
