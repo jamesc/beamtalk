@@ -1,6 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% @doc Unit tests for the beamtalk_classes registry.
+%%% Tests cover registration, lookup, hierarchy queries, method mutation,
+%%% and error handling for the global class registry.
 -module(beamtalk_classes_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -9,7 +12,7 @@
 %%====================================================================
 
 setup() ->
-    {ok, Pid} = beamtalk_classes:start_link(),
+    {ok, Pid} = beamtalk_classes:start_link_unnamed(),
     Pid.
 
 cleanup(Pid) ->
@@ -23,7 +26,7 @@ register_and_lookup_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              ClassInfo = #{
                  module => counter,
@@ -38,14 +41,14 @@ register_and_lookup_test_() ->
              },
              
              % Register class
-             ok = beamtalk_classes:register_class('Counter', ClassInfo),
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo),
              
              % Lookup should return the class info
-             {ok, Retrieved} = beamtalk_classes:lookup('Counter'),
+             {ok, Retrieved} = beamtalk_classes:lookup(Pid, 'Counter'),
              ?assertEqual(ClassInfo, Retrieved),
              
              % Lookup non-existent class
-             ?assertEqual(undefined, beamtalk_classes:lookup('NonExistent'))
+             ?assertEqual(undefined, beamtalk_classes:lookup(Pid, 'NonExistent'))
          end)]
      end}.
 
@@ -53,20 +56,20 @@ all_classes_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              % Initially empty
-             ?assertEqual([], beamtalk_classes:all_classes()),
+             ?assertEqual([], beamtalk_classes:all_classes(Pid)),
              
              % Register multiple classes
-             ok = beamtalk_classes:register_class('Counter', #{
+             ok = beamtalk_classes:register_class(Pid, 'Counter', #{
                  module => counter,
                  superclass => object,
                  methods => #{},
                  instance_variables => [],
                  class_variables => #{}
              }),
-             ok = beamtalk_classes:register_class('Point', #{
+             ok = beamtalk_classes:register_class(Pid, 'Point', #{
                  module => point,
                  superclass => object,
                  methods => #{},
@@ -75,7 +78,7 @@ all_classes_test_() ->
              }),
              
              % all_classes should return both
-             Classes = beamtalk_classes:all_classes(),
+             Classes = beamtalk_classes:all_classes(Pid),
              ?assertEqual(2, length(Classes)),
              ?assert(lists:member('Counter', Classes)),
              ?assert(lists:member('Point', Classes))
@@ -86,31 +89,31 @@ subclasses_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              % Build a simple hierarchy: Object <- Actor <- Counter
-             ok = beamtalk_classes:register_class('Object', #{
+             ok = beamtalk_classes:register_class(Pid, 'Object', #{
                  module => object,
                  superclass => none,
                  methods => #{},
                  instance_variables => [],
                  class_variables => #{}
              }),
-             ok = beamtalk_classes:register_class('Actor', #{
+             ok = beamtalk_classes:register_class(Pid, 'Actor', #{
                  module => actor,
                  superclass => 'Object',
                  methods => #{},
                  instance_variables => [],
                  class_variables => #{}
              }),
-             ok = beamtalk_classes:register_class('Counter', #{
+             ok = beamtalk_classes:register_class(Pid, 'Counter', #{
                  module => counter,
                  superclass => 'Actor',
                  methods => #{},
                  instance_variables => [],
                  class_variables => #{}
              }),
-             ok = beamtalk_classes:register_class('Point', #{
+             ok = beamtalk_classes:register_class(Pid, 'Point', #{
                  module => point,
                  superclass => 'Object',
                  methods => #{},
@@ -119,17 +122,20 @@ subclasses_test_() ->
              }),
              
              % Object has two direct subclasses
-             ObjectSubs = beamtalk_classes:subclasses_of('Object'),
+             ObjectSubs = beamtalk_classes:subclasses_of(Pid, 'Object'),
              ?assertEqual(2, length(ObjectSubs)),
              ?assert(lists:member('Actor', ObjectSubs)),
              ?assert(lists:member('Point', ObjectSubs)),
              
              % Actor has one direct subclass
-             ActorSubs = beamtalk_classes:subclasses_of('Actor'),
+             ActorSubs = beamtalk_classes:subclasses_of(Pid, 'Actor'),
              ?assertEqual(['Counter'], ActorSubs),
              
              % Counter has no subclasses
-             ?assertEqual([], beamtalk_classes:subclasses_of('Counter'))
+             ?assertEqual([], beamtalk_classes:subclasses_of(Pid, 'Counter')),
+             
+             % Non-existent class returns empty list
+             ?assertEqual([], beamtalk_classes:subclasses_of(Pid, 'NonExistent'))
          end)]
      end}.
 
@@ -137,7 +143,7 @@ add_method_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              % Register a class with one method
              ClassInfo = #{
@@ -149,14 +155,14 @@ add_method_test_() ->
                  instance_variables => [count],
                  class_variables => #{}
              },
-             ok = beamtalk_classes:register_class('Counter', ClassInfo),
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo),
              
              % Add a new method
              IncrementBlock = fun() -> ok end,
-             ok = beamtalk_classes:add_method('Counter', increment, IncrementBlock),
+             ok = beamtalk_classes:add_method(Pid, 'Counter', increment, IncrementBlock),
              
              % Verify the method was added
-             {ok, Updated} = beamtalk_classes:lookup('Counter'),
+             {ok, Updated} = beamtalk_classes:lookup(Pid, 'Counter'),
              Methods = maps:get(methods, Updated),
              ?assert(maps:is_key(increment, Methods)),
              #{block := Block} = maps:get(increment, Methods),
@@ -168,11 +174,11 @@ add_method_to_nonexistent_class_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              Block = fun() -> ok end,
              ?assertEqual({error, class_not_found}, 
-                          beamtalk_classes:add_method('NonExistent', foo, Block))
+                          beamtalk_classes:add_method(Pid, 'NonExistent', foo, Block))
          end)]
      end}.
 
@@ -180,7 +186,7 @@ remove_method_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              % Register a class with two methods
              ClassInfo = #{
@@ -193,13 +199,13 @@ remove_method_test_() ->
                  instance_variables => [count],
                  class_variables => #{}
              },
-             ok = beamtalk_classes:register_class('Counter', ClassInfo),
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo),
              
              % Remove a method
-             ok = beamtalk_classes:remove_method('Counter', increment),
+             ok = beamtalk_classes:remove_method(Pid, 'Counter', increment),
              
              % Verify the method was removed
-             {ok, Updated} = beamtalk_classes:lookup('Counter'),
+             {ok, Updated} = beamtalk_classes:lookup(Pid, 'Counter'),
              Methods = maps:get(methods, Updated),
              ?assertNot(maps:is_key(increment, Methods)),
              ?assert(maps:is_key(value, Methods))
@@ -210,10 +216,10 @@ remove_method_from_nonexistent_class_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              ?assertEqual({error, class_not_found}, 
-                          beamtalk_classes:remove_method('NonExistent', foo))
+                          beamtalk_classes:remove_method(Pid, 'NonExistent', foo))
          end)]
      end}.
 
@@ -221,7 +227,7 @@ overwrite_class_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     fun(_Pid) ->
+     fun(Pid) ->
          [?_test(begin
              % Register a class
              ClassInfo1 = #{
@@ -231,20 +237,20 @@ overwrite_class_test_() ->
                  instance_variables => [count],
                  class_variables => #{}
              },
-             ok = beamtalk_classes:register_class('Counter', ClassInfo1),
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo1),
              
              % Re-register with different info (simulating hot reload)
              ClassInfo2 = #{
                  module => counter,
                  superclass => actor,
-                 methods => #{value => {}, increment => #{}},
+                 methods => #{value => #{}, increment => #{}},
                  instance_variables => [count, step],
                  class_variables => #{}
              },
-             ok = beamtalk_classes:register_class('Counter', ClassInfo2),
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo2),
              
              % Lookup should return the new info
-             {ok, Retrieved} = beamtalk_classes:lookup('Counter'),
+             {ok, Retrieved} = beamtalk_classes:lookup(Pid, 'Counter'),
              ?assertEqual(ClassInfo2, Retrieved)
          end)]
      end}.

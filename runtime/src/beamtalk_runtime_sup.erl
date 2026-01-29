@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Top-level supervisor for the Beamtalk runtime.
+%%% @doc Top-level supervisor for the Beamtalk runtime.
 -module(beamtalk_runtime_sup).
 -behaviour(supervisor).
 
@@ -17,7 +17,7 @@ start_link() ->
 init([]) ->
     SupFlags = #{
         strategy => one_for_one,
-        intensity => 10,
+        intensity => 5,
         period => 10
     },
     

@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Application callback module for the Beamtalk runtime.
+%%% @doc Application callback module for the Beamtalk runtime.
 -module(beamtalk_runtime_app).
 -behaviour(application).
 
