@@ -805,12 +805,13 @@ handle_load(Path, State = #state{loaded_modules = LoadedModules}) ->
 %% @private
 %% Derive module name from file path.
 %% Example: "examples/counter.bt" -> counter
+%% Note: Runtime modules use `beamtalk_*` prefix, so user modules can safely
+%% use short names without collision risk.
 -spec derive_module_name(string()) -> atom().
 derive_module_name(Path) ->
     %% Get base filename without extension
     Basename = filename:basename(Path, ".bt"),
-    %% Convert to atom with bt_ prefix to avoid conflicts
-    list_to_atom("bt_" ++ Basename).
+    list_to_atom(Basename).
 
 %% @private
 %% Compile a file via the daemon and extract class metadata.
