@@ -31,6 +31,10 @@ parse_bindings_request_test() ->
     Request = <<"{\"type\":\"bindings\"}">>,
     ?assertEqual({get_bindings}, beamtalk_repl:parse_request(Request)).
 
+parse_load_request_test() ->
+    Request = <<"{\"type\":\"load\",\"path\":\"examples/counter.bt\"}">>,
+    ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl:parse_request(Request)).
+
 parse_raw_expression_test() ->
     %% Non-JSON input is treated as a raw expression
     Request = <<"counter getValue">>,

@@ -78,7 +78,8 @@
     port :: inet:port_number(),
     bindings :: map(),
     daemon_socket_path :: string(),
-    eval_counter :: non_neg_integer()
+    eval_counter :: non_neg_integer(),
+    loaded_modules :: [atom()]
 }).
 
 %%% Public API
@@ -158,7 +159,8 @@ init({Port, Options}) ->
                 port = ActualPort,
                 bindings = #{},
                 daemon_socket_path = DaemonSocketPath,
-                eval_counter = 0
+                eval_counter = 0,
+                loaded_modules = []
             }};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
@@ -233,6 +235,15 @@ handle_info({client_request, Request, ClientPid}, State) ->
         {get_bindings} ->
             ClientPid ! {response, format_bindings(State#state.bindings)},
             {noreply, State};
+        {load_file, Path} ->
+            case handle_load(Path, State) of
+                {ok, Classes, NewState} ->
+                    ClientPid ! {response, format_loaded(Classes)},
+                    {noreply, NewState};
+                {error, Reason, NewState} ->
+                    ClientPid ! {response, format_error(Reason)},
+                    {noreply, NewState}
+            end;
         {error, ParseError} ->
             ClientPid ! {response, format_error(ParseError)},
             {noreply, State}
@@ -287,7 +298,7 @@ handle_client_loop(Socket, ReplPid) ->
 %% @private
 %% Parse a request from the CLI.
 %% Expected format: JSON with "type" field.
--spec parse_request(binary()) -> {eval, string()} | {clear_bindings} | {get_bindings} | {error, term()}.
+-spec parse_request(binary()) -> {eval, string()} | {clear_bindings} | {get_bindings} | {load_file, string()} | {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
         %% Remove trailing newline if present
@@ -300,6 +311,8 @@ parse_request(Data) when is_binary(Data) ->
                 {clear_bindings};
             {ok, #{<<"type">> := <<"bindings">>}} ->
                 {get_bindings};
+            {ok, #{<<"type">> := <<"load">>, <<"path">> := Path}} ->
+                {load_file, binary_to_list(Path)};
             {ok, _Other} ->
                 {error, {invalid_request, unknown_type}};
             {error, _Reason} ->
@@ -436,6 +449,12 @@ format_bindings(Bindings) ->
         Bindings
     ),
     jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
+
+%% @private
+%% Format a loaded file response as JSON.
+-spec format_loaded([string()]) -> binary().
+format_loaded(Classes) ->
+    jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => [list_to_binary(C) || C <- Classes]}).
 
 %% @private
 %% Convert an Erlang term to a JSON-encodable value for jsx.
@@ -738,3 +757,187 @@ extract_assignment(Expression) ->
         nomatch ->
             none
     end.
+
+%% @private
+%% Load a Beamtalk file and register its classes.
+-spec handle_load(string(), #state{}) -> {ok, [string()], #state{}} | {error, term(), #state{}}.
+handle_load(Path, State = #state{loaded_modules = LoadedModules}) ->
+    %% Check if file exists
+    case filelib:is_file(Path) of
+        false ->
+            {error, {file_not_found, Path}, State};
+        true ->
+            %% Read file source
+            case file:read_file(Path) of
+                {error, Reason} ->
+                    {error, {read_error, Reason}, State};
+                {ok, SourceBin} ->
+                    Source = binary_to_list(SourceBin),
+                    %% Derive module name from path
+                    ModuleName = derive_module_name(Path),
+                    %% Compile via daemon
+                    case compile_file_via_daemon(Source, ModuleName, State) of
+                        {ok, Binary, ClassNames} ->
+                            %% Load the module (persistent, not deleted)
+                            case code:load_binary(ModuleName, Path, Binary) of
+                                {module, ModuleName} ->
+                                    %% Register classes with beamtalk_classes
+                                    register_classes(ClassNames, ModuleName),
+                                    %% Track loaded module
+                                    NewState = State#state{
+                                        loaded_modules = [ModuleName | LoadedModules]
+                                    },
+                                    {ok, ClassNames, NewState};
+                                {error, Reason} ->
+                                    {error, {load_error, Reason}, State}
+                            end;
+                        {error, Reason} ->
+                            {error, Reason, State}
+                    end
+            end
+    end.
+
+%% @private
+%% Derive module name from file path.
+%% Example: "examples/counter.bt" -> counter
+-spec derive_module_name(string()) -> atom().
+derive_module_name(Path) ->
+    %% Get base filename without extension
+    Basename = filename:basename(Path, ".bt"),
+    %% Convert to atom with bt_ prefix to avoid conflicts
+    list_to_atom("bt_" ++ Basename).
+
+%% @private
+%% Compile a file via the daemon and extract class metadata.
+-spec compile_file_via_daemon(string(), atom(), #state{}) ->
+    {ok, binary(), [string()]} | {error, term()}.
+compile_file_via_daemon(Source, ModuleName, State) ->
+    case compile_via_daemon_socket_for_file(Source, ModuleName, State) of
+        {ok, Binary, ClassNames} ->
+            {ok, Binary, ClassNames};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% @private
+%% Compile file source and extract class names from daemon response.
+-spec compile_via_daemon_socket_for_file(string(), atom(), #state{}) ->
+    {ok, binary(), [string()]} | {error, term()}.
+compile_via_daemon_socket_for_file(Source, ModuleName, #state{daemon_socket_path = SocketPath}) ->
+    case connect_to_daemon(SocketPath) of
+        {ok, Socket} ->
+            try
+                %% Use compile method (not compile_expression) for files
+                RequestId = erlang:unique_integer([positive]),
+                Request = jsx:encode(#{
+                    <<"jsonrpc">> => <<"2.0">>,
+                    <<"id">> => RequestId,
+                    <<"method">> => <<"compile">>,
+                    <<"params">> => #{
+                        <<"path">> => list_to_binary(atom_to_list(ModuleName) ++ ".bt"),
+                        <<"source">> => list_to_binary(Source)
+                    }
+                }),
+                
+                ok = gen_tcp:send(Socket, [Request, <<"\n">>]),
+                
+                case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+                    {ok, ResponseLine} ->
+                        parse_file_compile_response(ResponseLine, ModuleName);
+                    {error, Reason} ->
+                        {error, {recv_error, Reason}}
+                end
+            after
+                gen_tcp:close(Socket)
+            end;
+        {error, _Reason} ->
+            {error, daemon_unavailable}
+    end.
+
+%% @private
+%% Parse compile response and extract bytecode + class metadata.
+-spec parse_file_compile_response(binary(), atom()) ->
+    {ok, binary(), [string()]} | {error, term()}.
+parse_file_compile_response(ResponseLine, ModuleName) ->
+    try
+        Response = jsx:decode(ResponseLine, [return_maps]),
+        case maps:get(<<"error">>, Response, undefined) of
+            undefined ->
+                case maps:get(<<"result">>, Response, undefined) of
+                    undefined ->
+                        {error, {daemon_error, <<"Invalid JSON-RPC response">>}};
+                    Result ->
+                        parse_file_compile_result(Result, ModuleName)
+                end;
+            ErrorObj ->
+                Msg = maps:get(<<"message">>, ErrorObj, <<"Unknown error">>),
+                {error, {daemon_error, Msg}}
+        end
+    catch
+        _:_ ->
+            {error, {daemon_error, <<"Invalid JSON in response">>}}
+    end.
+
+%% @private
+%% Parse file compile result and extract bytecode + class names.
+-spec parse_file_compile_result(map(), atom()) ->
+    {ok, binary(), [string()]} | {error, term()}.
+parse_file_compile_result(Result, ModuleName) ->
+    case maps:get(<<"success">>, Result, false) of
+        true ->
+            case maps:get(<<"core_erlang">>, Result, undefined) of
+                undefined ->
+                    {error, {daemon_error, <<"No core_erlang in response">>}};
+                CoreErlang ->
+                    %% Compile Core Erlang to BEAM
+                    case compile_core_erlang(CoreErlang, ModuleName) of
+                        {ok, Binary} ->
+                            %% Extract class names from result metadata
+                            ClassNames = extract_class_names(Result),
+                            {ok, Binary, ClassNames};
+                        {error, Reason} ->
+                            {error, Reason}
+                    end
+            end;
+        false ->
+            Diagnostics = maps:get(<<"diagnostics">>, Result, []),
+            Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
+            {error, {compile_error, format_daemon_diagnostics(Messages)}}
+    end.
+
+%% @private
+%% Extract class names from compile result.
+-spec extract_class_names(map()) -> [string()].
+extract_class_names(Result) ->
+    case maps:get(<<"classes">>, Result, undefined) of
+        undefined ->
+            [];
+        ClassesBinList ->
+            [binary_to_list(C) || C <- ClassesBinList]
+    end.
+
+%% @private
+%% Register loaded classes with beamtalk_classes.
+-spec register_classes([string()], atom()) -> ok.
+register_classes([], _ModuleName) ->
+    ok;
+register_classes(ClassNames, ModuleName) ->
+    lists:foreach(
+        fun(ClassName) ->
+            ClassInfo = #{
+                module => ModuleName,
+                superclass => none,
+                methods => #{},
+                instance_variables => [],
+                class_variables => #{},
+                source_file => undefined
+            },
+            case beamtalk_classes:register_class(list_to_atom(ClassName), ClassInfo) of
+                ok -> ok;
+                {error, Reason} ->
+                    io:format(standard_error, "Warning: Failed to register class ~s: ~p~n", 
+                              [ClassName, Reason])
+            end
+        end,
+        ClassNames
+    ).
