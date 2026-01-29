@@ -383,15 +383,7 @@ fn connect_with_retries(port: u16) -> Result<ReplClient> {
 /// Format a value for display.
 fn format_value(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::String(s) => {
-            // Check for special formatting
-            if s.starts_with("#<pid ") {
-                // Actor reference - format nicely
-                s.replace("#<pid ", "#Actor<").replace(">\"", ">")
-            } else {
-                s.clone()
-            }
-        }
+        serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => "nil".to_string(),
@@ -662,8 +654,14 @@ mod tests {
 
     #[test]
     fn format_value_pid() {
-        let value = serde_json::json!("#<pid <0.123.0>>");
+        let value = serde_json::json!("#Actor<<0.123.0>>");
         assert_eq!(format_value(&value), "#Actor<<0.123.0>>");
+    }
+
+    #[test]
+    fn format_value_block() {
+        let value = serde_json::json!("a Block/2");
+        assert_eq!(format_value(&value), "a Block/2");
     }
 
     #[test]

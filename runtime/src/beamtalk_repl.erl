@@ -474,9 +474,13 @@ term_to_json(Value) when is_list(Value) ->
         false ->
             [term_to_json(E) || E <- Value]
     end;
+term_to_json(Value) when is_function(Value) ->
+    %% Format function as "a Block/N" where N is arity
+    {arity, Arity} = erlang:fun_info(Value, arity),
+    iolist_to_binary([<<"a Block/">>, integer_to_list(Arity)]);
 term_to_json(Value) when is_pid(Value) ->
-    %% Format pid as string
-    iolist_to_binary([<<"#<pid ">>, pid_to_list(Value), <<">">>]);
+    %% Format pid as #Actor<pid>
+    iolist_to_binary([<<"#Actor<">>, pid_to_list(Value), <<">">>]);
 term_to_json(Value) when is_map(Value) ->
     %% Convert map keys and values
     maps:fold(
