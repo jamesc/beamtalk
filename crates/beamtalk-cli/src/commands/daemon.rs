@@ -487,6 +487,7 @@ fn dispatch_method(
 
     match method {
         "compile" => handle_compile(params, id, service),
+        "compile_expression" => handle_compile_expression(params, id),
         "diagnostics" => handle_diagnostics(params, id, service),
         "shutdown" => {
             info!("Received shutdown request, stopping daemon");
@@ -671,6 +672,98 @@ fn handle_diagnostics(
                 id,
                 INTERNAL_ERROR,
                 format!("Failed to serialize diagnostics: {e}"),
+            )
+        }
+    }
+}
+
+/// Parameters for the `compile_expression` method.
+#[derive(Debug, Deserialize)]
+struct CompileExpressionParams {
+    /// The expression source code.
+    source: String,
+    /// Unique module name for this evaluation.
+    module_name: String,
+}
+
+/// Result of the `compile_expression` method.
+#[derive(Debug, Serialize)]
+struct CompileExpressionResult {
+    success: bool,
+    core_erlang: Option<String>,
+    diagnostics: Vec<DiagnosticInfo>,
+}
+
+/// Handle the `compile_expression` method for REPL evaluation.
+///
+/// This parses a single expression and generates Core Erlang code
+/// that can be compiled and executed by the Erlang runtime.
+fn handle_compile_expression(
+    params: serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> JsonRpcResponse {
+    let params: CompileExpressionParams = match serde_json::from_value(params) {
+        Ok(p) => p,
+        Err(e) => {
+            return JsonRpcResponse::error(id, INVALID_PARAMS, format!("Invalid params: {e}"));
+        }
+    };
+
+    // Parse the expression as a module (it will contain one expression)
+    let tokens = beamtalk_core::parse::lex_with_eof(&params.source);
+    let (module, parse_diagnostics) = beamtalk_core::parse::parse(tokens);
+
+    // Convert diagnostics
+    let diagnostics: Vec<DiagnosticInfo> = parse_diagnostics
+        .iter()
+        .map(|d| DiagnosticInfo {
+            message: d.message.to_string(),
+            severity: match d.severity {
+                beamtalk_core::parse::Severity::Error => "error".to_string(),
+                beamtalk_core::parse::Severity::Warning => "warning".to_string(),
+            },
+            start: d.span.start(),
+            end: d.span.end(),
+        })
+        .collect();
+
+    let has_errors = diagnostics.iter().any(|d| d.severity == "error");
+
+    // Generate Core Erlang for the expression
+    let core_erlang = if has_errors || module.expressions.is_empty() {
+        None
+    } else {
+        // Get the first (and likely only) expression
+        let expression = &module.expressions[0];
+
+        // Generate REPL module for this expression
+        match beamtalk_core::erlang::generate_repl_expression(expression, &params.module_name) {
+            Ok(code) => Some(code),
+            Err(e) => {
+                error!("Code generation failed: {e}");
+                return JsonRpcResponse::error(
+                    id,
+                    INTERNAL_ERROR,
+                    format!("Code generation failed: {e}"),
+                );
+            }
+        }
+    };
+
+    let result = CompileExpressionResult {
+        success: !has_errors && core_erlang.is_some(),
+        core_erlang,
+        diagnostics,
+    };
+
+    match serde_json::to_value(result) {
+        Ok(value) => JsonRpcResponse::success(id, value),
+        Err(e) => {
+            error!("Failed to serialize result: {e}");
+            JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                format!("Failed to serialize result: {e}"),
             )
         }
     }
