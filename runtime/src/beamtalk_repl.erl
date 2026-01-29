@@ -69,32 +69,30 @@
 %% Internal exports for testing
 -export([parse_request/1, format_response/1, format_error/1]).
 
--define(DEFAULT_COMPILER_HOST, "localhost").
--define(DEFAULT_COMPILER_PORT, 8081).
 -define(ACCEPT_TIMEOUT, 100).
 -define(RECV_TIMEOUT, 30000).
+-define(DAEMON_CONNECT_TIMEOUT, 5000).
 
 -record(state, {
     listen_socket :: gen_tcp:socket() | undefined,
     port :: inet:port_number(),
     bindings :: map(),
-    compiler_host :: string(),
-    compiler_port :: inet:port_number(),
+    daemon_socket_path :: string(),
     eval_counter :: non_neg_integer()
 }).
 
 %%% Public API
 
 %% @doc Start the REPL server on the given port.
-%% Uses default compiler daemon settings (localhost:8081).
+%% Uses default compiler daemon socket path.
 -spec start_link(inet:port_number()) -> {ok, pid()} | {error, term()}.
 start_link(Port) ->
     start_link(Port, #{}).
 
 %% @doc Start the REPL server with options.
 %% Options:
-%%   - compiler_host: hostname of compiler daemon (default: "localhost")
-%%   - compiler_port: port of compiler daemon (default: 8081)
+%%   - daemon_socket_path: Unix socket path for compiler daemon
+%%                         (default: ~/.beamtalk/daemon.sock)
 -spec start_link(inet:port_number(), map()) -> {ok, pid()} | {error, term()}.
 start_link(Port, Options) ->
     gen_server:start_link(?MODULE, {Port, Options}, []).
@@ -130,8 +128,23 @@ get_port(Pid) ->
 
 %% @private
 init({Port, Options}) ->
-    CompilerHost = maps:get(compiler_host, Options, ?DEFAULT_COMPILER_HOST),
-    CompilerPort = maps:get(compiler_port, Options, ?DEFAULT_COMPILER_PORT),
+    %% Determine daemon socket path (default: ~/.beamtalk/daemon.sock)
+    %% If no explicit path is provided and HOME is unset, fail explicitly so
+    %% behavior matches the daemon (which requires HOME to be set).
+    DaemonSocketPath = case maps:get(daemon_socket_path, Options, undefined) of
+        undefined ->
+            case os:getenv("HOME") of
+                false ->
+                    erlang:error({missing_env_var,
+                                  "HOME",
+                                  "Beamtalk REPL requires HOME to be set to locate the compiler daemon "
+                                  "socket. Either set HOME or pass daemon_socket_path in Options."});
+                Home ->
+                    filename:join([Home, ".beamtalk", "daemon.sock"])
+            end;
+        Path ->
+            Path
+    end,
     
     %% Open TCP listen socket
     case gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {packet, line}]) of
@@ -144,8 +157,7 @@ init({Port, Options}) ->
                 listen_socket = ListenSocket,
                 port = ActualPort,
                 bindings = #{},
-                compiler_host = CompilerHost,
-                compiler_port = CompilerPort,
+                daemon_socket_path = DaemonSocketPath,
                 eval_counter = 0
             }};
         {error, Reason} ->
@@ -290,7 +302,7 @@ parse_request(Data) when is_binary(Data) ->
                 {get_bindings};
             {ok, _Other} ->
                 {error, {invalid_request, unknown_type}};
-            {error, Reason} ->
+            {error, _Reason} ->
                 %% Not JSON, treat as raw expression for backwards compatibility
                 case Trimmed of
                     <<>> -> {error, empty_expression};
@@ -548,7 +560,7 @@ do_eval(Expression, State = #state{bindings = Bindings, eval_counter = Counter})
     %% For now, we have a simplified evaluation that handles basic expressions
     %% TODO: Connect to compiler daemon for full Beamtalk compilation
     case compile_expression(Expression, ModuleName, Bindings, NewState) of
-        {ok, Binary, ResultExpr} ->
+        {ok, Binary, _ResultExpr} ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
@@ -579,293 +591,261 @@ do_eval(Expression, State = #state{bindings = Bindings, eval_counter = Counter})
     end.
 
 %% @private
-%% Compile a Beamtalk expression to bytecode.
-%% This is a simplified version - full implementation would call compiler daemon.
+%% Compile a Beamtalk expression to bytecode via compiler daemon.
 -spec compile_expression(string(), atom(), map(), #state{}) ->
     {ok, binary(), term()} | {error, term()}.
-compile_expression(Expression, ModuleName, Bindings, _State) ->
-    %% For now, implement a basic eval that can handle simple expressions
-    %% This will be replaced with proper compiler daemon integration
-    
-    %% Parse the expression to determine what operations are needed
-    case parse_simple_expression(Expression, Bindings) of
-        {ok, ErlangExpr} ->
-            %% Generate a simple module that evaluates the expression
-            Source = generate_eval_module(ModuleName, ErlangExpr, Bindings),
-            %% Compile to beam
-            case compile_source(Source) of
-                {ok, Binary} ->
-                    {ok, Binary, ErlangExpr};
-                {error, Reason} ->
-                    {error, Reason}
+compile_expression(Expression, ModuleName, _Bindings, State) ->
+    case compile_via_daemon(Expression, ModuleName, State) of
+        {ok, Binary} ->
+            {ok, Binary, {daemon_compiled}};
+        {error, daemon_unavailable} ->
+            {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
+        {error, {compile_error, Diagnostics}} ->
+            {error, format_daemon_diagnostics(Diagnostics)};
+        {error, {core_compile_error, Errors}} ->
+            {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Errors]))};
+        {error, {daemon_error, Msg}} ->
+            {error, iolist_to_binary([<<"Daemon error: ">>, Msg])};
+        {error, Reason} ->
+            {error, iolist_to_binary(io_lib:format("Compilation error: ~p", [Reason]))}
+    end.
+
+%% @private
+%% Compile expression via compiler daemon using JSON-RPC over Unix socket.
+-spec compile_via_daemon(string(), atom(), #state{}) ->
+    {ok, binary()} | {error, term()}.
+compile_via_daemon(Expression, ModuleName, #state{daemon_socket_path = SocketPath}) ->
+    %% Try to connect to daemon
+    case connect_to_daemon(SocketPath) of
+        {ok, Socket} ->
+            try
+                compile_via_daemon_socket(Expression, ModuleName, Socket)
+            after
+                gen_tcp:close(Socket)
             end;
+        {error, _Reason} ->
+            {error, daemon_unavailable}
+    end.
+
+%% @private
+%% Connect to the compiler daemon Unix socket.
+-spec connect_to_daemon(string()) -> {ok, gen_tcp:socket()} | {error, term()}.
+connect_to_daemon(SocketPath) ->
+    %% Use local address family for Unix socket
+    case gen_tcp:connect({local, SocketPath}, 0, 
+                         [binary, {active, false}, {packet, line}],
+                         ?DAEMON_CONNECT_TIMEOUT) of
+        {ok, Socket} ->
+            {ok, Socket};
         {error, Reason} ->
             {error, Reason}
     end.
 
 %% @private
-%% Parse a simple expression into an Erlang term/expression.
-%% This handles basic cases while full compiler integration is developed.
--spec parse_simple_expression(string(), map()) -> {ok, term()} | {error, term()}.
-parse_simple_expression(Expression, Bindings) ->
-    Trimmed = string:trim(Expression),
+%% Send compile request to daemon and process response.
+-spec compile_via_daemon_socket(string(), atom(), gen_tcp:socket()) ->
+    {ok, binary()} | {error, term()}.
+compile_via_daemon_socket(Expression, ModuleName, Socket) ->
+    %% Build JSON-RPC request
+    %% Note: Using simple string formatting since we don't have jsx dependency yet
+    RequestId = erlang:unique_integer([positive]),
+    ExpressionEscaped = escape_json_string(list_to_binary(Expression)),
+    ModuleNameBin = atom_to_binary(ModuleName, utf8),
+    Request = iolist_to_binary([
+        <<"{\"jsonrpc\":\"2.0\",\"id\":">>,
+        integer_to_binary(RequestId),
+        <<",\"method\":\"compile_expression\",\"params\":{\"source\":\"">>,
+        ExpressionEscaped,
+        <<"\",\"module_name\":\"">>,
+        ModuleNameBin,
+        <<"\"}}\n">>
+    ]),
     
-    %% Check for various expression types
-    case Trimmed of
-        "" ->
-            {error, empty_expression};
-        _ ->
-            %% Try to parse as different expression types
-            parse_expression_type(Trimmed, Bindings)
+    %% Send request
+    ok = gen_tcp:send(Socket, Request),
+    
+    %% Receive response
+    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+        {ok, ResponseLine} ->
+            parse_daemon_response(ResponseLine, ModuleName);
+        {error, Reason} ->
+            {error, {recv_error, Reason}}
     end.
 
-parse_expression_type(Expr, Bindings) ->
-    %% Assignment: varName := expression
-    case re:run(Expr, "^([a-zA-Z_][a-zA-Z0-9_]*)\\s*:=\\s*(.+)$", [{capture, [1, 2], list}]) of
-        {match, [_VarName, ValueExpr]} ->
-            %% Parse the value expression
-            parse_expression_type(ValueExpr, Bindings);
-        nomatch ->
-            parse_value_expression(Expr, Bindings)
-    end.
-
-parse_value_expression(Expr, Bindings) ->
-    %% Integer literal
-    case re:run(Expr, "^-?[0-9]+$", [{capture, none}]) of
-        match ->
-            {ok, {literal, list_to_integer(Expr)}};
-        nomatch ->
-            parse_float_or_string(Expr, Bindings)
-    end.
-
-parse_float_or_string(Expr, Bindings) ->
-    %% Float literal
-    case re:run(Expr, "^-?[0-9]+\\.[0-9]+$", [{capture, none}]) of
-        match ->
-            {ok, {literal, list_to_float(Expr)}};
-        nomatch ->
-            parse_string_or_symbol(Expr, Bindings)
-    end.
-
-parse_string_or_symbol(Expr, Bindings) ->
-    %% String literal (single or double quoted)
-    case re:run(Expr, "^['\"](.*)['\"]$", [{capture, [1], list}]) of
-        {match, [StrValue]} ->
-            {ok, {literal, list_to_binary(StrValue)}};
-        nomatch ->
-            parse_symbol_or_true(Expr, Bindings)
-    end.
-
-parse_symbol_or_true(Expr, Bindings) ->
-    %% Symbol literal (#symbol)
-    case re:run(Expr, "^#([a-zA-Z_][a-zA-Z0-9_]*)$", [{capture, [1], list}]) of
-        {match, [SymName]} ->
-            {ok, {literal, list_to_atom(SymName)}};
-        nomatch ->
-            parse_boolean_or_nil(Expr, Bindings)
-    end.
-
-parse_boolean_or_nil(Expr, Bindings) ->
-    %% Boolean and nil literals
-    case Expr of
-        "true" -> {ok, {literal, true}};
-        "false" -> {ok, {literal, false}};
-        "nil" -> {ok, {literal, nil}};
-        _ -> parse_variable_or_spawn(Expr, Bindings)
-    end.
-
-parse_variable_or_spawn(Expr, Bindings) ->
-    %% Actor spawn: ClassName spawn
-    case re:run(Expr, "^([A-Z][a-zA-Z0-9_]*)\\s+spawn$", [{capture, [1], list}]) of
-        {match, [ClassName]} ->
-            {ok, {spawn, list_to_atom(string:lowercase(ClassName))}};
-        nomatch ->
-            parse_spawn_with_args(Expr, Bindings)
-    end.
-
-parse_spawn_with_args(Expr, Bindings) ->
-    %% Actor spawn with args: ClassName spawnWith: args  
-    case re:run(Expr, "^([A-Z][a-zA-Z0-9_]*)\\s+spawnWith:\\s*(.+)$", [{capture, [1, 2], list}]) of
-        {match, [ClassName, ArgsExpr]} ->
-            case parse_expression_type(ArgsExpr, Bindings) of
-                {ok, ArgsParsed} ->
-                    {ok, {spawn_with, list_to_atom(string:lowercase(ClassName)), ArgsParsed}};
-                Error ->
-                    Error
+%% @private
+%% Parse daemon JSON-RPC response.
+-spec parse_daemon_response(binary(), atom()) -> {ok, binary()} | {error, term()}.
+parse_daemon_response(ResponseLine, ModuleName) ->
+    %% Simple JSON parsing for daemon response
+    case extract_json_field(ResponseLine, <<"error">>) of
+        {ok, _ErrorObj} ->
+            %% JSON-RPC error
+            case extract_json_string(ResponseLine, <<"message">>) of
+                {ok, Msg} -> {error, {daemon_error, Msg}};
+                error -> {error, {daemon_error, <<"Unknown error">>}}
             end;
-        nomatch ->
-            parse_message_send(Expr, Bindings)
-    end.
-
-parse_message_send(Expr, Bindings) ->
-    %% Message send: receiver selector (unary)
-    case re:run(Expr, "^([a-zA-Z_][a-zA-Z0-9_]*)\\s+([a-zA-Z_][a-zA-Z0-9_]*)$", [{capture, [1, 2], list}]) of
-        {match, [Receiver, Selector]} ->
-            %% Check if receiver is a bound variable
-            ReceiverAtom = list_to_atom(Receiver),
-            case maps:is_key(ReceiverAtom, Bindings) of
-                true ->
-                    {ok, {send, {var, ReceiverAtom}, list_to_atom(Selector), []}};
-                false ->
-                    %% Could be a class name for spawn
-                    {error, {undefined_variable, Receiver}}
-            end;
-        nomatch ->
-            parse_keyword_message(Expr, Bindings)
-    end.
-
-parse_keyword_message(Expr, Bindings) ->
-    %% Simple keyword message: receiver selector: arg
-    case re:run(Expr, "^([a-zA-Z_][a-zA-Z0-9_]*)\\s+([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.+)$", 
-                [{capture, [1, 2, 3], list}]) of
-        {match, [Receiver, Selector, ArgExpr]} ->
-            ReceiverAtom = list_to_atom(Receiver),
-            case maps:is_key(ReceiverAtom, Bindings) of
-                true ->
-                    case parse_expression_type(ArgExpr, Bindings) of
-                        {ok, ArgParsed} ->
-                            SelectorAtom = list_to_atom(Selector ++ ":"),
-                            {ok, {send, {var, ReceiverAtom}, SelectorAtom, [ArgParsed]}};
-                        Error ->
-                            Error
+        error ->
+            %% Check for result
+            case extract_json_field(ResponseLine, <<"result">>) of
+                {ok, _Result} ->
+                    %% Check success field
+                    case extract_json_bool(ResponseLine, <<"success">>) of
+                        {ok, true} ->
+                            %% Get Core Erlang and compile to BEAM
+                            case extract_json_string(ResponseLine, <<"core_erlang">>) of
+                                {ok, CoreErlang} ->
+                                    compile_core_erlang(CoreErlang, ModuleName);
+                                error ->
+                                    {error, {daemon_error, <<"No core_erlang in response">>}}
+                            end;
+                        {ok, false} ->
+                            %% Compilation failed - extract diagnostics
+                            {error, {compile_error, extract_diagnostics(ResponseLine)}};
+                        error ->
+                            {error, {daemon_error, <<"Invalid response format">>}}
                     end;
-                false ->
-                    {error, {undefined_variable, Receiver}}
-            end;
-        nomatch ->
-            parse_await(Expr, Bindings)
-    end.
-
-parse_await(Expr, Bindings) ->
-    %% Await: expr await
-    case re:run(Expr, "^(.+)\\s+await$", [{capture, [1], list}]) of
-        {match, [InnerExpr]} ->
-            case parse_expression_type(InnerExpr, Bindings) of
-                {ok, Inner} ->
-                    {ok, {await, Inner}};
-                Error ->
-                    Error
-            end;
-        nomatch ->
-            parse_variable_ref(Expr, Bindings)
-    end.
-
-parse_variable_ref(Expr, Bindings) ->
-    %% Variable reference
-    case re:run(Expr, "^[a-zA-Z_][a-zA-Z0-9_]*$", [{capture, none}]) of
-        match ->
-            VarName = list_to_atom(Expr),
-            case maps:is_key(VarName, Bindings) of
-                true ->
-                    {ok, {var, VarName}};
-                false ->
-                    {error, {undefined_variable, Expr}}
-            end;
-        nomatch ->
-            {error, {syntax_error, io_lib:format("Cannot parse expression: ~s", [Expr])}}
+                error ->
+                    {error, {daemon_error, <<"Invalid JSON-RPC response">>}}
+            end
     end.
 
 %% @private
-%% Generate an Erlang module that evaluates the parsed expression.
--spec generate_eval_module(atom(), term(), map()) -> string().
-generate_eval_module(ModuleName, ParsedExpr, Bindings) ->
-    %% Generate the expression evaluation code
-    %% Bindings are accessed via helper function to avoid Erlang's single-assignment
-    ExprCode = generate_expr_code(ParsedExpr),
-    
-    %% Generate binding helper function
-    BindingHelperCode = generate_binding_helper(Bindings),
-    
-    lists:flatten(io_lib:format(
-        "-module('~s').~n"
-        "-export([eval/1]).~n"
-        "~n"
-        "eval(Bindings) ->~n"
-        "    ~s.~n"
-        "~n"
-        "~s",
-        [ModuleName, ExprCode, BindingHelperCode]
-    )).
-
-generate_binding_helper(Bindings) when map_size(Bindings) == 0 ->
-    %% No bindings - generate a simple function that always returns error
-    "get_binding(_Name, _Bindings) -> error({undefined_variable, _Name}).\n";
-generate_binding_helper(_Bindings) ->
-    %% Generate helper function to look up bindings
-    "get_binding(Name, Bindings) ->\n"
-    "    case maps:find(Name, Bindings) of\n"
-    "        {ok, Value} -> Value;\n"
-    "        error -> error({undefined_variable, Name})\n"
-    "    end.\n".
-
-generate_expr_code({literal, Value}) when is_integer(Value) ->
-    io_lib:format("~p", [Value]);
-generate_expr_code({literal, Value}) when is_float(Value) ->
-    io_lib:format("~p", [Value]);
-generate_expr_code({literal, Value}) when is_atom(Value) ->
-    %% Use ~p for safe escaping of atom names with special characters
-    io_lib:format("~p", [Value]);
-generate_expr_code({literal, Value}) when is_binary(Value) ->
-    %% Use ~p for safe escaping to prevent code injection
-    io_lib:format("~p", [Value]);
-generate_expr_code({var, Name}) ->
-    %% Use helper function to look up binding (avoids Erlang single-assignment issues)
-    io_lib:format("get_binding('~s', Bindings)", [Name]);
-generate_expr_code({spawn, ClassName}) ->
-    io_lib:format("beamtalk_actor:spawn_actor('~s', [])", [ClassName]);
-generate_expr_code({spawn_with, ClassName, ArgsExpr}) ->
-    ArgsCode = generate_expr_code(ArgsExpr),
-    io_lib:format("beamtalk_actor:spawn_actor('~s', ~s)", [ClassName, ArgsCode]);
-generate_expr_code({send, Receiver, Selector, Args}) ->
-    ReceiverCode = generate_expr_code(Receiver),
-    ArgsCode = case Args of
-        [] -> "[]";
-        _ -> "[" ++ string:join([generate_expr_code(A) || A <- Args], ", ") ++ "]"
-    end,
-    %% Create a future and send async message
-    io_lib:format(
-        "begin~n"
-        "        __Future__ = beamtalk_future:new(),~n"
-        "        gen_server:cast(~s, {'~s', ~s, __Future__}),~n"
-        "        __Future__~n"
-        "    end",
-        [ReceiverCode, Selector, ArgsCode]
-    );
-generate_expr_code({await, Inner}) ->
-    InnerCode = generate_expr_code(Inner),
-    io_lib:format("beamtalk_future:await(~s)", [InnerCode]);
-generate_expr_code(Other) ->
-    io_lib:format("~p", [Other]).
-
-%% @private
-%% Compile Erlang source to bytecode.
--spec compile_source(string()) -> {ok, binary()} | {error, term()}.
-compile_source(Source) ->
-    %% Write to temporary file and compile
-    %% Alternative: use compile:forms/2 with erl_scan/erl_parse
+%% Compile Core Erlang source to BEAM bytecode.
+%% TODO: BT-56 (security) - This writes to a predictable temp file path which
+%% could be exploited via symlink attacks on multi-user systems. Should use
+%% a per-user private directory with securely created temp files, or use
+%% in-memory compilation APIs if available.
+-spec compile_core_erlang(binary(), atom()) -> {ok, binary()} | {error, term()}.
+compile_core_erlang(CoreErlangBin, ModuleName) ->
+    %% Write Core Erlang to temp file (filename must match module name)
     TempDir = os:getenv("TMPDIR", "/tmp"),
-    TempFile = filename:join(
-        TempDir,
-        "beamtalk_repl_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".erl"
-    ),
+    TempFile = filename:join(TempDir, atom_to_list(ModuleName) ++ ".core"),
     try
-        ok = file:write_file(TempFile, Source),
-        case compile:file(TempFile, [binary, return_errors]) of
-            {ok, _ModuleName, Binary} ->
+        ok = file:write_file(TempFile, CoreErlangBin),
+        %% Compile Core Erlang to BEAM
+        case compile:file(TempFile, [from_core, binary, return_errors]) of
+            {ok, _CompiledModule, Binary} ->
                 {ok, Binary};
-            {ok, _ModuleName, Binary, _Warnings} ->
+            {ok, _CompiledModule, Binary, _Warnings} ->
                 {ok, Binary};
             {error, Errors, _Warnings} ->
-                {error, format_compile_errors(Errors)}
+                {error, {core_compile_error, format_compile_errors(Errors)}}
         end
     catch
         _:Error ->
-            {error, Error}
+            {error, {core_compile_error, Error}}
     after
         file:delete(TempFile)
     end.
 
 %% @private
+%% Extract a JSON field value (very simple extraction).
+-spec extract_json_field(binary(), binary()) -> {ok, binary()} | error.
+extract_json_field(Json, Field) ->
+    Pattern = <<"\"", Field/binary, "\":">>,
+    case binary:match(Json, Pattern) of
+        {Pos, Len} ->
+            %% Found field, extract value
+            Start = Pos + Len,
+            {ok, binary:part(Json, Start, byte_size(Json) - Start)};
+        nomatch ->
+            error
+    end.
+
+%% @private
+%% Extract a JSON string value (with unescaping).
+-spec extract_json_string(binary(), binary()) -> {ok, binary()} | error.
+extract_json_string(Json, Field) ->
+    Pattern = <<"\"", Field/binary, "\":\"">>,
+    case binary:match(Json, Pattern) of
+        {Pos, Len} ->
+            Start = Pos + Len,
+            Rest = binary:part(Json, Start, byte_size(Json) - Start),
+            %% Find closing quote (handling escapes)
+            case find_string_end(Rest, 0) of
+                {ok, EndPos} ->
+                    EscapedStr = binary:part(Rest, 0, EndPos),
+                    {ok, unescape_json_string(EscapedStr)};
+                error ->
+                    error
+            end;
+        nomatch ->
+            error
+    end.
+
+%% @private
+%% Find end of JSON string (handling escapes).
+-spec find_string_end(binary(), non_neg_integer()) -> {ok, non_neg_integer()} | error.
+find_string_end(<<>>, _Pos) ->
+    error;
+find_string_end(<<"\\", _, Rest/binary>>, Pos) ->
+    %% Escaped character, skip
+    find_string_end(Rest, Pos + 2);
+find_string_end(<<"\"", _/binary>>, Pos) ->
+    {ok, Pos};
+find_string_end(<<_, Rest/binary>>, Pos) ->
+    find_string_end(Rest, Pos + 1).
+
+%% @private
+%% Unescape JSON string escape sequences.
+%% NOTE: This is a simplified unescaper that only handles basic escape sequences
+%% (\n, \r, \t, \", \\). It does NOT handle:
+%% - Unicode escape sequences (\uXXXX)
+%% - Forward slash escaping (\/)
+%% - Invalid escape sequences are silently passed through
+%% TODO: BT-55 - Use a proper JSON parsing library (jsx or jiffy) for robust handling.
+-spec unescape_json_string(binary()) -> binary().
+unescape_json_string(Str) ->
+    unescape_json_string(Str, <<>>).
+
+unescape_json_string(<<>>, Acc) ->
+    Acc;
+unescape_json_string(<<"\\n", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\n>>);
+unescape_json_string(<<"\\r", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\r>>);
+unescape_json_string(<<"\\t", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\t>>);
+unescape_json_string(<<"\\\"", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\">>);
+unescape_json_string(<<"\\\\", Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, $\\>>);
+unescape_json_string(<<C, Rest/binary>>, Acc) ->
+    unescape_json_string(Rest, <<Acc/binary, C>>).
+
+%% @private
+%% Extract a JSON boolean value.
+-spec extract_json_bool(binary(), binary()) -> {ok, boolean()} | error.
+extract_json_bool(Json, Field) ->
+    case binary:match(Json, <<"\"", Field/binary, "\":true">>) of
+        {_, _} -> {ok, true};
+        nomatch ->
+            case binary:match(Json, <<"\"", Field/binary, "\":false">>) of
+                {_, _} -> {ok, false};
+                nomatch -> error
+            end
+    end.
+
+%% @private
+%% Extract diagnostics from response (simplified).
+-spec extract_diagnostics(binary()) -> list().
+extract_diagnostics(Json) ->
+    %% For now, just extract the message strings
+    case extract_json_string(Json, <<"message">>) of
+        {ok, Msg} -> [Msg];
+        error -> []
+    end.
+
+%% @private
+%% Format daemon diagnostics for display.
+-spec format_daemon_diagnostics(list()) -> binary().
+format_daemon_diagnostics([]) ->
+    <<"Compilation failed">>;
+format_daemon_diagnostics(Diagnostics) ->
+    iolist_to_binary(lists:join(<<"\n">>, Diagnostics)).
+
+%% @private
+%% Format Erlang compile errors.
 format_compile_errors(Errors) ->
     lists:flatten([
         io_lib:format("~s:~p: ~s~n", [File, Line, erl_lint:format_error(Desc)])

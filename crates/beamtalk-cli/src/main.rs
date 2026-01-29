@@ -51,6 +51,12 @@ enum Command {
         #[arg(default_value = ".")]
         path: String,
     },
+
+    /// Manage the compiler daemon
+    Daemon {
+        #[command(subcommand)]
+        action: commands::daemon::DaemonAction,
+    },
 }
 
 fn main() -> Result<()> {
@@ -81,6 +87,7 @@ fn main() -> Result<()> {
             println!("(Not yet implemented)");
             Ok(())
         }
+        Command::Daemon { action } => commands::daemon::run(action),
     };
 
     // Exit with appropriate code
