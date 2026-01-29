@@ -218,9 +218,9 @@ List
 
   // Remove element at index
   removeAt: index =>
-    self collectWithIndex: [:i :e |
+    (self collectWithIndex: [:i :e |
       i = index ifTrue: [nil] ifFalse: [e]
-    ] thenSelect: [:e | e ~= nil]
+    ]) select: [:e | e ~= nil]
 
   // ═══════════════════════════════════════════════════════════════════
   // Conversion

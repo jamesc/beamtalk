@@ -222,6 +222,14 @@ SequenceableCollection
   collectWithIndex: block =>
     self collectWithIndex: block into: self class new
 
+  // Core worker for collectWithIndex: that accumulates into a target collection
+  collectWithIndex: block into: intoCollection =>
+    result := intoCollection.
+    1 to: self size do: [:i |
+      result := result copyWith: (block value: i value: (self at: i))
+    ].
+    ^result
+
   // ═══════════════════════════════════════════════════════════════════
   // Pairing Operations
   // ═══════════════════════════════════════════════════════════════════
