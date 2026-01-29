@@ -66,7 +66,7 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
-use crate::ast::{Block, Expression, Identifier, Literal, MessageSelector, Module};
+use crate::ast::{Block, Expression, Identifier, Literal, MapEntry, MessageSelector, Module};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -728,6 +728,7 @@ impl CoreErlangGenerator {
                 receiver, field, ..
             } => self.generate_field_access(receiver, field),
             Expression::Parenthesized { expression, .. } => self.generate_expression(expression),
+            Expression::MapLiteral { entries, .. } => self.generate_map_literal(entries),
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -769,6 +770,34 @@ impl CoreErlangGenerator {
                 write!(self.output, "]")?;
             }
         }
+        Ok(())
+    }
+
+    /// Generates code for a map literal.
+    ///
+    /// Maps in Core Erlang use the syntax: `~{key => value, ...}~`
+    ///
+    /// # Example
+    ///
+    /// Beamtalk: `#{#name => 'Alice', #age => 30}`
+    /// Core Erlang: `~{'name' => 'Alice', 'age' => 30}~`
+    fn generate_map_literal(&mut self, entries: &[MapEntry]) -> Result<()> {
+        write!(self.output, "~{{")?;
+        
+        for (i, entry) in entries.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            
+            // Generate key
+            self.generate_expression(&entry.key)?;
+            write!(self.output, " => ")?;
+            
+            // Generate value
+            self.generate_expression(&entry.value)?;
+        }
+        
+        write!(self.output, "}}~")?;
         Ok(())
     }
 
@@ -884,6 +913,12 @@ impl CoreErlangGenerator {
         // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
         // These are synchronous function calls, not async actor messages
         if let Some(result) = self.try_generate_block_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: Dictionary/Map methods - direct calls to Erlang maps module
+        // These are synchronous operations, not async actor messages
+        if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
             return Ok(result);
         }
 
@@ -1063,6 +1098,126 @@ impl CoreErlangGenerator {
             }
 
             // Not a block evaluation message
+            _ => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for Dictionary/Map methods.
+    ///
+    /// Dictionary methods are synchronous calls to the Erlang `maps` module.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a Dictionary method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a Dictionary method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Dictionary Methods
+    ///
+    /// - `at:` (1 arg) → `maps:get(Key, Map)`
+    /// - `at:put:` (2 args) → `maps:put(Key, Value, Map)`
+    /// - `includesKey:` (1 arg) → `maps:is_key(Key, Map)`
+    /// - `removeKey:` (1 arg) → `maps:remove(Key, Map)`
+    /// - `keys` (0 args) → `maps:keys(Map)`
+    /// - `values` (0 args) → `maps:values(Map)`
+    /// - `size` (0 args) → `maps:size(Map)`
+    /// - `merge:` (1 arg) → `maps:merge(Map1, Map2)`
+    /// - `keysAndValuesDo:` (1 arg block) → `maps:foreach(Fun, Map)`
+    fn try_generate_dictionary_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            // Unary messages
+            MessageSelector::Unary(name) => match name.as_str() {
+                "keys" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'keys'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "values" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'values'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "size" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'size'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            // Keyword messages
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "at:" if arguments.len() == 1 => {
+                        // maps:get(Key, Map)
+                        write!(self.output, "call 'maps':'get'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "at:put:" if arguments.len() == 2 => {
+                        // maps:put(Key, Value, Map)
+                        write!(self.output, "call 'maps':'put'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "includesKey:" if arguments.len() == 1 => {
+                        // maps:is_key(Key, Map)
+                        write!(self.output, "call 'maps':'is_key'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "removeKey:" if arguments.len() == 1 => {
+                        // maps:remove(Key, Map)
+                        write!(self.output, "call 'maps':'remove'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "merge:" if arguments.len() == 1 => {
+                        // maps:merge(Map1, Map2)
+                        write!(self.output, "call 'maps':'merge'(")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "keysAndValuesDo:" if arguments.len() == 1 => {
+                        // maps:foreach(Fun, Map)
+                        write!(self.output, "call 'maps':'foreach'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            // Binary selectors - not used for Dictionary methods
             _ => Ok(None),
         }
     }
