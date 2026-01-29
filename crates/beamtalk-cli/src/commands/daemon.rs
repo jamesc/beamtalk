@@ -503,6 +503,28 @@ fn dispatch_method(
 // Method Handlers
 // ============================================================================
 
+/// Validate a file path for daemon methods.
+///
+/// Returns an error message if the path is invalid:
+/// - Empty paths
+/// - Root path "/"
+/// - Paths containing null bytes
+fn validate_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+
+    if path == "/" {
+        return Err("Path cannot be root directory".to_string());
+    }
+
+    if path.contains('\0') {
+        return Err("Path cannot contain null bytes".to_string());
+    }
+
+    Ok(())
+}
+
 /// Parameters for the compile method.
 #[derive(Debug, Deserialize)]
 struct CompileParams {
@@ -542,6 +564,11 @@ fn handle_compile(
             return JsonRpcResponse::error(id, INVALID_PARAMS, format!("Invalid params: {e}"));
         }
     };
+
+    // Validate path before processing
+    if let Err(msg) = validate_path(&params.path) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, msg);
+    }
 
     let file_path = Utf8PathBuf::from(&params.path);
 
@@ -635,6 +662,11 @@ fn handle_diagnostics(
             return JsonRpcResponse::error(id, INVALID_PARAMS, format!("Invalid params: {e}"));
         }
     };
+
+    // Validate path before processing
+    if let Err(msg) = validate_path(&params.path) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, msg);
+    }
 
     let file_path = Utf8PathBuf::from(&params.path);
 
@@ -887,5 +919,120 @@ mod tests {
         assert!(!response.contains("error"));
         // Shutdown should set running to false
         assert!(!running.load(Ordering::SeqCst));
+    }
+
+    // Path validation tests
+    #[test]
+    fn test_validate_path_empty() {
+        let result = validate_path("");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty");
+    }
+
+    #[test]
+    fn test_validate_path_root() {
+        let result = validate_path("/");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be root directory");
+    }
+
+    #[test]
+    fn test_validate_path_null_byte() {
+        let result = validate_path("test\0path");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot contain null bytes");
+    }
+
+    #[test]
+    fn test_validate_path_valid() {
+        assert!(validate_path("test.bt").is_ok());
+        assert!(validate_path("/home/user/test.bt").is_ok());
+        assert!(validate_path("./relative/path.bt").is_ok());
+    }
+
+    #[test]
+    fn test_compile_with_empty_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be empty"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_compile_with_root_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"/","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be root directory"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_compile_with_null_byte_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        // Using a string literal with null byte
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"compile","params":{{"path":"test{}path.bt","source":"x := 42"}}}}"#,
+            '\0'
+        );
+        let response = handle_request(&request, &mut service, &running);
+        // Null byte in JSON causes parse error, which is acceptable
+        assert!(response.contains("error"));
+        assert!(response.contains("Parse error") || response.contains("Path cannot contain"));
+    }
+
+    #[test]
+    fn test_diagnostics_with_empty_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be empty"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_diagnostics_with_root_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"/","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be root directory"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_diagnostics_with_null_byte_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        // Using a string literal with null byte
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{{"path":"test{}path.bt","source":"x := 42"}}}}"#,
+            '\0'
+        );
+        let response = handle_request(&request, &mut service, &running);
+        // Null byte in JSON causes parse error, which is acceptable
+        assert!(response.contains("error"));
+        assert!(response.contains("Parse error") || response.contains("Path cannot contain"));
     }
 }
