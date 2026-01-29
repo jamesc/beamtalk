@@ -341,10 +341,6 @@ impl CoreErlangGenerator {
     ///             call 'erlang':'error'({'spawn_failed', Reason})
     ///     end
     /// ```
-    ///
-    /// Note: The `module` parameter is currently unused because field initialization
-    /// is handled by `init/1`. It's kept for future compatibility when parameterized
-    /// spawn (e.g., `Counter spawnWith: #{value => 10}`) passes arguments to init.
     fn generate_spawn_function(&mut self, _module: &Module) -> Result<()> {
         writeln!(self.output, "'spawn'/0 = fun () ->")?;
         self.indent += 1;

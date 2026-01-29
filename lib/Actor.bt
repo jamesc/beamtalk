@@ -45,7 +45,7 @@
 //
 // The `spawn` message is a compiler primitive that generates:
 // ```erlang
-// gen_server:start_link(ModuleName, [], [])
+// gen_server:start_link(ModuleName, ~{}~, [])
 // ```
 //
 // The `spawnWith:` message passes the argument to init:
@@ -73,7 +73,7 @@ Actor
   describe => 'an Actor'
 
   // Spawn a new instance with default state (compiler primitive)
-  // Generated code: gen_server:start_link(ClassName, [], [])
+  // Generated code: gen_server:start_link(ClassName, ~{}~, [])
   spawn => // implemented by compiler
 
   // Spawn a new instance with initialization arguments (compiler primitive)
