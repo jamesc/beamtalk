@@ -75,7 +75,12 @@ fn beamtalk_binary() -> PathBuf {
         return release_path;
     }
 
-    panic!("beamtalk binary not found. Run `cargo build` first.");
+    panic!(
+        "beamtalk binary not found. Run `cargo build` first.\n\
+         Checked:\n  - {}\n  - {}",
+        debug_path.display(),
+        release_path.display()
+    );
 }
 
 /// Find the runtime directory.
@@ -156,6 +161,11 @@ struct DaemonManager {
 
 impl DaemonManager {
     /// Start the daemon and BEAM REPL backend if not already running.
+    ///
+    /// Note: If the test detects an existing REPL on the port, it will use that
+    /// and not start its own processes. This is useful for development but means
+    /// the test won't manage the lifecycle. If the external REPL fails or stops
+    /// mid-test, errors may be confusing. For CI, always start with a clean state.
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
@@ -169,15 +179,31 @@ impl DaemonManager {
         // Start the compiler daemon first
         eprintln!("E2E: Starting compiler daemon...");
         let binary = beamtalk_binary();
+
+        // Check if debug output is requested via environment variable
+        let debug_output = env::var("E2E_DEBUG").is_ok();
+        let (stdout_cfg, stderr_cfg) = if debug_output {
+            (Stdio::inherit(), Stdio::inherit())
+        } else {
+            (Stdio::null(), Stdio::null())
+        };
+
         let daemon_child = Command::new(&binary)
             .args(["daemon", "start", "--foreground"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(stdout_cfg)
+            .stderr(stderr_cfg)
             .spawn()
             .expect("Failed to start daemon");
 
-        // Wait for daemon to start
-        std::thread::sleep(Duration::from_millis(1000));
+        // Poll for daemon socket instead of fixed sleep
+        let daemon_socket = dirs::home_dir()
+            .map(|h| h.join(".beamtalk/daemon.sock"))
+            .unwrap_or_default();
+        let mut daemon_retries = 20;
+        while daemon_retries > 0 && !daemon_socket.exists() {
+            std::thread::sleep(Duration::from_millis(100));
+            daemon_retries -= 1;
+        }
 
         // Start the BEAM node with REPL backend
         eprintln!("E2E: Starting BEAM REPL backend...");
@@ -197,6 +223,13 @@ impl DaemonManager {
             assert!(status.success(), "Failed to build runtime");
         }
 
+        // Reuse debug output settings for BEAM
+        let (stdout_cfg, stderr_cfg) = if debug_output {
+            (Stdio::inherit(), Stdio::inherit())
+        } else {
+            (Stdio::null(), Stdio::null())
+        };
+
         let beam_child = Command::new("erl")
             .args([
                 "-noshell",
@@ -209,8 +242,8 @@ impl DaemonManager {
                     "{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end."
                 ),
             ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(stdout_cfg)
+            .stderr(stderr_cfg)
             .spawn()
             .expect("Failed to start BEAM node");
 
@@ -237,6 +270,44 @@ impl DaemonManager {
     }
 
     /// Stop the daemon and BEAM if we started them.
+    ///
+    /// Uses SIGTERM first for graceful shutdown, then SIGKILL if needed.
+    #[cfg(unix)]
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "PIDs are always positive and fit in i32 on Unix"
+    )]
+    fn stop(&mut self) {
+        if let Some(ref mut child) = self.beam_process {
+            eprintln!("E2E: Stopping BEAM...");
+            // Try graceful shutdown first (SIGTERM)
+            // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
+            // If pid doesn't exist, it returns an error which we ignore.
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+            // Give it a moment to shutdown gracefully
+            std::thread::sleep(Duration::from_millis(200));
+            // Force kill if still running
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        if let Some(ref mut child) = self.daemon_process {
+            eprintln!("E2E: Stopping daemon...");
+            // Try graceful shutdown first (SIGTERM)
+            // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
+            // If pid doesn't exist, it returns an error which we ignore.
+            unsafe {
+                libc::kill(child.id() as i32, libc::SIGTERM);
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    #[cfg(not(unix))]
     fn stop(&mut self) {
         if let Some(ref mut child) = self.beam_process {
             eprintln!("E2E: Stopping BEAM...");
@@ -350,6 +421,11 @@ impl ReplClient {
 }
 
 /// Run a single test file.
+///
+/// Note: Bindings are cleared at the start of each file, but NOT between
+/// individual test cases within the same file. This allows testing variable
+/// persistence across expressions. If you need isolated tests, put them in
+/// separate files.
 fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
     let cases = parse_test_file(&content);

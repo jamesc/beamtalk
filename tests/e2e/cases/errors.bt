@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for error handling
+// Each expression tests that specific errors are caught correctly
+
+// Division by zero
+// Note: Erlang returns 'badarith' for division by zero
+1 / 0
+// => ERROR: badarith

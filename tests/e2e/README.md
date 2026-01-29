@@ -71,9 +71,14 @@ undefined_variable
 
 The test passes if the error message *contains* the specified text.
 
+See `tests/e2e/cases/errors.bt` for examples of error test cases.
+
 ### Multi-line Expressions
 
-Currently, each expression must be on a single line. Multi-line expressions are not yet supported.
+Currently, each expression must be on a single line within the test file format.
+This is a **test parser limitation**, not a language limitation - Beamtalk itself
+supports multi-line expressions. The test format reads one line at a time looking
+for `// =>` markers. Multi-line test format support may be added in the future.
 
 ## Writing New Tests
 
@@ -124,6 +129,14 @@ The harness uses the same JSON protocol as the REPL CLI:
 ### "Daemon may not be fully started"
 
 The REPL server may take a moment to initialize. The test harness waits up to 6 seconds for the server to become available.
+
+### Debugging Output
+
+To see daemon and BEAM output during tests:
+
+```bash
+E2E_DEBUG=1 cargo test --test e2e -- --nocapture
+```
 
 ### Tests timeout
 
