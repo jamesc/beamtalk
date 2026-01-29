@@ -10,8 +10,8 @@ Module {
                 Identifier {
                     name: "value",
                     span: Span {
-                        start: 186,
-                        end: 191,
+                        start: 368,
+                        end: 373,
                     },
                 },
             ),
@@ -20,13 +20,13 @@ Module {
                     0,
                 ),
                 Span {
-                    start: 195,
-                    end: 196,
+                    start: 377,
+                    end: 378,
                 },
             ),
             span: Span {
-                start: 186,
-                end: 196,
+                start: 368,
+                end: 378,
             },
         },
         Assignment {
@@ -34,8 +34,8 @@ Module {
                 Identifier {
                     name: "increment",
                     span: Span {
-                        start: 198,
-                        end: 207,
+                        start: 380,
+                        end: 389,
                     },
                 },
             ),
@@ -49,21 +49,21 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 213,
-                                            end: 217,
+                                            start: 395,
+                                            end: 399,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "value",
                                     span: Span {
-                                        start: 218,
-                                        end: 223,
+                                        start: 400,
+                                        end: 405,
                                     },
                                 },
                                 span: Span {
-                                    start: 213,
-                                    end: 223,
+                                    start: 395,
+                                    end: 405,
                                 },
                             },
                             value: MessageSend {
@@ -72,21 +72,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 227,
-                                                end: 231,
+                                                start: 409,
+                                                end: 413,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 232,
-                                            end: 237,
+                                            start: 414,
+                                            end: 419,
                                         },
                                     },
                                     span: Span {
-                                        start: 227,
-                                        end: 237,
+                                        start: 409,
+                                        end: 419,
                                     },
                                 },
                                 selector: Binary(
@@ -98,130 +98,150 @@ Module {
                                             1,
                                         ),
                                         Span {
-                                            start: 240,
-                                            end: 241,
+                                            start: 422,
+                                            end: 423,
                                         },
                                     ),
                                 ],
                                 span: Span {
-                                    start: 227,
-                                    end: 241,
+                                    start: 409,
+                                    end: 423,
                                 },
                             },
                             span: Span {
-                                start: 213,
-                                end: 241,
+                                start: 395,
+                                end: 423,
                             },
                         },
                     ],
                     span: Span {
-                        start: 211,
-                        end: 243,
+                        start: 393,
+                        end: 425,
                     },
                 },
             ),
             span: Span {
-                start: 198,
-                end: 243,
+                start: 380,
+                end: 425,
             },
         },
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "counter",
+                    name: "counter1",
                     span: Span {
-                        start: 246,
-                        end: 253,
+                        start: 469,
+                        end: 477,
                     },
                 },
             ),
             value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "Counter",
-                            span: Span {
-                                start: 257,
-                                end: 264,
-                            },
+                receiver: Identifier(
+                    Identifier {
+                        name: "Counter",
+                        span: Span {
+                            start: 481,
+                            end: 488,
                         },
-                    ),
-                    selector: Unary(
-                        "spawn",
-                    ),
-                    arguments: [],
-                    span: Span {
-                        start: 257,
-                        end: 270,
                     },
-                },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "initial:",
-                            span: Span {
-                                start: 271,
-                                end: 279,
-                            },
-                        },
-                    ],
                 ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            10,
-                        ),
-                        Span {
-                            start: 280,
-                            end: 282,
-                        },
-                    ),
-                ],
+                selector: Unary(
+                    "spawn",
+                ),
+                arguments: [],
                 span: Span {
-                    start: 257,
-                    end: 282,
+                    start: 481,
+                    end: 494,
                 },
             },
             span: Span {
-                start: 246,
-                end: 282,
+                start: 469,
+                end: 494,
             },
         },
     ],
     span: Span {
-        start: 186,
-        end: 282,
+        start: 368,
+        end: 494,
     },
     leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {
-                start: 186,
-                end: 191,
+                start: 368,
+                end: 373,
             },
             kind: Line,
         },
         Comment {
             content: "// SPDX-License-Identifier: Apache-2.0",
             span: Span {
-                start: 186,
-                end: 191,
+                start: 368,
+                end: 373,
             },
             kind: Line,
         },
         Comment {
-            content: "// Test actor spawn with keyword arguments",
+            content: "// Test actor spawn with initialization arguments",
             span: Span {
-                start: 186,
-                end: 191,
+                start: 368,
+                end: 373,
             },
             kind: Line,
         },
         Comment {
-            content: "// The syntax \"Counter spawn initial: 10\" should pass arguments to init",
+            content: "// Counter spawnWith: passes initialization arguments to init/1",
             span: Span {
-                start: 186,
-                end: 191,
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// which merges them with default field values.",
+            span: Span {
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Once map literals are supported, use:",
+            span: Span {
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//   counter := Counter spawnWith: #{value => 10}",
+            span: Span {
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 368,
+                end: 373,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// For now, test with a simple value:",
+            span: Span {
+                start: 368,
+                end: 373,
             },
             kind: Line,
         },
