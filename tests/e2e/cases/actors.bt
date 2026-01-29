@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor features
+// Actors are lightweight processes that communicate via messages
+//
+// NOTE: Actor definitions and spawning require full module compilation,
+// not single REPL expressions. These tests document the intended syntax.
+//
+// For actor instantiation examples, see:
+//   test-package-compiler/cases/actor_spawn/
+//   test-package-compiler/cases/actor_spawn_with_args/
+//   test-package-compiler/cases/async_with_await/
+//
+// ===========================================================================
+// ACTOR DEFINITION (in .bt files)
+// ===========================================================================
+//
+// Actor subclass: Counter
+//   state: value = 0
+//
+//   increment => self.value := self.value + 1
+//   decrement => self.value := self.value - 1
+//   getValue => ^self.value
+//
+// ===========================================================================
+// SPAWNING ACTORS
+// ===========================================================================
+//
+// counter := Counter spawn                    // Spawn with default state
+// counter := Counter spawnWith: #{value => 10}  // Spawn with initial values
+//
+// ===========================================================================
+// ASYNC MESSAGE SENDS
+// ===========================================================================
+//
+// All message sends to actors are async by default:
+//
+// future := counter increment   // Returns immediately with a future
+// value := future await          // Block until result is available
+//
+// Or use continuation style:
+// counter increment
+//   whenResolved: [:v | self process: v]
+//   whenRejected: [:e | self handle: e]
+//
+// ===========================================================================
+// BEAM MAPPING
+// ===========================================================================
+//
+// Actor spawn    →  gen_server:start_link/4
+// Async send     →  gen_server:cast/2 + future process
+// await          →  receive block or gen_server:call
+// Actor state    →  gen_server state map

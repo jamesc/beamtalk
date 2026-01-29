@@ -2,14 +2,73 @@
 
 End-to-end tests that validate the complete compilation and execution pipeline by evaluating Beamtalk expressions through the REPL.
 
+## Feature Coverage Matrix
+
+| Feature | Status | Test File | Notes |
+|---------|--------|-----------|-------|
+| **Literals** | | | |
+| Integer literals | ✅ | [literals.bt](cases/literals.bt) | `42`, `0`, `1000000` |
+| String literals | ✅ | [literals.bt](cases/literals.bt) | `'hello'`, `''` |
+| Boolean literals | ✅ | [booleans.bt](cases/booleans.bt) | `true`, `false` |
+| **Binary Operations** | | | |
+| Addition | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `3 + 4` |
+| Subtraction | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `10 - 3` |
+| Multiplication | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `5 * 6` |
+| Division | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `20 / 4` → float |
+| Math precedence | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `2 + 3 * 4` → 14 |
+| **Unary Messages** | | | |
+| Block `value` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `[42] value` |
+| Integer methods | 📋 | — | `negated`, `abs`, `isZero` planned |
+| String methods | 📋 | — | `length`, `isEmpty` planned |
+| **Keyword Messages** | | | |
+| `value:` | ✅ | [keyword_messages.bt](cases/keyword_messages.bt) | `[:x | x] value: 5` |
+| `value:value:` | ✅ | [keyword_messages.bt](cases/keyword_messages.bt) | `[:x :y | x + y] value: 1 value: 2` |
+| `value:value:value:` | ✅ | [keyword_messages.bt](cases/keyword_messages.bt) | Three-arg blocks |
+| **Blocks** | | | |
+| Zero-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[42] value` |
+| One-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x | x + 1] value: 5` |
+| Two-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x :y | x + y] value: 3 value: 4` |
+| Nested blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[[:x | x] value: 5] value` |
+| **Control Flow** | | | |
+| Block evaluation | ✅ | [control_flow.bt](cases/control_flow.bt) | `[5 + 3] value` |
+| `whileTrue:` | 📋 | — | Requires variable persistence |
+| `whileFalse:` | 📋 | — | Requires variable persistence |
+| `timesRepeat:` | 📋 | — | Requires variable persistence |
+| **Boolean Operations** | | | |
+| `ifTrue:ifFalse:` | 🔄 | — | Returns future (needs await) |
+| `and:` / `or:` | 🔄 | — | Returns future (needs await) |
+| `not` | 🔄 | — | Returns future (needs await) |
+| **Cascades** | | | |
+| Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Parsed, codegen not implemented |
+| **Actors** | | | |
+| `spawn` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
+| Async messages | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
+| `await` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
+| **Error Handling** | | | |
+| Division by zero | ✅ | [errors.bt](cases/errors.bt) | `1 / 0` → badarith |
+
+**Legend:**
+- ✅ = Fully tested and working
+- 🔄 = Implemented but needs refinement (returns future in REPL)
+- 📋 = Documented, implementation in progress
+- — = No separate test file (documented elsewhere)
+
 ## Directory Structure
 
 ```
 tests/e2e/
-├── README.md           # This file
-└── cases/              # Test case files
-    ├── arithmetic.bt   # Arithmetic operation tests
-    └── blocks.bt       # Block/closure tests
+├── README.md              # This file
+└── cases/                 # Test case files
+    ├── actors.bt          # Actor documentation (syntax examples)
+    ├── arithmetic.bt      # Arithmetic operations (+, -, *, /)
+    ├── blocks.bt          # Block/closure tests
+    ├── booleans.bt        # Boolean literals (true, false)
+    ├── cascades.bt        # Cascade documentation (syntax examples)
+    ├── control_flow.bt    # Control flow (block evaluation)
+    ├── errors.bt          # Error handling tests
+    ├── keyword_messages.bt # Keyword message sends
+    ├── literals.bt        # Integer and string literals
+    └── unary_messages.bt  # Unary message sends
 ```
 
 ## Running Tests

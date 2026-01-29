@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for unary message sends
+// Unary messages are single-word messages with no arguments
+//
+// NOTE: Many unary methods (negated, abs, isZero, isEven, isOdd, etc.) are
+// defined in the stdlib but use conditional logic (ifTrue:ifFalse:) which
+// currently returns futures in the REPL. These are documented in lib/*.bt
+// but full E2E testing awaits synchronous evaluation support.
+//
+// The tests below verify unary message syntax with built-in block evaluation.
+
+// ===========================================================================
+// BLOCK UNARY MESSAGES (verified working)
+// ===========================================================================
+
+// Block value (unary message to block)
+[42] value
+// => 42
+
+// Block value with computed body
+[10 + 5] value
+// => 15
+
+// Nested block value
+[[3] value + 2] value
+// => 5
+

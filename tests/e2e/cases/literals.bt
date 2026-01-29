@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for literal values
+// Tests for integers, strings, and other primitive literals
+
+// ===========================================================================
+// INTEGER LITERALS
+// ===========================================================================
+
+// Basic integer
+42
+// => 42
+
+// Zero
+0
+// => 0
+
+// Negative integer (via subtraction from 0)
+0 - 5
+// => -5
+
+// Large integer
+1000000
+// => 1000000
+
+// ===========================================================================
+// STRING LITERALS
+// ===========================================================================
+
+// Simple string (single-quoted)
+'hello'
+// => hello
+
+// String with spaces
+'hello world'
+// => hello world
+
+// Empty string
+''
+// => 
+
+// String with punctuation
+'Hello, World!'
+// => Hello, World!
+
