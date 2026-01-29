@@ -1,0 +1,71 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'stdlib_set' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+  attributes ['behaviour' = ['gen_server']]
+
+'spawn'/0 = fun () ->
+    case call 'gen_server':'start_link'('stdlib_set', ~{}~, []) of
+        <{'ok', Pid}> when 'true' ->
+            Pid
+        <{'error', Reason}> when 'true' ->
+            call 'erlang':'error'({'spawn_failed', Reason})
+    end
+
+
+'spawn'/1 = fun (InitArgs) ->
+    case call 'gen_server':'start_link'('stdlib_set', InitArgs, []) of
+        <{'ok', Pid}> when 'true' ->
+            Pid
+        <{'error', Reason}> when 'true' ->
+            call 'erlang':'error'({'spawn_failed', Reason})
+    end
+
+
+'init'/1 = fun (InitArgs) ->
+    let DefaultState = ~{
+        '__class__' => 'StdlibSet',
+        '__methods__' => call 'stdlib_set':'method_table'()
+    }~
+    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in {'ok', FinalState}
+
+
+'handle_cast'/2 = fun (Msg, State) ->
+    case Msg of
+        <{Selector, Args, FuturePid}> when 'true' ->
+            case call 'stdlib_set':'dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
+                    in {'noreply', NewState}
+            end
+    end
+
+
+'handle_call'/3 = fun (Msg, _From, State) ->
+    case Msg of
+        <{Selector, Args}> when 'true' ->
+            case call 'stdlib_set':'dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    {'reply', Result, NewState}
+            end
+    end
+
+
+'code_change'/3 = fun (_OldVsn, State, _Extra) ->
+    %% TODO: Add state migration logic
+    {'ok', State}
+
+
+'dispatch'/3 = fun (Selector, Args, State) ->
+    case Selector of
+        <_> when 'true' ->
+            {'reply', {'error', 'does_not_understand'}, State}
+    end
+
+
+'method_table'/0 = fun () ->
+    ~{}~
+
+end

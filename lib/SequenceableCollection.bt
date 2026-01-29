@@ -1,0 +1,283 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════
+
+// SequenceableCollection - Protocol for ordered, indexed collections
+//
+// This protocol extends Collection with operations that require ordering
+// and index-based access. Concrete subtypes are:
+//
+// - `Array` - Fixed-size Erlang tuple (fast random access)
+// - `List` - Erlang linked list (fast prepend, sequential access)
+//
+// ## Index Convention
+//
+// Beamtalk uses **1-based indexing** (Smalltalk convention):
+// ```beamtalk
+// arr := {#a, #b, #c}
+// arr at: 1  // => #a (first element)
+// arr at: 3  // => #c (last element)
+// ```
+//
+// ## Ordering Operations
+//
+// SequenceableCollection adds:
+// - `at:`, `at:put:` - Index-based access
+// - `first`, `last` - Endpoints
+// - `sorted`, `sortedBy:`, `reversed` - Reordering
+// - `++` - Concatenation (preserves order)
+// - `from:to:` - Subsequence extraction
+// - `copyWith:`, `copyWithout:` - Element addition/removal
+//
+// ## Mutability
+//
+// All operations are **immutable** - they return new collections:
+// ```beamtalk
+// original := {1, 2, 3}
+// modified := original at: 2 put: 99  // => {1, 99, 3}
+// // original is still {1, 2, 3}
+// ```
+//
+// ## BEAM Mapping
+//
+// | Beamtalk | Erlang | Performance |
+// |----------|--------|-------------|
+// | Array | tuple `{a, b, c}` | O(1) access, O(n) update |
+// | List | list `[a, b, c]` | O(1) prepend, O(n) access |
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Index access
+// items := {#apple, #banana, #cherry}
+// second := items at: 2            // => #banana
+// updated := items at: 2 put: #blueberry  // => {#apple, #blueberry, #cherry}
+//
+// // Endpoints
+// first := items first             // => #apple
+// last := items last               // => #cherry
+//
+// // Subsequence
+// slice := items from: 1 to: 2     // => {#apple, #banana}
+//
+// // Reordering
+// reversed := items reversed       // => {#cherry, #banana, #apple}
+// sorted := items sorted           // => {#apple, #banana, #cherry}
+//
+// // Concatenation
+// combined := {1, 2} ++ {3, 4}     // => {1, 2, 3, 4}
+// ```
+//
+// ## See Also
+//
+// - `Collection.bt` - Base collection protocol
+// - `Array.bt` - Tuple-specific operations
+// - `List.bt` - Linked list-specific operations
+
+SequenceableCollection
+  // ═══════════════════════════════════════════════════════════════════
+  // Index-Based Access (1-based indexing)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Get element at index (1-based)
+  // Raises error if index out of bounds
+  at: index => // implemented by compiler
+
+  // Return new collection with element at index replaced
+  // Raises error if index out of bounds
+  at: index put: value => // implemented by compiler
+
+  // Get first element (same as at: 1)
+  first => self at: 1
+
+  // Get last element
+  last => self at: self size
+
+  // Get second element (convenience)
+  second => self at: 2
+
+  // Get third element (convenience)
+  third => self at: 3
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Bounds-Checked Access
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Get element at index, or default if out of bounds
+  at: index ifAbsent: defaultBlock =>
+    (index >= 1) and: [index <= self size]
+      ifTrue: [^self at: index]
+      ifFalse: [^defaultBlock value]
+
+  // Get first element, or default if empty
+  firstIfAbsent: defaultBlock =>
+    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self first]
+
+  // Get last element, or default if empty
+  lastIfAbsent: defaultBlock =>
+    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self last]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Subsequence Extraction
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Extract subsequence from start to end (inclusive, 1-based)
+  from: startIndex to: endIndex => // implemented by compiler
+
+  // Extract first n elements
+  first: n => self from: 1 to: n
+
+  // Extract last n elements
+  last: n => self from: (self size - n + 1) to: self size
+
+  // Drop first n elements
+  allButFirst: n => self from: (n + 1) to: self size
+
+  // Drop last n elements
+  allButLast: n => self from: 1 to: (self size - n)
+
+  // All but first element
+  allButFirst => self allButFirst: 1
+
+  // All but last element
+  allButLast => self allButLast: 1
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Copying with Changes
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Return new collection with element appended
+  copyWith: element => // implemented by compiler
+
+  // Return new collection without first occurrence of element
+  copyWithout: element => // implemented by compiler
+
+  // Return new collection with element inserted at index
+  copyWith: element at: index => // implemented by compiler
+
+  // Remove element at index, shift remaining elements
+  removeAt: index => // implemented by compiler
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Reordering
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Return sorted copy (uses default ordering)
+  sorted => // implemented by compiler
+
+  // Return sorted copy using custom comparator
+  // block receives two elements, returns true if first should come before second
+  sortedBy: block => // implemented by compiler
+
+  // Return reversed copy
+  reversed => // implemented by compiler
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Concatenation
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Concatenate with another sequenceable collection
+  ++ other => // implemented by compiler
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Index Finding
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Find index of first occurrence of element
+  // Returns 0 if not found
+  indexOf: element => // implemented by compiler
+
+  // Find index of first occurrence, or evaluate ifAbsent block
+  indexOf: element ifAbsent: absentBlock =>
+    index := self indexOf: element.
+    index = 0 ifTrue: [^absentBlock value] ifFalse: [^index]
+
+  // Find index of first element satisfying predicate
+  findFirst: block =>
+    1 to: self size do: [:i |
+      (block value: (self at: i)) ifTrue: [^i]
+    ].
+    ^0
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Iteration with Index
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Execute block for each element with its index
+  // block receives index and element
+  eachWithIndex: block =>
+    1 to: self size do: [:i |
+      block value: i value: (self at: i)
+    ]
+
+  // Transform each element with its index
+  // block receives index and element, returns transformed value
+  collectWithIndex: block =>
+    self collectWithIndex: block into: self class new
+
+  // Core worker for collectWithIndex: that accumulates into a target collection
+  collectWithIndex: block into: intoCollection =>
+    result := intoCollection.
+    1 to: self size do: [:i |
+      result := result copyWith: (block value: i value: (self at: i))
+    ].
+    ^result
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Pairing Operations
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Combine with another collection element-wise
+  // block receives element from self and element from other
+  with: otherCollection collect: block => // implemented by compiler
+
+  // Iterate pairs from this and other collection
+  with: otherCollection do: block =>
+    1 to: (self size min: otherCollection size) do: [:i |
+      block value: (self at: i) value: (otherCollection at: i)
+    ]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Grouping
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Group consecutive elements into pairs
+  // {1, 2, 3, 4} pairsDo: [:a :b | ...] => visits (1,2), (3,4)
+  pairsDo: block =>
+    1 to: self size - 1 by: 2 do: [:i |
+      block value: (self at: i) value: (self at: i + 1)
+    ]
+
+  // Sliding window of adjacent pairs
+  // {1, 2, 3, 4} overlappingPairsDo: [:a :b | ...] => visits (1,2), (2,3), (3,4)
+  overlappingPairsDo: block =>
+    1 to: self size - 1 do: [:i |
+      block value: (self at: i) value: (self at: i + 1)
+    ]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Testing Order
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Test if collection is sorted (ascending)
+  isSorted =>
+    self size <= 1 ifTrue: [^true].
+    1 to: self size - 1 do: [:i |
+      (self at: i) > (self at: i + 1) ifTrue: [^false]
+    ].
+    ^true
+
+  // Test if collection equals another element-by-element
+  equals: other =>
+    self size = other size ifFalse: [^false].
+    1 to: self size do: [:i |
+      (self at: i) = (other at: i) ifFalse: [^false]
+    ].
+    ^true
