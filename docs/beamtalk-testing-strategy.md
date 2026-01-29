@@ -13,7 +13,8 @@ Beamtalk uses a multi-layered testing strategy covering both the Rust compiler a
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
 | Runtime Unit Tests | EUnit | `runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
-| E2E Tests | EUnit | `runtime/test/beamtalk_e2e_tests.erl` | Full Beamtalk → BEAM → execution |
+| E2E Tests (Erlang) | EUnit | `runtime/test/beamtalk_e2e_tests.erl` | Full Beamtalk → BEAM → execution |
+| E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | Language feature validation via REPL |
 
 ## Running Tests
 
@@ -204,7 +205,7 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 ---
 
-### 6. End-to-End Tests
+### 6. End-to-End Tests (Erlang)
 
 Full pipeline tests: Beamtalk source → Core Erlang → BEAM → execution.
 
@@ -225,6 +226,57 @@ spawn_with_args_initializes_state_test() ->
     %% Verify initial state was set
     ?assertEqual(10, gen_server:call(Counter, {getValue, []})).
 ```
+
+---
+
+### 7. End-to-End Tests (Rust)
+
+Language feature validation via REPL TCP connection.
+
+**Location:** `tests/e2e/`
+
+**Test cases:** `tests/e2e/cases/*.bt`
+
+**Test harness:** `crates/beamtalk-cli/tests/e2e.rs`
+
+**What they test:**
+- Complete compilation and execution via REPL
+- Language features as users would experience them
+- Arithmetic operators, blocks, closures
+- Integration between compiler daemon and runtime
+
+**Test file format:**
+```smalltalk
+// Test arithmetic
+3 + 4
+// => 7
+
+// Test blocks
+[:x | x + 1] value: 5
+// => 6
+```
+
+**Running:**
+```bash
+# Run E2E tests only
+cargo test --test e2e
+
+# Run with verbose output
+cargo test --test e2e -- --nocapture
+```
+
+**Adding a new test case:**
+1. Create `tests/e2e/cases/my_feature.bt`
+2. Add expressions with `// =>` expected results
+3. Run `cargo test --test e2e`
+
+**Error testing:**
+```smalltalk
+undefined_var
+// => ERROR: Undefined variable
+```
+
+See [tests/e2e/README.md](../tests/e2e/README.md) for full documentation.
 
 ---
 
@@ -300,11 +352,24 @@ mod tests {
 2. Name it `descriptive_name_test()` (EUnit convention)
 3. Run `cd runtime && rebar3 eunit`
 
-### Adding an E2E Test
+### Adding an E2E Test (Erlang)
 
 1. Add to `runtime/test/beamtalk_e2e_tests.erl`
 2. May need to compile Beamtalk source first
 3. Run `cd runtime && rebar3 eunit --module=beamtalk_e2e_tests`
+
+### Adding an E2E Test (Rust/REPL)
+
+1. Create or edit a `.bt` file in `tests/e2e/cases/`
+2. Add expressions with `// => expected_result` annotations
+3. Run `cargo test --test e2e`
+
+Example test file:
+```smalltalk
+// Test my new feature
+myExpression
+// => expected_result
+```
 
 ---
 
@@ -361,6 +426,7 @@ Performance regression tests are planned but not yet implemented.
 ## References
 
 - [test-package-compiler/README.md](../test-package-compiler/README.md) - Snapshot test details
+- [tests/e2e/README.md](../tests/e2e/README.md) - E2E test framework details
 - [runtime/README.md](../runtime/README.md) - Erlang runtime test details
 - [AGENTS.md](../AGENTS.md) - Development guidelines
 - [insta documentation](https://insta.rs/) - Snapshot testing framework
