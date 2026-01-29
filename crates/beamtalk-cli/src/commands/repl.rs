@@ -279,7 +279,9 @@ fn start_beam_node(port: u16) -> Result<Child> {
     eprintln!("Using runtime at: {}", runtime_dir.display());
 
     // Build runtime first
-    let runtime_beam_dir = runtime_dir.join("_build/default/lib/beamtalk_runtime/ebin");
+    let build_lib_dir = runtime_dir.join("_build/default/lib");
+    let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
+    let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
 
     // Check if runtime is built
     if !runtime_beam_dir.exists() {
@@ -304,6 +306,8 @@ fn start_beam_node(port: u16) -> Result<Child> {
             "-noshell",
             "-pa",
             runtime_beam_dir.to_str().unwrap_or(""),
+            "-pa",
+            jsx_beam_dir.to_str().unwrap_or(""),
             "-eval",
             &format!(
                 "{{ok, _}} = beamtalk_repl:start_link({port}), io:format(\"REPL backend started on port {port}~n\"), receive stop -> ok end."

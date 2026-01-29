@@ -48,50 +48,64 @@ parse_whitespace_only_test() ->
 
 format_integer_response_test() ->
     Response = beamtalk_repl:format_response(42),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":42}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => 42}, Decoded).
 
 format_float_response_test() ->
     Response = beamtalk_repl:format_response(3.14),
-    %% Float formatting may vary slightly
-    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assert(is_float(Value) andalso Value > 3.1 andalso Value < 3.2).
 
 format_atom_response_test() ->
     Response = beamtalk_repl:format_response(ok),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":\"ok\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => <<"ok">>}, Decoded).
 
 format_string_response_test() ->
     Response = beamtalk_repl:format_response(<<"hello">>),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":\"hello\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => <<"hello">>}, Decoded).
 
 format_string_with_quotes_test() ->
     Response = beamtalk_repl:format_response(<<"say \"hi\"">>),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":\"say \\\"hi\\\"\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => <<"say \"hi\"">>}, Decoded).
 
 format_nil_response_test() ->
     Response = beamtalk_repl:format_response(nil),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":\"nil\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => <<"nil">>}, Decoded).
 
 format_list_response_test() ->
     Response = beamtalk_repl:format_response([1, 2, 3]),
-    ?assertEqual(<<"{\"type\":\"result\",\"value\":[1,2,3]}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"result">>, <<"value">> => [1, 2, 3]}, Decoded).
 
 format_pid_response_test() ->
     Response = beamtalk_repl:format_response(self()),
-    ?assertMatch(<<"{\"type\":\"result\",\"value\":\"#<pid ", _/binary>>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assertMatch(<<"#<pid ", _/binary>>, Value).
 
 %%% Error Formatting Tests
 
 format_undefined_variable_error_test() ->
     Response = beamtalk_repl:format_error({undefined_variable, "foo"}),
-    ?assertEqual(<<"{\"type\":\"error\",\"message\":\"Undefined variable: foo\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Undefined variable: foo">>}, Decoded).
 
 format_empty_expression_error_test() ->
     Response = beamtalk_repl:format_error(empty_expression),
-    ?assertEqual(<<"{\"type\":\"error\",\"message\":\"Empty expression\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Empty expression">>}, Decoded).
 
 format_timeout_error_test() ->
     Response = beamtalk_repl:format_error(timeout),
-    ?assertEqual(<<"{\"type\":\"error\",\"message\":\"Request timed out\"}">>, Response).
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Request timed out">>}, Decoded).
 
 %%% Server Lifecycle Tests
 
