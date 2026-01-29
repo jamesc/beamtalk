@@ -30,6 +30,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 ctrlc.workspace = true
 libc.workspace = true
+rustyline.workspace = true
 
 [dev-dependencies]
 tempfile = "3.14"
