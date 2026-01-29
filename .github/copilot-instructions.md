@@ -103,6 +103,62 @@ When the user types `/done`, execute this workflow:
 
 ---
 
+### `/whats-next` - Find the next logical piece of work
+
+When the user types `/whats-next`, execute this workflow to recommend the next issue to work on:
+
+1. **Check current branch**: Determine if we're on a feature branch and extract the issue number if present.
+
+2. **Check for active cycles**: Query Linear for the team's active cycle:
+   ```json
+   {"action": "graphql", "graphql": "query { teams { nodes { key activeCycle { id name issues { nodes { id identifier title state { name } priority } } } } } }"}
+   ```
+   If an active cycle exists, prioritize issues from that cycle.
+
+3. **Get recent completed work**: Query Linear for recently completed issues to understand work patterns:
+   ```json
+   {"action": "graphql", "graphql": "query { issues(filter: {team: {key: {eq: \"BT\"}}, state: {name: {in: [\"Done\", \"In Review\"]}}}, orderBy: updatedAt, first: 10) { nodes { id identifier title labels { nodes { name } } parent { identifier title } } } }"}
+   ```
+
+4. **Check git history**: Review recent commits to understand what areas were recently worked on:
+   ```bash
+   git log --oneline -20 --format="%s" | grep -oE "BT-[0-9]+" | sort -u | head -5
+   ```
+
+5. **Find candidate issues**: Query Linear for backlog issues that are ready to work on:
+   ```json
+   {"action": "graphql", "graphql": "query { issues(filter: {team: {key: {eq: \"BT\"}}, state: {name: {in: [\"Backlog\", \"Ready\"]}}}, orderBy: priority, first: 20) { nodes { id identifier title description priority state { name } labels { nodes { name } } parent { identifier title } children { nodes { identifier state { name } } } relations { nodes { type relatedIssue { identifier state { name } } } } } } }"}
+   ```
+
+6. **Prioritize issues**: Score and rank issues based on:
+   - **Active cycle membership** (highest priority if cycle is active)
+   - **`agent-ready` label** (fully specified, can start immediately)
+   - **Priority level** (1=Urgent, 2=High, 3=Medium, 4=Low)
+   - **Blocking relationships** (issues that unblock others get priority)
+   - **Relatedness to recent work** (same parent issue, similar area)
+   - **Dependencies satisfied** (all blocking issues are Done)
+
+7. **Present recommendations**: Display the top 3-5 recommended issues with:
+   - Issue identifier and title
+   - Priority and state
+   - Why it's recommended (cycle, related to recent work, unblocks others, etc.)
+   - Any blockers that need resolution first
+
+8. **Optional: Start work**: Ask the user if they want to start on the top recommended issue (which would run the `/next-issue` workflow for that specific issue).
+
+**Scoring logic:**
+- +50 points: In active cycle
+- +30 points: Has `agent-ready` label
+- +20 points: Related to recently completed work (same parent or area)
+- +15 points: Unblocks other issues
+- +10 points: Priority 1 (Urgent)
+- +5 points: Priority 2 (High)
+- -100 points: Has unresolved blocking dependencies
+- -50 points: Has `needs-spec` label (requires human input first)
+- -20 points: Has `blocked` label
+
+---
+
 ### `/pr-resolve` - Address PR review comments
 
 When the user types `/pr-resolve`, execute this workflow to systematically address all PR review comments:
