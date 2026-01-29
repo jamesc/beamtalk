@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Array (tuple) operations
+
+// Array creation
+point := {10, 20}
+rgb := {255, 128, 0}
+empty := {}
+
+// Index access (1-based)
+x := point at: 1
+y := point at: 2
+
+// First and last
+first := rgb first
+last := rgb last
+
+// Size
+size := rgb size
+
+// Update (returns new array)
+moved := point at: 1 put: 15
+
+// Iteration
+rgb each: [:c | Transcript show: c]
+
+// Transformation
+doubled := rgb collect: [:c | c * 2]
+
+// Filtering
+small := rgb select: [:c | c < 200]
+
+// Reduction
+sum := rgb inject: 0 into: [:acc :c | acc + c]
+
+// Membership test
+hasRed := rgb includes: 255
+
+// Concatenation
+combined := {1, 2} ++ {3, 4}
+
+// Conversion to list
+asList := point asList
