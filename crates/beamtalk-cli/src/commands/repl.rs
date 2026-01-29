@@ -238,8 +238,10 @@ fn start_daemon() -> Result<()> {
     // Get path to beamtalk binary (ourselves)
     let exe = std::env::current_exe().into_diagnostic()?;
 
+    // Spawn daemon in foreground mode as a background process
+    // (background mode in daemon itself is not implemented)
     Command::new(exe)
-        .args(["daemon", "start"])
+        .args(["daemon", "start", "--foreground"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -247,7 +249,7 @@ fn start_daemon() -> Result<()> {
         .into_diagnostic()?;
 
     // Wait a moment for daemon to start
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1000));
 
     if !is_daemon_running() {
         return Err(miette!(
@@ -297,8 +299,8 @@ fn start_beam_node(port: u16) -> Result<Child> {
             ),
         ])
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())  // Show BEAM output for debugging
-        .stderr(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
