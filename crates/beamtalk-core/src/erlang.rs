@@ -281,6 +281,12 @@ impl CoreErlangGenerator {
     ///     <expression>
     /// end
     /// ```
+    ///
+    /// # Known Issues
+    ///
+    /// TODO: BT-57 - Variable references currently fall back to accessing `State`,
+    /// but REPL modules have `Bindings` instead. Need to add REPL context to generator
+    /// so identifier lookup uses `Bindings` instead of `State`.
     fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
@@ -1059,6 +1065,26 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_literal_string() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let lit = Literal::String("hello".into());
+        let result = generator.generate_literal(&lit);
+        assert!(result.is_ok());
+        // Core Erlang binary syntax: #{segment, ...}#
+        // Each segment is #<charcode>(8,1,'integer',['unsigned'|['big']])
+        assert_eq!(
+            generator.output,
+            "#\
+{#<104>(8,1,'integer',['unsigned'|['big']]),\
+#<101>(8,1,'integer',['unsigned'|['big']]),\
+#<108>(8,1,'integer',['unsigned'|['big']]),\
+#<108>(8,1,'integer',['unsigned'|['big']]),\
+#<111>(8,1,'integer',['unsigned'|['big']])}#",
+            "String 'hello' should generate correct Core Erlang binary literal"
+        );
+    }
+
+    #[test]
     fn test_generate_binary_op_addition() {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
@@ -1156,6 +1182,57 @@ end
                 assert!(
                     output.status.success(),
                     "erlc compilation failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    core_erlang
+                );
+            }
+            Err(_) => {
+                // erlc not available, skip test
+                println!("Skipping test - erlc not installed in CI environment");
+            }
+        }
+    }
+
+    #[test]
+    fn test_string_literal_core_erlang_compiles() {
+        use std::fs;
+        use std::process::Command;
+
+        // Test that string literals compile correctly through the full pipeline
+        // This tests the new binary syntax: #{#<value>(8,1,'integer',['unsigned'|['big']]),...}#
+        let core_erlang = r"module 'test_string' ['get_greeting'/0]
+  attributes []
+
+'get_greeting'/0 = fun () ->
+    #{#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}#
+
+end
+";
+
+        // Write to temporary file
+        let temp_dir = std::env::temp_dir();
+        let core_file = temp_dir.join("test_string.core");
+        fs::write(&core_file, core_erlang).expect("should write core erlang file");
+
+        // Try to compile with erlc
+        let output = Command::new("erlc")
+            .arg("+from_core")
+            .arg(&core_file)
+            .current_dir(&temp_dir)
+            .output();
+
+        // Clean up
+        let _ = fs::remove_file(&core_file);
+        let beam_file = temp_dir.join("test_string.beam");
+        let _ = fs::remove_file(&beam_file);
+
+        // Check compilation result
+        match output {
+            Ok(output) => {
+                assert!(
+                    output.status.success(),
+                    "erlc compilation of string literal failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr),
                     core_erlang

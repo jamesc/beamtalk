@@ -69,7 +69,6 @@
 %% Internal exports for testing
 -export([parse_request/1, format_response/1, format_error/1]).
 
--define(DEFAULT_DAEMON_SOCKET_PATH, "/tmp/.beamtalk/daemon.sock").
 -define(ACCEPT_TIMEOUT, 100).
 -define(RECV_TIMEOUT, 30000).
 -define(DAEMON_CONNECT_TIMEOUT, 5000).
@@ -130,13 +129,21 @@ get_port(Pid) ->
 %% @private
 init({Port, Options}) ->
     %% Determine daemon socket path (default: ~/.beamtalk/daemon.sock)
+    %% If no explicit path is provided and HOME is unset, fail explicitly so
+    %% behavior matches the daemon (which requires HOME to be set).
     DaemonSocketPath = case maps:get(daemon_socket_path, Options, undefined) of
         undefined ->
             case os:getenv("HOME") of
-                false -> ?DEFAULT_DAEMON_SOCKET_PATH;
-                Home -> filename:join([Home, ".beamtalk", "daemon.sock"])
+                false ->
+                    erlang:error({missing_env_var,
+                                  "HOME",
+                                  "Beamtalk REPL requires HOME to be set to locate the compiler daemon "
+                                  "socket. Either set HOME or pass daemon_socket_path in Options."});
+                Home ->
+                    filename:join([Home, ".beamtalk", "daemon.sock"])
             end;
-        Path -> Path
+        Path ->
+            Path
     end,
     
     %% Open TCP listen socket
@@ -704,6 +711,10 @@ parse_daemon_response(ResponseLine, ModuleName) ->
 
 %% @private
 %% Compile Core Erlang source to BEAM bytecode.
+%% TODO: BT-56 (security) - This writes to a predictable temp file path which
+%% could be exploited via symlink attacks on multi-user systems. Should use
+%% a per-user private directory with securely created temp files, or use
+%% in-memory compilation APIs if available.
 -spec compile_core_erlang(binary(), atom()) -> {ok, binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin, ModuleName) ->
     %% Write Core Erlang to temp file (filename must match module name)
@@ -777,6 +788,12 @@ find_string_end(<<_, Rest/binary>>, Pos) ->
 
 %% @private
 %% Unescape JSON string escape sequences.
+%% NOTE: This is a simplified unescaper that only handles basic escape sequences
+%% (\n, \r, \t, \", \\). It does NOT handle:
+%% - Unicode escape sequences (\uXXXX)
+%% - Forward slash escaping (\/)
+%% - Invalid escape sequences are silently passed through
+%% TODO: BT-55 - Use a proper JSON parsing library (jsx or jiffy) for robust handling.
 -spec unescape_json_string(binary()) -> binary().
 unescape_json_string(Str) ->
     unescape_json_string(Str, <<>>).
