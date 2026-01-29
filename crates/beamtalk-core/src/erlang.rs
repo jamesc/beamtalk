@@ -806,7 +806,7 @@ impl CoreErlangGenerator {
         if let MessageSelector::Unary(name) = selector {
             if name == "spawn" && arguments.is_empty() {
                 if let Expression::Identifier(id) = receiver {
-                    // Generate: call 'module':'spawn'/0()
+                    // Generate: call 'module':'spawn'()
                     // Convert class name to module name (CamelCase -> snake_case)
                     let module_name = Self::to_module_name(&id.name);
                     write!(self.output, "call '{module_name}':'spawn'()")?;
