@@ -39,7 +39,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | `and:` / `or:` | 🔄 | — | Returns future (needs await) |
 | `not` | 🔄 | — | Returns future (needs await) |
 | **Cascades** | | | |
-| Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Parsed, codegen not implemented |
+| Cascade syntax | ✅ | [cascades.bt](cases/cascades.bt) | Codegen implemented, REPL TBD |
 | **Actors** | | | |
 | `spawn` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
 | Async messages | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |

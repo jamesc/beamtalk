@@ -6,12 +6,13 @@
 //
 // SYNTAX: receiver msg1; msg2; msg3
 //
-// NOTE: Cascade syntax is parsed but code generation is not yet implemented.
-// These tests document the intended syntax for future implementation.
+// Implementation Status: Code generation implemented BT-86
 //
-// Cascades are useful for initialization patterns:
-//   collection add: 1; add: 2; add: 3
-//   stream write: 'hello'; nl; write: 'world'
+// These tests are currently documentation-only as the REPL doesn't yet support cascades.
+// When REPL support is added, uncomment these tests:
 //
-// The parser recognizes cascade syntax, but the REPL doesn't yet evaluate it.
-// See: Expression::Cascade in crates/beamtalk-core/src/ast.rs
+// Simple cascade example (returns result of final message):
+// [1, 2, 3] size; isEmpty; not
+// // => future (when supported)
+//
+// For now, cascades work in compiled modules but not in the REPL.
