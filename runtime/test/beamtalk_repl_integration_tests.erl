@@ -43,6 +43,8 @@ repl_integration_test_() ->
                   {"eval nil literal", fun eval_nil_literal/0},
                   {"eval assignment", fun eval_assignment/0},
                   {"eval variable reference", fun eval_variable_reference/0},
+                  {"eval variable in arithmetic (BT-57)", fun eval_variable_arithmetic/0},
+                  {"eval multiple variable arithmetic (BT-57)", fun eval_multi_variable_arithmetic/0},
                   {"eval multiple assignments", fun eval_multiple_assignments/0},
                   {"eval reassignment", fun eval_reassignment/0},
                   {"clear bindings", fun clear_bindings/0}
@@ -170,3 +172,22 @@ clear_bindings() ->
     ok = beamtalk_repl:clear_bindings(Pid),
     ?assertEqual(0, maps:size(beamtalk_repl:get_bindings(Pid))),
     beamtalk_repl:stop(Pid).
+
+%% BT-57: Variable references in arithmetic expressions
+%% Tests that variable lookup works correctly via State alias
+eval_variable_arithmetic() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    {ok, 10} = beamtalk_repl:eval(Pid, "x := 10"),
+    Result = beamtalk_repl:eval(Pid, "x + 5"),
+    beamtalk_repl:stop(Pid),
+    ?assertMatch({ok, 15}, Result).
+
+%% BT-57: Multiple variables in expression
+%% Tests that all variable lookups correctly resolve from bindings
+eval_multi_variable_arithmetic() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    {ok, 3} = beamtalk_repl:eval(Pid, "a := 3"),
+    {ok, 4} = beamtalk_repl:eval(Pid, "b := 4"),
+    Result = beamtalk_repl:eval(Pid, "a + b"),
+    beamtalk_repl:stop(Pid),
+    ?assertMatch({ok, 7}, Result).

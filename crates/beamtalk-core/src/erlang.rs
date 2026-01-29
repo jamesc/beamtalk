@@ -32,7 +32,7 @@
 //! 'init'/1 = fun (_Args) ->
 //!     let InitialState = ~{
 //!       '__class__' => 'Counter',
-//!       '__methods__' => call 'counter':'method_table'/0(),
+//!       '__methods__' => call 'counter':'method_table'(),
 //!       'value' => 0
 //!     }~
 //!     in {'ok', InitialState}
@@ -40,7 +40,7 @@
 //! 'handle_cast'/2 = fun (Msg, State) ->
 //!     case Msg of
 //!       <{Selector, Args, FuturePid}> when 'true' ->
-//!         case call 'counter':'dispatch'/3(Selector, Args, State) of
+//!         case call 'counter':'dispatch'(Selector, Args, State) of
 //!           <{'reply', Result, NewState}> when 'true' ->
 //!             let _ = call 'erlang':'!'(FuturePid, {'resolved', Result})
 //!             in {'noreply', NewState}
@@ -54,7 +54,7 @@
 //!
 //! - **Atoms**: `'atom_name'` (always quoted)
 //! - **Variables**: `VariableName` (starts with uppercase)
-//! - **Function calls**: `call 'module':'function'/arity(args)`
+//! - **Function calls**: `call 'module':'function'(args)`
 //! - **Let bindings**: `let Var = Expr in Body`
 //! - **Case expressions**: `case Expr of Pattern -> Body end`
 //! - **Maps**: `~{'key' => value}~`
@@ -278,15 +278,14 @@ impl CoreErlangGenerator {
     ///   attributes []
     ///
     /// 'eval'/1 = fun (Bindings) ->
+    ///     let State = Bindings in
     ///     <expression>
     /// end
     /// ```
     ///
-    /// # Known Issues
-    ///
-    /// TODO: BT-57 - Variable references currently fall back to accessing `State`,
-    /// but REPL modules have `Bindings` instead. Need to add REPL context to generator
-    /// so identifier lookup uses `Bindings` instead of `State`.
+    /// The `State` alias ensures that identifier lookups work correctly,
+    /// since `generate_identifier` falls back to `maps:get(Name, State)`
+    /// for variables not bound in the current scope.
     fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
@@ -294,12 +293,17 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         // Generate eval/1 function
+        // Alias State = Bindings so identifier lookup works (it falls back to State)
         writeln!(self.output, "'eval'/1 = fun (Bindings) ->")?;
         self.indent += 1;
 
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
+
+        // Alias State to Bindings for identifier fallback lookup
+        self.write_indent()?;
+        writeln!(self.output, "let State = Bindings in")?;
 
         // Generate the expression
         self.write_indent()?;
@@ -326,7 +330,7 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'spawn'/0 = fun () ->
-    ///     case call 'gen_server':'start_link'/3('counter', [], []) of
+    ///     case call 'gen_server':'start_link'('counter', [], []) of
     ///         <{'ok', Pid}> when 'true' ->
     ///             Pid;
     ///         <{'error', Reason}> when 'true' ->
@@ -343,7 +347,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call 'gen_server':'start_link'/3('{}', [], []) of",
+            "case call 'gen_server':'start_link'('{}', [], []) of",
             self.module_name
         )?;
         self.indent += 1;
@@ -382,7 +386,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "'__methods__' => call '{}':'method_table'/0()",
+            "'__methods__' => call '{}':'method_table'()",
             self.module_name
         )?;
 
@@ -416,7 +420,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call '{}':'dispatch'/3(Selector, Args, State) of",
+            "case call '{}':'dispatch'(Selector, Args, State) of",
             self.module_name
         )?;
         self.indent += 1;
@@ -458,7 +462,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call '{}':'dispatch'/3(Selector, Args, State) of",
+            "case call '{}':'dispatch'(Selector, Args, State) of",
             self.module_name
         )?;
         self.indent += 1;
@@ -635,12 +639,10 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
-            Expression::Assignment { .. } => {
-                // Assignments in expressions are not yet supported
-                Err(CodeGenError::UnsupportedFeature {
-                    feature: "assignment in expression".to_string(),
-                    location: format!("{:?}", expr.span()),
-                })
+            Expression::Assignment { value, .. } => {
+                // In REPL context and elsewhere, assignment returns the assigned value
+                // The REPL extracts the variable name separately and updates bindings
+                self.generate_expression(value)
             }
             Expression::Return { value, .. } => {
                 // Return in Core Erlang is just the value
@@ -707,7 +709,7 @@ impl CoreErlangGenerator {
                     write!(self.output, "{var_name}")?;
                 } else {
                     // Field access from state
-                    write!(self.output, "call 'maps':'get'/2('{}', State)", id.name)?;
+                    write!(self.output, "call 'maps':'get'('{}', State)", id.name)?;
                 }
             }
         }
@@ -719,7 +721,7 @@ impl CoreErlangGenerator {
         // For now, assume receiver is 'self' and access from State
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                write!(self.output, "call 'maps':'get'/2('{}', State)", field.name)?;
+                write!(self.output, "call 'maps':'get'('{}', State)", field.name)?;
                 return Ok(());
             }
         }
@@ -807,7 +809,7 @@ impl CoreErlangGenerator {
                     // Generate: call 'module':'spawn'/0()
                     // Convert class name to module name (CamelCase -> snake_case)
                     let module_name = Self::to_module_name(&id.name);
-                    write!(self.output, "call '{module_name}':'spawn'/0()")?;
+                    write!(self.output, "call '{module_name}':'spawn'()")?;
                     return Ok(());
                 }
             }
@@ -819,8 +821,8 @@ impl CoreErlangGenerator {
         }
 
         // Generate the async message send protocol:
-        // let Future1 = call 'beamtalk_future':'new'/0()
-        // in let _ = call 'gen_server':'cast'/2(ReceiverPid, {Selector, Args, Future1})
+        // let Future1 = call 'beamtalk_future':'new'()
+        // in let _ = call 'gen_server':'cast'(ReceiverPid, {Selector, Args, Future1})
         //    in Future1
         //
         // Use fresh_var to avoid shadowing in nested message sends
@@ -828,11 +830,11 @@ impl CoreErlangGenerator {
         let future_var = self.fresh_var("Future");
         write!(
             self.output,
-            "let {future_var} = call 'beamtalk_future':'new'/0() in "
+            "let {future_var} = call 'beamtalk_future':'new'() in "
         )?;
 
         // Build the message tuple: {Selector, Args, Future}
-        write!(self.output, "let _ = call 'gen_server':'cast'/2(")?;
+        write!(self.output, "let _ = call 'gen_server':'cast'(")?;
 
         // Receiver evaluation
         self.generate_expression(receiver)?;
@@ -885,7 +887,7 @@ impl CoreErlangGenerator {
     /// For a timed await with timeout handling, use `beamtalk_future:await/2`.
     fn generate_await(&mut self, future: &Expression) -> Result<()> {
         // Delegate to beamtalk_future:await/1, which blocks until resolution/rejection
-        write!(self.output, "call 'beamtalk_future':'await'/1(")?;
+        write!(self.output, "call 'beamtalk_future':'await'(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
         Ok(())
@@ -924,7 +926,7 @@ impl CoreErlangGenerator {
             }
         };
 
-        write!(self.output, "call 'erlang':'{erlang_op}'/2(")?;
+        write!(self.output, "call 'erlang':'{erlang_op}'(")?;
         self.generate_expression(left)?;
         write!(self.output, ", ")?;
         self.generate_expression(&arguments[0])?;
@@ -1091,7 +1093,7 @@ mod tests {
         let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
         let result = generator.generate_binary_op("+", &left, &right);
         assert!(result.is_ok());
-        assert!(generator.output.contains("call 'erlang':'+'/2(3, 4)"));
+        assert!(generator.output.contains("call 'erlang':'+'(3, 4)"));
     }
 
     #[test]
@@ -1259,12 +1261,12 @@ end
         let output = &generator.output;
         // Check async protocol: create future, cast, return future
         assert!(
-            output.contains("beamtalk_future':'new'/0"),
-            "Should create a future with beamtalk_future:new/0. Got: {output}"
+            output.contains("beamtalk_future':'new'()"),
+            "Should create a future with beamtalk_future:new(). Got: {output}"
         );
         assert!(
-            output.contains("gen_server':'cast'/2"),
-            "Should send via gen_server:cast/2. Got: {output}"
+            output.contains("gen_server':'cast'("),
+            "Should send via gen_server:cast(). Got: {output}"
         );
         assert!(
             output.contains("'increment'"),
@@ -1299,12 +1301,12 @@ end
         let output = &generator.output;
         // Check async protocol
         assert!(
-            output.contains("beamtalk_future':'new'/0"),
+            output.contains("beamtalk_future':'new'()"),
             "Should create a future. Got: {output}"
         );
         assert!(
-            output.contains("gen_server':'cast'/2"),
-            "Should send via gen_server:cast/2. Got: {output}"
+            output.contains("gen_server':'cast'("),
+            "Should send via gen_server:cast(). Got: {output}"
         );
         assert!(
             output.contains("'at:put:'"),
@@ -1324,10 +1326,10 @@ end
         assert!(result.is_ok());
 
         let output = &generator.output;
-        // Special case: await uses beamtalk_future:await/1, not the async protocol
+        // Special case: await uses beamtalk_future:await(), not the async protocol
         assert!(
-            output.contains("beamtalk_future':'await'/1"),
-            "Should call beamtalk_future:await/1. Got: {output}"
+            output.contains("beamtalk_future':'await'("),
+            "Should call beamtalk_future:await(). Got: {output}"
         );
         assert!(
             !output.contains("gen_server':'cast'"),
@@ -1350,8 +1352,8 @@ end
         let output = &generator.output;
         // Binary ops use erlang's built-in operators - synchronous
         assert!(
-            output.contains("erlang':'+'/2"),
-            "Should use erlang:+/2. Got: {output}"
+            output.contains("erlang':'+'("),
+            "Should use erlang:'+'. Got: {output}"
         );
         assert!(
             !output.contains("beamtalk_future':'new'"),
@@ -1408,7 +1410,7 @@ end
 
         let result = generator.generate_message_send(&receiver, &selector, &arguments);
         assert!(result.is_ok());
-        assert!(generator.output.contains("call 'counter':'spawn'/0()"));
+        assert!(generator.output.contains("call 'counter':'spawn'()"));
     }
 
     #[test]
@@ -1435,7 +1437,7 @@ end
         assert!(code.contains("'spawn'/0 = fun () ->"));
 
         // Check that it calls gen_server:start_link with empty args (init creates state)
-        assert!(code.contains("call 'gen_server':'start_link'/3('counter', [], [])"));
+        assert!(code.contains("call 'gen_server':'start_link'('counter', [], [])"));
 
         // Check that it uses a case expression to extract the Pid
         assert!(code.contains("case call 'gen_server':'start_link'"));
@@ -1450,7 +1452,61 @@ end
         assert!(code.contains("'init'/1 = fun (_Args) ->"));
         assert!(code.contains("let InitialState = ~{"));
         assert!(code.contains("'__class__' => 'Counter'"));
-        assert!(code.contains("'__methods__' => call 'counter':'method_table'/0()"));
+        assert!(code.contains("'__methods__' => call 'counter':'method_table'()"));
         assert!(code.contains("'value' => 0"));
+    }
+
+    #[test]
+    fn test_generate_repl_module_aliases_state_to_bindings() {
+        // BT-57: REPL modules must alias State to Bindings for identifier lookups
+        let expression = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let code = generate_repl_expression(&expression, "repl_test").expect("codegen should work");
+
+        // Check that the module aliases State to Bindings
+        assert!(
+            code.contains("let State = Bindings in"),
+            "REPL module should alias State to Bindings. Got:\n{code}"
+        );
+
+        // Check that identifier lookup uses maps:get with State
+        assert!(
+            code.contains("call 'maps':'get'('x', State)"),
+            "Identifier lookup should use State (aliased to Bindings). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_arithmetic() {
+        // BT-57: Verify complex expressions with variable references work
+        // Expression: x + 1
+        let x_ref = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let one = Expression::Literal(Literal::Integer(1), Span::new(4, 5));
+        let expression = Expression::MessageSend {
+            receiver: Box::new(x_ref),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            span: Span::new(0, 5),
+        };
+
+        let code =
+            generate_repl_expression(&expression, "repl_arith").expect("codegen should work");
+
+        // Check State aliasing
+        assert!(
+            code.contains("let State = Bindings in"),
+            "REPL module should alias State to Bindings. Got:\n{code}"
+        );
+
+        // Check that x lookup works through State
+        assert!(
+            code.contains("call 'maps':'get'('x', State)"),
+            "Variable x should be looked up from State. Got:\n{code}"
+        );
+
+        // Check the arithmetic operation
+        assert!(
+            code.contains("call 'erlang':'+'("),
+            "Should have addition operation. Got:\n{code}"
+        );
     }
 }
