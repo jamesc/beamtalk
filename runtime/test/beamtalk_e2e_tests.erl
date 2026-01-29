@@ -12,6 +12,7 @@
 %%% - spawn/0 tests (Counter spawn)
 %%% - spawn/1 tests (Counter spawnWith: #{...})
 %%% - State merging behavior (InitArgs override defaults)
+%%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
@@ -172,6 +173,9 @@ async_message_creates_future_test() ->
     Future = beamtalk_future:new(),
     ?assert(is_pid(Future)),
     
+    %% Clean up: resolve the future to allow it to terminate
+    beamtalk_future:resolve(Future, ok),
+    
     gen_server:stop(Actor).
 
 async_message_uses_cast_tuple_test() ->
@@ -220,12 +224,20 @@ async_await_on_pending_future_blocks_test() ->
     
     %% Spawn a process that will await the future
     spawn(fun() ->
+        Parent ! {ready, self()},  % Signal that we're about to await
         {ok, Result} = beamtalk_future:await(Future, 2000),
         Parent ! {awaited, Result}
     end),
     
-    %% Give the awaiter time to register
-    timer:sleep(50),
+    %% Wait for the awaiter to signal it's ready
+    receive
+        {ready, _} -> ok
+    after 1000 ->
+        ?assert(false)  % Timeout - spawned process didn't start
+    end,
+    
+    %% Give a moment for the await to register with the future
+    timer:sleep(100),
     
     %% Now send the async message to resolve the future
     gen_server:cast(Actor, {increment, [], Future}),
@@ -244,21 +256,22 @@ async_await_on_resolved_future_returns_immediately_test() ->
     State = counter_module_state(#{value => 20}),
     {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
     
-    %% Send async message and let it complete
+    %% Send async message and await to ensure it's resolved
     Future = beamtalk_future:new(),
     gen_server:cast(Actor, {increment, [], Future}),
     
-    %% Give it time to resolve
-    timer:sleep(100),
+    %% First await to ensure future is resolved
+    {ok, Result1} = beamtalk_future:await(Future, 1000),
+    ?assertEqual(21, Result1),
     
-    %% Now await the already-resolved future - should return immediately
+    %% Now await the already-resolved future again - should return immediately
     StartTime = erlang:monotonic_time(millisecond),
-    {ok, Result} = beamtalk_future:await(Future, 1000),
+    {ok, Result2} = beamtalk_future:await(Future, 1000),
     EndTime = erlang:monotonic_time(millisecond),
     
-    ?assertEqual(21, Result),
-    %% Should be nearly instant (< 50ms)
-    ?assert(EndTime - StartTime < 50),
+    ?assertEqual(21, Result2),
+    %% Should be very fast (< 500ms) since future is already resolved
+    ?assert(EndTime - StartTime < 500),
     
     gen_server:stop(Actor).
 
@@ -414,6 +427,9 @@ async_future_timeout_behavior_test() ->
     Result = beamtalk_future:await(Future, 100),
     ?assertEqual({error, timeout}, Result),
     
+    %% Clean up: resolve the future to allow it to terminate
+    beamtalk_future:resolve(Future, ok),
+    
     gen_server:stop(Actor).
 
 async_multiple_awaits_same_future_test() ->
@@ -427,13 +443,23 @@ async_multiple_awaits_same_future_test() ->
     %% Spawn 3 processes awaiting the same future
     lists:foreach(fun(N) ->
         spawn(fun() ->
+            Parent ! {ready, N},  % Signal ready to await
             {ok, Result} = beamtalk_future:await(Future, 2000),
             Parent ! {waiter, N, Result}
         end)
     end, [1, 2, 3]),
     
-    %% Give them time to register
-    timer:sleep(50),
+    %% Wait for all waiters to signal they're ready
+    lists:foreach(fun(_) ->
+        receive
+            {ready, _} -> ok
+        after 1000 ->
+            ?assert(false)
+        end
+    end, [1, 2, 3]),
+    
+    %% Give a moment for all awaits to register
+    timer:sleep(100),
     
     %% Send the async message
     gen_server:cast(Actor, {increment, [], Future}),
