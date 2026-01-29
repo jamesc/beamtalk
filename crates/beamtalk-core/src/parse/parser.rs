@@ -1389,11 +1389,20 @@ mod tests {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 // First pair: #name => 'Alice'
-                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name"));
-                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice"));
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name")
+                );
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice")
+                );
                 // Second pair: #age => 30
-                assert!(matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age"));
-                assert!(matches!(&pairs[1].value, Expression::Literal(Literal::Integer(30), _)));
+                assert!(
+                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age")
+                );
+                assert!(matches!(
+                    &pairs[1].value,
+                    Expression::Literal(Literal::Integer(30), _)
+                ));
             }
             _ => panic!("Expected MapLiteral"),
         }
@@ -1406,8 +1415,12 @@ mod tests {
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
-                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::String(s), _) if s == "host"));
-                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "localhost"));
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::String(s), _) if s == "host")
+                );
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "localhost")
+                );
             }
             _ => panic!("Expected MapLiteral"),
         }
@@ -1420,8 +1433,13 @@ mod tests {
         match &module.expressions[0] {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
-                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::Integer(1), _)));
-                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "first"));
+                assert!(matches!(
+                    &pairs[0].key,
+                    Expression::Literal(Literal::Integer(1), _)
+                ));
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "first")
+                );
             }
             _ => panic!("Expected MapLiteral"),
         }

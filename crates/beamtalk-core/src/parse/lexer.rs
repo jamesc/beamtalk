@@ -746,11 +746,8 @@ mod tests {
 
     #[test]
     fn lex_map_open() {
-        assert_eq!(
-            lex_kinds("#{"),
-            vec![TokenKind::MapOpen]
-        );
-        
+        assert_eq!(lex_kinds("#{"), vec![TokenKind::MapOpen]);
+
         // Test that #{ is recognized as MapOpen, not Hash followed by LeftBrace
         let tokens = lex("#{");
         assert_eq!(tokens.len(), 1);
