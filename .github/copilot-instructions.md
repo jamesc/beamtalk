@@ -103,6 +103,69 @@ When the user types `/done`, execute this workflow:
 
 ---
 
+### `/pr-resolve` - Address PR review comments
+
+When the user types `/pr-resolve`, execute this workflow to systematically address all PR review comments:
+
+1. **Get PR review comments**: Fetch all unresolved review comments from the active PR:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/{pr}/comments --jq '.[] | select(.in_reply_to_id == null) | {id, path, body}'
+   ```
+
+2. **Analyze and plan**: For each review comment:
+   - Understand what the reviewer is asking for
+   - Determine if it needs a code fix, documentation, Linear issue, or just clarification
+   - Create a todo list with all items to address
+
+3. **Run tests first**: Verify current state passes all checks:
+   ```bash
+   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+   ```
+   Also run Erlang tests if runtime changes are involved:
+   ```bash
+   cd runtime && rebar3 eunit
+   ```
+
+4. **Address each comment**: For each item in the plan:
+   - Make the necessary code changes
+   - Run tests after each significant change to catch regressions early
+   - If a comment requires a follow-up Linear issue (e.g., "TODO for later"):
+     - Create the Linear issue with full context
+     - Add a TODO comment in the code referencing the issue number
+   - Mark the todo item complete
+
+5. **Run full test suite**: After all changes:
+   ```bash
+   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+   ```
+
+6. **Commit changes**: Stage and commit with a descriptive message:
+   ```bash
+   git add -A
+   git commit -m "fix: address PR review comments BT-{number}
+
+   - Summary of each fix
+   - Reference any Linear issues created"
+   ```
+
+7. **Push changes**:
+   ```bash
+   git push
+   ```
+
+8. **Reply to each comment**: For every review comment that was addressed, add a reply explaining what was done:
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/{pr}/comments/{comment_id}/replies -f body="<explanation of fix, commit hash, any Linear issues created>"
+   ```
+   Include:
+   - Commit hash where the fix was made
+   - Brief description of the change
+   - Links to any Linear issues created for follow-up work
+
+9. **Report summary**: Provide a summary table of all comments and how they were resolved.
+
+---
+
 ### Creating Linear Issues
 
 When creating Linear issues with dependencies:
