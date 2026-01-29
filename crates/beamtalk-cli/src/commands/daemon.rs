@@ -518,6 +518,7 @@ struct CompileResult {
     beam_path: Option<String>,
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
+    classes: Vec<String>,
 }
 
 /// Diagnostic information for responses.
@@ -577,8 +578,8 @@ fn handle_compile(
     let has_errors = !diagnostics.is_empty();
 
     // Generate Core Erlang if no errors
-    let core_erlang = if has_errors {
-        None
+    let (core_erlang, class_names) = if has_errors {
+        (None, vec![])
     } else {
         // Parse and generate
         use beamtalk_core::parse::{lex_with_eof, parse};
@@ -588,7 +589,9 @@ fn handle_compile(
         // Derive module name from file path
         let module_name = file_path.file_stem().unwrap_or("module").to_string();
 
-        beamtalk_core::erlang::generate_with_name(&module, &module_name).ok()
+        let core = beamtalk_core::erlang::generate_with_name(&module, &module_name).ok();
+        let classes = extract_class_names(&module);
+        (core, classes)
     };
 
     let result = CompileResult {
@@ -596,6 +599,7 @@ fn handle_compile(
         beam_path: None, // TODO: Invoke erlc
         core_erlang,
         diagnostics,
+        classes: class_names,
     };
 
     match serde_json::to_value(result) {
@@ -767,6 +771,14 @@ fn handle_compile_expression(
             )
         }
     }
+}
+
+/// Extract class names from a parsed module.
+/// Returns empty vec for now - will be populated when class definitions are added to AST.
+fn extract_class_names(_module: &beamtalk_core::ast::Module) -> Vec<String> {
+    // TODO: When class definitions are added to the AST, extract them here
+    // For now, return empty vec
+    vec![]
 }
 
 #[cfg(test)]

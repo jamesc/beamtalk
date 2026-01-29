@@ -73,12 +73,14 @@ struct ReplResponse {
     value: Option<serde_json::Value>,
     message: Option<String>,
     bindings: Option<serde_json::Value>,
+    classes: Option<Vec<String>>,
 }
 
 /// REPL client state.
 struct ReplClient {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
+    last_loaded_file: Option<String>,
 }
 
 impl ReplClient {
@@ -95,7 +97,11 @@ impl ReplClient {
         let reader_stream = stream.try_clone().into_diagnostic()?;
         let reader = BufReader::new(reader_stream);
 
-        Ok(Self { stream, reader })
+        Ok(Self {
+            stream,
+            reader,
+            last_loaded_file: None,
+        })
     }
 
     /// Send an eval request and receive the response.
@@ -152,6 +158,42 @@ impl ReplClient {
             .into_diagnostic()?;
 
         serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+
+    /// Load a Beamtalk file.
+    fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
+        let request = serde_json::json!({
+            "type": "load",
+            "path": path
+        });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        let response: ReplResponse = serde_json::from_str(&response_line)
+            .map_err(|e| miette!("Failed to parse response: {e}"))?;
+
+        // Update last loaded file on success
+        if response.response_type == "loaded" {
+            self.last_loaded_file = Some(path.to_string());
+        }
+
+        Ok(response)
+    }
+
+    /// Reload the last loaded file.
+    fn reload_file(&mut self) -> Result<ReplResponse> {
+        let path = self
+            .last_loaded_file
+            .clone()
+            .ok_or_else(|| miette!("No file has been loaded yet"))?;
+        self.load_file(&path)
     }
 }
 
@@ -379,6 +421,8 @@ fn print_help() {
     println!("  :exit, :q     Exit the REPL");
     println!("  :clear        Clear all variable bindings");
     println!("  :bindings     Show current variable bindings");
+    println!("  :load <path>  Load a .bt file");
+    println!("  :reload       Reload the last loaded file");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -402,6 +446,10 @@ impl Drop for BeamChildGuard {
 }
 
 /// Run the REPL.
+#[expect(
+    clippy::too_many_lines,
+    reason = "REPL main loop handles many commands"
+)]
 pub fn run() -> Result<()> {
     println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
     println!("Type :help for available commands, :exit to quit.");
@@ -470,6 +518,63 @@ pub fn run() -> Result<()> {
                                         for (name, value) in map {
                                             println!("  {name} = {}", format_value(&value));
                                         }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ if line.starts_with(":load ") || line.starts_with(":l ") => {
+                        let path = if line.starts_with(":load ") {
+                            line.strip_prefix(":load ").unwrap().trim()
+                        } else {
+                            line.strip_prefix(":l ").unwrap().trim()
+                        };
+
+                        if path.is_empty() {
+                            eprintln!("Usage: :load <path>");
+                            continue;
+                        }
+
+                        match client.load_file(path) {
+                            Ok(response) => {
+                                if response.response_type == "loaded" {
+                                    if let Some(classes) = response.classes {
+                                        if classes.is_empty() {
+                                            println!("Loaded {path}");
+                                        } else {
+                                            println!("Loaded {}", classes.join(", "));
+                                        }
+                                    } else {
+                                        println!("Loaded {path}");
+                                    }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":reload" | ":r" => {
+                        match client.reload_file() {
+                            Ok(response) => {
+                                if response.response_type == "loaded" {
+                                    if let Some(classes) = response.classes {
+                                        if classes.is_empty() {
+                                            println!("Reloaded");
+                                        } else {
+                                            println!("Reloaded {}", classes.join(", "));
+                                        }
+                                    } else {
+                                        println!("Reloaded");
+                                    }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
                                     }
                                 }
                             }

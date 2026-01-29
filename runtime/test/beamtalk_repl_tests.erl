@@ -31,6 +31,10 @@ parse_bindings_request_test() ->
     Request = <<"{\"type\":\"bindings\"}">>,
     ?assertEqual({get_bindings}, beamtalk_repl:parse_request(Request)).
 
+parse_load_request_test() ->
+    Request = <<"{\"type\":\"load\",\"path\":\"examples/counter.bt\"}">>,
+    ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl:parse_request(Request)).
+
 parse_raw_expression_test() ->
     %% Non-JSON input is treated as a raw expression
     Request = <<"counter getValue">>,
@@ -116,6 +120,21 @@ format_timeout_error_test() ->
     Response = beamtalk_repl:format_error(timeout),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Request timed out">>}, Decoded).
+
+format_file_not_found_error_test() ->
+    Response = beamtalk_repl:format_error({file_not_found, "missing.bt"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"File not found: missing.bt">>}, Decoded).
+
+format_read_error_test() ->
+    Response = beamtalk_repl:format_error({read_error, eacces}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Failed to read file: eacces">>}, Decoded).
+
+format_daemon_unavailable_error_test() ->
+    Response = beamtalk_repl:format_error(daemon_unavailable),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{<<"type">> => <<"error">>, <<"message">> => <<"Unable to connect to compiler daemon. Start with: beamtalk daemon start --foreground">>}, Decoded).
 
 %%% Server Lifecycle Tests
 
