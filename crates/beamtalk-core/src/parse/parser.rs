@@ -837,8 +837,9 @@ impl Parser {
         while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
             let entry_start = self.current_token().span();
 
-            // Parse key expression
-            let key = self.parse_primary(); // Parse only primary to avoid consuming '=>' as binary operator
+            // Parse key expression - use comparison level to get full expressions
+            // but stop before => (which is a binary selector but not used in normal expressions)
+            let key = self.parse_comparison();
 
             // Expect '=>' operator
             let has_arrow = matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=>");
@@ -852,8 +853,8 @@ impl Parser {
             }
             self.advance(); // consume '=>'
 
-            // Parse value expression (also just primary to avoid issues)
-            let value = self.parse_primary();
+            // Parse value expression - same level as key
+            let value = self.parse_comparison();
 
             let entry_end = value.span();
             let entry_span = entry_start.merge(entry_end);
