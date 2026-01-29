@@ -1692,6 +1692,42 @@ end
     }
 
     #[test]
+    fn test_generate_repl_module_block_value_call() {
+        // Test full REPL module generation for block value call
+        // Expression: [:x | x + 1] value: 5
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(1, 2))],
+            vec![Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "x",
+                    Span::new(5, 6),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+                span: Span::new(5, 10),
+            }],
+            Span::new(0, 12),
+        );
+
+        let expression = Expression::MessageSend {
+            receiver: Box::new(Expression::Block(block)),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]),
+            arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))],
+            span: Span::new(0, 22),
+        };
+
+        let code =
+            generate_repl_expression(&expression, "test_block_repl").expect("codegen should work");
+
+        // Check basic structure
+        assert!(
+            code.contains("let State = Bindings in"),
+            "Should alias State to Bindings"
+        );
+        assert!(code.contains("apply"), "Should use apply for block call");
+    }
+
+    #[test]
     fn test_generate_repl_module_with_arithmetic() {
         // BT-57: Verify complex expressions with variable references work
         // Expression: x + 1
