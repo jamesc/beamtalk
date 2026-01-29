@@ -5,10 +5,20 @@
 //!
 //! Test cases are discovered from the `cases/` directory.
 //! Each subdirectory with a `main.bt` file becomes a test.
+//!
+//! Each test case generates three snapshots:
+//! - `{case}_lexer` - Token stream from the lexer
+//! - `{case}_parser` - AST from the parser
+//! - `{case}_codegen` - Generated Core Erlang code
+//!
+//! Additionally, a compilation test verifies the generated Core Erlang
+//! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
 
+use beamtalk_core::erlang::generate_with_name;
 use beamtalk_core::parse::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use std::fs;
+use std::process::Command;
 
 /// Helper function to read test case source files
 fn read_test_case(case_name: &str) -> String {
@@ -57,6 +67,76 @@ fn test_parser_snapshot(case_name: &str) {
     }
 
     insta::assert_snapshot!(format!("{}_parser", case_name), output);
+}
+
+/// Test the Core Erlang codegen output for a given test case
+fn test_codegen_snapshot(case_name: &str) {
+    let (_module_name, core_erlang) = generate_core_erlang(case_name);
+    insta::assert_snapshot!(format!("{}_codegen", case_name), core_erlang);
+}
+
+/// Helper function to generate Core Erlang from a test case.
+///
+/// Returns a tuple of (module_name, core_erlang_code).
+fn generate_core_erlang(case_name: &str) -> (String, String) {
+    let source = read_test_case(case_name);
+    let tokens = lex_with_eof(&source);
+    let (module, _diagnostics) = parse(tokens);
+
+    // Generate Core Erlang with a module name derived from the test case
+    let module_name = case_name.replace('-', "_");
+    let core_erlang = generate_with_name(&module, &module_name)
+        .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
+
+    (module_name, core_erlang)
+}
+
+/// Test that the generated Core Erlang compiles successfully with erlc.
+///
+/// This test is skipped if `erlc` is not available on the system PATH.
+/// The test writes the generated Core Erlang to a temp file and runs
+/// `erlc +from_core` to verify the syntax is valid.
+fn test_codegen_compiles(case_name: &str) {
+    // Check if erlc is available
+    let erlc_check = Command::new("erlc").arg("--version").output();
+    if erlc_check.is_err() {
+        eprintln!(
+            "Skipping {} compilation test - erlc not available",
+            case_name
+        );
+        return;
+    }
+
+    let (module_name, core_erlang) = generate_core_erlang(case_name);
+
+    // Write to temp file
+    let temp_dir = std::env::temp_dir();
+    let core_file = temp_dir.join(format!("{}.core", module_name));
+    fs::write(&core_file, &core_erlang)
+        .unwrap_or_else(|e| panic!("Failed to write temp file: {}", e));
+
+    // Compile with erlc
+    let output = Command::new("erlc")
+        .arg("+from_core")
+        .arg(&core_file)
+        .current_dir(&temp_dir)
+        .output()
+        .expect("Failed to run erlc");
+
+    // Clean up
+    let _ = fs::remove_file(&core_file);
+    let beam_file = temp_dir.join(format!("{}.beam", module_name));
+    let _ = fs::remove_file(&beam_file);
+
+    // Check result
+    assert!(
+        output.status.success(),
+        "erlc compilation failed for '{}':\nstdout: {}\nstderr: {}\n\nGenerated Core Erlang:\n{}",
+        case_name,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        core_erlang
+    );
 }
 
 // Test cases will be generated here by build.rs

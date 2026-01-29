@@ -1329,15 +1329,12 @@ impl CoreErlangGenerator {
     /// assignments, used by both `spawn/0` and `init/1`.
     fn generate_initial_state_fields(&mut self, module: &Module) -> Result<()> {
         // Initialize fields from module expressions (assignments at top level)
-        // Only literal values are supported for now
+        // Only include literal values - blocks are methods handled by dispatch/3
         for expr in &module.expressions {
             if let Expression::Assignment { target, value, .. } = expr {
                 if let Expression::Identifier(id) = target.as_ref() {
-                    // Only generate field if it's a simple literal or block
-                    if matches!(
-                        value.as_ref(),
-                        Expression::Literal(..) | Expression::Block(_)
-                    ) {
+                    // Only generate field if it's a simple literal (not a block/method)
+                    if matches!(value.as_ref(), Expression::Literal(..)) {
                         self.write_indent()?;
                         write!(self.output, ", '{}' => ", id.name)?;
                         self.generate_expression(value)?;
