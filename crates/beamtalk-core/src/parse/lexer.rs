@@ -467,6 +467,11 @@ impl<'src> Lexer<'src> {
         self.advance(); // #
 
         match self.peek_char() {
+            // Map literal: #{
+            Some('{') => {
+                self.advance(); // consume '{'
+                TokenKind::MapOpen
+            }
             // Quoted symbol: #'hello world'
             Some('\'') => {
                 self.advance(); // opening quote
@@ -737,6 +742,19 @@ mod tests {
                 TokenKind::Symbol("hello world".into()),
             ]
         );
+    }
+
+    #[test]
+    fn lex_map_open() {
+        assert_eq!(
+            lex_kinds("#{"),
+            vec![TokenKind::MapOpen]
+        );
+        
+        // Test that #{ is recognized as MapOpen, not Hash followed by LeftBrace
+        let tokens = lex("#{");
+        assert_eq!(tokens.len(), 1);
+        assert!(matches!(tokens[0].kind(), TokenKind::MapOpen));
     }
 
     #[test]

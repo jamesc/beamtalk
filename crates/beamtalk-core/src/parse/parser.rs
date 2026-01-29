@@ -37,7 +37,7 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, Comment, CommentKind, CompoundOperator, Expression,
-    Identifier, KeywordPart, Literal, MessageSelector, Module,
+    Identifier, KeywordPart, Literal, MapPair, MessageSelector, Module,
 };
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -646,6 +646,9 @@ impl Parser {
             // Parenthesized expression
             TokenKind::LeftParen => self.parse_parenthesized(),
 
+            // Map literal
+            TokenKind::MapOpen => self.parse_map_literal(),
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
@@ -790,6 +793,89 @@ impl Parser {
         let span = start.merge(end);
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
+    }
+
+    /// Parses a map literal: `#{key => value, ...}`
+    fn parse_map_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
+        let start = start_token.map_or_else(|| self.current_token().span(), |t| t.span());
+
+        let mut pairs = Vec::new();
+
+        // Handle empty map: #{}
+        if self.check(&TokenKind::RightBrace) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::MapLiteral { pairs, span };
+        }
+
+        // Parse key-value pairs
+        loop {
+            let pair_start = self.current_token().span();
+
+            // Parse key expression
+            let key = self.parse_expression();
+
+            // Expect '=>' (using BinarySelector for now as it's parsed as an operator)
+            if !matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "=>") {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                self.diagnostics
+                    .push(Diagnostic::error("Expected '=>' after map key", span));
+                // Try to recover: skip to next comma or closing brace
+                while !matches!(self.current_kind(), TokenKind::RightBrace | TokenKind::Eof) {
+                    if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",")
+                    {
+                        self.advance();
+                        break;
+                    }
+                    self.advance();
+                }
+                continue;
+            }
+            self.advance(); // consume '=>'
+
+            // Parse value expression
+            let value = self.parse_expression();
+
+            let pair_span = pair_start.merge(value.span());
+            pairs.push(MapPair::new(key, value, pair_span));
+
+            // Check for comma (continue) or closing brace (end)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBrace) {
+                    break;
+                }
+            } else if self.check(&TokenKind::RightBrace) {
+                break;
+            } else {
+                let bad_token = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Expected ',' or '}}' in map literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                ));
+                break;
+            }
+        }
+
+        // Expect closing brace
+        let end_span = if self.check(&TokenKind::RightBrace) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected '}' to close map literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::MapLiteral { pairs, span }
     }
 
     /// Parses a parenthesized expression.
@@ -1282,6 +1368,74 @@ mod tests {
         match &module.expressions[0] {
             Expression::FieldAccess { .. } => {}
             _ => panic!("Expected field access"),
+        }
+    }
+
+    #[test]
+    fn parse_empty_map() {
+        let module = parse_ok("#{}");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(matches!(
+            &module.expressions[0],
+            Expression::MapLiteral { pairs, .. } if pairs.is_empty()
+        ));
+    }
+
+    #[test]
+    fn parse_map_with_atom_keys() {
+        let module = parse_ok("#{#name => 'Alice', #age => 30}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                // First pair: #name => 'Alice'
+                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name"));
+                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice"));
+                // Second pair: #age => 30
+                assert!(matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age"));
+                assert!(matches!(&pairs[1].value, Expression::Literal(Literal::Integer(30), _)));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_string_keys() {
+        let module = parse_ok("#{'host' => 'localhost', 'port' => 8080}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::String(s), _) if s == "host"));
+                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "localhost"));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_integer_keys() {
+        let module = parse_ok("#{1 => 'first', 2 => 'second'}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                assert!(matches!(&pairs[0].key, Expression::Literal(Literal::Integer(1), _)));
+                assert!(matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "first"));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_trailing_comma() {
+        let module = parse_ok("#{#a => 1, #b => 2,}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+            }
+            _ => panic!("Expected MapLiteral"),
         }
     }
 }
