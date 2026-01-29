@@ -223,7 +223,7 @@ impl CoreErlangGenerator {
         // Module header
         writeln!(
             self.output,
-            "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0]",
+            "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]",
             self.module_name
         )?;
         writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
@@ -231,6 +231,10 @@ impl CoreErlangGenerator {
 
         // Generate spawn/0 function (class method to instantiate actors)
         self.generate_spawn_function(module)?;
+        writeln!(self.output)?;
+
+        // Generate spawn/1 function (class method with init args)
+        self.generate_spawn_with_args_function(module)?;
         writeln!(self.output)?;
 
         // Generate init/1 function
@@ -337,17 +341,65 @@ impl CoreErlangGenerator {
     ///             call 'erlang':'error'({'spawn_failed', Reason})
     ///     end
     /// ```
-    ///
-    /// Note: The `module` parameter is currently unused because field initialization
-    /// is handled by `init/1`. It's kept for future compatibility when parameterized
-    /// spawn (e.g., `Counter spawn initial: 10`) passes arguments to init.
     fn generate_spawn_function(&mut self, _module: &Module) -> Result<()> {
         writeln!(self.output, "'spawn'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
+        // Pass empty map as InitArgs - init/1 merges this with default state
         writeln!(
             self.output,
-            "case call 'gen_server':'start_link'('{}', [], []) of",
+            "case call 'gen_server':'start_link'('{}', ~{{}}~, []) of",
+            self.module_name
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "Pid")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call 'erlang':'error'({{'spawn_failed', Reason}})"
+        )?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `spawn/1` class method for creating actor instances with init args.
+    ///
+    /// This is a class-level method that instantiates a new actor process
+    /// with initialization arguments passed to `init/1`. The function:
+    /// 1. Calls `gen_server:start_link/3` with the provided args
+    /// 2. Extracts and returns the process Pid, or throws error on failure
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'spawn'/1 = fun (InitArgs) ->
+    ///     case call 'gen_server':'start_link'('counter', InitArgs, []) of
+    ///         <{'ok', Pid}> when 'true' ->
+    ///             Pid;
+    ///         <{'error', Reason}> when 'true' ->
+    ///             call 'erlang':'error'({'spawn_failed', Reason})
+    ///     end
+    /// ```
+    fn generate_spawn_with_args_function(&mut self, _module: &Module) -> Result<()> {
+        writeln!(self.output, "'spawn'/1 = fun (InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'gen_server':'start_link'('{}', InitArgs, []) of",
             self.module_name
         )?;
         self.indent += 1;
@@ -375,11 +427,29 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `init/1` callback for `gen_server`.
+    ///
+    /// The init function:
+    /// 1. Creates a default state map with `__class__`, `__methods__`, and default field values
+    /// 2. Merges the `InitArgs` map into the default state (`InitArgs` values override defaults)
+    /// 3. Returns `{ok, FinalState}`
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'init'/1 = fun (InitArgs) ->
+    ///     let DefaultState = ~{
+    ///         '__class__' => 'Counter',
+    ///         '__methods__' => call 'counter':'method_table'(),
+    ///         'value' => 0
+    ///     }~
+    ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    ///        in {'ok', FinalState}
+    /// ```
     fn generate_init_function(&mut self, module: &Module) -> Result<()> {
-        writeln!(self.output, "'init'/1 = fun (_Args) ->")?;
+        writeln!(self.output, "'init'/1 = fun (InitArgs) ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let InitialState = ~{{")?;
+        writeln!(self.output, "let DefaultState = ~{{")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
@@ -397,7 +467,13 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "}}~")?;
         self.write_indent()?;
-        writeln!(self.output, "in {{'ok', InitialState}}")?;
+        // Merge InitArgs into DefaultState - InitArgs values override defaults
+        writeln!(
+            self.output,
+            "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "in {{'ok', FinalState}}")?;
         self.indent -= 1;
         writeln!(self.output)?;
 
@@ -791,6 +867,8 @@ impl CoreErlangGenerator {
     ///   `repeat`) - These are direct function calls, not async actor messages
     /// - `spawn` - When the selector is "spawn" on a class identifier, generates
     ///   a call to the module's `spawn/0` function instead
+    /// - `spawnWith:` - When the selector is "spawnWith:" on a class identifier with
+    ///   one argument, generates a call to the module's `spawn/1` function
     /// - `await` - When the selector is "await", generates a blocking await operation
     fn generate_message_send(
         &mut self,
@@ -825,6 +903,21 @@ impl CoreErlangGenerator {
             // Special case: "await" is a blocking operation on a future
             if name == "await" && arguments.is_empty() {
                 return self.generate_await(receiver);
+            }
+        }
+
+        // Special case: "spawnWith:" keyword message on a class/identifier
+        // This creates a new actor instance with initialization arguments
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
+                if let Expression::Identifier(id) = receiver {
+                    // Generate: call 'module':'spawn'(InitArgs)
+                    let module_name = Self::to_module_name(&id.name);
+                    write!(self.output, "call '{module_name}':'spawn'(")?;
+                    self.generate_expression(&arguments[0])?;
+                    write!(self.output, ")")?;
+                    return Ok(());
+                }
             }
         }
 
@@ -1648,6 +1741,34 @@ end
     }
 
     #[test]
+    fn test_generate_spawn_with_message_send() {
+        let mut generator = CoreErlangGenerator::new("test_module");
+
+        // Create AST for: Counter spawnWith: #{value => 10}
+        // For simplicity, we'll use an integer literal as the init arg
+        // (in practice this would be a map literal)
+        let receiver = Expression::Identifier(Identifier::new("Counter", Span::new(0, 7)));
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(8, 18))]);
+        let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+        // Should call spawn/1 with the argument
+        assert!(
+            generator.output.contains("call 'counter':'spawn'(42)"),
+            "spawnWith: should generate spawn/1 call. Got: {}",
+            generator.output
+        );
+        // Should NOT create a future (spawn is synchronous)
+        assert!(
+            !generator.output.contains("beamtalk_future"),
+            "spawnWith: should NOT create futures. Got: {}",
+            generator.output
+        );
+    }
+
+    #[test]
     fn test_generate_spawn_function() {
         use crate::ast::*;
 
@@ -1664,14 +1785,17 @@ end
         let module = Module::new(vec![value_assignment], Span::new(0, 10));
         let code = generate_with_name(&module, "counter").expect("codegen should succeed");
 
-        // Check that spawn/0 is exported
+        // Check that spawn/0 and spawn/1 are exported
         assert!(code.contains("'spawn'/0"));
+        assert!(code.contains("'spawn'/1"));
 
-        // Check that spawn function exists and calls gen_server:start_link
+        // Check that spawn/0 function exists and calls gen_server:start_link with empty map
         assert!(code.contains("'spawn'/0 = fun () ->"));
+        assert!(code.contains("call 'gen_server':'start_link'('counter', ~{}~, [])"));
 
-        // Check that it calls gen_server:start_link with empty args (init creates state)
-        assert!(code.contains("call 'gen_server':'start_link'('counter', [], [])"));
+        // Check that spawn/1 function exists and calls gen_server:start_link with InitArgs
+        assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
+        assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
 
         // Check that it uses a case expression to extract the Pid
         assert!(code.contains("case call 'gen_server':'start_link'"));
@@ -1682,12 +1806,15 @@ end
         assert!(code.contains("<{'error', Reason}> when 'true' ->"));
         assert!(code.contains("call 'erlang':'error'({'spawn_failed', Reason})"));
 
-        // Check that init/1 creates the initial state with fields
-        assert!(code.contains("'init'/1 = fun (_Args) ->"));
-        assert!(code.contains("let InitialState = ~{"));
+        // Check that init/1 creates the default state with fields and merges with InitArgs
+        assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
+        assert!(code.contains("let DefaultState = ~{"));
         assert!(code.contains("'__class__' => 'Counter'"));
         assert!(code.contains("'__methods__' => call 'counter':'method_table'()"));
         assert!(code.contains("'value' => 0"));
+        // Check that InitArgs is merged into DefaultState
+        assert!(code.contains("call 'maps':'merge'(DefaultState, InitArgs)"));
+        assert!(code.contains("{'ok', FinalState}"));
     }
 
     #[test]

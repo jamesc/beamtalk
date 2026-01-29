@@ -17,17 +17,46 @@
 //
 // ## Core Messages
 //
-// - `spawn` - Create a new instance of this actor (implemented by compiler)
+// - `spawn` - Create a new instance of this actor with default state
+// - `spawnWith:` - Create a new instance with initialization arguments
 // - `class` - Returns the actor's class name
 // - `inspect` - Show a textual representation on Transcript
 // - `describe` - Returns a string description of this actor
+//
+// ## Spawn Messages
+//
+// ### spawn (0-arg)
+// Creates a stateless actor or one with default field values:
+// ```beamtalk
+// worker := Worker spawn
+// ```
+//
+// ### spawnWith: (1-arg)
+// Creates an actor with initialization state passed as a dictionary:
+// ```beamtalk
+// counter := Counter spawnWith: #{value => 10}
+// server := Server spawnWith: #{port => 8080, handler => myHandler}
+// ```
+//
+// The initialization dictionary is merged with default field values.
+// Keys in the dictionary override the defaults defined in the actor class.
 //
 // ## Implementation Notes
 //
 // The `spawn` message is a compiler primitive that generates:
 // ```erlang
-// beamtalk_actor:spawn_actor(ModuleName, InitArgs)
+// gen_server:start_link(ModuleName, ~{}~, [])
 // ```
+//
+// The `spawnWith:` message passes the argument to init:
+// ```erlang
+// gen_server:start_link(ModuleName, InitArgs, [])
+// ```
+//
+// The generated `init/1` callback handles the initialization:
+// - Creates the initial state map with `__class__` and `__methods__`
+// - Merges initialization arguments into the state
+// - Field values in InitArgs override default values
 //
 // All other actors should inherit from Actor and override `describe`
 // to provide meaningful debugging output.
@@ -43,6 +72,12 @@ Actor
   // Subclasses should override to provide detailed info
   describe => 'an Actor'
 
-  // Spawn a new instance (compiler primitive)
-  // Generated code: beamtalk_actor:spawn_actor(ClassName, [])
+  // Spawn a new instance with default state (compiler primitive)
+  // Generated code: gen_server:start_link(ClassName, ~{}~, [])
   spawn => // implemented by compiler
+
+  // Spawn a new instance with initialization arguments (compiler primitive)
+  // Arguments should be a dictionary that gets merged into the actor's state.
+  // Example: Counter spawnWith: #{value => 10}
+  // Generated code: gen_server:start_link(ClassName, InitArgs, [])
+  spawnWith: initArgs => // implemented by compiler
