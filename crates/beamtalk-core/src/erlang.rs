@@ -728,6 +728,9 @@ impl CoreErlangGenerator {
                 receiver, field, ..
             } => self.generate_field_access(receiver, field),
             Expression::Parenthesized { expression, .. } => self.generate_expression(expression),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => self.generate_cascade(receiver, messages),
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -991,6 +994,65 @@ impl CoreErlangGenerator {
         write!(self.output, "call 'beamtalk_future':'await'(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates code for cascade expressions.
+    ///
+    /// Cascades send multiple messages to the same receiver using semicolon separators.
+    /// The receiver is evaluated once and each message is sent to that receiver.
+    ///
+    /// # Example
+    ///
+    /// ```beamtalk
+    /// collection add: 1; add: 2; add: 3
+    /// ```
+    ///
+    /// Generates:
+    ///
+    /// ```erlang
+    /// let Receiver = <evaluate collection> in
+    ///   let _ = <send add: 1 to Receiver> in
+    ///   let _ = <send add: 2 to Receiver> in
+    ///   <send add: 3 to Receiver>
+    /// ```
+    ///
+    /// The cascade returns the result of the final message.
+    fn generate_cascade(
+        &mut self,
+        receiver: &Expression,
+        messages: &[crate::ast::CascadeMessage],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            // Edge case: cascade with no messages just evaluates to the receiver
+            return self.generate_expression(receiver);
+        }
+
+        // Generate a fresh variable to hold the receiver
+        let receiver_var = self.fresh_temp_var("Receiver");
+        write!(self.output, "let {receiver_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in ")?;
+
+        // Generate each message send, discarding intermediate results
+        for (i, message) in messages.iter().enumerate() {
+            let is_last = i == messages.len() - 1;
+
+            if !is_last {
+                // For all but the last message, discard the result
+                write!(self.output, "let _ = ")?;
+            }
+
+            // Generate the message send to the receiver variable
+            let receiver_expr =
+                Expression::Identifier(crate::ast::Identifier::new(&receiver_var, message.span));
+            self.generate_message_send(&receiver_expr, &message.selector, &message.arguments)?;
+
+            if !is_last {
+                write!(self.output, " in ")?;
+            }
+        }
+
         Ok(())
     }
 

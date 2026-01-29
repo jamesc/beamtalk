@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test cascade message sends
+// Sends multiple messages to the same receiver
+
+// Unary cascade in a block
+testUnary := [ counter increment; increment; getValue ]
+
+// Keyword cascade in a block  
+testKeyword := [ collection add: 1; add: 2; size ]

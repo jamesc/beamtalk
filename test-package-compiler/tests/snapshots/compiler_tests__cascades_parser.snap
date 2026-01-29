@@ -1,0 +1,174 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "testUnary",
+                    span: Span {
+                        start: 177,
+                        end: 186,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Invalid assignment target",
+                span: Span {
+                    start: 190,
+                    end: 277,
+                },
+            },
+            span: Span {
+                start: 177,
+                end: 277,
+            },
+        },
+        Block(
+            Block {
+                parameters: [],
+                body: [
+                    Cascade {
+                        receiver: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "collection",
+                                    span: Span {
+                                        start: 283,
+                                        end: 293,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "add:",
+                                        span: Span {
+                                            start: 294,
+                                            end: 298,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 299,
+                                        end: 300,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 283,
+                                end: 300,
+                            },
+                        },
+                        messages: [
+                            CascadeMessage {
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "add:",
+                                            span: Span {
+                                                start: 302,
+                                                end: 306,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 307,
+                                            end: 308,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 302,
+                                    end: 308,
+                                },
+                            },
+                            CascadeMessage {
+                                selector: Unary(
+                                    "size",
+                                ),
+                                arguments: [],
+                                span: Span {
+                                    start: 310,
+                                    end: 314,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 283,
+                            end: 314,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 281,
+                    end: 316,
+                },
+            },
+        ),
+    ],
+    span: Span {
+        start: 177,
+        end: 316,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 177,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 177,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test cascade message sends",
+            span: Span {
+                start: 177,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Sends multiple messages to the same receiver",
+            span: Span {
+                start: 177,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Unary cascade in a block",
+            span: Span {
+                start: 177,
+                end: 186,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 190, end: 277 } }
