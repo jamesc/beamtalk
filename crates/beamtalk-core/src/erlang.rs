@@ -801,6 +801,12 @@ impl CoreErlangGenerator {
             return self.generate_binary_op(op, receiver, arguments);
         }
 
+        // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
+        // These are synchronous function calls, not async actor messages
+        if let Some(result) = self.try_generate_block_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: unary "spawn" message on a class/identifier
         // This creates a new actor instance via gen_server:start_link
         if let MessageSelector::Unary(name) = selector {
@@ -890,6 +896,212 @@ impl CoreErlangGenerator {
         write!(self.output, "call 'beamtalk_future':'await'(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Tries to generate code for block evaluation messages.
+    ///
+    /// Block evaluation messages (`value`, `value:`, `whileTrue:`, etc.) are
+    /// direct function calls, not async actor messages. This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a block message and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a block message (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Block Evaluation Messages
+    ///
+    /// - `value` (0 args) → `apply Fun ()`
+    /// - `value:` (1 arg) → `apply Fun (Arg1)`
+    /// - `value:value:` (2 args) → `apply Fun (Arg1, Arg2)`
+    /// - `value:value:value:` (3 args) → `apply Fun (Arg1, Arg2, Arg3)`
+    ///
+    /// # Control Flow Messages
+    ///
+    /// - `whileTrue:` → loop while condition block returns true
+    /// - `whileFalse:` → loop while condition block returns false
+    /// - `repeat` → infinite loop (until return or error)
+    fn try_generate_block_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            // `value` - evaluate block with no arguments
+            MessageSelector::Unary(name) if name == "value" => {
+                self.generate_block_value_call(receiver, &[])?;
+                Ok(Some(()))
+            }
+
+            // `repeat` - infinite loop
+            MessageSelector::Unary(name) if name == "repeat" => {
+                self.generate_repeat(receiver)?;
+                Ok(Some(()))
+            }
+
+            // Keyword messages for block evaluation
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    // `value:`, `value:value:`, `value:value:value:` - evaluate block with args
+                    "value:" | "value:value:" | "value:value:value:" => {
+                        self.generate_block_value_call(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // `whileTrue:` - loop while condition block returns true
+                    "whileTrue:" => {
+                        self.generate_while_true(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // `whileFalse:` - loop while condition block returns false
+                    "whileFalse:" => {
+                        self.generate_while_false(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // Not a block evaluation message
+                    _ => Ok(None),
+                }
+            }
+
+            // Not a block evaluation message
+            _ => Ok(None),
+        }
+    }
+
+    /// Generates a block value call: `apply Fun (Args...)`.
+    ///
+    /// In Core Erlang, function application is:
+    /// ```erlang
+    /// apply Fun (Arg1, Arg2, ...)
+    /// ```
+    fn generate_block_value_call(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        write!(self.output, "apply ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " (")?;
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates a `whileTrue:` loop.
+    ///
+    /// Beamtalk: `[condition] whileTrue: [body]`
+    ///
+    /// Core Erlang uses letrec for loops:
+    /// ```erlang
+    /// letrec '_Loop1'/0 = fun () ->
+    ///     case apply ConditionFun () of
+    ///       <'true'> when 'true' ->
+    ///         do apply BodyFun ()
+    ///            apply '_Loop1'/0 ()
+    ///       <'false'> when 'true' ->
+    ///         'nil'
+    ///     end
+    /// in apply '_Loop1'/0 ()
+    /// ```
+    fn generate_while_true(
+        &mut self,
+        condition: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        if arguments.len() != 1 {
+            return Err(CodeGenError::Internal(
+                "whileTrue: requires exactly one argument (body block)".to_string(),
+            ));
+        }
+        let body = &arguments[0];
+
+        let loop_fn = self.fresh_var("Loop");
+        let condition_var = self.fresh_var("Cond");
+        let body_var = self.fresh_var("Body");
+
+        // Bind condition and body to variables first to avoid repeated evaluation
+        write!(self.output, "let {condition_var} = ")?;
+        self.generate_expression(condition)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(self.output, " in letrec '{loop_fn}'/0 = fun () -> ")?;
+        write!(self.output, "case apply {condition_var} () of ")?;
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(self.output, "do apply {body_var} () ")?;
+        write!(self.output, "apply '{loop_fn}'/0 () ")?;
+        write!(self.output, "<'false'> when 'true' -> 'nil' end ")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+
+        Ok(())
+    }
+
+    /// Generates a `whileFalse:` loop.
+    ///
+    /// Beamtalk: `[condition] whileFalse: [body]`
+    ///
+    /// Same as whileTrue but with inverted condition check.
+    fn generate_while_false(
+        &mut self,
+        condition: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        if arguments.len() != 1 {
+            return Err(CodeGenError::Internal(
+                "whileFalse: requires exactly one argument (body block)".to_string(),
+            ));
+        }
+        let body = &arguments[0];
+
+        let loop_fn = self.fresh_var("Loop");
+        let condition_var = self.fresh_var("Cond");
+        let body_var = self.fresh_var("Body");
+
+        write!(self.output, "let {condition_var} = ")?;
+        self.generate_expression(condition)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(self.output, " in letrec '{loop_fn}'/0 = fun () -> ")?;
+        write!(self.output, "case apply {condition_var} () of ")?;
+        write!(self.output, "<'false'> when 'true' -> ")?;
+        write!(self.output, "do apply {body_var} () ")?;
+        write!(self.output, "apply '{loop_fn}'/0 () ")?;
+        write!(self.output, "<'true'> when 'true' -> 'nil' end ")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+
+        Ok(())
+    }
+
+    /// Generates a `repeat` infinite loop.
+    ///
+    /// Beamtalk: `[body] repeat`
+    ///
+    /// Core Erlang:
+    /// ```erlang
+    /// letrec '_Loop1'/0 = fun () ->
+    ///     do apply BodyFun ()
+    ///        apply '_Loop1'/0 ()
+    /// in apply '_Loop1'/0 ()
+    /// ```
+    fn generate_repeat(&mut self, body: &Expression) -> Result<()> {
+        let loop_fn = self.fresh_var("Loop");
+        let body_var = self.fresh_var("Body");
+
+        write!(self.output, "let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(self.output, " in letrec '{loop_fn}'/0 = fun () -> ")?;
+        write!(self.output, "do apply {body_var} () ")?;
+        write!(self.output, "apply '{loop_fn}'/0 () ")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+
         Ok(())
     }
 
@@ -1507,6 +1719,272 @@ end
         assert!(
             code.contains("call 'erlang':'+'("),
             "Should have addition operation. Got:\n{code}"
+        );
+    }
+
+    // ========================================================================
+    // Block Evaluation Message Tests (BT-32)
+    // ========================================================================
+
+    #[test]
+    fn test_block_value_message_no_args() {
+        // [42] value → apply Fun ()
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let block = Block::new(
+            vec![],
+            vec![Expression::Literal(Literal::Integer(42), Span::new(1, 3))],
+            Span::new(0, 4),
+        );
+        let receiver = Expression::Block(block);
+        let selector = MessageSelector::Unary("value".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("apply fun () -> 42 ()"),
+            "Should generate apply Fun (). Got: {output}"
+        );
+        // Should NOT use async protocol
+        assert!(
+            !output.contains("beamtalk_future"),
+            "value message should NOT create futures. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_block_value_message_one_arg() {
+        // [:x | x + 1] value: 5 → apply Fun (5)
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(1, 2))],
+            vec![Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "x",
+                    Span::new(5, 6),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+                span: Span::new(5, 10),
+            }],
+            Span::new(0, 12),
+        );
+        let receiver = Expression::Block(block);
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]);
+        let arguments = vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("apply"),
+            "Should use apply for block evaluation. Got: {output}"
+        );
+        assert!(
+            output.contains("(5)"),
+            "Should pass argument 5 to the block. Got: {output}"
+        );
+        assert!(
+            !output.contains("beamtalk_future"),
+            "value: message should NOT create futures. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_block_value_message_two_args() {
+        // [:x :y | x + y] value: 3 value: 4
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let block = Block::new(
+            vec![
+                BlockParameter::new("x", Span::new(1, 2)),
+                BlockParameter::new("y", Span::new(4, 5)),
+            ],
+            vec![Expression::Literal(Literal::Integer(0), Span::new(8, 9))], // placeholder body
+            Span::new(0, 11),
+        );
+        let receiver = Expression::Block(block);
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("value:", Span::new(12, 18)),
+            KeywordPart::new("value:", Span::new(21, 27)),
+        ]);
+        let arguments = vec![
+            Expression::Literal(Literal::Integer(3), Span::new(19, 20)),
+            Expression::Literal(Literal::Integer(4), Span::new(28, 29)),
+        ];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("apply"),
+            "Should use apply for block evaluation. Got: {output}"
+        );
+        assert!(
+            output.contains("(3, 4)"),
+            "Should pass arguments 3, 4 to the block. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_block_while_true_loop() {
+        // [counter < 5] whileTrue: [counter := counter + 1]
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Condition block: [counter < 5]
+        let condition_block = Block::new(
+            vec![],
+            vec![Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "counter",
+                    Span::new(1, 8),
+                ))),
+                selector: MessageSelector::Binary("<".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(11, 12))],
+                span: Span::new(1, 12),
+            }],
+            Span::new(0, 13),
+        );
+
+        // Body block: [counter := counter + 1]
+        let body_block = Block::new(
+            vec![],
+            vec![Expression::Literal(Literal::Integer(0), Span::new(0, 1))], // simplified body
+            Span::new(15, 38),
+        );
+
+        let receiver = Expression::Block(condition_block);
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(14, 24))]);
+        let arguments = vec![Expression::Block(body_block)];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("letrec"),
+            "whileTrue: should generate a letrec for looping. Got: {output}"
+        );
+        assert!(
+            output.contains("case apply"),
+            "whileTrue: should have case on condition result. Got: {output}"
+        );
+        assert!(
+            output.contains("<'true'> when 'true'"),
+            "whileTrue: should match on true to continue. Got: {output}"
+        );
+        assert!(
+            output.contains("<'false'> when 'true' -> 'nil'"),
+            "whileTrue: should return nil when condition is false. Got: {output}"
+        );
+        assert!(
+            !output.contains("beamtalk_future"),
+            "whileTrue: should NOT create futures. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_block_while_false_loop() {
+        // [done] whileFalse: [process next]
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let condition_block = Block::new(
+            vec![],
+            vec![Expression::Identifier(Identifier::new(
+                "done",
+                Span::new(1, 5),
+            ))],
+            Span::new(0, 6),
+        );
+        let body_block = Block::new(vec![], vec![], Span::new(8, 10));
+
+        let receiver = Expression::Block(condition_block);
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("whileFalse:", Span::new(7, 18))]);
+        let arguments = vec![Expression::Block(body_block)];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("letrec"),
+            "whileFalse: should generate a letrec for looping. Got: {output}"
+        );
+        assert!(
+            output.contains("<'false'> when 'true' ->"),
+            "whileFalse: should continue when condition is false. Got: {output}"
+        );
+        assert!(
+            output.contains("<'true'> when 'true' -> 'nil'"),
+            "whileFalse: should stop when condition is true. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_block_repeat_infinite_loop() {
+        // [process] repeat
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let body_block = Block::new(
+            vec![],
+            vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+            Span::new(0, 3),
+        );
+
+        let receiver = Expression::Block(body_block);
+        let selector = MessageSelector::Unary("repeat".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("letrec"),
+            "repeat should generate a letrec for looping. Got: {output}"
+        );
+        assert!(
+            output.contains("'_Loop"),
+            "repeat should create a loop function. Got: {output}"
+        );
+        // repeat has no condition, just loops forever
+        assert!(
+            !output.contains("case"),
+            "repeat should NOT have a case (no condition). Got: {output}"
+        );
+        assert!(
+            !output.contains("beamtalk_future"),
+            "repeat should NOT create futures. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_non_block_message_still_creates_future() {
+        // Regular message sends should still use async protocol
+        // actor increment → should create future
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let receiver = Expression::Identifier(Identifier::new("actor", Span::new(0, 5)));
+        let selector = MessageSelector::Unary("increment".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        assert!(
+            output.contains("beamtalk_future':'new'()"),
+            "Non-block unary messages should create futures. Got: {output}"
+        );
+        assert!(
+            output.contains("gen_server':'cast'("),
+            "Non-block messages should use gen_server:cast(). Got: {output}"
         );
     }
 }
