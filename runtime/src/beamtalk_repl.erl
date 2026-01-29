@@ -408,22 +408,21 @@ extract_value(Data) ->
 %% Format a successful response as JSON.
 -spec format_response(term()) -> binary().
 format_response(Value) ->
-    FormattedValue = format_value(Value),
-    iolist_to_binary([<<"{\"type\":\"result\",\"value\":">>, FormattedValue, <<"}">>]).
+    jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => term_to_json(Value)}).
 
 %% @private
 %% Format an error response as JSON.
 -spec format_error(term()) -> binary().
 format_error(Reason) ->
     Message = format_error_message(Reason),
-    iolist_to_binary([<<"{\"type\":\"error\",\"message\":\"">>, escape_json_string(Message), <<"\"}">>]).
+    jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message}).
 
 %% @private
 %% Format bindings response as JSON.
 -spec format_bindings(map()) -> binary().
 format_bindings(Bindings) ->
-    %% Format each binding
-    Pairs = maps:fold(
+    %% Convert bindings map to JSON-safe format
+    JsonBindings = maps:fold(
         fun(Name, Value, Acc) ->
             NameBin = if
                 is_atom(Name) -> atom_to_binary(Name, utf8);
@@ -431,89 +430,59 @@ format_bindings(Bindings) ->
                 is_binary(Name) -> Name;
                 true -> list_to_binary(io_lib:format("~p", [Name]))
             end,
-            ValueBin = format_value(Value),
-            [[<<"\"">>, NameBin, <<"\":">>, ValueBin] | Acc]
+            maps:put(NameBin, term_to_json(Value), Acc)
         end,
-        [],
+        #{},
         Bindings
     ),
-    BindingsJson = case Pairs of
-        [] -> <<"{}">>;
-        _ -> iolist_to_binary([<<"{">>, lists:join(<<",">>, Pairs), <<"}">>])
-    end,
-    iolist_to_binary([<<"{\"type\":\"bindings\",\"bindings\":">>, BindingsJson, <<"}">>]).
+    jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
 
 %% @private
-%% Format a value as JSON.
--spec format_value(term()) -> binary().
-format_value(Value) when is_integer(Value) ->
-    integer_to_binary(Value);
-format_value(Value) when is_float(Value) ->
-    float_to_binary(Value, [{decimals, 10}, compact]);
-format_value(Value) when is_atom(Value) ->
-    iolist_to_binary([<<"\"">>, atom_to_binary(Value, utf8), <<"\"">>]);
-format_value(Value) when is_binary(Value) ->
-    iolist_to_binary([<<"\"">>, escape_json_string(Value), <<"\"">>]);
-format_value(Value) when is_list(Value) ->
+%% Convert an Erlang term to a JSON-encodable value for jsx.
+%% Returns a term that jsx:encode/1 can handle.
+-spec term_to_json(term()) -> term().
+term_to_json(Value) when is_integer(Value); is_float(Value); is_boolean(Value) ->
+    Value;
+term_to_json(Value) when is_atom(Value) ->
+    atom_to_binary(Value, utf8);
+term_to_json(Value) when is_binary(Value) ->
+    Value;
+term_to_json(Value) when is_list(Value) ->
     %% Could be a string or a list
     case io_lib:printable_list(Value) of
         true ->
-            iolist_to_binary([<<"\"">>, escape_json_string(list_to_binary(Value)), <<"\"">>]);
+            list_to_binary(Value);
         false ->
-            %% Format as array
-            Elements = [format_value(E) || E <- Value],
-            iolist_to_binary([<<"[">>, lists:join(<<",">>, Elements), <<"]">>])
+            [term_to_json(E) || E <- Value]
     end;
-format_value(Value) when is_pid(Value) ->
+term_to_json(Value) when is_pid(Value) ->
     %% Format pid as string
-    PidStr = pid_to_list(Value),
-    iolist_to_binary([<<"\"#<pid ">>, list_to_binary(PidStr), <<">\"">>]);
-format_value(Value) when is_map(Value) ->
-    %% Format map as JSON object
-    Pairs = maps:fold(
+    iolist_to_binary([<<"#<pid ">>, pid_to_list(Value), <<">">>]);
+term_to_json(Value) when is_map(Value) ->
+    %% Convert map keys and values
+    maps:fold(
         fun(K, V, Acc) ->
-            KeyBin = format_value(K),
-            ValueBin = format_value(V),
-            [[KeyBin, <<":">>, ValueBin] | Acc]
+            KeyBin = if
+                is_atom(K) -> atom_to_binary(K, utf8);
+                is_binary(K) -> K;
+                is_list(K) ->
+                    case io_lib:printable_list(K) of
+                        true -> list_to_binary(K);
+                        false -> list_to_binary(io_lib:format("~p", [K]))
+                    end;
+                true -> list_to_binary(io_lib:format("~p", [K]))
+            end,
+            maps:put(KeyBin, term_to_json(V), Acc)
         end,
-        [],
+        #{},
         Value
-    ),
-    iolist_to_binary([<<"{">>, lists:join(<<",">>, Pairs), <<"}">>]);
-format_value(Value) when is_tuple(Value) ->
-    %% Format tuple as JSON array with marker
-    Elements = [format_value(E) || E <- tuple_to_list(Value)],
-    iolist_to_binary([<<"{\"__tuple__\":[">>, lists:join(<<",">>, Elements), <<"]}">>]);
-format_value(Value) ->
+    );
+term_to_json(Value) when is_tuple(Value) ->
+    %% Format tuple with marker
+    #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]};
+term_to_json(Value) ->
     %% Fallback: format using io_lib
-    iolist_to_binary([<<"\"">>, escape_json_string(iolist_to_binary(io_lib:format("~p", [Value]))), <<"\"">>]).
-
-%% @private
-%% Escape a string for JSON.
--spec escape_json_string(binary() | string()) -> binary().
-escape_json_string(Str) when is_list(Str) ->
-    escape_json_string(list_to_binary(Str));
-escape_json_string(Bin) when is_binary(Bin) ->
-    escape_json_chars(Bin, <<>>).
-
-escape_json_chars(<<>>, Acc) ->
-    Acc;
-escape_json_chars(<<$\\, Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, $\\, $\\>>);
-escape_json_chars(<<$", Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, $\\, $">>);
-escape_json_chars(<<$\n, Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, $\\, $n>>);
-escape_json_chars(<<$\r, Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, $\\, $r>>);
-escape_json_chars(<<$\t, Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, $\\, $t>>);
-escape_json_chars(<<C, Rest/binary>>, Acc) when C < 32 ->
-    %% Control character - escape as \uXXXX
-    Hex = io_lib:format("\\u~4.16.0B", [C]),
-    escape_json_chars(Rest, <<Acc/binary, (list_to_binary(Hex))/binary>>);
-escape_json_chars(<<C, Rest/binary>>, Acc) ->
-    escape_json_chars(Rest, <<Acc/binary, C>>).
+    iolist_to_binary(io_lib:format("~p", [Value])).
 
 %% @private
 %% Format an error reason as a human-readable message.
@@ -646,23 +615,20 @@ connect_to_daemon(SocketPath) ->
 -spec compile_via_daemon_socket(string(), atom(), gen_tcp:socket()) ->
     {ok, binary()} | {error, term()}.
 compile_via_daemon_socket(Expression, ModuleName, Socket) ->
-    %% Build JSON-RPC request
-    %% Note: Using simple string formatting since we don't have jsx dependency yet
+    %% Build JSON-RPC request using jsx
     RequestId = erlang:unique_integer([positive]),
-    ExpressionEscaped = escape_json_string(list_to_binary(Expression)),
-    ModuleNameBin = atom_to_binary(ModuleName, utf8),
-    Request = iolist_to_binary([
-        <<"{\"jsonrpc\":\"2.0\",\"id\":">>,
-        integer_to_binary(RequestId),
-        <<",\"method\":\"compile_expression\",\"params\":{\"source\":\"">>,
-        ExpressionEscaped,
-        <<"\",\"module_name\":\"">>,
-        ModuleNameBin,
-        <<"\"}}\n">>
-    ]),
+    Request = jsx:encode(#{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"id">> => RequestId,
+        <<"method">> => <<"compile_expression">>,
+        <<"params">> => #{
+            <<"source">> => list_to_binary(Expression),
+            <<"module_name">> => atom_to_binary(ModuleName, utf8)
+        }
+    }),
     
-    %% Send request
-    ok = gen_tcp:send(Socket, Request),
+    %% Send request (with newline delimiter)
+    ok = gen_tcp:send(Socket, [Request, <<"\n">>]),
     
     %% Receive response
     case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
@@ -673,40 +639,47 @@ compile_via_daemon_socket(Expression, ModuleName, Socket) ->
     end.
 
 %% @private
-%% Parse daemon JSON-RPC response.
+%% Parse daemon JSON-RPC response using jsx.
 -spec parse_daemon_response(binary(), atom()) -> {ok, binary()} | {error, term()}.
 parse_daemon_response(ResponseLine, ModuleName) ->
-    %% Simple JSON parsing for daemon response
-    case extract_json_field(ResponseLine, <<"error">>) of
-        {ok, _ErrorObj} ->
-            %% JSON-RPC error
-            case extract_json_string(ResponseLine, <<"message">>) of
-                {ok, Msg} -> {error, {daemon_error, Msg}};
-                error -> {error, {daemon_error, <<"Unknown error">>}}
+    try
+        Response = jsx:decode(ResponseLine, [return_maps]),
+        case maps:get(<<"error">>, Response, undefined) of
+            undefined ->
+                %% No error, check for result
+                case maps:get(<<"result">>, Response, undefined) of
+                    undefined ->
+                        {error, {daemon_error, <<"Invalid JSON-RPC response">>}};
+                    Result ->
+                        parse_compile_result(Result, ModuleName)
+                end;
+            ErrorObj ->
+                %% JSON-RPC error
+                Msg = maps:get(<<"message">>, ErrorObj, <<"Unknown error">>),
+                {error, {daemon_error, Msg}}
+        end
+    catch
+        _:_ ->
+            {error, {daemon_error, <<"Invalid JSON in response">>}}
+    end.
+
+%% @private
+%% Parse compile result from daemon response.
+-spec parse_compile_result(map(), atom()) -> {ok, binary()} | {error, term()}.
+parse_compile_result(Result, ModuleName) ->
+    case maps:get(<<"success">>, Result, false) of
+        true ->
+            case maps:get(<<"core_erlang">>, Result, undefined) of
+                undefined ->
+                    {error, {daemon_error, <<"No core_erlang in response">>}};
+                CoreErlang ->
+                    compile_core_erlang(CoreErlang, ModuleName)
             end;
-        error ->
-            %% Check for result
-            case extract_json_field(ResponseLine, <<"result">>) of
-                {ok, _Result} ->
-                    %% Check success field
-                    case extract_json_bool(ResponseLine, <<"success">>) of
-                        {ok, true} ->
-                            %% Get Core Erlang and compile to BEAM
-                            case extract_json_string(ResponseLine, <<"core_erlang">>) of
-                                {ok, CoreErlang} ->
-                                    compile_core_erlang(CoreErlang, ModuleName);
-                                error ->
-                                    {error, {daemon_error, <<"No core_erlang in response">>}}
-                            end;
-                        {ok, false} ->
-                            %% Compilation failed - extract diagnostics
-                            {error, {compile_error, extract_diagnostics(ResponseLine)}};
-                        error ->
-                            {error, {daemon_error, <<"Invalid response format">>}}
-                    end;
-                error ->
-                    {error, {daemon_error, <<"Invalid JSON-RPC response">>}}
-            end
+        false ->
+            %% Compilation failed - extract diagnostics
+            Diagnostics = maps:get(<<"diagnostics">>, Result, []),
+            Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
+            {error, {compile_error, Messages}}
     end.
 
 %% @private
@@ -736,104 +709,6 @@ compile_core_erlang(CoreErlangBin, ModuleName) ->
             {error, {core_compile_error, Error}}
     after
         file:delete(TempFile)
-    end.
-
-%% @private
-%% Extract a JSON field value (very simple extraction).
--spec extract_json_field(binary(), binary()) -> {ok, binary()} | error.
-extract_json_field(Json, Field) ->
-    Pattern = <<"\"", Field/binary, "\":">>,
-    case binary:match(Json, Pattern) of
-        {Pos, Len} ->
-            %% Found field, extract value
-            Start = Pos + Len,
-            {ok, binary:part(Json, Start, byte_size(Json) - Start)};
-        nomatch ->
-            error
-    end.
-
-%% @private
-%% Extract a JSON string value (with unescaping).
--spec extract_json_string(binary(), binary()) -> {ok, binary()} | error.
-extract_json_string(Json, Field) ->
-    Pattern = <<"\"", Field/binary, "\":\"">>,
-    case binary:match(Json, Pattern) of
-        {Pos, Len} ->
-            Start = Pos + Len,
-            Rest = binary:part(Json, Start, byte_size(Json) - Start),
-            %% Find closing quote (handling escapes)
-            case find_string_end(Rest, 0) of
-                {ok, EndPos} ->
-                    EscapedStr = binary:part(Rest, 0, EndPos),
-                    {ok, unescape_json_string(EscapedStr)};
-                error ->
-                    error
-            end;
-        nomatch ->
-            error
-    end.
-
-%% @private
-%% Find end of JSON string (handling escapes).
--spec find_string_end(binary(), non_neg_integer()) -> {ok, non_neg_integer()} | error.
-find_string_end(<<>>, _Pos) ->
-    error;
-find_string_end(<<"\\", _, Rest/binary>>, Pos) ->
-    %% Escaped character, skip
-    find_string_end(Rest, Pos + 2);
-find_string_end(<<"\"", _/binary>>, Pos) ->
-    {ok, Pos};
-find_string_end(<<_, Rest/binary>>, Pos) ->
-    find_string_end(Rest, Pos + 1).
-
-%% @private
-%% Unescape JSON string escape sequences.
-%% NOTE: This is a simplified unescaper that only handles basic escape sequences
-%% (\n, \r, \t, \", \\). It does NOT handle:
-%% - Unicode escape sequences (\uXXXX)
-%% - Forward slash escaping (\/)
-%% - Invalid escape sequences are silently passed through
-%% TODO: BT-55 - Use a proper JSON parsing library (jsx or jiffy) for robust handling.
--spec unescape_json_string(binary()) -> binary().
-unescape_json_string(Str) ->
-    unescape_json_string(Str, <<>>).
-
-unescape_json_string(<<>>, Acc) ->
-    Acc;
-unescape_json_string(<<"\\n", Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, $\n>>);
-unescape_json_string(<<"\\r", Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, $\r>>);
-unescape_json_string(<<"\\t", Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, $\t>>);
-unescape_json_string(<<"\\\"", Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, $\">>);
-unescape_json_string(<<"\\\\", Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, $\\>>);
-unescape_json_string(<<C, Rest/binary>>, Acc) ->
-    unescape_json_string(Rest, <<Acc/binary, C>>).
-
-%% @private
-%% Extract a JSON boolean value.
--spec extract_json_bool(binary(), binary()) -> {ok, boolean()} | error.
-extract_json_bool(Json, Field) ->
-    case binary:match(Json, <<"\"", Field/binary, "\":true">>) of
-        {_, _} -> {ok, true};
-        nomatch ->
-            case binary:match(Json, <<"\"", Field/binary, "\":false">>) of
-                {_, _} -> {ok, false};
-                nomatch -> error
-            end
-    end.
-
-%% @private
-%% Extract diagnostics from response (simplified).
--spec extract_diagnostics(binary()) -> list().
-extract_diagnostics(Json) ->
-    %% For now, just extract the message strings
-    case extract_json_string(Json, <<"message">>) of
-        {ok, Msg} -> [Msg];
-        error -> []
     end.
 
 %% @private
