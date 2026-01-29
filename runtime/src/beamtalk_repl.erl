@@ -678,7 +678,9 @@ parse_daemon_response(ResponseLine, ModuleName) ->
                 {error, {daemon_error, Msg}}
         end
     catch
-        _:_ ->
+        Class:Error:Stack ->
+            io:format(standard_error, "Failed to parse daemon response:~nClass: ~p~nError: ~p~nStack: ~p~nResponse: ~p~n", 
+                      [Class, Error, Stack, ResponseLine]),
             {error, {daemon_error, <<"Invalid JSON in response">>}}
     end.
 
@@ -874,7 +876,9 @@ parse_file_compile_response(ResponseLine, ModuleName) ->
                 {error, {daemon_error, Msg}}
         end
     catch
-        _:_ ->
+        Class:Error:Stack ->
+            io:format(standard_error, "Failed to parse file compile response:~nClass: ~p~nError: ~p~nStack: ~p~nResponse (first 200 bytes): ~p~n",  
+                      [Class, Error, Stack, binary:part(ResponseLine, 0, min(200, byte_size(ResponseLine)))]),
             {error, {daemon_error, <<"Invalid JSON in response">>}}
     end.
 
