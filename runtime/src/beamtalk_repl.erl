@@ -617,11 +617,14 @@ compile_via_daemon(Expression, ModuleName, #state{daemon_socket_path = SocketPat
 
 %% @private
 %% Connect to the compiler daemon Unix socket.
+%% Uses a large receive buffer (64KB) to handle large JSON responses containing
+%% Core Erlang code, since {packet, line} mode truncates lines longer than recbuf.
 -spec connect_to_daemon(string()) -> {ok, gen_tcp:socket()} | {error, term()}.
 connect_to_daemon(SocketPath) ->
     %% Use local address family for Unix socket
+    %% Set recbuf to 64KB to handle large JSON responses (Core Erlang can be big)
     case gen_tcp:connect({local, SocketPath}, 0, 
-                         [binary, {active, false}, {packet, line}],
+                         [binary, {active, false}, {packet, line}, {recbuf, 65536}],
                          ?DAEMON_CONNECT_TIMEOUT) of
         {ok, Socket} ->
             {ok, Socket};

@@ -189,9 +189,10 @@ impl ReplClient {
 
     /// Reload the last loaded file.
     fn reload_file(&mut self) -> Result<ReplResponse> {
-        let path = self.last_loaded_file.clone().ok_or_else(|| {
-            miette!("No file has been loaded yet")
-        })?;
+        let path = self
+            .last_loaded_file
+            .clone()
+            .ok_or_else(|| miette!("No file has been loaded yet"))?;
         self.load_file(&path)
     }
 }
@@ -447,7 +448,10 @@ impl Drop for BeamChildGuard {
 }
 
 /// Run the REPL.
-#[expect(clippy::too_many_lines, reason = "REPL main loop handles many commands")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "REPL main loop handles many commands"
+)]
 pub fn run() -> Result<()> {
     println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
     println!("Type :help for available commands, :exit to quit.");
