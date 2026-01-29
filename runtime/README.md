@@ -37,21 +37,12 @@ See module documentation in `beamtalk_future.erl` for the complete protocol and 
 
 To compile the runtime modules (requires Erlang/OTP installed):
 
-### Using rebar3 (recommended)
+### Using rebar3
 
 ```bash
 cd runtime
 rebar3 compile
 ```
-
-### Manual compilation
-
-```bash
-cd runtime
-erlc -o ebin src/beamtalk_actor.erl src/beamtalk_future.erl
-```
-
-This produces `.beam` bytecode files.
 
 ## Testing
 
@@ -66,27 +57,6 @@ rebar3 eunit
 
 This automatically discovers and runs all `*_tests.erl` modules.
 
-### Running tests manually
-
-If you need to compile and run tests manually:
-
-```bash
-cd runtime
-
-# Compile runtime modules
-erlc -o ebin src/beamtalk_actor.erl src/beamtalk_future.erl
-
-# Compile test modules
-erlc -o test test/test_counter.erl test/test_proxy.erl test/test_throwing_actor.erl test/test_invalid_method_actor.erl test/test_throwing_dnu_actor.erl
-erlc -o test test/beamtalk_future_tests.erl test/beamtalk_actor_tests.erl
-
-# Run specific test module
-erl -noshell -pa ebin -pa test -eval 'eunit:test(beamtalk_actor_tests, [verbose])' -s init stop
-
-# Run all tests
-erl -noshell -pa ebin -pa test -eval 'eunit:test([beamtalk_future_tests, beamtalk_actor_tests], [verbose])' -s init stop
-```
-
 ### Interactive testing
 
 ```bash
@@ -94,31 +64,6 @@ cd runtime
 rebar3 shell
 ```
 
-Then in the Erlang shell:
-
-```erlang
-%% Modules are already compiled and loaded
-eunit:test([beamtalk_actor_tests, beamtalk_future_tests], [verbose]).
-```
-
-Or manually:
-
-```bash
-cd runtime  
-erl -pa _build/default/lib/beamtalk_runtime/ebin -pa _build/test/lib/beamtalk_runtime/ebin
-```
-
-Then in the Erlang shell:
-
-```erlang
-c("src/beamtalk_actor").
-c("src/beamtalk_future").
-c("test/test_counter").
-c("test/test_proxy").
-c("test/beamtalk_actor_tests").
-c("test/beamtalk_future_tests").
-eunit:test([beamtalk_actor_tests, beamtalk_future_tests], [verbose]).
-```
 
 ## Integration with Beamtalk Compiler
 
