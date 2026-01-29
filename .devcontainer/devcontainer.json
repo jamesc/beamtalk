@@ -17,12 +17,12 @@
         "fill-labs.dependi",
         "vadimcn.vscode-lldb",
         "usernamehw.errorlens",
-        "eamodio.gitlens",
         "erlang-ls.erlang-ls",
         "github.copilot",
         "github.vscode-github-actions",
         "github.vscode-pull-request-github",
-        "linear.linear"
+        "linear.linear",
+        "ms-vscode-remote.remote-containers",
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy",
