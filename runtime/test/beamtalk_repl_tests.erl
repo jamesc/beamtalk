@@ -92,7 +92,17 @@ format_pid_response_test() ->
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     Value = maps:get(<<"value">>, Decoded),
-    ?assertMatch(<<"#<pid ", _/binary>>, Value).
+    ?assertMatch(<<"#Actor<", _/binary>>, Value).
+
+format_function_response_test() ->
+    %% Test that functions are formatted as "a Block/N"
+    Response1 = beamtalk_repl:format_response(fun(X) -> X end),
+    Decoded1 = jsx:decode(Response1, [return_maps]),
+    ?assertEqual(<<"a Block/1">>, maps:get(<<"value">>, Decoded1)),
+    
+    Response2 = beamtalk_repl:format_response(fun(X, Y) -> X + Y end),
+    Decoded2 = jsx:decode(Response2, [return_maps]),
+    ?assertEqual(<<"a Block/2">>, maps:get(<<"value">>, Decoded2)).
 
 %%% Error Formatting Tests
 
