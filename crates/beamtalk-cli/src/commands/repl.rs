@@ -560,4 +560,47 @@ mod tests {
         let value = serde_json::json!({"__tuple__": [1, "hello"]});
         assert_eq!(format_value(&value), "(1, hello)");
     }
+
+    #[test]
+    fn find_runtime_dir_respects_env_var() {
+        // Create a temp directory with the expected structure (needs rebar.config)
+        let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(temp_dir.join("rebar.config"), "{deps, []}.").unwrap();
+
+        // SAFETY: This test runs single-threaded and we restore the env var after.
+        // The set_var/remove_var pair is scoped to just around the find_runtime_dir call.
+        unsafe { std::env::set_var("BEAMTALK_RUNTIME_DIR", &temp_dir) };
+        let result = find_runtime_dir();
+        // SAFETY: Restoring env var set earlier in this test
+        unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), temp_dir);
+    }
+
+    #[test]
+    fn find_runtime_dir_env_var_requires_rebar_config() {
+        // Create a temp directory WITHOUT rebar.config
+        let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime_no_rebar");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // SAFETY: This test runs single-threaded and we restore the env var after.
+        // The set_var/remove_var pair is scoped to just around the find_runtime_dir call.
+        unsafe { std::env::set_var("BEAMTALK_RUNTIME_DIR", &temp_dir) };
+        let result = find_runtime_dir();
+        // SAFETY: Restoring env var set earlier in this test
+        unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Should fail because rebar.config is missing
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("does not contain a valid runtime"));
+    }
 }
