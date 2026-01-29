@@ -787,6 +787,8 @@ impl CoreErlangGenerator {
     /// The receiving actor's `handle_cast/2` will resolve the future when complete.
     ///
     /// **Special cases:**
+    /// - Block evaluation messages (`value`, `value:`, `whileTrue:`, `whileFalse:`,
+    ///   `repeat`) - These are direct function calls, not async actor messages
     /// - `spawn` - When the selector is "spawn" on a class identifier, generates
     ///   a call to the module's `spawn/0` function instead
     /// - `await` - When the selector is "await", generates a blocking await operation
@@ -986,7 +988,8 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<()> {
         // Bind receiver to a variable first for proper evaluation
-        let fun_var = self.fresh_var("Fun");
+        // Use fresh_temp_var to avoid shadowing user identifiers named "Fun"
+        let fun_var = self.fresh_temp_var("Fun");
         write!(self.output, "let {fun_var} = ")?;
         self.generate_expression(receiver)?;
         write!(self.output, " in apply {fun_var} (")?;
@@ -1028,9 +1031,10 @@ impl CoreErlangGenerator {
         }
         let body = &arguments[0];
 
-        let loop_fn = self.fresh_var("Loop");
-        let condition_var = self.fresh_var("Cond");
-        let body_var = self.fresh_var("Body");
+        // Use fresh_temp_var to avoid shadowing user identifiers
+        let loop_fn = self.fresh_temp_var("Loop");
+        let condition_var = self.fresh_temp_var("Cond");
+        let body_var = self.fresh_temp_var("Body");
 
         // Bind condition and body to variables first to avoid repeated evaluation
         write!(self.output, "let {condition_var} = ")?;
@@ -1065,9 +1069,10 @@ impl CoreErlangGenerator {
         }
         let body = &arguments[0];
 
-        let loop_fn = self.fresh_var("Loop");
-        let condition_var = self.fresh_var("Cond");
-        let body_var = self.fresh_var("Body");
+        // Use fresh_temp_var to avoid shadowing user identifiers
+        let loop_fn = self.fresh_temp_var("Loop");
+        let condition_var = self.fresh_temp_var("Cond");
+        let body_var = self.fresh_temp_var("Body");
 
         write!(self.output, "let {condition_var} = ")?;
         self.generate_expression(condition)?;
@@ -1096,8 +1101,9 @@ impl CoreErlangGenerator {
     /// in apply '_Loop1'/0 ()
     /// ```
     fn generate_repeat(&mut self, body: &Expression) -> Result<()> {
-        let loop_fn = self.fresh_var("Loop");
-        let body_var = self.fresh_var("Body");
+        // Use fresh_temp_var to avoid shadowing user identifiers
+        let loop_fn = self.fresh_temp_var("Loop");
+        let body_var = self.fresh_temp_var("Body");
 
         write!(self.output, "let {body_var} = ")?;
         self.generate_expression(body)?;
@@ -1160,6 +1166,9 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a fresh variable name and binds it in the current scope.
+    ///
+    /// Use this for user-visible bindings (block parameters, assignments, etc.)
+    /// where the name should be looked up later via `lookup_var`.
     fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         let var_name = format!("_{}{}", base.replace('_', ""), self.var_counter);
@@ -1168,6 +1177,15 @@ impl CoreErlangGenerator {
             current_scope.insert(base.to_string(), var_name.clone());
         }
         var_name
+    }
+
+    /// Generates a fresh temporary variable name WITHOUT binding it in scope.
+    ///
+    /// Use this for internal codegen temporaries (loop variables, function bindings,
+    /// etc.) that should never shadow or be confused with user identifiers.
+    fn fresh_temp_var(&mut self, base: &str) -> String {
+        self.var_counter += 1;
+        format!("_{}{}", base.replace('_', ""), self.var_counter)
     }
 
     /// Converts module name (`snake_case`) to class name (`CamelCase`).
@@ -2030,5 +2048,134 @@ end
             output.contains("gen_server':'cast'("),
             "Non-block messages should use gen_server:cast(). Got: {output}"
         );
+    }
+
+    /// End-to-end test that generates Core Erlang for a whileTrue: loop and
+    /// compiles it through erlc to verify the output is valid Core Erlang.
+    #[test]
+    fn test_while_true_compiles_through_erlc() {
+        use std::io::Write;
+        use std::process::Command;
+
+        // Generate a complete module with a whileTrue: expression
+        let mut generator = CoreErlangGenerator::new("test_while_loop");
+
+        // Start module
+        generator
+            .output
+            .push_str("module 'test_while_loop' ['main'/0]\n  attributes []\n\n");
+        generator.output.push_str("'main'/0 = fun () ->\n    ");
+
+        // Generate: [true] whileTrue: [42]
+        // This creates a loop that runs once (returns nil after first iteration)
+        let condition_block = Block::new(
+            vec![],
+            vec![Expression::Identifier(Identifier::new(
+                "false",
+                Span::new(1, 6),
+            ))],
+            Span::new(0, 7),
+        );
+        let body_block = Block::new(
+            vec![],
+            vec![Expression::Literal(Literal::Integer(42), Span::new(9, 11))],
+            Span::new(8, 12),
+        );
+
+        let receiver = Expression::Block(condition_block);
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
+        let arguments = vec![Expression::Block(body_block)];
+
+        let result = generator.generate_message_send(&receiver, &selector, &arguments);
+        assert!(result.is_ok(), "Code generation should succeed");
+
+        generator.output.push_str("\n\nend\n");
+
+        // Write to temp file
+        let temp_dir = std::env::temp_dir();
+        let core_file = temp_dir.join("test_while_loop.core");
+        let mut file = std::fs::File::create(&core_file).expect("Failed to create temp file");
+        file.write_all(generator.output.as_bytes())
+            .expect("Failed to write Core Erlang");
+
+        // Try to compile with erlc
+        let output = Command::new("erlc")
+            .arg("+from_core")
+            .arg("-o")
+            .arg(&temp_dir)
+            .arg(&core_file)
+            .output();
+
+        // Clean up temp files regardless of result
+        let _ = std::fs::remove_file(&core_file);
+        let beam_file = temp_dir.join("test_while_loop.beam");
+        let _ = std::fs::remove_file(&beam_file);
+
+        match output {
+            Ok(result) => {
+                if !result.status.success() {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    panic!(
+                        "erlc compilation failed.\n\nGenerated Core Erlang:\n{}\n\nerlc error:\n{}",
+                        generator.output, stderr
+                    );
+                }
+            }
+            Err(e) => {
+                // erlc not available, skip this test with a message
+                eprintln!("Skipping erlc compilation test: {e}");
+            }
+        }
+    }
+
+    /// Test that internal loop temporaries don't shadow user identifiers.
+    ///
+    /// This tests that a user variable named "Loop" in a block parameter
+    /// is correctly resolved even after generating whileTrue: code.
+    #[test]
+    fn test_temp_vars_dont_shadow_user_identifiers() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // First, generate a whileTrue: which creates internal _Loop, _Cond, _Body temps
+        let condition_block = Block::new(
+            vec![],
+            vec![Expression::Identifier(Identifier::new(
+                "false",
+                Span::new(1, 6),
+            ))],
+            Span::new(0, 7),
+        );
+        let body_block = Block::new(vec![], vec![], Span::new(8, 10));
+
+        let receiver = Expression::Block(condition_block);
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
+        let arguments = vec![Expression::Block(body_block)];
+
+        generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+
+        // Clear output for the next test
+        generator.output.clear();
+
+        // Now push a scope with a user variable named "Loop"
+        generator.push_scope();
+        let user_loop_var = generator.fresh_var("Loop");
+
+        // Access the "Loop" identifier - it should resolve to the user's binding
+        let loop_id = Identifier::new("Loop", Span::new(0, 4));
+        generator.generate_identifier(&loop_id).unwrap();
+
+        let output = &generator.output;
+
+        // The identifier should resolve to the user's variable, not an internal temp
+        assert!(
+            output.contains(&user_loop_var),
+            "User identifier 'Loop' should resolve to user's binding {user_loop_var}, got: {output}"
+        );
+
+        generator.pop_scope();
     }
 }
