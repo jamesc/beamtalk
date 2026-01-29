@@ -119,11 +119,11 @@ mod tests {
     }
 
     #[test]
-    fn is_daemon_running_returns_none_when_no_lockfile() {
-        // When there's no lockfile, should return None
-        let result = is_daemon_running().expect("Failed to check daemon status");
-        // We can't assume the daemon is not running in the test environment,
-        // so just verify the function doesn't panic
-        assert!(result.is_none() || result.is_some());
+    fn is_daemon_running_returns_result_without_error() {
+        // This test verifies the function doesn't panic and returns a valid Result.
+        // The actual value (Some/None) depends on whether a daemon is running,
+        // which we cannot control in unit tests.
+        let result = is_daemon_running();
+        assert!(result.is_ok(), "is_daemon_running should return Ok");
     }
 }
