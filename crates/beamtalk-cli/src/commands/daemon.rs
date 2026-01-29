@@ -468,6 +468,22 @@ fn validate_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Read source code either from provided string or file path.
+///
+/// This helper function encapsulates the common pattern of:
+/// 1. Using the source if provided in params
+/// 2. Reading from the file path if no source is provided
+/// 3. Returning an appropriate error message on failure
+///
+/// # Errors
+/// Returns an error message string if file reading fails.
+fn read_source_from_params_or_file(source: Option<String>, path: &str) -> Result<String, String> {
+    match source {
+        Some(s) => Ok(s),
+        None => std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {e}")),
+    }
+}
+
 /// Parameters for the compile method.
 #[derive(Debug, Deserialize)]
 struct CompileParams {
@@ -516,18 +532,11 @@ fn handle_compile(
     let file_path = Utf8PathBuf::from(&params.path);
 
     // Get source either from params or read from file
-    let source = match params.source {
-        Some(s) => s,
-        None => match std::fs::read_to_string(&params.path) {
-            Ok(s) => s,
-            Err(e) => {
-                return JsonRpcResponse::error(
-                    id,
-                    INTERNAL_ERROR,
-                    format!("Failed to read file: {e}"),
-                );
-            }
-        },
+    let source = match read_source_from_params_or_file(params.source, &params.path) {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+        }
     };
 
     // Update the language service
@@ -614,18 +623,11 @@ fn handle_diagnostics(
     let file_path = Utf8PathBuf::from(&params.path);
 
     // Get source either from params or read from file
-    let source = match params.source {
-        Some(s) => s,
-        None => match std::fs::read_to_string(&params.path) {
-            Ok(s) => s,
-            Err(e) => {
-                return JsonRpcResponse::error(
-                    id,
-                    INTERNAL_ERROR,
-                    format!("Failed to read file: {e}"),
-                );
-            }
-        },
+    let source = match read_source_from_params_or_file(params.source, &params.path) {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+        }
     };
 
     // Update the language service
