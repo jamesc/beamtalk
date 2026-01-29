@@ -239,6 +239,16 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A map literal expression.
+    ///
+    /// Example: `#{#key => 'value', #age => 30}`
+    MapLiteral {
+        /// Key-value pairs in the map.
+        entries: Vec<MapEntry>,
+        /// Source location of the entire map literal.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -265,6 +275,7 @@ impl Expression {
             | Self::Parenthesized { span, .. }
             | Self::Pipe { span, .. }
             | Self::Match { span, .. }
+            | Self::MapLiteral { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -702,6 +713,29 @@ impl CascadeMessage {
             arguments,
             span,
         }
+    }
+}
+
+/// A key-value entry in a map literal.
+///
+/// Example: In `#{#name => 'Alice', #age => 30}`, there are two entries:
+/// - `MapEntry { key: Expression::Literal(Literal::Symbol("name")), value: Expression::Literal(Literal::String("Alice")), ... }`
+/// - `MapEntry { key: Expression::Literal(Literal::Symbol("age")), value: Expression::Literal(Literal::Integer(30)), ... }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapEntry {
+    /// The key expression.
+    pub key: Expression,
+    /// The value expression.
+    pub value: Expression,
+    /// Source location of this map entry (key => value).
+    pub span: Span,
+}
+
+impl MapEntry {
+    /// Creates a new map entry.
+    #[must_use]
+    pub fn new(key: Expression, value: Expression, span: Span) -> Self {
+        Self { key, value, span }
     }
 }
 

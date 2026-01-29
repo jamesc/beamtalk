@@ -37,7 +37,7 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, Comment, CommentKind, CompoundOperator, Expression,
-    Identifier, KeywordPart, Literal, MessageSelector, Module,
+    Identifier, KeywordPart, Literal, MapEntry, MessageSelector, Module,
 };
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -637,6 +637,16 @@ impl Parser {
             | TokenKind::Symbol(_)
             | TokenKind::Character(_) => self.parse_literal(),
 
+            // Map literal: #{...}
+            TokenKind::Hash => {
+                // Check if it's a map literal (followed by {) or a symbol
+                if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
+                    self.parse_map_literal()
+                } else {
+                    self.parse_literal()
+                }
+            }
+
             // Identifier or field access
             TokenKind::Identifier(_) => self.parse_identifier_or_field_access(),
 
@@ -811,6 +821,61 @@ impl Parser {
             expression: Box::new(inner),
             span,
         }
+    }
+
+    /// Parses a map literal: `#{key => value, key2 => value2}`
+    /// Commas are optional separators (can use whitespace instead)
+    fn parse_map_literal(&mut self) -> Expression {
+        let hash_token = self.expect(&TokenKind::Hash, "Expected '#'").unwrap();
+        let start = hash_token.span();
+
+        self.expect(&TokenKind::LeftBrace, "Expected '{' after '#' for map literal");
+
+        let mut entries = Vec::new();
+
+        // Parse entries until we hit RightBrace or EOF
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            let entry_start = self.current_token().span();
+
+            // Parse key expression
+            let key = self.parse_primary(); // Parse only primary to avoid consuming '=>' as binary operator
+
+            // Expect '=>' operator
+            let has_arrow = matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=>");
+            if !has_arrow {
+                self.error("Expected '=>' after map key");
+                // Try to recover by skipping to next RightBrace
+                while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+                    self.advance();
+                }
+                break;
+            }
+            self.advance(); // consume '=>'
+
+            // Parse value expression (also just primary to avoid issues)
+            let value = self.parse_primary();
+
+            let entry_end = value.span();
+            let entry_span = entry_start.merge(entry_end);
+
+            entries.push(MapEntry::new(key, value, entry_span));
+
+            // Optionally consume comma separator (it's lexed as a BinarySelector)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == ",") {
+                self.advance();
+            }
+
+            // Check if there's more entries - if next token is not }, continue
+            // This handles both comma-separated and space-separated entries
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBrace, "Expected '}' to close map literal")
+            .map_or(start, |t| t.span());
+
+        let span = start.merge(end);
+
+        Expression::MapLiteral { entries, span }
     }
 }
 
