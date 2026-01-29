@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Simple hello world example for testing :load command
+
+message := "Hello from loaded file!"

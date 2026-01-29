@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Simple counter example for testing :load command
+// This will be compiled and loaded into the REPL
+
+// Create a simple counter value
+count := 0
+
+// Increment function (will be replaced with proper methods when classes are added)
+count + 1
