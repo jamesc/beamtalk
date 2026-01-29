@@ -329,7 +329,7 @@ while_false_loop(Counter, Target) ->
             Counter
     end.
 
-%% @doc Test: [count < 100] whileTrue: [count := count + 1. process: count]
+%% @doc Test: [counter < 100] whileTrue: [counter := counter + 1. process: counter]
 %% whileTrue: executes body multiple times
 block_while_true_accumulates_test() ->
     %% Sum numbers 1 to 10
@@ -347,7 +347,7 @@ while_true_accumulate(Counter, Sum) ->
     end.
 
 %% @doc Test: repeat loop with early termination
-%% count := 0. [count := count + 1. count < 5] repeat => loops forever
+%% counter := 0. [counter := counter + 1. counter < 5] repeat => loops forever
 %% We simulate with a bounded version that terminates
 block_repeat_with_termination_test() ->
     %% Simulate repeat that increments until threshold
