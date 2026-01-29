@@ -6,6 +6,7 @@
 //! This ensures the runtime BEAM files are built alongside the Rust code.
 
 use std::env;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -17,9 +18,20 @@ fn main() {
         .expect("Cannot find workspace root");
     let runtime_dir = workspace_root.join("runtime");
 
-    // Watch the runtime source files for changes
+    // Watch individual Erlang source files for changes
+    // (watching a directory only triggers when files are added/removed, not modified)
     let src_dir = runtime_dir.join("src");
-    println!("cargo:rerun-if-changed={}", src_dir.display());
+    if let Ok(entries) = fs::read_dir(&src_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|ext| ext == "erl" || ext == "hrl")
+            {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
     println!(
         "cargo:rerun-if-changed={}",
         runtime_dir.join("rebar.config").display()
@@ -35,8 +47,6 @@ fn main() {
     }
 
     // Run rebar3 compile in the runtime directory
-    println!("cargo:warning=Building Erlang runtime with rebar3...");
-
     let status = Command::new("rebar3")
         .arg("compile")
         .current_dir(&runtime_dir)

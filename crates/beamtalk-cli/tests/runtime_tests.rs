@@ -1,10 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration test that runs the Erlang runtime test suite.
+//! Integration test that runs the Erlang runtime unit tests.
 //!
 //! This ensures the Erlang runtime tests are run as part of `cargo test`.
+//! Only unit test modules are run here - integration tests that require
+//! the compiler daemon are run separately in CI.
 
+use serial_test::serial;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -20,8 +23,15 @@ fn find_runtime_dir() -> PathBuf {
     workspace_root.join("runtime")
 }
 
+/// Unit test modules to run (matches CI workflow).
+/// Integration tests (`beamtalk_repl_integration_tests`) require the daemon
+/// and are run separately in CI.
+const UNIT_TEST_MODULES: &str =
+    "beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests";
+
 #[test]
-fn erlang_runtime_tests() {
+#[serial]
+fn erlang_runtime_unit_tests() {
     let runtime_dir = find_runtime_dir();
 
     // Check if rebar3 is available
@@ -33,9 +43,10 @@ fn erlang_runtime_tests() {
         return;
     }
 
-    // Run rebar3 eunit
+    // Run rebar3 eunit for unit test modules only (matching CI workflow)
     let output = Command::new("rebar3")
         .arg("eunit")
+        .arg(format!("--module={UNIT_TEST_MODULES}"))
         .current_dir(&runtime_dir)
         .output()
         .expect("Failed to run rebar3 eunit");
