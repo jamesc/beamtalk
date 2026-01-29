@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Set (unique elements) operations
+
+// Set creation from list
+colors := Set fromList: [#red, #green, #blue]
+warm := Set fromList: [#red, #orange, #yellow]
+
+// Add element (duplicates ignored)
+extended := colors add: #purple
+withDupe := colors add: #red
+
+// Size
+size := colors size
+
+// Membership test
+hasRed := colors includes: #red
+hasPurple := colors includes: #purple
+
+// Set operations
+union := colors union: warm
+intersection := colors intersection: warm
+difference := colors difference: warm
+
+// Iteration (order not guaranteed)
+colors each: [:c | Transcript show: c]
+
+// Transformation
+transformed := colors collect: [:c | c]
+
+// Filtering
+filtered := colors select: [:c | c = #red]
+
+// Subset test
+isSubset := intersection isSubsetOf: colors
+
+// Remove element
+withoutRed := colors remove: #red
+
+// Conversion
+asList := colors asList

@@ -120,26 +120,110 @@ word each: [:char | Transcript show: char]
 caps := word collect: [:char | char uppercase]
 ```
 
+### Collection Hierarchy
+
+Beamtalk provides a rich collection framework following Smalltalk conventions:
+
+```
+Collection (abstract base)
+  ├─ SequenceableCollection (ordered, indexed)
+  │     ├─ Array (fixed-size tuple)
+  │     └─ List (linked list)
+  ├─ Set (unordered, unique)
+  └─ Dictionary (key-value)
+```
+
 ### Collection (`Collection.bt`)
 
-Protocol for arrays, lists, sets, and maps.
+Abstract base protocol for all collection types.
 
-**Key messages:**
-- Size: `size`, `isEmpty`
-- Access: `at:`, `at:put:`, `first`, `last`
-- Modify: `add:`, `remove:`, `removeAt:`
-- Iterate: `each:`, `collect:`, `select:`, `reject:`
+**Common messages (all collections):**
+- Size: `size`, `isEmpty`, `isNotEmpty`
 - Test: `includes:`, `allSatisfy:`, `anySatisfy:`
-- Reduce: `inject:into:`
+- Modify: `add:`, `addAll:`, `remove:`
+- Iterate: `each:`, `collect:`, `select:`, `reject:`
+- Reduce: `inject:into:`, `count:`
+- Convert: `asArray`, `asList`, `asSet`
+
+### SequenceableCollection (`SequenceableCollection.bt`)
+
+Protocol for ordered, indexed collections (Array and List).
+
+**Additional messages:**
+- Access: `at:`, `at:put:`, `first`, `last`
+- Slice: `from:to:`, `first:`, `last:`
+- Order: `sorted`, `sortedBy:`, `reversed`
+- Index: `indexOf:`, `findFirst:`
+- Concat: `++`
+
+### Array (`Array.bt`)
+
+Fixed-size indexed collection using Erlang tuples. Fast O(1) access.
 
 **Usage:**
 ```beamtalk
-numbers := {1, 2, 3, 4, 5}
-doubled := numbers collect: [:n | n * 2]
-evens := numbers select: [:n | n isEven]
-sum := numbers inject: 0 into: [:acc :n | acc + n]
+point := {10, 20}
+x := point at: 1        // => 10
+moved := point at: 1 put: 15   // => {15, 20}
 
-(numbers includes: 3) ifTrue: [Transcript show: 'Found']
+numbers := {1, 2, 3, 4, 5}
+doubled := numbers collect: [:n | n * 2]  // => {2, 4, 6, 8, 10}
+```
+
+### List (`List.bt`)
+
+Linked list using Erlang lists. Fast O(1) prepend.
+
+**Additional messages:**
+- `head`, `tail` - Access first element and rest
+- `prepend:` - Add to front (O(1))
+- `flatten`, `zip:`, `partition:`
+
+**Usage:**
+```beamtalk
+items := [1, 2, 3, 4, 5]
+first := items head          // => 1
+rest := items tail           // => [2, 3, 4, 5]
+extended := items prepend: 0 // => [0, 1, 2, 3, 4, 5]
+```
+
+### Set (`Set.bt`)
+
+Unordered collection of unique elements.
+
+**Additional messages:**
+- `union:`, `intersection:`, `difference:`
+- `isSubsetOf:`, `isSupersetOf:`, `isDisjointFrom:`
+
+**Usage:**
+```beamtalk
+colors := Set fromList: [#red, #green, #blue]
+warm := Set fromList: [#red, #orange, #yellow]
+
+both := colors intersection: warm     // => {#red}
+all := colors union: warm             // => {#red, #green, #blue, #orange, #yellow}
+(colors includes: #red) ifTrue: [Transcript show: 'Has red']
+```
+
+### Dictionary (`Dictionary.bt`)
+
+Key-value collection using Erlang maps.
+
+**Key messages:**
+- `at:`, `at:put:`, `at:ifAbsent:`
+- `includesKey:`, `removeKey:`
+- `keys`, `values`, `keysAndValuesDo:`
+- `merge:`, `collect:`, `select:`
+
+**Usage:**
+```beamtalk
+person := #{#name => 'Alice', #age => 30}
+name := person at: #name              // => 'Alice'
+older := person at: #age put: 31      // => #{#name => 'Alice', #age => 31}
+
+person keysAndValuesDo: [:k :v |
+  Transcript show: k; show: ' => '; show: v
+]
 ```
 
 ## Compiler Integration
@@ -174,9 +258,10 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 | `Block` | Anonymous fun (closure) | Captures lexical scope |
 | `Integer` | Erlang integer (bignum support) | Arbitrary precision |
 | `String` | Binary `<<"UTF-8">>` | UTF-8 encoded, not charlist |
-| `Collection` | Tuple `{...}` (primary), List `[...]`, Map `#{...}` | Tuples preferred for arrays |
-
-**Note on Collections:** Beamtalk uses tuples (Erlang `{...}`) as the primary array representation for efficiency. Lists are supported for interop but tuples are recommended for most use cases. See the Collection.bt documentation for details.
+| `Array` | Erlang tuple `{...}` | O(1) access, O(n) update |
+| `List` | Erlang list `[...]` | O(1) prepend, O(n) access |
+| `Set` | `ordsets` (sorted list) | O(log n) membership |
+| `Dictionary` | Erlang map `#{...}` | O(log n) key access |
 
 ## Implementation Status
 
@@ -187,7 +272,12 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 | `Block` | ✅ Defined | Needs compiler closure codegen |
 | `Integer` | ✅ Defined | Needs compiler operator codegen |
 | `String` | ✅ Defined | Needs compiler string ops |
-| `Collection` | ✅ Defined | Needs compiler collection ops |
+| `Collection` | ✅ Defined | Abstract base protocol |
+| `SequenceableCollection` | ✅ Defined | Ordered collection protocol |
+| `Array` | ✅ Defined | Needs compiler tuple ops |
+| `List` | ✅ Defined | Needs compiler list ops |
+| `Set` | ✅ Defined | Needs compiler ordsets ops |
+| `Dictionary` | ✅ Defined | Needs compiler map ops |
 
 ## Testing
 
@@ -209,10 +299,8 @@ Example test case:
 Planned additions to the standard library:
 
 - **Number** - Abstract number protocol (Integer, Float, Rational)
-- **List** - Linked list operations (cons, car, cdr)
-- **Array** - Fixed-size tuple operations
-- **Set** - Unordered unique collection
-- **Dictionary** - Key-value map (Erlang map)
+- **Float** - Floating-point numbers
+- **OrderedSet** - Set that maintains insertion order
 - **Stream** - Lazy sequence processing
 - **Exception** - Error handling protocol
 - **Process** - Low-level process primitives

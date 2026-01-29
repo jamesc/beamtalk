@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test List (linked list) operations
+
+// List creation
+numbers := [1, 2, 3, 4, 5]
+empty := []
+
+// Head and tail (O(1))
+first := numbers head
+rest := numbers tail
+
+// Prepend (O(1))
+extended := numbers prepend: 0
+
+// Index access (O(n))
+third := numbers at: 3
+
+// Size
+size := numbers size
+
+// Iteration
+numbers each: [:n | Transcript show: n]
+
+// Transformation
+doubled := numbers collect: [:n | n * 2]
+
+// Filtering
+evens := numbers select: [:n | n % 2 = 0]
+
+// Reduction
+sum := numbers inject: 0 into: [:acc :n | acc + n]
+
+// Membership test
+hasThree := numbers includes: 3
+
+// Concatenation
+combined := [1, 2] ++ [3, 4]
+
+// Reverse
+reversed := numbers reversed
+
+// Conversion to array
+asArray := numbers asArray
+
+// Remove element
+withoutThree := numbers remove: 3

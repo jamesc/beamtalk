@@ -1,0 +1,169 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "point",
+                    span: Span {
+                        start: 122,
+                        end: 127,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Unexpected token: expected expression, found {",
+                span: Span {
+                    start: 131,
+                    end: 132,
+                },
+            },
+            span: Span {
+                start: 122,
+                end: 132,
+            },
+        },
+        Literal(
+            Integer(
+                10,
+            ),
+            Span {
+                start: 132,
+                end: 134,
+            },
+        ),
+        Error {
+            message: "Unexpected token: expected expression, found ,",
+            span: Span {
+                start: 134,
+                end: 135,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 138,
+                end: 143,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 159,
+                end: 166,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 171,
+                end: 201,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 423,
+                end: 451,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 479,
+                end: 500,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 529,
+                end: 548,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 590,
+                end: 618,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found }",
+            span: Span {
+                start: 675,
+                end: 676,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 685,
+                end: 716,
+            },
+        },
+    ],
+    span: Span {
+        start: 122,
+        end: 732,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 122,
+                end: 127,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 122,
+                end: 127,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test Array (tuple) operations",
+            span: Span {
+                start: 122,
+                end: 127,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Array creation",
+            span: Span {
+                start: 122,
+                end: 127,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 131, end: 132 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 134, end: 135 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 138, end: 139 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 138, end: 143 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 159, end: 160 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 159, end: 166 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 171, end: 172 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 171, end: 201 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 423, end: 424 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 423, end: 451 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 479, end: 480 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 479, end: 500 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 529, end: 530 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 529, end: 548 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 590, end: 591 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 590, end: 618 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 675, end: 676 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 685, end: 716 } }

@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Dictionary (key-value map) operations
+
+// Dictionary creation
+person := #{#name => 'Alice', #age => 30, #city => 'NYC'}
+empty := #{}
+
+// Key access
+name := person at: #name
+age := person at: #age
+
+// Safe access with default
+title := person at: #title ifAbsent: ['Unknown']
+
+// Update (returns new dictionary)
+older := person at: #age put: 31
+
+// Add new key
+withJob := person at: #job put: 'Engineer'
+
+// Size
+size := person size
+
+// Key test
+hasName := person includesKey: #name
+hasJob := person includesKey: #job
+
+// Remove key
+minimal := person removeKey: #city
+
+// Get keys and values
+keys := person keys
+values := person values
+
+// Iteration over keys and values
+person keysAndValuesDo: [:k :v |
+  Transcript show: k
+  Transcript show: v
+]
+
+// Transformation of values
+doubled := #{#x => 10, #y => 20} collect: [:v | v * 2]
+
+// Merge two dictionaries
+base := #{#a => 1, #b => 2}
+extra := #{#b => 3, #c => 4}
+merged := base merge: extra

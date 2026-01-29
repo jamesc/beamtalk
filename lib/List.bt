@@ -1,0 +1,315 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════
+
+// List - Linked list collection (Erlang list)
+//
+// Lists are singly-linked sequences, ideal for sequential processing,
+// pattern matching, and recursive algorithms. They provide O(1) prepend
+// but O(n) random access.
+//
+// ## When to Use List
+//
+// Use List when you need:
+// - Efficient head/tail access
+// - Pattern matching (Prolog/Erlang style)
+// - Building sequences by prepending
+// - Recursive processing
+// - Interop with Erlang list-based APIs
+//
+// Use Array instead when you need:
+// - Fast random access by index
+// - Fixed-size collections
+// - Frequent element access by position
+//
+// ## Literal Syntax
+//
+// Lists use bracket syntax:
+// ```beamtalk
+// empty := []
+// numbers := [1, 2, 3, 4, 5]
+// mixed := [#name, 'Alice', 42]
+// ```
+//
+// ## Head/Tail Pattern
+//
+// Lists are conceptually `[head | tail]`:
+// ```beamtalk
+// list := [1, 2, 3]
+// h := list head      // => 1
+// t := list tail      // => [2, 3]
+// new := [0 | list]   // => [0, 1, 2, 3] - prepend
+// ```
+//
+// ## Performance Characteristics
+//
+// | Operation | Time Complexity |
+// |-----------|-----------------|
+// | `size` | O(n) - must traverse |
+// | `head` | O(1) |
+// | `tail` | O(1) |
+// | `prepend:` | O(1) |
+// | `at:` | O(n) |
+// | `at:put:` | O(n) |
+// | `++` | O(n) - left operand |
+// | `includes:` | O(n) |
+// | `reversed` | O(n) |
+//
+// ## BEAM Mapping
+//
+// ```erlang
+// [1, 2, 3]           % Beamtalk: [1, 2, 3]
+// [H|T] = List        % Beamtalk: list head, list tail
+// [X | List]          % Beamtalk: list prepend: X
+// lists:nth(N, L)     % Beamtalk: list at: N
+// length(L)           % Beamtalk: list size
+// lists:append(A, B)  % Beamtalk: a ++ b
+// lists:reverse(L)    % Beamtalk: list reversed
+// ```
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Creation
+// numbers := [1, 2, 3, 4, 5]
+//
+// // Head/tail decomposition
+// first := numbers head        // => 1
+// rest := numbers tail         // => [2, 3, 4, 5]
+//
+// // Prepending (O(1))
+// extended := numbers prepend: 0  // => [0, 1, 2, 3, 4, 5]
+//
+// // Or using cons syntax
+// extended := [0 | numbers]       // => [0, 1, 2, 3, 4, 5]
+//
+// // Building lists (prepend then reverse)
+// result := [].
+// items each: [:item | result := result prepend: item].
+// result := result reversed
+//
+// // Iteration
+// numbers each: [:n | Transcript show: n]
+//
+// // Transformation
+// doubled := numbers collect: [:n | n * 2]  // => [2, 4, 6, 8, 10]
+//
+// // Recursive processing
+// sum := [:list |
+//   list isEmpty ifTrue: [^0].
+//   ^list head + (self value: list tail)
+// ]
+// total := sum value: numbers  // => 15
+// ```
+//
+// ## See Also
+//
+// - `Collection.bt` - Base collection protocol
+// - `SequenceableCollection.bt` - Ordered collection protocol
+// - `Array.bt` - Alternative for random-access collections
+
+List
+  // ═══════════════════════════════════════════════════════════════════
+  // Construction
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Create empty list
+  new => // implemented by compiler - returns []
+
+  // Create list with n copies of element
+  new: size withAll: element =>
+    result := [].
+    size timesRepeat: [result := result prepend: element].
+    ^result
+
+  // Create list from array
+  fromArray: anArray => anArray asList
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Head/Tail Access (O(1))
+  // ═══════════════════════════════════════════════════════════════════
+
+  // First element (O(1))
+  // Raises error if list is empty
+  head => // implemented by compiler - hd(List)
+
+  // All elements except first (O(1))
+  // Raises error if list is empty
+  tail => // implemented by compiler - tl(List)
+
+  // Aliases for Smalltalk compatibility
+  first => self head
+  rest => self tail
+
+  // Safe access with default
+  headIfEmpty: defaultBlock =>
+    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self head]
+
+  tailIfEmpty: defaultBlock =>
+    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self tail]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Cons Operations (Building Lists)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Prepend element to front (O(1))
+  // Returns new list: [element | self]
+  prepend: element => // implemented by compiler - [Element | List]
+
+  // Synonym for prepend (Lisp terminology)
+  cons: element => self prepend: element
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Index Access (O(n) - use sparingly)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Get element at index (1-based, O(n))
+  at: index => // implemented by compiler - lists:nth
+
+  // Return new list with element at index replaced (O(n))
+  at: index put: value => // implemented by compiler
+
+  // Size (O(n) - must traverse entire list)
+  size => // implemented by compiler - length(List)
+
+  // Last element (O(n) - must traverse to end)
+  last => // implemented by compiler - lists:last
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Concatenation
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Append another list (O(n) in self's length)
+  ++ other => // implemented by compiler - lists:append
+
+  // Append single element (O(n) - appends to end)
+  append: element => self ++ [element]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Reordering
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Return reversed copy (O(n))
+  reversed => // implemented by compiler - lists:reverse
+
+  // Return sorted copy
+  sorted => // implemented by compiler - lists:sort
+
+  // Return sorted copy with custom comparator
+  sortedBy: block => // implemented by compiler
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Removal
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Remove first occurrence of element
+  remove: element => // implemented by compiler - lists:delete
+
+  // Remove all occurrences of element
+  removeAll: element =>
+    self select: [:e | e ~= element]
+
+  // Remove element at index
+  removeAt: index =>
+    self collectWithIndex: [:i :e |
+      i = index ifTrue: [nil] ifFalse: [e]
+    ] thenSelect: [:e | e ~= nil]
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Conversion
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Return self (already a list)
+  asList => self
+
+  // Convert to array (tuple)
+  asArray => // implemented by compiler - list_to_tuple
+
+  // Convert to set (remove duplicates)
+  asSet => // implemented by compiler - ordsets:from_list
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Comparison
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Structural equality
+  = other =>
+    other isList ifFalse: [^false].
+    self size = other size ifFalse: [^false].
+    self with: other do: [:a :b |
+      a = b ifFalse: [^false]
+    ].
+    ^true
+
+  // Type tests
+  isArray => false
+  isList => true
+  isSet => false
+  isDictionary => false
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Iteration (List-optimized)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // These are compiler-optimized for list traversal
+
+  each: block => // implemented by compiler - lists:foreach
+  collect: block => // implemented by compiler - lists:map
+  select: block => // implemented by compiler - lists:filter
+  reject: block => // implemented by compiler - lists:filter negated
+  inject: initial into: block => // implemented by compiler - lists:foldl
+
+  // ═══════════════════════════════════════════════════════════════════
+  // List-Specific Operations
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Flatten nested lists one level
+  flatten => // implemented by compiler - lists:flatten
+
+  // Flatten all levels
+  flattenDeep => // implemented by compiler - lists:flatten recursive
+
+  // Zip two lists into list of pairs
+  zip: other =>
+    self with: other collect: [:a :b | {a, b}]
+
+  // Unzip list of pairs into two lists
+  unzip =>
+    firsts := self collect: [:pair | pair at: 1].
+    seconds := self collect: [:pair | pair at: 2].
+    ^{firsts, seconds}
+
+  // Take while predicate is true
+  takeWhile: block => // implemented by compiler - lists:takewhile
+
+  // Drop while predicate is true
+  dropWhile: block => // implemented by compiler - lists:dropwhile
+
+  // Split at first element matching predicate
+  splitWith: block =>
+    before := self takeWhile: [:e | (block value: e) not].
+    after := self dropWhile: [:e | (block value: e) not].
+    ^{before, after}
+
+  // Partition into two lists by predicate
+  partition: block =>
+    matching := self select: block.
+    notMatching := self reject: block.
+    ^{matching, notMatching}
+
+  // Intersperse element between all elements
+  intersperse: separator =>
+    self isEmpty ifTrue: [^[]].
+    self size = 1 ifTrue: [^[self head]].
+    result := [self head].
+    self tail each: [:e |
+      result := result ++ [separator, e]
+    ].
+    ^result
