@@ -254,3 +254,110 @@ overwrite_class_test_() ->
              ?assertEqual(ClassInfo2, Retrieved)
          end)]
      end}.
+
+register_class_validation_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Missing required field 'module'
+             InvalidInfo1 = #{
+                 superclass => object,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             },
+             {error, {missing_fields, Missing1}} = beamtalk_classes:register_class(Pid, 'BadClass1', InvalidInfo1),
+             ?assert(lists:member(module, Missing1)),
+             
+             % Missing multiple required fields
+             InvalidInfo2 = #{
+                 module => bad_class
+             },
+             {error, {missing_fields, Missing2}} = beamtalk_classes:register_class(Pid, 'BadClass2', InvalidInfo2),
+             ?assertEqual(4, length(Missing2)),  % missing 4 fields
+             ?assert(lists:member(superclass, Missing2)),
+             ?assert(lists:member(methods, Missing2)),
+             ?assert(lists:member(instance_variables, Missing2)),
+             ?assert(lists:member(class_variables, Missing2)),
+             
+             % Valid info should work
+             ValidInfo = #{
+                 module => good_class,
+                 superclass => object,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             },
+             ok = beamtalk_classes:register_class(Pid, 'GoodClass', ValidInfo)
+         end)]
+     end}.
+
+add_method_preserves_arity_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Register a class with a method that has arity
+             ClassInfo = #{
+                 module => counter,
+                 superclass => object,
+                 methods => #{
+                     increment => #{arity => 0},
+                     'add:' => #{arity => 1}
+                 },
+                 instance_variables => [count],
+                 class_variables => #{}
+             },
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo),
+             
+             % Add a block to increment method
+             IncrementBlock = fun() -> ok end,
+             ok = beamtalk_classes:add_method(Pid, 'Counter', increment, IncrementBlock),
+             
+             % Verify both arity and block are present
+             {ok, Updated} = beamtalk_classes:lookup(Pid, 'Counter'),
+             Methods = maps:get(methods, Updated),
+             #{arity := Arity, block := Block} = maps:get(increment, Methods),
+             ?assertEqual(0, Arity),
+             ?assertEqual(IncrementBlock, Block),
+             
+             % Other method unchanged
+             #{arity := AddArity} = maps:get('add:', Methods),
+             ?assertEqual(1, AddArity),
+             ?assertNot(maps:is_key(block, maps:get('add:', Methods)))
+         end)]
+     end}.
+
+code_change_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Register a class
+             ClassInfo = #{
+                 module => counter,
+                 superclass => object,
+                 methods => #{value => #{}},
+                 instance_variables => [count],
+                 class_variables => #{}
+             },
+             ok = beamtalk_classes:register_class(Pid, 'Counter', ClassInfo),
+             
+             % Get current state
+             State = sys:get_state(Pid),
+             
+             % Call code_change directly (simulates OTP upgrade)
+             {ok, NewState} = beamtalk_classes:code_change("1.0", State, []),
+             
+             % Verify state is preserved
+             ?assertEqual(State, NewState),
+             
+             % Verify registry still works
+             {ok, Retrieved} = beamtalk_classes:lookup(Pid, 'Counter'),
+             ?assertEqual(ClassInfo, Retrieved)
+         end)]
+     end}.
