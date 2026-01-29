@@ -170,6 +170,17 @@ fn history_path() -> Result<PathBuf> {
 
 /// Find the runtime directory by checking multiple possible locations.
 fn find_runtime_dir() -> Result<PathBuf> {
+    // Check explicit env var first
+    if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
+        let path = PathBuf::from(dir);
+        if path.join("rebar.config").exists() {
+            return Ok(path);
+        }
+        return Err(miette!(
+            "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
+        ));
+    }
+
     // Candidates in order of preference
     let candidates = [
         // 1. CARGO_MANIFEST_DIR (when running via cargo run)
@@ -374,6 +385,18 @@ fn print_help() {
     println!("  counter increment    # Send a message");
 }
 
+/// Guard to ensure BEAM child process is killed on drop.
+/// This prevents orphaned BEAM processes when REPL exits early due to errors.
+struct BeamChildGuard {
+    child: Child,
+}
+
+impl Drop for BeamChildGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
 /// Run the REPL.
 pub fn run() -> Result<()> {
     println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
@@ -386,17 +409,13 @@ pub fn run() -> Result<()> {
     }
 
     // Start BEAM node with REPL backend
-    let mut beam_child = start_beam_node(REPL_PORT)?;
+    // Use a guard to ensure cleanup on any exit path
+    let beam_guard = BeamChildGuard {
+        child: start_beam_node(REPL_PORT)?,
+    };
 
     // Connect to REPL backend
-    let mut client = match connect_with_retries(REPL_PORT) {
-        Ok(c) => c,
-        Err(e) => {
-            // Kill the BEAM node on failure
-            let _ = beam_child.kill();
-            return Err(e);
-        }
-    };
+    let mut client = connect_with_retries(REPL_PORT)?;
 
     println!("Connected to REPL backend.");
     println!();
@@ -496,8 +515,8 @@ pub fn run() -> Result<()> {
     // Save history
     let _ = rl.save_history(&history_file);
 
-    // Clean up - stop BEAM node
-    let _ = beam_child.kill();
+    // BEAM child is cleaned up automatically by BeamChildGuard::drop()
+    drop(beam_guard);
 
     Ok(())
 }
