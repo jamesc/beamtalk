@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "linear": {
+      "type": "stdio",
+      "command": "npx",
+      "tools": [
+        "*"
+      ],
+      "args": [
+        "-y",
+        "github:obra/streamlinear"
+      ],
+      "env": {
+        "LINEAR_API_TOKEN": "${LINEAR_API_KEY}"
+      }
+    }
+  }
+}
