@@ -146,7 +146,9 @@ else {
         }
         else {
             # Create new worktree
-            $worktreePath = Join-Path $WorktreeRoot $Branch
+            # Sanitize branch name for directory (replace / with -)
+            $dirName = $Branch -replace '/', '-'
+            $worktreePath = Join-Path $WorktreeRoot $dirName
             
             if (Test-BranchExists -BranchName $Branch) {
                 Write-Host "📌 Creating worktree for existing branch: $Branch" -ForegroundColor Yellow
