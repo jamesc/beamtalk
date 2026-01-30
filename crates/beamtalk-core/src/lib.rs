@@ -22,7 +22,10 @@ mod queries;
 
 /// Re-export commonly used types.
 pub mod prelude {
-    pub use crate::ast::{Expression, Identifier, Literal, Module};
+    pub use crate::ast::{
+        ClassDefinition, Expression, Identifier, Literal, MethodDefinition, Module,
+        StateDeclaration, TypeAnnotation,
+    };
     pub use crate::language_service::{
         Completion, CompletionKind, HoverInfo, LanguageService, Location, Position,
         SimpleLanguageService,

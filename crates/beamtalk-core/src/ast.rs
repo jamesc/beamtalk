@@ -31,6 +31,7 @@
 //!
 //! // Source: x := 3 + 4
 //! let module = Module {
+//!     classes: Vec::new(),
 //!     expressions: vec![
 //!         Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -63,11 +64,13 @@ use ecow::EcoString;
 
 /// Top-level container for a Beamtalk module.
 ///
-/// A module consists of a sequence of expressions, typically method definitions
-/// or top-level statements.
+/// A module consists of class definitions and/or top-level expressions.
+/// Class definitions are the primary structure for actor-based code.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
-    /// The expressions in this module.
+    /// Class definitions in this module.
+    pub classes: Vec<ClassDefinition>,
+    /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<Expression>,
     /// Source location spanning the entire module.
     pub span: Span,
@@ -80,7 +83,19 @@ impl Module {
     #[must_use]
     pub fn new(expressions: Vec<Expression>, span: Span) -> Self {
         Self {
+            classes: Vec::new(),
             expressions,
+            span,
+            leading_comments: Vec::new(),
+        }
+    }
+
+    /// Creates a new module with class definitions.
+    #[must_use]
+    pub fn with_classes(classes: Vec<ClassDefinition>, span: Span) -> Self {
+        Self {
+            classes,
+            expressions: Vec::new(),
             span,
             leading_comments: Vec::new(),
         }
@@ -94,6 +109,7 @@ impl Module {
         leading_comments: Vec<Comment>,
     ) -> Self {
         Self {
+            classes: Vec::new(),
             expressions,
             span,
             leading_comments,
@@ -121,6 +137,273 @@ pub enum CommentKind {
     Line,
     /// A block comment (`/* text */`).
     Block,
+}
+
+/// A class definition.
+///
+/// Example:
+/// ```text
+/// Actor subclass: Counter
+///   state: value = 0
+///
+///   increment => self.value += 1
+///   getValue => ^self.value
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassDefinition {
+    /// The class name (e.g., `Counter`).
+    pub name: Identifier,
+    /// The superclass name (e.g., `Actor`).
+    pub superclass: Identifier,
+    /// Instance variable declarations.
+    pub state: Vec<StateDeclaration>,
+    /// Method definitions.
+    pub methods: Vec<MethodDefinition>,
+    /// Source location of the entire class definition.
+    pub span: Span,
+}
+
+impl ClassDefinition {
+    /// Creates a new class definition.
+    #[must_use]
+    pub fn new(
+        name: Identifier,
+        superclass: Identifier,
+        state: Vec<StateDeclaration>,
+        methods: Vec<MethodDefinition>,
+        span: Span,
+    ) -> Self {
+        Self {
+            name,
+            superclass,
+            state,
+            methods,
+            span,
+        }
+    }
+}
+
+/// A state (instance variable) declaration.
+///
+/// Example: `state: value: Integer = 0`
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateDeclaration {
+    /// The field name.
+    pub name: Identifier,
+    /// Optional type annotation.
+    pub type_annotation: Option<TypeAnnotation>,
+    /// Optional default value.
+    pub default_value: Option<Expression>,
+    /// Source location.
+    pub span: Span,
+}
+
+impl StateDeclaration {
+    /// Creates a new state declaration.
+    #[must_use]
+    pub fn new(name: Identifier, span: Span) -> Self {
+        Self {
+            name,
+            type_annotation: None,
+            default_value: None,
+            span,
+        }
+    }
+
+    /// Creates a state declaration with a type annotation.
+    #[must_use]
+    pub fn with_type(name: Identifier, type_annotation: TypeAnnotation, span: Span) -> Self {
+        Self {
+            name,
+            type_annotation: Some(type_annotation),
+            default_value: None,
+            span,
+        }
+    }
+
+    /// Creates a state declaration with a default value.
+    #[must_use]
+    pub fn with_default(name: Identifier, default_value: Expression, span: Span) -> Self {
+        Self {
+            name,
+            type_annotation: None,
+            default_value: Some(default_value),
+            span,
+        }
+    }
+
+    /// Creates a state declaration with both type and default value.
+    #[must_use]
+    pub fn with_type_and_default(
+        name: Identifier,
+        type_annotation: TypeAnnotation,
+        default_value: Expression,
+        span: Span,
+    ) -> Self {
+        Self {
+            name,
+            type_annotation: Some(type_annotation),
+            default_value: Some(default_value),
+            span,
+        }
+    }
+}
+
+/// A method definition.
+///
+/// Example: `getValue -> Integer => ^self.value`
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodDefinition {
+    /// The method selector (name).
+    pub selector: MessageSelector,
+    /// Parameter names (for keyword messages).
+    pub parameters: Vec<Identifier>,
+    /// The method body expressions.
+    pub body: Vec<Expression>,
+    /// Optional return type annotation.
+    pub return_type: Option<TypeAnnotation>,
+    /// Source location.
+    pub span: Span,
+}
+
+impl MethodDefinition {
+    /// Creates a new method definition.
+    #[must_use]
+    pub fn new(
+        selector: MessageSelector,
+        parameters: Vec<Identifier>,
+        body: Vec<Expression>,
+        span: Span,
+    ) -> Self {
+        Self {
+            selector,
+            parameters,
+            body,
+            return_type: None,
+            span,
+        }
+    }
+
+    /// Creates a method definition with a return type.
+    #[must_use]
+    pub fn with_return_type(
+        selector: MessageSelector,
+        parameters: Vec<Identifier>,
+        body: Vec<Expression>,
+        return_type: TypeAnnotation,
+        span: Span,
+    ) -> Self {
+        Self {
+            selector,
+            parameters,
+            body,
+            return_type: Some(return_type),
+            span,
+        }
+    }
+}
+
+/// A type annotation for optional typing.
+///
+/// Beamtalk supports gradual typing - add types where helpful.
+/// All variants carry a [`Span`] for error reporting and IDE features.
+///
+/// Examples:
+/// - `Integer`
+/// - `String`
+/// - `Counter` (custom class)
+/// - `Integer | String` (union)
+/// - `#north | #south | #east | #west` (singleton/enum)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeAnnotation {
+    /// A simple named type (e.g., `Integer`, `String`, `Counter`).
+    Simple(Identifier),
+    /// A union type (e.g., `Integer | String`).
+    Union {
+        /// The types in the union.
+        types: Vec<TypeAnnotation>,
+        /// Source location of the entire union type.
+        span: Span,
+    },
+    /// A singleton/literal type (e.g., `#north`).
+    Singleton {
+        /// The singleton value name.
+        name: EcoString,
+        /// Source location.
+        span: Span,
+    },
+    /// A generic type (e.g., `Collection<Integer>`).
+    Generic {
+        /// The base type name.
+        base: Identifier,
+        /// Type parameters.
+        parameters: Vec<TypeAnnotation>,
+        /// Source location of the entire generic type.
+        span: Span,
+    },
+    /// A false-or type (Option/Maybe pattern).
+    ///
+    /// Example: `Integer | False`
+    FalseOr {
+        /// The inner type.
+        inner: Box<TypeAnnotation>,
+        /// Source location of the entire false-or type.
+        span: Span,
+    },
+}
+
+impl TypeAnnotation {
+    /// Returns the span of this type annotation.
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        match self {
+            Self::Simple(id) => id.span,
+            Self::Union { span, .. }
+            | Self::Singleton { span, .. }
+            | Self::Generic { span, .. }
+            | Self::FalseOr { span, .. } => *span,
+        }
+    }
+
+    /// Creates a simple type annotation.
+    #[must_use]
+    pub fn simple(name: impl Into<EcoString>, span: Span) -> Self {
+        Self::Simple(Identifier::new(name, span))
+    }
+
+    /// Creates a singleton type annotation.
+    #[must_use]
+    pub fn singleton(name: impl Into<EcoString>, span: Span) -> Self {
+        Self::Singleton {
+            name: name.into(),
+            span,
+        }
+    }
+
+    /// Creates a union type annotation.
+    #[must_use]
+    pub fn union(types: Vec<TypeAnnotation>, span: Span) -> Self {
+        Self::Union { types, span }
+    }
+
+    /// Creates a generic type annotation.
+    #[must_use]
+    pub fn generic(base: Identifier, parameters: Vec<TypeAnnotation>, span: Span) -> Self {
+        Self::Generic {
+            base,
+            parameters,
+            span,
+        }
+    }
+
+    /// Creates a false-or type annotation.
+    #[must_use]
+    pub fn false_or(inner: TypeAnnotation, span: Span) -> Self {
+        Self::FalseOr {
+            inner: Box::new(inner),
+            span,
+        }
+    }
 }
 
 /// A Beamtalk expression.
@@ -962,5 +1245,252 @@ mod tests {
             span: Span::new(0, 21),
         };
         assert_eq!(expr.span(), Span::new(0, 21));
+    }
+
+    #[test]
+    fn type_annotation_simple() {
+        let ty = TypeAnnotation::simple("Integer", Span::new(0, 7));
+        assert!(matches!(ty, TypeAnnotation::Simple(_)));
+        assert_eq!(ty.span(), Span::new(0, 7));
+    }
+
+    #[test]
+    fn type_annotation_singleton() {
+        let ty = TypeAnnotation::singleton("north", Span::new(0, 6));
+        assert!(matches!(ty, TypeAnnotation::Singleton { .. }));
+        if let TypeAnnotation::Singleton { name, span } = ty {
+            assert_eq!(name, "north");
+            assert_eq!(span, Span::new(0, 6));
+        }
+    }
+
+    #[test]
+    fn type_annotation_union() {
+        let ty = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                TypeAnnotation::simple("String", Span::new(10, 16)),
+            ],
+            Span::new(0, 16),
+        );
+        if let TypeAnnotation::Union { types, span } = ty {
+            assert_eq!(types.len(), 2);
+            assert_eq!(span, Span::new(0, 16));
+        }
+    }
+
+    #[test]
+    fn type_annotation_generic() {
+        let ty = TypeAnnotation::generic(
+            Identifier::new("Collection", Span::new(0, 10)),
+            vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+            Span::new(0, 19),
+        );
+        if let TypeAnnotation::Generic {
+            base,
+            parameters,
+            span,
+        } = ty
+        {
+            assert_eq!(base.name, "Collection");
+            assert_eq!(parameters.len(), 1);
+            assert_eq!(span, Span::new(0, 19));
+        }
+    }
+
+    #[test]
+    fn type_annotation_false_or() {
+        let inner = TypeAnnotation::simple("Integer", Span::new(0, 7));
+        let ty = TypeAnnotation::false_or(inner, Span::new(0, 15));
+        assert!(matches!(ty, TypeAnnotation::FalseOr { .. }));
+        assert_eq!(ty.span(), Span::new(0, 15));
+    }
+
+    #[test]
+    fn type_annotation_span() {
+        // Test that span() works for all variants
+        let simple = TypeAnnotation::simple("Int", Span::new(0, 3));
+        assert_eq!(simple.span(), Span::new(0, 3));
+
+        let singleton = TypeAnnotation::singleton("ok", Span::new(0, 3));
+        assert_eq!(singleton.span(), Span::new(0, 3));
+
+        let union = TypeAnnotation::union(vec![], Span::new(0, 10));
+        assert_eq!(union.span(), Span::new(0, 10));
+
+        let generic = TypeAnnotation::generic(
+            Identifier::new("List", Span::new(0, 4)),
+            vec![],
+            Span::new(0, 6),
+        );
+        assert_eq!(generic.span(), Span::new(0, 6));
+
+        let false_or = TypeAnnotation::false_or(
+            TypeAnnotation::simple("X", Span::new(0, 1)),
+            Span::new(0, 9),
+        );
+        assert_eq!(false_or.span(), Span::new(0, 9));
+    }
+
+    #[test]
+    fn state_declaration_creation() {
+        let name = Identifier::new("value", Span::new(0, 5));
+        let state = StateDeclaration::new(name, Span::new(0, 5));
+        assert_eq!(state.name.name, "value");
+        assert!(state.type_annotation.is_none());
+        assert!(state.default_value.is_none());
+    }
+
+    #[test]
+    fn state_declaration_with_type() {
+        let name = Identifier::new("count", Span::new(0, 5));
+        let ty = TypeAnnotation::simple("Integer", Span::new(7, 14));
+        let state = StateDeclaration::with_type(name, ty, Span::new(0, 14));
+        assert!(state.type_annotation.is_some());
+        assert!(state.default_value.is_none());
+    }
+
+    #[test]
+    fn state_declaration_with_default() {
+        let name = Identifier::new("value", Span::new(0, 5));
+        let default = Expression::Literal(Literal::Integer(0), Span::new(8, 9));
+        let state = StateDeclaration::with_default(name, default, Span::new(0, 9));
+        assert!(state.type_annotation.is_none());
+        assert!(state.default_value.is_some());
+    }
+
+    #[test]
+    fn state_declaration_with_type_and_default() {
+        let name = Identifier::new("value", Span::new(0, 5));
+        let ty = TypeAnnotation::simple("Integer", Span::new(7, 14));
+        let default = Expression::Literal(Literal::Integer(0), Span::new(17, 18));
+        let state = StateDeclaration::with_type_and_default(name, ty, default, Span::new(0, 18));
+        assert!(state.type_annotation.is_some());
+        assert!(state.default_value.is_some());
+    }
+
+    #[test]
+    fn method_definition_unary() {
+        let selector = MessageSelector::Unary("increment".into());
+        let body = vec![Expression::CompoundAssignment {
+            target: Box::new(Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "self",
+                    Span::new(0, 4),
+                ))),
+                field: Identifier::new("value", Span::new(5, 10)),
+                span: Span::new(0, 10),
+            }),
+            operator: CompoundOperator::Add,
+            value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(14, 15))),
+            span: Span::new(0, 15),
+        }];
+        let method = MethodDefinition::new(selector, Vec::new(), body, Span::new(0, 15));
+        assert_eq!(method.selector.name(), "increment");
+        assert!(method.parameters.is_empty());
+        assert_eq!(method.body.len(), 1);
+        assert!(method.return_type.is_none());
+    }
+
+    #[test]
+    fn method_definition_keyword() {
+        let selector = MessageSelector::Keyword(vec![KeywordPart::new("at:", Span::new(0, 3))]);
+        let params = vec![Identifier::new("index", Span::new(4, 9))];
+        let body = vec![Expression::Identifier(Identifier::new(
+            "result",
+            Span::new(13, 19),
+        ))];
+        let method = MethodDefinition::new(selector, params, body, Span::new(0, 19));
+        assert_eq!(method.selector.name(), "at:");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name, "index");
+    }
+
+    #[test]
+    fn method_definition_with_return_type() {
+        let selector = MessageSelector::Unary("getValue".into());
+        let body = vec![Expression::Return {
+            value: Box::new(Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "self",
+                    Span::new(0, 4),
+                ))),
+                field: Identifier::new("value", Span::new(5, 10)),
+                span: Span::new(0, 10),
+            }),
+            span: Span::new(0, 10),
+        }];
+        let return_type = TypeAnnotation::simple("Integer", Span::new(12, 19));
+        let method = MethodDefinition::with_return_type(
+            selector,
+            Vec::new(),
+            body,
+            return_type,
+            Span::new(0, 19),
+        );
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn class_definition_creation() {
+        let name = Identifier::new("Counter", Span::new(0, 7));
+        let superclass = Identifier::new("Actor", Span::new(18, 23));
+
+        let state = vec![StateDeclaration::with_default(
+            Identifier::new("value", Span::new(32, 37)),
+            Expression::Literal(Literal::Integer(0), Span::new(40, 41)),
+            Span::new(32, 41),
+        )];
+
+        let methods = vec![MethodDefinition::new(
+            MessageSelector::Unary("increment".into()),
+            Vec::new(),
+            vec![Expression::CompoundAssignment {
+                target: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(Expression::Identifier(Identifier::new(
+                        "self",
+                        Span::new(50, 54),
+                    ))),
+                    field: Identifier::new("value", Span::new(55, 60)),
+                    span: Span::new(50, 60),
+                }),
+                operator: CompoundOperator::Add,
+                value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(64, 65))),
+                span: Span::new(50, 65),
+            }],
+            Span::new(45, 65),
+        )];
+
+        let class = ClassDefinition::new(name, superclass, state, methods, Span::new(0, 65));
+
+        assert_eq!(class.name.name, "Counter");
+        assert_eq!(class.superclass.name, "Actor");
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.methods.len(), 1);
+    }
+
+    #[test]
+    fn module_with_classes() {
+        let class = ClassDefinition::new(
+            Identifier::new("Counter", Span::new(0, 7)),
+            Identifier::new("Actor", Span::new(18, 23)),
+            Vec::new(),
+            Vec::new(),
+            Span::new(0, 23),
+        );
+
+        let module = Module::with_classes(vec![class], Span::new(0, 23));
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.expressions.is_empty());
+        assert_eq!(module.classes[0].name.name, "Counter");
+    }
+
+    #[test]
+    fn module_creation_includes_classes() {
+        let span = Span::new(0, 10);
+        let module = Module::new(Vec::new(), span);
+        assert!(module.classes.is_empty());
+        assert!(module.expressions.is_empty());
     }
 }
