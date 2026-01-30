@@ -601,6 +601,7 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn format_value_string() {
@@ -650,6 +651,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn find_runtime_dir_respects_env_var() {
         // Create a temp directory with the expected structure (needs rebar.config)
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime");
@@ -671,6 +673,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn find_runtime_dir_env_var_requires_rebar_config() {
         // Create a temp directory WITHOUT rebar.config
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime_no_rebar");
