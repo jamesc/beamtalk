@@ -506,3 +506,208 @@ spawn_preserves_class_and_methods_test() ->
     Methods = maps:get('__methods__', State),
     ?assert(is_function(maps:get(increment, Methods), 2)),
     ?assert(is_function(maps:get(getValue, Methods), 2)).
+
+%%% ===========================================================================
+%%% Boolean control flow tests
+%%% ===========================================================================
+%%%
+%%% These tests verify Boolean control flow message implementations work
+%%% correctly on BEAM. The helper functions below implement the exact semantics
+%%% that compiled Beamtalk Boolean methods must produce.
+%%%
+%%% Boolean messages are core language semantics - True and False respond
+%%% to control flow messages like ifTrue:ifFalse:, and:, or:, not.
+%%%
+%%% Tests pass block funs through the helper implementations to verify:
+%%% - Correct block is evaluated for conditional messages
+%%% - Short-circuit behavior prevents evaluation of unused blocks
+%%% - Return values match Beamtalk semantics
+%%%
+%%% @see lib/True.bt for True control flow API
+%%% @see lib/False.bt for False control flow API
+
+%%% ---------------------------------------------------------------------------
+%%% Boolean method implementations (simulating compiled Beamtalk methods)
+%%% ---------------------------------------------------------------------------
+
+%% True>>ifTrue:ifFalse: - evaluates trueBlock, ignores falseBlock
+beamtalk_if_true_if_false(true, TrueBlock, _FalseBlock) when is_function(TrueBlock, 0) ->
+    TrueBlock();
+%% False>>ifTrue:ifFalse: - evaluates falseBlock, ignores trueBlock
+beamtalk_if_true_if_false(false, _TrueBlock, FalseBlock) when is_function(FalseBlock, 0) ->
+    FalseBlock().
+
+%% True>>ifTrue: - evaluates the block
+beamtalk_if_true(true, Block) when is_function(Block, 0) ->
+    Block();
+%% False>>ifTrue: - returns self without evaluating
+beamtalk_if_true(false, _Block) ->
+    false.
+
+%% True>>ifFalse: - returns self without evaluating
+beamtalk_if_false(true, _Block) ->
+    true;
+%% False>>ifFalse: - evaluates the block
+beamtalk_if_false(false, Block) when is_function(Block, 0) ->
+    Block().
+
+%% True>>and: - evaluates the block (short-circuit: true needs to check)
+beamtalk_and(true, Block) when is_function(Block, 0) ->
+    Block();
+%% False>>and: - returns false without evaluating (short-circuit)
+beamtalk_and(false, _Block) ->
+    false.
+
+%% True>>or: - returns true without evaluating (short-circuit)
+beamtalk_or(true, _Block) ->
+    true;
+%% False>>or: - evaluates the block (short-circuit: false needs to check)
+beamtalk_or(false, Block) when is_function(Block, 0) ->
+    Block().
+
+%% True>>not - returns false
+beamtalk_not(true) ->
+    false;
+%% False>>not - returns true
+beamtalk_not(false) ->
+    true.
+
+%%% ---------------------------------------------------------------------------
+%%% ifTrue:ifFalse: tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true ifTrue: [42] ifFalse: [0] => 42
+true_if_true_if_false_evaluates_true_block_test() ->
+    TrueBlock = fun() -> 42 end,
+    FalseBlock = fun() -> error(should_not_evaluate) end,
+    Result = beamtalk_if_true_if_false(true, TrueBlock, FalseBlock),
+    ?assertEqual(42, Result).
+
+%% Test: false ifTrue: [42] ifFalse: [0] => 0
+false_if_true_if_false_evaluates_false_block_test() ->
+    TrueBlock = fun() -> error(should_not_evaluate) end,
+    FalseBlock = fun() -> 0 end,
+    Result = beamtalk_if_true_if_false(false, TrueBlock, FalseBlock),
+    ?assertEqual(0, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% ifTrue: tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true ifTrue: [42] => 42
+true_if_true_evaluates_block_test() ->
+    Block = fun() -> 42 end,
+    Result = beamtalk_if_true(true, Block),
+    ?assertEqual(42, Result).
+
+%% Test: false ifTrue: [42] => false
+false_if_true_returns_self_test() ->
+    Block = fun() -> error(should_not_evaluate) end,
+    Result = beamtalk_if_true(false, Block),
+    ?assertEqual(false, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% ifFalse: tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true ifFalse: [42] => true
+true_if_false_returns_self_test() ->
+    Block = fun() -> error(should_not_evaluate) end,
+    Result = beamtalk_if_false(true, Block),
+    ?assertEqual(true, Result).
+
+%% Test: false ifFalse: [42] => 42
+false_if_false_evaluates_block_test() ->
+    Block = fun() -> 42 end,
+    Result = beamtalk_if_false(false, Block),
+    ?assertEqual(42, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% and: short-circuit tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true and: [true] => true
+true_and_evaluates_block_returns_true_test() ->
+    Block = fun() -> true end,
+    Result = beamtalk_and(true, Block),
+    ?assertEqual(true, Result).
+
+%% Test: true and: [false] => false
+true_and_evaluates_block_returns_false_test() ->
+    Block = fun() -> false end,
+    Result = beamtalk_and(true, Block),
+    ?assertEqual(false, Result).
+
+%% Test: false and: [error(should_not_evaluate)] => false
+false_and_short_circuits_test() ->
+    ShouldNotRun = fun() -> error(should_not_evaluate) end,
+    Result = beamtalk_and(false, ShouldNotRun),
+    ?assertEqual(false, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% or: short-circuit tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true or: [error(should_not_evaluate)] => true
+true_or_short_circuits_test() ->
+    ShouldNotRun = fun() -> error(should_not_evaluate) end,
+    Result = beamtalk_or(true, ShouldNotRun),
+    ?assertEqual(true, Result).
+
+%% Test: false or: [true] => true
+false_or_evaluates_block_returns_true_test() ->
+    Block = fun() -> true end,
+    Result = beamtalk_or(false, Block),
+    ?assertEqual(true, Result).
+
+%% Test: false or: [false] => false
+false_or_evaluates_block_returns_false_test() ->
+    Block = fun() -> false end,
+    Result = beamtalk_or(false, Block),
+    ?assertEqual(false, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% not tests
+%%% ---------------------------------------------------------------------------
+
+%% Test: true not => false
+true_not_returns_false_test() ->
+    Result = beamtalk_not(true),
+    ?assertEqual(false, Result).
+
+%% Test: false not => true
+false_not_returns_true_test() ->
+    Result = beamtalk_not(false),
+    ?assertEqual(true, Result).
+
+%%% ---------------------------------------------------------------------------
+%%% Complex control flow tests
+%%% ---------------------------------------------------------------------------
+
+%% Test nested conditionals: true ifTrue: [false ifTrue: [1] ifFalse: [2]] => 2
+nested_if_true_if_false_test() ->
+    OuterBlock = fun() ->
+        InnerTrueBlock = fun() -> error(should_not_evaluate) end,
+        InnerFalseBlock = fun() -> 2 end,
+        beamtalk_if_true_if_false(false, InnerTrueBlock, InnerFalseBlock)
+    end,
+    Result = beamtalk_if_true(true, OuterBlock),
+    ?assertEqual(2, Result).
+
+%% Test chained logical operations: true and: [true] and: [false] => false
+chained_and_operations_test() ->
+    FirstBlock = fun() -> true end,
+    SecondBlock = fun() -> false end,
+    FirstResult = beamtalk_and(true, FirstBlock),
+    ?assertEqual(true, FirstResult),
+    Result = beamtalk_and(FirstResult, SecondBlock),
+    ?assertEqual(false, Result).
+
+%% Test chained logical operations: false or: [false] or: [true] => true
+chained_or_operations_test() ->
+    FirstBlock = fun() -> false end,
+    SecondBlock = fun() -> true end,
+    FirstResult = beamtalk_or(false, FirstBlock),
+    ?assertEqual(false, FirstResult),
+    Result = beamtalk_or(FirstResult, SecondBlock),
+    ?assertEqual(true, Result).
