@@ -740,9 +740,18 @@ impl CoreErlangGenerator {
                             return self.generate_field_assignment(&field.name, value);
                         }
                     }
+                    // Field assignment to non-self receiver (e.g., other.field := value)
+                    // This is not supported in the current implementation - actors can
+                    // only mutate their own state, not the state of other objects.
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "field assignment to non-self receiver".to_string(),
+                        location: format!("{:?}", target.span()),
+                    });
                 }
-                // For non-field assignments (e.g., local variables in REPL),
-                // just return the value - REPL handles binding updates externally
+                // For identifier assignments (e.g., local variables in REPL like `x := 1`),
+                // just return the value - REPL handles binding updates externally.
+                // In compiled code, local variable assignments should be handled by
+                // the block/method scope, but for now we generate just the value.
                 self.generate_expression(value)
             }
             Expression::Return { value, .. } => {

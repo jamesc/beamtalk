@@ -163,209 +163,348 @@ Module {
                     },
                 },
             ),
-            value: MessageSend {
-                receiver: Block(
-                    Block {
-                        parameters: [
-                            BlockParameter {
-                                name: "n",
+            value: Block(
+                Block {
+                    parameters: [
+                        BlockParameter {
+                            name: "n",
+                            span: Span {
+                                start: 443,
+                                end: 444,
+                            },
+                        },
+                    ],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 451,
+                                            end: 455,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 456,
+                                        end: 461,
+                                    },
+                                },
                                 span: Span {
-                                    start: 443,
-                                    end: 444,
+                                    start: 451,
+                                    end: 461,
                                 },
                             },
-                        ],
-                        body: [
-                            Assignment {
-                                target: FieldAccess {
+                            value: MessageSend {
+                                receiver: FieldAccess {
                                     receiver: Identifier(
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 451,
-                                                end: 455,
+                                                start: 465,
+                                                end: 469,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 456,
-                                            end: 461,
+                                            start: 470,
+                                            end: 475,
                                         },
                                     },
                                     span: Span {
-                                        start: 451,
-                                        end: 461,
+                                        start: 465,
+                                        end: 475,
                                     },
                                 },
-                                value: Error {
-                                    message: "Invalid assignment target",
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 478,
+                                                end: 479,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 465,
+                                    end: 479,
+                                },
+                            },
+                            span: Span {
+                                start: 451,
+                                end: 479,
+                            },
+                        },
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 485,
+                                            end: 489,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
                                     span: Span {
-                                        start: 465,
+                                        start: 490,
                                         end: 495,
                                     },
                                 },
                                 span: Span {
-                                    start: 451,
+                                    start: 485,
                                     end: 495,
                                 },
                             },
-                        ],
-                        span: Span {
-                            start: 441,
-                            end: 442,
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 499,
+                                                end: 503,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 504,
+                                            end: 509,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 499,
+                                        end: 509,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "n",
+                                            span: Span {
+                                                start: 512,
+                                                end: 513,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 499,
+                                    end: 513,
+                                },
+                            },
+                            span: Span {
+                                start: 485,
+                                end: 513,
+                            },
                         },
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 520,
+                                            end: 524,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 525,
+                                        end: 530,
+                                    },
+                                },
+                                span: Span {
+                                    start: 520,
+                                    end: 530,
+                                },
+                            },
+                            span: Span {
+                                start: 519,
+                                end: 530,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 441,
+                        end: 532,
                     },
-                ),
-                selector: Unary(
-                    "self",
-                ),
-                arguments: [],
-                span: Span {
-                    start: 441,
-                    end: 503,
                 },
-            },
+            ),
             span: Span {
                 start: 429,
-                end: 503,
-            },
-        },
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "value",
-                    span: Span {
-                        start: 504,
-                        end: 509,
-                    },
-                },
-            ),
-            selector: Binary(
-                "+",
-            ),
-            arguments: [
-                Identifier(
-                    Identifier {
-                        name: "n",
-                        span: Span {
-                            start: 512,
-                            end: 513,
-                        },
-                    },
-                ),
-            ],
-            span: Span {
-                start: 504,
-                end: 513,
-            },
-        },
-        Return {
-            value: FieldAccess {
-                receiver: Identifier(
-                    Identifier {
-                        name: "self",
-                        span: Span {
-                            start: 520,
-                            end: 524,
-                        },
-                    },
-                ),
-                field: Identifier {
-                    name: "value",
-                    span: Span {
-                        start: 525,
-                        end: 530,
-                    },
-                },
-                span: Span {
-                    start: 520,
-                    end: 530,
-                },
-            },
-            span: Span {
-                start: 519,
-                end: 530,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 531,
                 end: 532,
             },
         },
-        Return {
-            value: FieldAccess {
-                receiver: Identifier(
-                    Identifier {
-                        name: "self",
-                        span: Span {
-                            start: 585,
-                            end: 589,
-                        },
-                    },
-                ),
-                field: Identifier {
-                    name: "value",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "getValue",
                     span: Span {
-                        start: 590,
-                        end: 595,
+                        start: 570,
+                        end: 578,
                     },
                 },
-                span: Span {
-                    start: 585,
-                    end: 595,
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 585,
+                                            end: 589,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 590,
+                                        end: 595,
+                                    },
+                                },
+                                span: Span {
+                                    start: 585,
+                                    end: 595,
+                                },
+                            },
+                            span: Span {
+                                start: 584,
+                                end: 595,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 582,
+                        end: 597,
+                    },
                 },
-            },
+            ),
             span: Span {
-                start: 584,
-                end: 595,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 596,
+                start: 570,
                 end: 597,
             },
         },
-        Error {
-            message: "Invalid assignment target",
-            span: Span {
-                start: 655,
-                end: 661,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found .",
-            span: Span {
-                start: 666,
-                end: 667,
-            },
-        },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found .",
-                span: Span {
-                    start: 677,
-                    end: 678,
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "setValue",
+                    span: Span {
+                        start: 629,
+                        end: 637,
+                    },
                 },
-            },
-            selector: Unary(
-                "value",
             ),
-            arguments: [],
+            value: Block(
+                Block {
+                    parameters: [
+                        BlockParameter {
+                            name: "n",
+                            span: Span {
+                                start: 643,
+                                end: 644,
+                            },
+                        },
+                    ],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 651,
+                                            end: 655,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 656,
+                                        end: 661,
+                                    },
+                                },
+                                span: Span {
+                                    start: 651,
+                                    end: 661,
+                                },
+                            },
+                            value: Identifier(
+                                Identifier {
+                                    name: "n",
+                                    span: Span {
+                                        start: 665,
+                                        end: 666,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 651,
+                                end: 666,
+                            },
+                        },
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 673,
+                                            end: 677,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 678,
+                                        end: 683,
+                                    },
+                                },
+                                span: Span {
+                                    start: 673,
+                                    end: 683,
+                                },
+                            },
+                            span: Span {
+                                start: 672,
+                                end: 683,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 641,
+                        end: 685,
+                    },
+                },
+            ),
             span: Span {
-                start: 677,
-                end: 683,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 684,
+                start: 629,
                 end: 685,
             },
         },
@@ -425,14 +564,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 465, end: 495 } }
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 499, end: 503 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 531, end: 532 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 596, end: 597 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 655, end: 656 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 655, end: 661 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 666, end: 667 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 677, end: 678 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 684, end: 685 } }
