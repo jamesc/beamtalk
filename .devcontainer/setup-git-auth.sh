@@ -21,7 +21,22 @@ if [ -n "$GIT_USER_EMAIL" ]; then
 fi
 
 # Configure GitHub authentication via gh CLI
-# When GH_TOKEN is set, gh CLI uses it automatically - no login needed
+# Priority: 1) GH_TOKEN from host, 2) VS Code credential helper, 3) manual auth
+if [ -n "$GH_TOKEN" ]; then
+    log "Using GH_TOKEN from environment"
+else
+    # Try to get token from VS Code's credential helper (works in devcontainers)
+    VSCODE_TOKEN=$(printf "protocol=https\nhost=github.com\n" | git credential fill 2>/dev/null | grep password | cut -d= -f2)
+    if [ -n "$VSCODE_TOKEN" ]; then
+        export GH_TOKEN="$VSCODE_TOKEN"
+        export GITHUB_TOKEN="$VSCODE_TOKEN"
+        log "Using token from VS Code credential helper"
+    else
+        log "WARNING: No GitHub token available"
+        log "Either set GH_TOKEN on your host or authenticate VS Code with GitHub"
+    fi
+fi
+
 if [ -n "$GH_TOKEN" ]; then
     # Clear any existing GitHub credential helpers to avoid duplicates
     git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
@@ -29,9 +44,6 @@ if [ -n "$GH_TOKEN" ]; then
     # Configure git to use gh as credential helper
     gh auth setup-git 2>/dev/null
     log "Configured git to use gh for GitHub authentication"
-else
-    log "WARNING: GH_TOKEN not set, GitHub push will require manual authentication"
-    log "Set GH_TOKEN environment variable on your host machine"
 fi
 
 # Trust the workspace directory

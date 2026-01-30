@@ -37,7 +37,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
 use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,6 +47,8 @@ use clap::Subcommand;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
+
+use crate::paths::{beamtalk_dir, is_daemon_running, lockfile_path, socket_path};
 
 /// Daemon subcommand actions.
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -64,61 +65,6 @@ pub enum DaemonAction {
 
     /// Check if the daemon is running
     Status,
-}
-
-/// Directory for daemon state files.
-fn beamtalk_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk"))
-}
-
-/// Path to the Unix socket.
-fn socket_path() -> Result<PathBuf> {
-    Ok(beamtalk_dir()?.join("daemon.sock"))
-}
-
-/// Path to the lockfile containing the daemon PID.
-fn lockfile_path() -> Result<PathBuf> {
-    Ok(beamtalk_dir()?.join("daemon.lock"))
-}
-
-/// Check if daemon is currently running.
-///
-/// Uses POSIX-compliant `kill(pid, 0)` to check process existence,
-/// which works on Linux, macOS, and other Unix systems.
-#[cfg(unix)]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "PID values are always positive and fit in i32"
-)]
-fn is_daemon_running() -> Result<Option<u32>> {
-    let lockfile = lockfile_path()?;
-    if !lockfile.exists() {
-        return Ok(None);
-    }
-
-    let pid_str = fs::read_to_string(&lockfile).into_diagnostic()?;
-    let pid: u32 = pid_str.trim().parse().into_diagnostic()?;
-
-    // Check if process exists using POSIX kill(pid, 0)
-    // This is portable across Linux, macOS, and BSD systems
-    // SAFETY: kill with signal 0 only checks if process exists, doesn't send a signal
-    let exists = unsafe { libc::kill(pid as i32, 0) == 0 };
-    if exists {
-        Ok(Some(pid))
-    } else {
-        // Stale lockfile, clean up
-        let _ = fs::remove_file(&lockfile);
-        let _ = fs::remove_file(socket_path()?);
-        Ok(None)
-    }
-}
-
-/// Check if daemon is currently running (Windows stub).
-#[cfg(not(unix))]
-fn is_daemon_running() -> Result<Option<u32>> {
-    // Windows support not yet implemented
-    Ok(None)
 }
 
 /// Write current PID to lockfile atomically using `O_EXCL`.
@@ -503,6 +449,41 @@ fn dispatch_method(
 // Method Handlers
 // ============================================================================
 
+/// Validate a file path for daemon methods.
+///
+/// Returns an error message if the path is invalid:
+/// - Empty or whitespace-only paths
+/// - Root path "/"
+fn validate_path(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty or whitespace".to_string());
+    }
+
+    if trimmed == "/" {
+        return Err("Path cannot be root directory".to_string());
+    }
+
+    Ok(())
+}
+
+/// Read source code either from provided string or file path.
+///
+/// This helper function encapsulates the common pattern of:
+/// 1. Using the source if provided in params
+/// 2. Reading from the file path if no source is provided
+/// 3. Returning an appropriate error message on failure
+///
+/// # Errors
+/// Returns an error message string if file reading fails.
+fn read_source_from_params_or_file(source: Option<String>, path: &str) -> Result<String, String> {
+    match source {
+        Some(s) => Ok(s),
+        None => std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {e}")),
+    }
+}
+
 /// Parameters for the compile method.
 #[derive(Debug, Deserialize)]
 struct CompileParams {
@@ -543,21 +524,19 @@ fn handle_compile(
         }
     };
 
+    // Validate path before processing
+    if let Err(msg) = validate_path(&params.path) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, msg);
+    }
+
     let file_path = Utf8PathBuf::from(&params.path);
 
     // Get source either from params or read from file
-    let source = match params.source {
-        Some(s) => s,
-        None => match std::fs::read_to_string(&params.path) {
-            Ok(s) => s,
-            Err(e) => {
-                return JsonRpcResponse::error(
-                    id,
-                    INTERNAL_ERROR,
-                    format!("Failed to read file: {e}"),
-                );
-            }
-        },
+    let source = match read_source_from_params_or_file(params.source, &params.path) {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+        }
     };
 
     // Update the language service
@@ -636,21 +615,19 @@ fn handle_diagnostics(
         }
     };
 
+    // Validate path before processing
+    if let Err(msg) = validate_path(&params.path) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, msg);
+    }
+
     let file_path = Utf8PathBuf::from(&params.path);
 
     // Get source either from params or read from file
-    let source = match params.source {
-        Some(s) => s,
-        None => match std::fs::read_to_string(&params.path) {
-            Ok(s) => s,
-            Err(e) => {
-                return JsonRpcResponse::error(
-                    id,
-                    INTERNAL_ERROR,
-                    format!("Failed to read file: {e}"),
-                );
-            }
-        },
+    let source = match read_source_from_params_or_file(params.source, &params.path) {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+        }
     };
 
     // Update the language service
@@ -887,5 +864,94 @@ mod tests {
         assert!(!response.contains("error"));
         // Shutdown should set running to false
         assert!(!running.load(Ordering::SeqCst));
+    }
+
+    // Path validation tests
+    #[test]
+    fn test_validate_path_empty() {
+        let result = validate_path("");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
+    }
+
+    #[test]
+    fn test_validate_path_whitespace_only() {
+        let result = validate_path("   ");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
+
+        let result = validate_path("\t\n");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
+    }
+
+    #[test]
+    fn test_validate_path_root() {
+        let result = validate_path("/");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be root directory");
+    }
+
+    #[test]
+    fn test_validate_path_valid() {
+        assert!(validate_path("test.bt").is_ok());
+        assert!(validate_path("/home/user/test.bt").is_ok());
+        assert!(validate_path("./relative/path.bt").is_ok());
+    }
+
+    #[test]
+    fn test_compile_with_empty_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be empty or whitespace"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_compile_with_root_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"/","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be root directory"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_diagnostics_with_empty_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be empty or whitespace"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_diagnostics_with_root_path() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"/","source":"x := 42"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Path cannot be root directory"));
+        assert!(response.contains(&INVALID_PARAMS.to_string()));
     }
 }
