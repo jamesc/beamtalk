@@ -16,7 +16,7 @@ Every issue **must** have:
 | **Team** | `BT` |
 | **Assignee** | `jamesc` (James Casey) |
 | **Agent State Label** | `agent-ready` or `needs-spec` |
-| **Estimate (Size)** | T-shirt size: S, M, L, XM |
+| **Estimate (Size)** | T-shirt size: S, M, L, XL |
 | **Type** | See issue types below |
 
 ## Issue Types
@@ -92,7 +92,7 @@ Always set one of these labels:
 | **S** | Small change, few hours (add a test, simple refactor) |
 | **M** | Medium change, ~1 day (new feature, moderate complexity) |
 | **L** | Large change, 2-3 days (significant feature, multiple files) |
-| **XM** | Extra large, consider breaking down (major feature, architectural change) |
+| **XL** | Extra large, consider breaking down (major feature, architectural change) |
 
 ## Creating via Linear Tool
 
