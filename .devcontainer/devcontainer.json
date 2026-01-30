@@ -36,7 +36,7 @@
     }
   },
   "postCreateCommand": "cargo fetch",
-  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh",
+  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh && mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json",
   "remoteUser": "vscode",
   // Caching:
   // - Cargo registry shared across all containers (saves downloads)

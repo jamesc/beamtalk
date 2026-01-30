@@ -2,7 +2,7 @@
 
 Helper scripts for Beamtalk development.
 
-## `start-worktree.ps1` / `start-worktree.sh`
+## `worktree-new.ps1` / `worktree-new.sh`
 
 Start a Copilot devcontainer session for a git worktree branch. This enables running multiple parallel Copilot sessions, each in its own container working on a different branch.
 
@@ -10,18 +10,18 @@ Start a Copilot devcontainer session for a git worktree branch. This enables run
 
 **Windows (PowerShell):**
 ```powershell
-.\scripts\start-worktree.ps1 BT-99-feature
+.\scripts\worktree-new.ps1 BT-99-feature
 
 # Create new branch from main
-.\scripts\start-worktree.ps1 -Branch BT-99 -BaseBranch main
+.\scripts\worktree-new.ps1 -Branch BT-99 -BaseBranch main
 ```
 
 **Linux/Mac:**
 ```bash
-./scripts/start-worktree.sh BT-99-feature
+./scripts/worktree-new.sh BT-99-feature
 
 # Create new branch from main
-./scripts/start-worktree.sh BT-99 main
+./scripts/worktree-new.sh BT-99 main
 ```
 
 ### What it does
@@ -55,3 +55,39 @@ echo 'export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"' >> ~/.bashrc
 ```
 
 Then add the worktree mount to `.devcontainer/devcontainer.json` (see comments in that file).
+
+---
+
+## `worktree-rm.ps1` / `worktree-rm.sh`
+
+Stop and remove a git worktree, handling container path fixups automatically.
+
+### Usage
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\worktree-rm.ps1 BT-99-feature
+
+# Force remove even with uncommitted changes
+.\scripts\worktree-rm.ps1 -Branch BT-99 -Force
+```
+
+**Linux/Mac:**
+```bash
+./scripts/worktree-rm.sh BT-99-feature
+
+# Force remove
+./scripts/worktree-rm.sh BT-99 --force
+```
+
+### What it does
+
+1. **Finds the worktree** for the given branch
+2. **Fixes the .git file** if it was modified for container paths (points to `/workspaces/...`)
+3. **Removes the worktree** using `git worktree remove`
+4. **Falls back to manual cleanup** if standard removal fails
+5. **Optionally deletes the branch** (prompts you)
+
+### Why this is needed
+
+When a worktree is used inside a devcontainer, the `.git` file gets modified to point to container paths (`/workspaces/.beamtalk-git/...`). This breaks `git worktree remove` on the host system. The stop-worktree script fixes the path before removal.

@@ -1,8 +1,8 @@
 # Beamtalk Development Container
 # Rust compiler + Erlang/OTP for BEAM bytecode generation
 
-#FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
-FROM mcr.microsoft.com/devcontainers/rust:latest
+FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
+#FROM mcr.microsoft.com/devcontainers/rust:latest
 
 # Install Erlang/OTP and git from Debian packages
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
