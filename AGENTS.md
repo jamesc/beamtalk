@@ -2,6 +2,23 @@
 
 This document provides guidance for AI coding agents working on the beamtalk compiler and ecosystem.
 
+## Repository Information
+
+**Always use these values for GitHub API calls:**
+
+| Property | Value |
+|----------|-------|
+| Owner | `jamesc` |
+| Repository | `beamtalk` |
+| Full name | `jamesc/beamtalk` |
+| URL | `https://github.com/jamesc/beamtalk` |
+
+Example `gh` CLI usage:
+```bash
+gh api repos/jamesc/beamtalk/pulls
+gh pr create --repo jamesc/beamtalk
+```
+
 ## Project Overview
 
 Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to the BEAM virtual machine. The compiler is written in Rust and generates Core Erlang, which is then compiled to BEAM bytecode via erlc.
@@ -110,6 +127,74 @@ mutation {
 - BT-21 (API definitions) blocks BT-32, BT-33, BT-34, BT-35, BT-36, BT-37
 - BT-32 (block evaluation) blocks BT-35 (iteration uses blocks) and BT-37 (collections use blocks)
 - All new issues marked with `agent-ready` label
+
+---
+
+## Parallel Development with Worktrees
+
+We use git worktrees to enable multiple parallel development sessions. Each worktree is an independent working directory with its own branch, allowing multiple Copilot agents to work simultaneously on different issues.
+
+### Scripts
+
+Helper scripts are in `scripts/`:
+
+| Script | Purpose |
+|--------|--------|
+| `worktree-new.ps1` / `worktree-new.sh` | Create a worktree and start a devcontainer |
+| `worktree-rm.ps1` / `worktree-rm.sh` | Clean up a worktree (handles container path fixups) |
+
+### Creating a Worktree
+
+**Windows:**
+```powershell
+.\scripts\worktree-new.ps1 BT-99-feature-name
+```
+
+**Linux/Mac:**
+```bash
+./scripts/worktree-new.sh BT-99-feature-name
+```
+
+This will:
+1. Create a worktree at `../BT-99-feature-name/` (sibling to main repo)
+2. Check out the branch (creating it from main if needed)
+3. Start a devcontainer for that worktree
+4. Connect you to a shell inside the container
+
+### Removing a Worktree
+
+**Windows:**
+```powershell
+.\scripts\worktree-rm.ps1 BT-99-feature-name
+```
+
+**Linux/Mac:**
+```bash
+./scripts/worktree-rm.sh BT-99-feature-name
+```
+
+This handles a special case: when a worktree has been used with devcontainers, the `.git` file gets modified to point to container paths (`/workspaces/...`). The script fixes this before removal.
+
+### Why Worktrees?
+
+- **Parallel work**: Multiple agents can work on different issues simultaneously
+- **Isolation**: Each worktree has its own build artifacts, IDE state, etc.
+- **No stashing**: Switch context without stashing uncommitted changes
+- **Devcontainer support**: Each worktree can run in its own container
+
+### Environment Setup
+
+For devcontainer support, set this environment variable permanently:
+
+**Windows:**
+```powershell
+setx BEAMTALK_MAIN_GIT_PATH "C:\Users\you\source\beamtalk\.git"
+```
+
+**Linux/Mac:**
+```bash
+echo 'export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"' >> ~/.bashrc
+```
 
 ---
 
