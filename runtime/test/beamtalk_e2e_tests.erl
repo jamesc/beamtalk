@@ -173,7 +173,7 @@ async_message_creates_future_test() ->
     Future = beamtalk_future:new(),
     ?assert(is_pid(Future)),
     
-    %% Clean up: resolve the future to allow it to terminate
+    %% Clean up: resolve the future so we don't leave a pending future process around
     beamtalk_future:resolve(Future, ok),
     
     gen_server:stop(Actor).
@@ -264,14 +264,12 @@ async_await_on_resolved_future_returns_immediately_test() ->
     {ok, Result1} = beamtalk_future:await(Future, 1000),
     ?assertEqual(21, Result1),
     
-    %% Now await the already-resolved future again - should return immediately
-    StartTime = erlang:monotonic_time(millisecond),
-    {ok, Result2} = beamtalk_future:await(Future, 1000),
-    EndTime = erlang:monotonic_time(millisecond),
+    %% Now await the already-resolved future again with a very small timeout.
+    %% This verifies it is already resolved without relying on wall-clock timing.
+    SmallTimeout = 10,
+    {ok, Result2} = beamtalk_future:await(Future, SmallTimeout),
     
     ?assertEqual(21, Result2),
-    %% Should be very fast (< 500ms) since future is already resolved
-    ?assert(EndTime - StartTime < 500),
     
     gen_server:stop(Actor).
 
@@ -427,7 +425,8 @@ async_future_timeout_behavior_test() ->
     Result = beamtalk_future:await(Future, 100),
     ?assertEqual({error, timeout}, Result),
     
-    %% Clean up: resolve the future to allow it to terminate
+    %% Optional cleanup: resolve the future; the future process remains
+    %% alive until its inactivity timeout elapses
     beamtalk_future:resolve(Future, ok),
     
     gen_server:stop(Actor).
