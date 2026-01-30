@@ -798,7 +798,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for a map literal: `#{key => value, ...}`
     fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
-        write!(self.output, "#{{ ")?;
+        write!(self.output, "~{{ ")?;
 
         for (i, pair) in pairs.iter().enumerate() {
             if i > 0 {
@@ -813,7 +813,7 @@ impl CoreErlangGenerator {
             self.generate_expression(&pair.value)?;
         }
 
-        write!(self.output, " }}")?;
+        write!(self.output, " }}~")?;
         Ok(())
     }
 
@@ -2524,7 +2524,7 @@ end
         let pairs = vec![];
         let result = generator.generate_map_literal(&pairs);
         assert!(result.is_ok());
-        assert_eq!(generator.output.trim(), "#{  }"); // Empty map has two spaces
+        assert_eq!(generator.output.trim(), "~{  }~"); // Empty map with Core Erlang syntax
     }
 
     #[test]
@@ -2590,7 +2590,10 @@ end
             generate_repl_expression(&map_expr, "test_map_lit").expect("codegen should succeed");
 
         // Verify the generated Core Erlang contains the map literal syntax
-        assert!(code.contains("#{"));
+        assert!(
+            code.contains("~{"),
+            "Should contain Core Erlang map syntax ~{{"
+        );
         // Symbols become atoms in Core Erlang
         assert!(code.contains("'key'"));
         // Strings are represented as binaries with character codes

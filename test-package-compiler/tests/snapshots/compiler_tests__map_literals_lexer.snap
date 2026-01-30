@@ -1,0 +1,107 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("empty"), span: Span { start: 119, end: 124 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test map literal syntax parsing"), Whitespace("\n\n"), LineComment("// Empty map"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 125, end: 127 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 128, end: 130 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 130, end: 131 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("person"), span: Span { start: 155, end: 161 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Map with atom keys"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 162, end: 164 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 165, end: 167 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("name"), span: Span { start: 167, end: 172 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 173, end: 175 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Alice"), span: Span { start: 176, end: 183 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 183, end: 184 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("age"), span: Span { start: 185, end: 189 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 190, end: 192 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("30"), span: Span { start: 193, end: 195 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 195, end: 196 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("config"), span: Span { start: 222, end: 228 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Map with string keys"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 229, end: 231 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 232, end: 234 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: String("host"), span: Span { start: 234, end: 240 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 241, end: 243 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("localhost"), span: Span { start: 244, end: 255 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 255, end: 256 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("port"), span: Span { start: 257, end: 263 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 264, end: 266 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("8080"), span: Span { start: 267, end: 271 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 271, end: 272 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("positions"), span: Span { start: 299, end: 308 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Map with integer keys"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 309, end: 311 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 312, end: 314 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("1"), span: Span { start: 314, end: 315 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 316, end: 318 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("first"), span: Span { start: 319, end: 326 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 326, end: 327 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 328, end: 329 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 330, end: 332 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("second"), span: Span { start: 333, end: 341 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 341, end: 342 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("3"), span: Span { start: 343, end: 344 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 345, end: 347 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("third"), span: Span { start: 348, end: 355 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 355, end: 356 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("mixed"), span: Span { start: 386, end: 391 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Map with mixed key types"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 392, end: 394 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 395, end: 397 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("type"), span: Span { start: 397, end: 402 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 403, end: 405 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("mixed"), span: Span { start: 406, end: 413 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 413, end: 414 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("count"), span: Span { start: 415, end: 422 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 423, end: 425 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("5"), span: Span { start: 426, end: 427 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 427, end: 428 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 429, end: 431 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 432, end: 434 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("answer"), span: Span { start: 435, end: 443 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 443, end: 444 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("data"), span: Span { start: 461, end: 465 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Nested maps"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 466, end: 468 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 469, end: 471 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("user"), span: Span { start: 474, end: 479 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 480, end: 482 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 483, end: 485 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("name"), span: Span { start: 490, end: 495 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 496, end: 498 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Bob"), span: Span { start: 499, end: 504 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 504, end: 505 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("email"), span: Span { start: 510, end: 516 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 517, end: 519 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("bob@example.com"), span: Span { start: 520, end: 537 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 540, end: 541 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 541, end: 542 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("settings"), span: Span { start: 545, end: 554 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 555, end: 557 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 558, end: 560 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("theme"), span: Span { start: 565, end: 571 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 572, end: 574 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("dark"), span: Span { start: 575, end: 581 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 581, end: 582 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("language"), span: Span { start: 587, end: 596 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 597, end: 599 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("en"), span: Span { start: 600, end: 604 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 607, end: 608 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 609, end: 610 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("withTrailing"), span: Span { start: 639, end: 651 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Map with trailing comma"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 652, end: 654 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 655, end: 657 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("a"), span: Span { start: 657, end: 659 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 660, end: 662 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 663, end: 664 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 664, end: 665 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("b"), span: Span { start: 666, end: 668 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 669, end: 671 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 672, end: 673 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: BinarySelector(","), span: Span { start: 673, end: 674 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 674, end: 675 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("single"), span: Span { start: 697, end: 703 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Single entry map"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 704, end: 706 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: MapOpen, span: Span { start: 707, end: 709 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("only"), span: Span { start: 709, end: 714 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("=>"), span: Span { start: 715, end: 717 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("value"), span: Span { start: 718, end: 725 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBrace, span: Span { start: 725, end: 726 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 727, end: 727 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
