@@ -152,6 +152,9 @@ fi
 
 log_gray "📂 Worktree path: $WORKTREE_PATH"
 
+# Stop devcontainer FIRST (before removing worktree to release file locks)
+remove_devcontainer "$WORKTREE_PATH"
+
 # Check if the .git file in the worktree needs fixing
 GIT_FILE="$WORKTREE_PATH/.git"
 if [ -f "$GIT_FILE" ]; then
@@ -212,11 +215,6 @@ else
     git worktree prune
     
     log_success "✅ Manual cleanup complete"
-fi
-
-# Remove devcontainer if it exists
-if [ -n "$WORKTREE_PATH" ]; then
-    remove_devcontainer "$WORKTREE_PATH"
 fi
 
 # Ask about deleting the branch

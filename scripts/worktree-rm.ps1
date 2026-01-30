@@ -147,6 +147,9 @@ try {
     
     Write-Host "📂 Worktree path: $worktreePath" -ForegroundColor Gray
     
+    # Stop devcontainer FIRST (before removing worktree to release file locks)
+    Remove-DevContainer -WorktreePath $worktreePath
+    
     # Check if the .git file in the worktree needs fixing
     $gitFile = Join-Path $worktreePath ".git"
     if (Test-Path $gitFile -PathType Leaf) {
@@ -217,11 +220,6 @@ try {
         git worktree prune
         
         Write-Host "✅ Manual cleanup complete" -ForegroundColor Green
-    }
-    
-    # Remove devcontainer if it exists
-    if ($worktreePath) {
-        Remove-DevContainer -WorktreePath $worktreePath
     }
     
     # Optionally delete the branch
