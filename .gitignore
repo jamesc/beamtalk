@@ -4,16 +4,12 @@
 *.beam
 *.core
 
-# IDE
-.vscode/mcp.json
-
-# Environment (secrets)
-.env
-.env.local
-
 # OS
 .DS_Store
 Thumbs.db
+
+# Environment (secrets)
+.env
 
 # Rust
 Cargo.lock

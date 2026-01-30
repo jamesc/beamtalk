@@ -5,9 +5,7 @@
     "context": ".."
   },
   "features": {
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/node:1": {}
+    "ghcr.io/devcontainers/features/copilot-cli:1": {}
   },
   "customizations": {
     "vscode": {
@@ -22,7 +20,7 @@
         "github.vscode-github-actions",
         "github.vscode-pull-request-github",
         "linear.linear",
-        "ms-vscode-remote.remote-containers",
+        "ms-vscode-remote.remote-containers"
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy",
@@ -37,17 +35,40 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:rustlang /usr/local/cargo/registry ${containerWorkspaceFolder}/target && cargo fetch && [ -f .vscode/mcp.json.example ] && [ ! -f .vscode/mcp.json ] && cp .vscode/mcp.json.example .vscode/mcp.json || true",
+  "postCreateCommand": "cargo fetch",
+  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh",
   "remoteUser": "vscode",
-  "runArgs": [
-    "--env-file",
-    "${localWorkspaceFolder}/.env"
-  ],
+  // Caching:
+  // - Cargo registry shared across all containers (saves downloads)
+  // - Target cache per-worktree (avoids build conflicts)
+  // - Main .git mounted for worktree support (set BEAMTALK_MAIN_GIT_PATH on host)
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
-    "source=beamtalk-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
+    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
+    "source=${localEnv:BEAMTALK_MAIN_GIT_PATH},target=/workspaces/.beamtalk-git,type=bind,readonly"
   ],
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GIT WORKTREES: Parallel Copilot Sessions
+  // ═══════════════════════════════════════════════════════════════════════════
+  // To run multiple Copilot sessions in parallel containers from worktrees:
+  //
+  // 1. Set env var on host pointing to main repo's .git directory:
+  //      Windows PowerShell: $env:BEAMTALK_MAIN_GIT_PATH = "C:/Users/you/source/beamtalk/.git"
+  //      Windows (permanent): setx BEAMTALK_MAIN_GIT_PATH "C:/Users/you/source/beamtalk/.git"
+  //      Linux/Mac: export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"
+  //
+  // 2. Create worktrees and open each in its own container:
+  //      git worktree add ../BT-99 -b BT-99-feature
+  //      ./scripts/start-worktree.ps1 BT-99  # or start-worktree.sh on Linux/Mac
+  //
+  // Each worktree container can run Copilot independently.
+  // The fix-worktree-git.sh script auto-fixes the .git path on container start.
+  // ═══════════════════════════════════════════════════════════════════════════
   "containerEnv": {
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
+  },
+  "remoteEnv": {
+    "LINEAR_API_KEY": "${localEnv:LINEAR_API_KEY}",
+    "GH_TOKEN": "${localEnv:GH_TOKEN}"
   }
 }
