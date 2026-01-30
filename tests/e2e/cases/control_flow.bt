@@ -4,7 +4,7 @@
 // E2E tests for control flow constructs
 //
 // NOTE: Control flow with state mutation (whileTrue:, timesRepeat:, etc.)
-// requires proper assignment codegen with state threading (BT-58).
+// requires block-local variable mutation support (BT-90).
 // Currently, assignments inside blocks don't propagate to outer scope.
 // See variable_persistence.bt for tests of REPL-level variable persistence.
 
