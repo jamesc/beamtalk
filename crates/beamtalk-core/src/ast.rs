@@ -306,6 +306,7 @@ impl MethodDefinition {
 /// A type annotation for optional typing.
 ///
 /// Beamtalk supports gradual typing - add types where helpful.
+/// All variants carry a [`Span`] for error reporting and IDE features.
 ///
 /// Examples:
 /// - `Integer`
@@ -318,23 +319,52 @@ pub enum TypeAnnotation {
     /// A simple named type (e.g., `Integer`, `String`, `Counter`).
     Simple(Identifier),
     /// A union type (e.g., `Integer | String`).
-    Union(Vec<TypeAnnotation>),
+    Union {
+        /// The types in the union.
+        types: Vec<TypeAnnotation>,
+        /// Source location of the entire union type.
+        span: Span,
+    },
     /// A singleton/literal type (e.g., `#north`).
-    Singleton(EcoString),
+    Singleton {
+        /// The singleton value name.
+        name: EcoString,
+        /// Source location.
+        span: Span,
+    },
     /// A generic type (e.g., `Collection<Integer>`).
     Generic {
         /// The base type name.
         base: Identifier,
         /// Type parameters.
         parameters: Vec<TypeAnnotation>,
+        /// Source location of the entire generic type.
+        span: Span,
     },
     /// A false-or type (Option/Maybe pattern).
     ///
     /// Example: `Integer | False`
-    FalseOr(Box<TypeAnnotation>),
+    FalseOr {
+        /// The inner type.
+        inner: Box<TypeAnnotation>,
+        /// Source location of the entire false-or type.
+        span: Span,
+    },
 }
 
 impl TypeAnnotation {
+    /// Returns the span of this type annotation.
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        match self {
+            Self::Simple(id) => id.span,
+            Self::Union { span, .. }
+            | Self::Singleton { span, .. }
+            | Self::Generic { span, .. }
+            | Self::FalseOr { span, .. } => *span,
+        }
+    }
+
     /// Creates a simple type annotation.
     #[must_use]
     pub fn simple(name: impl Into<EcoString>, span: Span) -> Self {
@@ -343,8 +373,36 @@ impl TypeAnnotation {
 
     /// Creates a singleton type annotation.
     #[must_use]
-    pub fn singleton(name: impl Into<EcoString>) -> Self {
-        Self::Singleton(name.into())
+    pub fn singleton(name: impl Into<EcoString>, span: Span) -> Self {
+        Self::Singleton {
+            name: name.into(),
+            span,
+        }
+    }
+
+    /// Creates a union type annotation.
+    #[must_use]
+    pub fn union(types: Vec<TypeAnnotation>, span: Span) -> Self {
+        Self::Union { types, span }
+    }
+
+    /// Creates a generic type annotation.
+    #[must_use]
+    pub fn generic(base: Identifier, parameters: Vec<TypeAnnotation>, span: Span) -> Self {
+        Self::Generic {
+            base,
+            parameters,
+            span,
+        }
+    }
+
+    /// Creates a false-or type annotation.
+    #[must_use]
+    pub fn false_or(inner: TypeAnnotation, span: Span) -> Self {
+        Self::FalseOr {
+            inner: Box::new(inner),
+            span,
+        }
     }
 }
 
@@ -1193,45 +1251,85 @@ mod tests {
     fn type_annotation_simple() {
         let ty = TypeAnnotation::simple("Integer", Span::new(0, 7));
         assert!(matches!(ty, TypeAnnotation::Simple(_)));
+        assert_eq!(ty.span(), Span::new(0, 7));
     }
 
     #[test]
     fn type_annotation_singleton() {
-        let ty = TypeAnnotation::singleton("north");
-        assert!(matches!(ty, TypeAnnotation::Singleton(_)));
-        if let TypeAnnotation::Singleton(name) = ty {
+        let ty = TypeAnnotation::singleton("north", Span::new(0, 6));
+        assert!(matches!(ty, TypeAnnotation::Singleton { .. }));
+        if let TypeAnnotation::Singleton { name, span } = ty {
             assert_eq!(name, "north");
+            assert_eq!(span, Span::new(0, 6));
         }
     }
 
     #[test]
     fn type_annotation_union() {
-        let ty = TypeAnnotation::Union(vec![
-            TypeAnnotation::simple("Integer", Span::new(0, 7)),
-            TypeAnnotation::simple("String", Span::new(10, 16)),
-        ]);
-        if let TypeAnnotation::Union(types) = ty {
+        let ty = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", Span::new(0, 7)),
+                TypeAnnotation::simple("String", Span::new(10, 16)),
+            ],
+            Span::new(0, 16),
+        );
+        if let TypeAnnotation::Union { types, span } = ty {
             assert_eq!(types.len(), 2);
+            assert_eq!(span, Span::new(0, 16));
         }
     }
 
     #[test]
     fn type_annotation_generic() {
-        let ty = TypeAnnotation::Generic {
-            base: Identifier::new("Collection", Span::new(0, 10)),
-            parameters: vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
-        };
-        if let TypeAnnotation::Generic { base, parameters } = ty {
+        let ty = TypeAnnotation::generic(
+            Identifier::new("Collection", Span::new(0, 10)),
+            vec![TypeAnnotation::simple("Integer", Span::new(11, 18))],
+            Span::new(0, 19),
+        );
+        if let TypeAnnotation::Generic {
+            base,
+            parameters,
+            span,
+        } = ty
+        {
             assert_eq!(base.name, "Collection");
             assert_eq!(parameters.len(), 1);
+            assert_eq!(span, Span::new(0, 19));
         }
     }
 
     #[test]
     fn type_annotation_false_or() {
         let inner = TypeAnnotation::simple("Integer", Span::new(0, 7));
-        let ty = TypeAnnotation::FalseOr(Box::new(inner));
-        assert!(matches!(ty, TypeAnnotation::FalseOr(_)));
+        let ty = TypeAnnotation::false_or(inner, Span::new(0, 15));
+        assert!(matches!(ty, TypeAnnotation::FalseOr { .. }));
+        assert_eq!(ty.span(), Span::new(0, 15));
+    }
+
+    #[test]
+    fn type_annotation_span() {
+        // Test that span() works for all variants
+        let simple = TypeAnnotation::simple("Int", Span::new(0, 3));
+        assert_eq!(simple.span(), Span::new(0, 3));
+
+        let singleton = TypeAnnotation::singleton("ok", Span::new(0, 3));
+        assert_eq!(singleton.span(), Span::new(0, 3));
+
+        let union = TypeAnnotation::union(vec![], Span::new(0, 10));
+        assert_eq!(union.span(), Span::new(0, 10));
+
+        let generic = TypeAnnotation::generic(
+            Identifier::new("List", Span::new(0, 4)),
+            vec![],
+            Span::new(0, 6),
+        );
+        assert_eq!(generic.span(), Span::new(0, 6));
+
+        let false_or = TypeAnnotation::false_or(
+            TypeAnnotation::simple("X", Span::new(0, 1)),
+            Span::new(0, 9),
+        );
+        assert_eq!(false_or.span(), Span::new(0, 9));
     }
 
     #[test]
