@@ -65,7 +65,7 @@ Represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
 - `isNil` - Returns true (only Nil returns true)
 - `notNil` - Returns false (only Nil returns false)
 - `ifNil:` - Evaluate block if nil
-- `ifNotNil:` - Evaluate block if not nil (passes receiver as argument)
+- `ifNotNil:` - Returns self without evaluating block (on non-nil objects, evaluates block with receiver as argument - see BT-99)
 - `ifNil: ifNotNil:` - Conditional based on nil status
 
 **Usage:**
