@@ -1305,6 +1305,7 @@ impl CoreErlangGenerator {
     /// # Dictionary Methods
     ///
     /// - `at:` (1 arg) → `maps:get(Key, Map)`
+    /// - `at:ifAbsent:` (2 args) → `case maps:find(...) of ... end`
     /// - `at:put:` (2 args) → `maps:put(Key, Value, Map)`
     /// - `includesKey:` (1 arg) → `maps:is_key(Key, Map)`
     /// - `removeKey:` (1 arg) → `maps:remove(Key, Map)`
@@ -1313,12 +1314,24 @@ impl CoreErlangGenerator {
     /// - `size` (0 args) → `maps:size(Map)`
     /// - `merge:` (1 arg) → `maps:merge(Map1, Map2)`
     /// - `keysAndValuesDo:` (1 arg block) → `maps:foreach(Fun, Map)`
+    ///
+    /// # Note
+    ///
+    /// Currently only applies to map literal receivers to avoid collisions with
+    /// Array/List/Set selectors. Future type inference will enable this for all
+    /// Dictionary-typed expressions.
     fn try_generate_dictionary_message(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<()>> {
+        // Only apply to map literal receivers to avoid collision with Array/List/Set selectors
+        // like `at:`, `size`, etc. Future type inference will enable broader application.
+        if !matches!(receiver, Expression::MapLiteral { .. }) {
+            return Ok(None);
+        }
+
         match selector {
             // Unary messages
             MessageSelector::Unary(name) => match name.as_str() {
@@ -1355,6 +1368,23 @@ impl CoreErlangGenerator {
                         write!(self.output, ", ")?;
                         self.generate_expression(receiver)?;
                         write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "at:ifAbsent:" if arguments.len() == 2 => {
+                        // case maps:find(Key, Map) of {ok, V} -> V; error -> Block() end
+                        let result_var = self.fresh_var("FindResult");
+                        write!(self.output, "case call 'maps':'find'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ") of ")?;
+                        write!(
+                            self.output,
+                            "<{{'ok', {result_var}}}> when 'true' -> {result_var}"
+                        )?;
+                        write!(self.output, "; <'error'> when 'true' -> apply ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, " () end")?;
                         Ok(Some(()))
                     }
                     "at:put:" if arguments.len() == 2 => {

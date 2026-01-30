@@ -645,11 +645,19 @@ impl Parser {
 
             // Map literal: #{...}
             TokenKind::Hash => {
-                // Check if it's a map literal (followed by {) or a symbol
+                // Check if it's a map literal (followed by {)
                 if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
                     self.parse_map_literal()
                 } else {
-                    self.parse_literal()
+                    // Standalone '#' is not a valid primary expression
+                    let bad_token = self.advance();
+                    let span = bad_token.span();
+                    let message: EcoString =
+                        "Unexpected '#': expected '#{' for a map literal or a valid expression"
+                            .into();
+                    self.diagnostics
+                        .push(Diagnostic::error(message.clone(), span));
+                    Expression::Error { message, span }
                 }
             }
 
