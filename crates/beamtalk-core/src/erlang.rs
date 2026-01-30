@@ -798,6 +798,11 @@ impl CoreErlangGenerator {
 
     /// Generates code for a map literal: `#{key => value, ...}`
     fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
+        if pairs.is_empty() {
+            write!(self.output, "~{{}}~")?;
+            return Ok(());
+        }
+
         write!(self.output, "~{{ ")?;
 
         for (i, pair) in pairs.iter().enumerate() {
@@ -2524,7 +2529,7 @@ end
         let pairs = vec![];
         let result = generator.generate_map_literal(&pairs);
         assert!(result.is_ok());
-        assert_eq!(generator.output.trim(), "~{  }~"); // Empty map with Core Erlang syntax
+        assert_eq!(generator.output.trim(), "~{}~");
     }
 
     #[test]
