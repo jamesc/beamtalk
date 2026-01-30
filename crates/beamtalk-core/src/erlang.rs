@@ -917,6 +917,12 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // Special case: Dictionary/Map methods - direct calls to Erlang maps module
+        // These are synchronous operations, not async actor messages
+        if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: unary "spawn" message on a class/identifier
         // This creates a new actor instance via gen_server:start_link
         if let MessageSelector::Unary(name) = selector {
@@ -1284,6 +1290,150 @@ impl CoreErlangGenerator {
 
             // Not a block evaluation message
             _ => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for Dictionary/Map methods.
+    ///
+    /// Dictionary methods are synchronous calls to the Erlang `maps` module.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a Dictionary method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a Dictionary method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Dictionary Methods
+    ///
+    /// - `at:` (1 arg) → `maps:get(Key, Map)`
+    /// - `at:ifAbsent:` (2 args) → `case maps:find(...) of ... end`
+    /// - `at:put:` (2 args) → `maps:put(Key, Value, Map)`
+    /// - `includesKey:` (1 arg) → `maps:is_key(Key, Map)`
+    /// - `removeKey:` (1 arg) → `maps:remove(Key, Map)`
+    /// - `keys` (0 args) → `maps:keys(Map)`
+    /// - `values` (0 args) → `maps:values(Map)`
+    /// - `size` (0 args) → `maps:size(Map)`
+    /// - `merge:` (1 arg) → `maps:merge(Map1, Map2)`
+    /// - `keysAndValuesDo:` (1 arg block) → `maps:foreach(Fun, Map)`
+    ///
+    /// # Note
+    ///
+    /// These selectors are treated as Dictionary operations for ALL receivers.
+    /// This means Array/List/Set must use different selectors (e.g., `elementAt:`
+    /// instead of `at:`). Future type inference may allow disambiguation.
+    fn try_generate_dictionary_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            // Unary messages
+            MessageSelector::Unary(name) => match name.as_str() {
+                "keys" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'keys'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "values" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'values'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "size" if arguments.is_empty() => {
+                    write!(self.output, "call 'maps':'size'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            // Keyword messages
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "at:" if arguments.len() == 1 => {
+                        // maps:get(Key, Map)
+                        write!(self.output, "call 'maps':'get'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "at:ifAbsent:" if arguments.len() == 2 => {
+                        // case maps:find(Key, Map) of {ok, V} -> V; error -> Block() end
+                        let result_var = self.fresh_var("FindResult");
+                        write!(self.output, "case call 'maps':'find'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ") of ")?;
+                        write!(
+                            self.output,
+                            "<{{'ok', {result_var}}}> when 'true' -> {result_var}"
+                        )?;
+                        write!(self.output, "; <'error'> when 'true' -> apply ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, " () end")?;
+                        Ok(Some(()))
+                    }
+                    "at:put:" if arguments.len() == 2 => {
+                        // maps:put(Key, Value, Map)
+                        write!(self.output, "call 'maps':'put'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "includesKey:" if arguments.len() == 1 => {
+                        // maps:is_key(Key, Map)
+                        write!(self.output, "call 'maps':'is_key'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "removeKey:" if arguments.len() == 1 => {
+                        // maps:remove(Key, Map)
+                        write!(self.output, "call 'maps':'remove'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "merge:" if arguments.len() == 1 => {
+                        // maps:merge(Map1, Map2)
+                        write!(self.output, "call 'maps':'merge'(")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    "keysAndValuesDo:" if arguments.len() == 1 => {
+                        // maps:foreach(Fun, Map)
+                        write!(self.output, "call 'maps':'foreach'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ", ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, ")")?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            // Binary selectors - not used for Dictionary methods
+            MessageSelector::Binary(_) => Ok(None),
         }
     }
 
@@ -1827,16 +1977,17 @@ end
     fn test_generate_keyword_message_send_creates_future() {
         let mut generator = CoreErlangGenerator::new("test");
 
-        // Build: array at: 1 put: 'x'
-        let receiver = Expression::Identifier(Identifier::new("array", Span::new(0, 5)));
+        // Build: object foo: 1 bar: 'x'
+        // (using a non-Dictionary selector to avoid interception)
+        let receiver = Expression::Identifier(Identifier::new("object", Span::new(0, 6)));
         let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::new(6, 9)),
-            KeywordPart::new("put:", Span::new(12, 16)),
+            KeywordPart::new("foo:", Span::new(7, 11)),
+            KeywordPart::new("bar:", Span::new(14, 18)),
         ]);
         // Arguments are passed separately to generate_message_send
         let arguments = vec![
-            Expression::Literal(Literal::Integer(1), Span::new(10, 11)),
-            Expression::Literal(Literal::String("x".into()), Span::new(17, 20)),
+            Expression::Literal(Literal::Integer(1), Span::new(12, 13)),
+            Expression::Literal(Literal::String("x".into()), Span::new(19, 22)),
         ];
 
         let result = generator.generate_message_send(&receiver, &selector, &arguments);
@@ -1853,7 +2004,7 @@ end
             "Should send via gen_server:cast(). Got: {output}"
         );
         assert!(
-            output.contains("'at:put:'"),
+            output.contains("'foo:bar:'"),
             "Should include combined keyword selector. Got: {output}"
         );
     }
@@ -2633,6 +2784,89 @@ end
                 );
             }
         }
+    }
+
+    // ========================================================================
+    // Dictionary Method Code Generation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dictionary_at_on_identifier() {
+        // person at: #name -> maps:get('name', Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Keyword(vec![KeywordPart::new("at:", Span::new(7, 10))]);
+        let arguments = vec![Expression::Literal(
+            Literal::Symbol("name".into()),
+            Span::new(11, 16),
+        )];
+
+        generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'get'('name', Person)"),
+            "Should generate maps:get call. Got: {output}"
+        );
+        // Should NOT create a future (synchronous operation)
+        assert!(
+            !output.contains("beamtalk_future"),
+            "Dictionary methods should be synchronous. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_dictionary_at_put_on_identifier() {
+        // person at: #age put: 31 -> maps:put('age', 31, Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("at:", Span::new(7, 10)),
+            KeywordPart::new("put:", Span::new(14, 18)),
+        ]);
+        let arguments = vec![
+            Expression::Literal(Literal::Symbol("age".into()), Span::new(11, 14)),
+            Expression::Literal(Literal::Integer(31), Span::new(19, 21)),
+        ];
+
+        generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'put'('age', 31, Person)"),
+            "Should generate maps:put call. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_dictionary_size_on_identifier() {
+        // person size -> maps:size(Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Unary("size".into());
+
+        generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'size'(Person)"),
+            "Should generate maps:size call. Got: {output}"
+        );
     }
 
     // ========================================================================
