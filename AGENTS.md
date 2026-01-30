@@ -706,8 +706,14 @@ Transcript show: 'Hello'; cr; show: 'World'
 // Assignment
 count := 0
 
-// Return
-^result
+// Return (implicit vs explicit)
+// Use implicit return for last expression (no ^)
+getValue => self.value
+
+// Use ^ ONLY for early returns
+max: other =>
+  self > other ifTrue: [^self]   // early return needs ^
+  other                           // last expression - no ^
 
 // String interpolation (double quotes)
 greeting := "Hello, {name}!"

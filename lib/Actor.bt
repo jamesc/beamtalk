@@ -63,7 +63,7 @@
 
 Actor
   // Returns the actor's class (compiler intrinsic)
-  class => ^self.__class__
+  class => self.__class__
 
   // Show this actor's description on the Transcript
   inspect => Transcript show: self describe
