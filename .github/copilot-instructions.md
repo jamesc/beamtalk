@@ -159,6 +159,66 @@ When the user types `/whats-next`, execute this workflow to recommend the next i
 
 ---
 
+### `/worktree-start <branch>` - Start working in a new worktree
+
+When the user types `/worktree-start <branch>`, execute this workflow:
+
+1. **Check if already in a worktree**: Run `git worktree list` to see current worktrees.
+
+2. **Inform about the script**: Tell the user to run the worktree-new script from the HOST machine (not inside a container):
+
+   **Windows:**
+   ```powershell
+   .\scripts\worktree-new.ps1 <branch>
+   ```
+
+   **Linux/Mac:**
+   ```bash
+   ./scripts/worktree-new.sh <branch>
+   ```
+
+3. **Explain what happens**:
+   - Creates worktree at `../<branch>/` (sibling to main repo)
+   - Creates/checks out the branch
+   - Starts a devcontainer
+   - Connects to shell inside container
+
+4. **After container starts**: Once in the new container, the user can start a new Copilot session there.
+
+**Note:** This command cannot create the worktree directly because worktree operations must run on the host, not inside a container.
+
+---
+
+### `/worktree-stop <branch>` - Remove a worktree
+
+When the user types `/worktree-stop <branch>`, execute this workflow:
+
+1. **Check current worktrees**: Run `git worktree list` to verify the worktree exists.
+
+2. **Warn about unsaved work**: Remind the user to commit/push any changes in that worktree before removing it.
+
+3. **Inform about the script**: Tell the user to run the worktree-rm script from the HOST machine:
+
+   **Windows:**
+   ```powershell
+   .\scripts\worktree-rm.ps1 <branch>
+   ```
+
+   **Linux/Mac:**
+   ```bash
+   ./scripts/worktree-rm.sh <branch>
+   ```
+
+4. **Explain what happens**:
+   - Fixes `.git` file if it has container paths
+   - Removes the worktree via `git worktree remove`
+   - Falls back to manual cleanup if needed
+   - Optionally deletes the local branch
+
+**Note:** Worktrees used with devcontainers have their `.git` file modified to point to container paths. The script handles this automatically.
+
+---
+
 ### `/pr-resolve` - Address PR review comments
 
 When the user types `/pr-resolve`, execute this workflow to systematically address all PR review comments:
