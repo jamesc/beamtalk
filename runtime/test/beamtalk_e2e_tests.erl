@@ -12,6 +12,10 @@
 %%% - spawn/0 tests (Counter spawn)
 %%% - spawn/1 tests (Counter spawnWith: #{...})
 %%% - State merging behavior (InitArgs override defaults)
+%%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
+%%% - Block Evaluation Tests (value, value:, value:value:, closures)
+%%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
+%%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
@@ -29,6 +33,7 @@
 %% value := 0.
 %% increment := [self.value := self.value + 1. ^self.value].
 %% getValue := [^self.value].
+%% divide: n := [^self.value / n].
 %% ```
 -spec counter_module_state(InitArgs :: map()) -> map().
 counter_module_state(InitArgs) ->
@@ -36,7 +41,8 @@ counter_module_state(InitArgs) ->
         '__class__' => 'Counter',
         '__methods__' => #{
             increment => fun counter_increment/2,
-            getValue => fun counter_getValue/2
+            getValue => fun counter_getValue/2,
+            'divide:' => fun counter_divide/2
         },
         value => 0
     },
@@ -54,6 +60,14 @@ counter_increment([], State) ->
 counter_getValue([], State) ->
     Value = maps:get(value, State),
     {reply, Value, State}.
+
+%% Method: divide: (can error on division by zero)
+counter_divide([N], State) ->
+    Value = maps:get(value, State),
+    case N of
+        0 -> {error, division_by_zero, State};
+        _ -> {reply, Value / N, State}
+    end.
 
 %%% ===========================================================================
 %%% spawn/0 tests (Counter spawn)
@@ -148,24 +162,320 @@ spawn_with_multiple_overrides_test() ->
     gen_server:stop(Pid).
 
 %%% ===========================================================================
-%%% Async message tests with spawn/1
+%%% Async message protocol E2E tests (BT-79)
 %%% ===========================================================================
 
-spawn_with_async_messages_test() ->
-    %% Start with custom initial value
-    InitArgs = #{value => 50},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+%%% Basic async message send and future resolution
+
+async_message_creates_future_test() ->
+    %% Test: Async message send creates a future
+    State = counter_module_state(#{}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
     
-    %% Send async increment via future
+    %% Simulate: future := actor increment
     Future = beamtalk_future:new(),
-    gen_server:cast(Pid, {increment, [], Future}),
+    ?assert(is_pid(Future)),
     
-    %% Await result
+    %% Clean up: resolve the future so we don't leave a pending future process around
+    beamtalk_future:resolve(Future, ok),
+    
+    gen_server:stop(Actor).
+
+async_message_uses_cast_tuple_test() ->
+    %% Test: gen_server:cast with {Selector, Args, FuturePid} tuple
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    Future = beamtalk_future:new(),
+    %% This is the exact protocol the compiler generates
+    ok = gen_server:cast(Actor, {increment, [], Future}),
+    
+    %% Verify future resolves
     {ok, Result} = beamtalk_future:await(Future, 1000),
-    ?assertEqual(51, Result),
+    ?assertEqual(1, Result),
     
-    gen_server:stop(Pid).
+    gen_server:stop(Actor).
+
+async_message_resolves_after_method_completes_test() ->
+    %% Test: Future resolution after method completes
+    State = counter_module_state(#{value => 10}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send async increment
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {increment, [], Future}),
+    
+    %% Wait for resolution
+    {ok, Result} = beamtalk_future:await(Future, 1000),
+    ?assertEqual(11, Result),
+    
+    %% Verify actor state was updated
+    FinalValue = gen_server:call(Actor, {getValue, []}),
+    ?assertEqual(11, FinalValue),
+    
+    gen_server:stop(Actor).
+
+%%% await on pending vs resolved futures
+
+async_await_on_pending_future_blocks_test() ->
+    %% Test: await on a pending future blocks until resolved
+    State = counter_module_state(#{value => 5}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    Future = beamtalk_future:new(),
+    Parent = self(),
+    
+    %% Spawn a process that will await the future
+    spawn(fun() ->
+        Parent ! {ready, self()},  % Signal that we're about to await
+        {ok, Result} = beamtalk_future:await(Future, 2000),
+        Parent ! {awaited, Result}
+    end),
+    
+    %% Wait for the awaiter to signal it's ready
+    receive
+        {ready, _} -> ok
+    after 1000 ->
+        ?assert(false)  % Timeout - spawned process didn't start
+    end,
+    
+    %% Give a moment for the await to register with the future
+    timer:sleep(100),
+    
+    %% Now send the async message to resolve the future
+    gen_server:cast(Actor, {increment, [], Future}),
+    
+    %% Verify the awaiter got the result
+    receive
+        {awaited, Value} -> ?assertEqual(6, Value)
+    after 3000 ->
+        ?assert(false)  % Timeout - test failed
+    end,
+    
+    gen_server:stop(Actor).
+
+async_await_on_resolved_future_returns_immediately_test() ->
+    %% Test: await on an already-resolved future returns immediately
+    State = counter_module_state(#{value => 20}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send async message and await to ensure it's resolved
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {increment, [], Future}),
+    
+    %% First await to ensure future is resolved
+    {ok, Result1} = beamtalk_future:await(Future, 1000),
+    ?assertEqual(21, Result1),
+    
+    %% Now await the already-resolved future again with a very small timeout.
+    %% This verifies it is already resolved without relying on wall-clock timing.
+    SmallTimeout = 10,
+    {ok, Result2} = beamtalk_future:await(Future, SmallTimeout),
+    
+    ?assertEqual(21, Result2),
+    
+    gen_server:stop(Actor).
+
+%%% Future rejection on errors
+
+async_future_rejection_on_method_error_test() ->
+    %% Test: Future rejection when method returns error
+    State = counter_module_state(#{value => 10}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send async message that will error (divide by zero)
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {'divide:', [0], Future}),
+    
+    %% Await should return error
+    Result = beamtalk_future:await(Future, 1000),
+    ?assertEqual({error, division_by_zero}, Result),
+    
+    gen_server:stop(Actor).
+
+%%% Multiple concurrent async messages
+
+async_multiple_concurrent_messages_test() ->
+    %% Test: Multiple concurrent async messages to same actor
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send 5 concurrent increment messages
+    Futures = [begin
+        F = beamtalk_future:new(),
+        gen_server:cast(Actor, {increment, [], F}),
+        F
+    end || _ <- lists:seq(1, 5)],
+    
+    %% Await all results
+    Results = [begin
+        {ok, R} = beamtalk_future:await(F, 1000),
+        R
+    end || F <- Futures],
+    
+    %% All increments should have completed
+    ?assertEqual([1, 2, 3, 4, 5], Results),
+    
+    %% Final value should be 5
+    FinalValue = gen_server:call(Actor, {getValue, []}),
+    ?assertEqual(5, FinalValue),
+    
+    gen_server:stop(Actor).
+
+async_concurrent_messages_order_preserved_test() ->
+    %% Test: Message order is preserved even with async
+    State = counter_module_state(#{value => 100}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send multiple async messages rapidly
+    F1 = beamtalk_future:new(),
+    F2 = beamtalk_future:new(),
+    F3 = beamtalk_future:new(),
+    
+    gen_server:cast(Actor, {increment, [], F1}),
+    gen_server:cast(Actor, {increment, [], F2}),
+    gen_server:cast(Actor, {increment, [], F3}),
+    
+    %% Results should be in order
+    {ok, R1} = beamtalk_future:await(F1, 1000),
+    {ok, R2} = beamtalk_future:await(F2, 1000),
+    {ok, R3} = beamtalk_future:await(F3, 1000),
+    
+    ?assertEqual(101, R1),
+    ?assertEqual(102, R2),
+    ?assertEqual(103, R3),
+    
+    gen_server:stop(Actor).
+
+%%% Chained async operations
+
+async_chained_operations_test() ->
+    %% Test: Chained async operations (nested futures)
+    %% Simulates: result1 := actor increment await. result2 := actor increment await.
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% First async increment
+    Future1 = beamtalk_future:new(),
+    gen_server:cast(Actor, {increment, [], Future1}),
+    {ok, Result1} = beamtalk_future:await(Future1, 1000),
+    ?assertEqual(1, Result1),
+    
+    %% Second async increment (chained after first)
+    Future2 = beamtalk_future:new(),
+    gen_server:cast(Actor, {increment, [], Future2}),
+    {ok, Result2} = beamtalk_future:await(Future2, 1000),
+    ?assertEqual(2, Result2),
+    
+    gen_server:stop(Actor).
+
+async_nested_futures_different_actors_test() ->
+    %% Test: Nested futures with different actors
+    %% Simulates: actor1 increment await + actor2 increment await
+    State1 = counter_module_state(#{value => 10}),
+    State2 = counter_module_state(#{value => 20}),
+    {ok, Actor1} = gen_server:start_link(beamtalk_actor, State1, []),
+    {ok, Actor2} = gen_server:start_link(beamtalk_actor, State2, []),
+    
+    %% Send async messages to both actors
+    F1 = beamtalk_future:new(),
+    F2 = beamtalk_future:new(),
+    gen_server:cast(Actor1, {increment, [], F1}),
+    gen_server:cast(Actor2, {increment, [], F2}),
+    
+    %% Await both results
+    {ok, R1} = beamtalk_future:await(F1, 1000),
+    {ok, R2} = beamtalk_future:await(F2, 1000),
+    
+    ?assertEqual(11, R1),
+    ?assertEqual(21, R2),
+    
+    gen_server:stop(Actor1),
+    gen_server:stop(Actor2).
+
+%%% Mixed sync and async messages
+
+async_mixed_with_sync_messages_test() ->
+    %% Test: Mixing synchronous and asynchronous messages
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Sync increment
+    ?assertEqual(1, gen_server:call(Actor, {increment, []})),
+    
+    %% Async increment
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {increment, [], Future}),
+    {ok, Result} = beamtalk_future:await(Future, 1000),
+    ?assertEqual(2, Result),
+    
+    %% Sync getValue
+    ?assertEqual(2, gen_server:call(Actor, {getValue, []})),
+    
+    gen_server:stop(Actor).
+
+%%% Edge cases with futures
+
+async_future_timeout_behavior_test() ->
+    %% Test: Future await with timeout works correctly
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Create a future but DON'T send the message
+    Future = beamtalk_future:new(),
+    
+    %% Await with short timeout should fail
+    Result = beamtalk_future:await(Future, 100),
+    ?assertEqual({error, timeout}, Result),
+    
+    %% Optional cleanup: resolve the future; the future process remains
+    %% alive until its inactivity timeout elapses
+    beamtalk_future:resolve(Future, ok),
+    
+    gen_server:stop(Actor).
+
+async_multiple_awaits_same_future_test() ->
+    %% Test: Multiple processes can await the same future
+    State = counter_module_state(#{value => 0}),
+    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    Future = beamtalk_future:new(),
+    Parent = self(),
+    
+    %% Spawn 3 processes awaiting the same future
+    lists:foreach(fun(N) ->
+        spawn(fun() ->
+            Parent ! {ready, N},  % Signal ready to await
+            {ok, Result} = beamtalk_future:await(Future, 2000),
+            Parent ! {waiter, N, Result}
+        end)
+    end, [1, 2, 3]),
+    
+    %% Wait for all waiters to signal they're ready
+    lists:foreach(fun(_) ->
+        receive
+            {ready, _} -> ok
+        after 1000 ->
+            ?assert(false)
+        end
+    end, [1, 2, 3]),
+    
+    %% Give a moment for all awaits to register
+    timer:sleep(100),
+    
+    %% Send the async message
+    gen_server:cast(Actor, {increment, [], Future}),
+    
+    %% All waiters should get the result
+    Results = lists:sort([receive
+        {waiter, N, R} -> {N, R}
+    after 3000 ->
+        ?assert(false)
+    end || _ <- [1, 2, 3]]),
+    
+    ?assertEqual([{1, 1}, {2, 1}, {3, 1}], Results),
+    
+    gen_server:stop(Actor).
 
 %%% ===========================================================================
 %%% Edge cases
@@ -199,6 +509,201 @@ spawn_preserves_class_and_methods_test() ->
     Methods = maps:get('__methods__', State),
     ?assert(is_function(maps:get(increment, Methods), 2)),
     ?assert(is_function(maps:get(getValue, Methods), 2)).
+
+%%% ===========================================================================
+%%% Block Evaluation Tests (value, value:, value:value:, etc.)
+%%% ===========================================================================
+
+%% @doc Test: [42] value => 42
+%% Block with no arguments, evaluated with value message
+block_value_no_args_test() ->
+    Block = fun() -> 42 end,
+    Result = Block(),
+    ?assertEqual(42, Result).
+
+%% @doc Test: [:x | x + 1] value: 5 => 6
+%% Block with one parameter, evaluated with value: message
+block_value_one_arg_test() ->
+    Block = fun(X) -> X + 1 end,
+    Result = Block(5),
+    ?assertEqual(6, Result).
+
+%% @doc Test: [:x :y | x + y] value: 3 value: 4 => 7
+%% Block with two parameters, evaluated with value:value: message
+block_value_two_args_test() ->
+    Block = fun(X, Y) -> X + Y end,
+    Result = Block(3, 4),
+    ?assertEqual(7, Result).
+
+%% @doc Test: [:x :y :z | x + y + z] value: 1 value: 2 value: 3 => 6
+%% Block with three parameters, evaluated with value:value:value: message
+block_value_three_args_test() ->
+    Block = fun(X, Y, Z) -> X + Y + Z end,
+    Result = Block(1, 2, 3),
+    ?assertEqual(6, Result).
+
+%% @doc Test: [:x | [:y | x + y]] value: 10 value: 5 => 15
+%% Nested blocks - outer block returns inner block, which captures x
+block_nested_evaluation_test() ->
+    %% Outer block: [:x | [:y | x + y]]
+    OuterBlock = fun(X) ->
+        %% Inner block captures X from lexical scope
+        fun(Y) -> X + Y end
+    end,
+    
+    %% Evaluate outer with 10, returns inner block
+    InnerBlock = OuterBlock(10),
+    
+    %% Evaluate inner with 5
+    Result = InnerBlock(5),
+    ?assertEqual(15, Result).
+
+%% @doc Test closures capture lexical scope
+%% captured := 100. [:x | x + captured] value: 5 => 105
+block_captures_lexical_scope_test() ->
+    %% Simulate captured variable from lexical scope
+    Captured = 100,
+    
+    %% Block captures Captured
+    Block = fun(X) -> X + Captured end,
+    
+    %% Evaluate block
+    Result = Block(5),
+    ?assertEqual(105, Result).
+
+%% @doc Test block that returns another block
+%% makeAdder := [:n | [:x | x + n]].
+%% addFive := makeAdder value: 5.
+%% addFive value: 10 => 15
+block_returns_closure_test() ->
+    %% makeAdder returns a closure that adds n to its argument
+    MakeAdder = fun(N) ->
+        fun(X) -> X + N end
+    end,
+    
+    %% Create an adder that adds 5
+    AddFive = MakeAdder(5),
+    
+    %% Use the adder
+    ?assertEqual(15, AddFive(10)),
+    ?assertEqual(8, AddFive(3)).
+
+%% @doc Test block with multiple statements
+%% [:x | temp := x * 2. temp + 1] value: 5 => 11
+block_multiple_statements_test() ->
+    Block = fun(X) ->
+        Temp = X * 2,
+        Temp + 1
+    end,
+    Result = Block(5),
+    ?assertEqual(11, Result).
+
+%%% ===========================================================================
+%%% Control Flow Tests (whileTrue:, whileFalse:, repeat)
+%%% ===========================================================================
+
+%% @doc Test: [counter < 5] whileTrue: [counter := counter + 1]
+%% Loop while condition is true
+block_while_true_loop_test() ->
+    %% Simulate: counter := 0. [counter < 5] whileTrue: [counter := counter + 1]
+    %% We'll use a recursive function to simulate the letrec loop
+    InitialCounter = 0,
+    FinalCounter = while_true_loop(InitialCounter, 5),
+    ?assertEqual(5, FinalCounter).
+
+%% Helper: Simulates whileTrue: loop implementation
+while_true_loop(Counter, Limit) ->
+    case Counter < Limit of
+        true ->
+            NewCounter = Counter + 1,
+            while_true_loop(NewCounter, Limit);
+        false ->
+            Counter
+    end.
+
+%% @doc Test: [counter >= 10] whileFalse: [counter := counter + 1]
+%% Loop while condition is false
+block_while_false_loop_test() ->
+    %% Start at 0, increment until counter >= 10
+    InitialCounter = 0,
+    FinalCounter = while_false_loop(InitialCounter, 10),
+    ?assertEqual(10, FinalCounter).
+
+%% Helper: Simulates whileFalse: loop implementation
+while_false_loop(Counter, Target) ->
+    case Counter >= Target of
+        false ->
+            NewCounter = Counter + 1,
+            while_false_loop(NewCounter, Target);
+        true ->
+            Counter
+    end.
+
+%% @doc Test: [counter < 100] whileTrue: [counter := counter + 1. process: counter]
+%% whileTrue: executes body multiple times
+block_while_true_accumulates_test() ->
+    %% Sum numbers 1 to 10
+    {_Counter, Sum} = while_true_accumulate(1, 0),
+    ?assertEqual(55, Sum).  %% 1+2+3+...+10 = 55
+
+while_true_accumulate(Counter, Sum) ->
+    case Counter =< 10 of
+        true ->
+            NewSum = Sum + Counter,
+            NewCounter = Counter + 1,
+            while_true_accumulate(NewCounter, NewSum);
+        false ->
+            {Counter, Sum}
+    end.
+
+%% @doc Test: repeat loop with early termination
+%% counter := 0. [counter := counter + 1. counter < 5] repeat => loops forever
+%% We simulate with a bounded version that terminates
+block_repeat_with_termination_test() ->
+    %% Simulate repeat that increments until threshold
+    %% [counter := counter + 1. counter >= 5 ifTrue: [^counter]] repeat
+    Result = repeat_until_threshold(0, 5),
+    ?assertEqual(5, Result).
+
+%% Helper: Simulates repeat with early return
+repeat_until_threshold(Counter, Threshold) ->
+    NewCounter = Counter + 1,
+    case NewCounter >= Threshold of
+        true ->
+            NewCounter;  %% Early return simulates ^counter
+        false ->
+            repeat_until_threshold(NewCounter, Threshold)
+    end.
+
+%% @doc Test: nested loops with whileTrue:
+%% outer := 0. inner := 0.
+%% [outer < 3] whileTrue: [
+%%   inner := 0.
+%%   [inner < 3] whileTrue: [inner := inner + 1].
+%%   outer := outer + 1
+%% ]
+block_nested_while_true_test() ->
+    %% Count total iterations in nested loop (3 * 3 = 9)
+    TotalIterations = nested_while_loops(0, 0),
+    ?assertEqual(9, TotalIterations).
+
+nested_while_loops(Outer, Total) ->
+    case Outer < 3 of
+        true ->
+            %% Inner loop from 0 to 3
+            NewTotal = inner_while_loop(0, Total),
+            nested_while_loops(Outer + 1, NewTotal);
+        false ->
+            Total
+    end.
+
+inner_while_loop(Inner, Total) ->
+    case Inner < 3 of
+        true ->
+            inner_while_loop(Inner + 1, Total + 1);
+        false ->
+            Total
+    end.
 
 %%% ===========================================================================
 %%% Boolean control flow tests

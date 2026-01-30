@@ -55,7 +55,7 @@ jobs:
       - name: Test Erlang runtime (unit tests)
         run: |
           cd runtime
-          rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests
+          rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests
 
       - name: Test Erlang runtime (integration tests)
         run: |

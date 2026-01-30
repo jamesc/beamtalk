@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test cascade message sends
+// Sends multiple messages to the same receiver
+
+// Method that uses a cascade - all messages go to counter
+runCascade := [ counter increment; increment; getValue ]
