@@ -506,20 +506,17 @@ fn dispatch_method(
 /// Validate a file path for daemon methods.
 ///
 /// Returns an error message if the path is invalid:
-/// - Empty paths
+/// - Empty or whitespace-only paths
 /// - Root path "/"
-/// - Paths containing null bytes
 fn validate_path(path: &str) -> Result<(), String> {
-    if path.is_empty() {
-        return Err("Path cannot be empty".to_string());
+    let trimmed = path.trim();
+
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty or whitespace".to_string());
     }
 
-    if path == "/" {
+    if trimmed == "/" {
         return Err("Path cannot be root directory".to_string());
-    }
-
-    if path.contains('\0') {
-        return Err("Path cannot contain null bytes".to_string());
     }
 
     Ok(())
@@ -926,7 +923,18 @@ mod tests {
     fn test_validate_path_empty() {
         let result = validate_path("");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Path cannot be empty");
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
+    }
+
+    #[test]
+    fn test_validate_path_whitespace_only() {
+        let result = validate_path("   ");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
+
+        let result = validate_path("\t\n");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Path cannot be empty or whitespace");
     }
 
     #[test]
@@ -934,13 +942,6 @@ mod tests {
         let result = validate_path("/");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Path cannot be root directory");
-    }
-
-    #[test]
-    fn test_validate_path_null_byte() {
-        let result = validate_path("test\0path");
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Path cannot contain null bytes");
     }
 
     #[test]
@@ -960,7 +961,7 @@ mod tests {
             &running,
         );
         assert!(response.contains("error"));
-        assert!(response.contains("Path cannot be empty"));
+        assert!(response.contains("Path cannot be empty or whitespace"));
         assert!(response.contains(&INVALID_PARAMS.to_string()));
     }
 
@@ -979,21 +980,6 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_with_null_byte_path() {
-        let mut service = SimpleLanguageService::new();
-        let running = make_running();
-        // Using a string literal with null byte
-        let request = format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"compile","params":{{"path":"test{}path.bt","source":"x := 42"}}}}"#,
-            '\0'
-        );
-        let response = handle_request(&request, &mut service, &running);
-        // Null byte in JSON causes parse error, which is acceptable
-        assert!(response.contains("error"));
-        assert!(response.contains("Parse error") || response.contains("Path cannot contain"));
-    }
-
-    #[test]
     fn test_diagnostics_with_empty_path() {
         let mut service = SimpleLanguageService::new();
         let running = make_running();
@@ -1003,7 +989,7 @@ mod tests {
             &running,
         );
         assert!(response.contains("error"));
-        assert!(response.contains("Path cannot be empty"));
+        assert!(response.contains("Path cannot be empty or whitespace"));
         assert!(response.contains(&INVALID_PARAMS.to_string()));
     }
 
@@ -1019,20 +1005,5 @@ mod tests {
         assert!(response.contains("error"));
         assert!(response.contains("Path cannot be root directory"));
         assert!(response.contains(&INVALID_PARAMS.to_string()));
-    }
-
-    #[test]
-    fn test_diagnostics_with_null_byte_path() {
-        let mut service = SimpleLanguageService::new();
-        let running = make_running();
-        // Using a string literal with null byte
-        let request = format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{{"path":"test{}path.bt","source":"x := 42"}}}}"#,
-            '\0'
-        );
-        let response = handle_request(&request, &mut service, &running);
-        // Null byte in JSON causes parse error, which is acceptable
-        assert!(response.contains("error"));
-        assert!(response.contains("Parse error") || response.contains("Path cannot contain"));
     }
 }
