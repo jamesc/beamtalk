@@ -44,52 +44,52 @@ Module {
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found }",
             span: Span {
                 start: 138,
-                end: 143,
+                end: 139,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found }",
             span: Span {
                 start: 159,
-                end: 166,
+                end: 160,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found }",
             span: Span {
                 start: 171,
-                end: 201,
+                end: 172,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
                 start: 423,
-                end: 451,
+                end: 424,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
                 start: 479,
-                end: 500,
+                end: 480,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
                 start: 529,
-                end: 548,
+                end: 530,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
                 start: 590,
-                end: 618,
+                end: 591,
             },
         },
         Error {
@@ -100,10 +100,10 @@ Module {
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found }",
             span: Span {
                 start: 685,
-                end: 716,
+                end: 686,
             },
         },
     ],
@@ -151,19 +151,11 @@ Diagnostics:
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 131, end: 132 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 134, end: 135 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 138, end: 139 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 138, end: 143 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 159, end: 160 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 159, end: 166 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 171, end: 172 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 171, end: 201 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 423, end: 424 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 423, end: 451 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 479, end: 480 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 479, end: 500 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 529, end: 530 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 529, end: 548 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 590, end: 591 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 590, end: 618 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 675, end: 676 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 685, end: 716 } }

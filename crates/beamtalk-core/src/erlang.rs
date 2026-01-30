@@ -66,7 +66,7 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
-use crate::ast::{Block, Expression, Identifier, Literal, MapEntry, MessageSelector, Module};
+use crate::ast::{Block, Expression, Identifier, Literal, MapPair, MessageSelector, Module};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -728,7 +728,10 @@ impl CoreErlangGenerator {
                 receiver, field, ..
             } => self.generate_field_access(receiver, field),
             Expression::Parenthesized { expression, .. } => self.generate_expression(expression),
-            Expression::MapLiteral { entries, .. } => self.generate_map_literal(entries),
+            Expression::MapLiteral { pairs, .. } => self.generate_map_literal(pairs),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => self.generate_cascade(receiver, messages),
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -773,34 +776,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates code for a map literal.
-    ///
-    /// Maps in Core Erlang use the syntax: `~{key => value, ...}~`
-    ///
-    /// # Example
-    ///
-    /// Beamtalk: `#{#name => 'Alice', #age => 30}`
-    /// Core Erlang: `~{'name' => 'Alice', 'age' => 30}~`
-    fn generate_map_literal(&mut self, entries: &[MapEntry]) -> Result<()> {
-        write!(self.output, "~{{")?;
-        
-        for (i, entry) in entries.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            
-            // Generate key
-            self.generate_expression(&entry.key)?;
-            write!(self.output, " => ")?;
-            
-            // Generate value
-            self.generate_expression(&entry.value)?;
-        }
-        
-        write!(self.output, "}}~")?;
-        Ok(())
-    }
-
     /// Generates code for an identifier reference.
     fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
         // Handle special reserved identifiers as atoms
@@ -818,6 +793,32 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Generates code for a map literal: `#{key => value, ...}`
+    fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
+        if pairs.is_empty() {
+            write!(self.output, "~{{}}~")?;
+            return Ok(());
+        }
+
+        write!(self.output, "~{{ ")?;
+
+        for (i, pair) in pairs.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+
+            // Generate the key
+            self.generate_expression(&pair.key)?;
+            write!(self.output, " => ")?;
+
+            // Generate the value
+            self.generate_expression(&pair.value)?;
+        }
+
+        write!(self.output, " }}~")?;
         Ok(())
     }
 
@@ -1029,6 +1030,196 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates code for cascade expressions.
+    ///
+    /// Cascades send multiple messages to the same receiver using semicolon separators.
+    /// The receiver is evaluated once and each message is sent to that receiver.
+    ///
+    /// # Example
+    ///
+    /// ```beamtalk
+    /// collection add: 1; add: 2; add: 3
+    /// ```
+    ///
+    /// Generates:
+    ///
+    /// ```erlang
+    /// let Receiver = <evaluate collection> in
+    ///   let _ = <send add: 1 to Receiver> in
+    ///   let _ = <send add: 2 to Receiver> in
+    ///   <send add: 3 to Receiver>
+    /// ```
+    ///
+    /// The cascade returns the result of the final message.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "cascade codegen handles both normal and fallback paths"
+    )]
+    fn generate_cascade(
+        &mut self,
+        receiver: &Expression,
+        messages: &[crate::ast::CascadeMessage],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            // Edge case: cascade with no messages just evaluates to the receiver
+            return self.generate_expression(receiver);
+        }
+
+        // The parser represents cascades such that `receiver` is the *first*
+        // message send expression, e.g. for:
+        //
+        //   counter increment; increment; getValue
+        //
+        // `receiver` is a MessageSend for `counter increment`, and `messages`
+        // holds the remaining cascade messages. We need to:
+        //   1. Evaluate the underlying receiver expression (`counter`) once,
+        //      bind it to a temp variable.
+        //   2. Send the first message (`increment`) and all subsequent
+        //      cascade messages to that same bound receiver.
+        if let Expression::MessageSend {
+            receiver: underlying_receiver,
+            selector: first_selector,
+            arguments: first_arguments,
+            ..
+        } = receiver
+        {
+            // Bind the underlying receiver once
+            let receiver_var = self.fresh_temp_var("Receiver");
+            write!(self.output, "let {receiver_var} = ")?;
+            self.generate_expression(underlying_receiver)?;
+            write!(self.output, " in ")?;
+
+            // Total number of messages in the cascade: first + remaining
+            let total_messages = messages.len() + 1;
+
+            for index in 0..total_messages {
+                let is_last = index == total_messages - 1;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    write!(self.output, "let _ = ")?;
+                }
+
+                // Determine which selector/arguments to use:
+                // index 0 -> first message from the initial MessageSend
+                // index > 0 -> messages[index - 1]
+                let (selector, arguments): (&crate::ast::MessageSelector, &[Expression]) =
+                    if index == 0 {
+                        (first_selector, first_arguments.as_slice())
+                    } else {
+                        let msg = &messages[index - 1];
+                        (&msg.selector, msg.arguments.as_slice())
+                    };
+
+                // Generate async message send to the receiver variable
+                let future_var = self.fresh_var("Future");
+                write!(
+                    self.output,
+                    "let {future_var} = call 'beamtalk_future':'new'() in "
+                )?;
+                write!(
+                    self.output,
+                    "let _ = call 'gen_server':'cast'({receiver_var}, {{"
+                )?;
+
+                // Selector
+                write!(self.output, "'")?;
+                match selector {
+                    crate::ast::MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+                    crate::ast::MessageSelector::Keyword(parts) => {
+                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                        write!(self.output, "{name}")?;
+                    }
+                    crate::ast::MessageSelector::Binary(_) => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: "binary selectors in cascades".to_string(),
+                            location: "cascade message with binary selector".to_string(),
+                        });
+                    }
+                }
+                write!(self.output, "', [")?;
+
+                // Arguments
+                for (j, arg) in arguments.iter().enumerate() {
+                    if j > 0 {
+                        write!(self.output, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+
+                write!(self.output, "], {future_var}}}) in {future_var}")?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
+            }
+
+            Ok(())
+        } else {
+            // Fallback: if the receiver is not a MessageSend (which should not
+            // happen for well-formed cascades), preserve the previous behavior:
+            // evaluate the receiver once and send all cascade messages to it.
+            let receiver_var = self.fresh_temp_var("Receiver");
+            write!(self.output, "let {receiver_var} = ")?;
+            self.generate_expression(receiver)?;
+            write!(self.output, " in ")?;
+
+            // Generate each message send, discarding intermediate results
+            for (i, message) in messages.iter().enumerate() {
+                let is_last = i == messages.len() - 1;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    write!(self.output, "let _ = ")?;
+                }
+
+                // Generate async message send to the receiver variable
+                let future_var = self.fresh_var("Future");
+                write!(
+                    self.output,
+                    "let {future_var} = call 'beamtalk_future':'new'() in "
+                )?;
+                write!(
+                    self.output,
+                    "let _ = call 'gen_server':'cast'({receiver_var}, {{"
+                )?;
+
+                // Selector
+                write!(self.output, "'")?;
+                match &message.selector {
+                    crate::ast::MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+                    crate::ast::MessageSelector::Keyword(parts) => {
+                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                        write!(self.output, "{name}")?;
+                    }
+                    crate::ast::MessageSelector::Binary(_) => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: "binary selectors in cascades".to_string(),
+                            location: "cascade message with binary selector".to_string(),
+                        });
+                    }
+                }
+                write!(self.output, "', [")?;
+
+                // Arguments
+                for (j, arg) in message.arguments.iter().enumerate() {
+                    if j > 0 {
+                        write!(self.output, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+
+                write!(self.output, "], {future_var}}}) in {future_var}")?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
+            }
+
+            Ok(())
+        }
+    }
+
     /// Tries to generate code for block evaluation messages.
     ///
     /// Block evaluation messages (`value`, `value:`, `whileTrue:`, etc.) are
@@ -1218,7 +1409,7 @@ impl CoreErlangGenerator {
             }
 
             // Binary selectors - not used for Dictionary methods
-            _ => Ok(None),
+            MessageSelector::Binary(_) => Ok(None),
         }
     }
 
@@ -2457,5 +2648,336 @@ end
         );
 
         generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_empty_map_literal() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let pairs = vec![];
+        let result = generator.generate_map_literal(&pairs);
+        assert!(result.is_ok());
+        assert_eq!(generator.output.trim(), "~{}~");
+    }
+
+    #[test]
+    fn test_generate_map_literal_with_atoms() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let pairs = vec![
+            MapPair::new(
+                Expression::Literal(Literal::Symbol("name".into()), Span::new(2, 7)),
+                Expression::Literal(Literal::String("Alice".into()), Span::new(11, 18)),
+                Span::new(2, 18),
+            ),
+            MapPair::new(
+                Expression::Literal(Literal::Symbol("age".into()), Span::new(20, 24)),
+                Expression::Literal(Literal::Integer(30), Span::new(28, 30)),
+                Span::new(20, 30),
+            ),
+        ];
+
+        let result = generator.generate_map_literal(&pairs);
+        assert!(result.is_ok());
+        // Symbols become atoms in Core Erlang
+        assert!(
+            generator.output.contains("'name'"),
+            "Output should contain 'name': {}",
+            generator.output
+        );
+        // Strings are represented as binaries with character codes
+        assert!(
+            generator.output.contains("#<65>"),
+            "Output should contain character code for 'A': {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("'age'"),
+            "Output should contain 'age': {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("30"),
+            "Output should contain 30: {}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_generate_map_literal_compiles() {
+        use std::fs;
+        use std::process::Command;
+
+        let pairs = vec![MapPair::new(
+            Expression::Literal(Literal::Symbol("key".into()), Span::new(2, 6)),
+            Expression::Literal(Literal::String("value".into()), Span::new(10, 17)),
+            Span::new(2, 17),
+        )];
+
+        let map_expr = Expression::MapLiteral {
+            pairs,
+            span: Span::new(0, 19),
+        };
+
+        let code =
+            generate_repl_expression(&map_expr, "test_map_lit").expect("codegen should succeed");
+
+        // Verify the generated Core Erlang contains the map literal syntax
+        assert!(
+            code.contains("~{"),
+            "Should contain Core Erlang map syntax ~{{"
+        );
+        // Symbols become atoms in Core Erlang
+        assert!(code.contains("'key'"));
+        // Strings are represented as binaries with character codes
+        assert!(
+            code.contains("#<"),
+            "String should be represented as binary"
+        );
+
+        // Try to compile with erlc if available
+        let temp_dir = std::env::temp_dir();
+        let core_file = temp_dir.join("test_map_lit.core");
+        if let Ok(()) = fs::write(&core_file, &code) {
+            let output = Command::new("erlc")
+                .arg("+from_core")
+                .arg(&core_file)
+                .current_dir(&temp_dir)
+                .output();
+
+            // Clean up
+            let _ = fs::remove_file(&core_file);
+            let beam_file = temp_dir.join("test_map_lit.beam");
+            let _ = fs::remove_file(&beam_file);
+
+            // Check compilation result if erlc is available
+            if let Ok(output) = output {
+                assert!(
+                    output.status.success(),
+                    "erlc compilation of map literal failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    code
+                );
+            }
+        }
+    }
+
+    // ========================================================================
+    // Cascade Code Generation Tests (BT-86)
+    // ========================================================================
+
+    #[test]
+    fn test_cascade_unary_messages() {
+        // x negated; abs  (two unary messages to x)
+        // Parser creates:
+        // - receiver: MessageSend { receiver: Identifier(x), selector: Unary(negated), args: [] }
+        // - messages: [CascadeMessage { selector: Unary(abs), args: [] }]
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let x_ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(x_ident),
+            selector: MessageSelector::Unary("negated".into()),
+            arguments: vec![],
+            span: Span::new(0, 9),
+        };
+
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Unary("abs".into()),
+                vec![],
+                Span::new(11, 14),
+            )],
+            span: Span::new(0, 14),
+        };
+
+        generator.generate_expression(&cascade).unwrap();
+        let output = &generator.output;
+
+        // Should bind the underlying receiver (x) once
+        assert!(
+            output.contains("let _Receiver1 = call 'maps':'get'('x', State) in"),
+            "Should bind the underlying receiver x. Got: {output}"
+        );
+
+        // Should send BOTH messages (negated AND abs) to the receiver
+        assert!(
+            output.contains("'negated'"),
+            "Should send first message 'negated'. Got: {output}"
+        );
+        assert!(
+            output.contains("'abs'"),
+            "Should send second message 'abs'. Got: {output}"
+        );
+
+        // Should use gen_server:cast for async message sends
+        assert!(
+            output.contains("call 'gen_server':'cast'(_Receiver1"),
+            "Should send messages to the bound receiver. Got: {output}"
+        );
+
+        // Should create futures for async messages
+        assert!(
+            output.contains("call 'beamtalk_future':'new'()"),
+            "Should create futures for async messages. Got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_cascade_keyword_messages() {
+        // collection at: 1 put: 'a'; at: 2 put: 'b'; size
+        // Parser creates:
+        // - receiver: MessageSend { receiver: Identifier(collection), selector: Keyword(at:put:), args: [1, 'a'] }
+        // - messages: [CascadeMessage { selector: Keyword(at:put:), args: [2, 'b'] },
+        //              CascadeMessage { selector: Unary(size), args: [] }]
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let collection_ident =
+            Expression::Identifier(Identifier::new("collection", Span::new(0, 10)));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(collection_ident),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("at:", Span::new(11, 14)),
+                KeywordPart::new("put:", Span::new(16, 20)),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Integer(1), Span::new(15, 16)),
+                Expression::Literal(Literal::String("a".into()), Span::new(21, 24)),
+            ],
+            span: Span::new(0, 24),
+        };
+
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![
+                CascadeMessage::new(
+                    MessageSelector::Keyword(vec![
+                        KeywordPart::new("at:", Span::new(26, 29)),
+                        KeywordPart::new("put:", Span::new(31, 35)),
+                    ]),
+                    vec![
+                        Expression::Literal(Literal::Integer(2), Span::new(30, 31)),
+                        Expression::Literal(Literal::String("b".into()), Span::new(36, 39)),
+                    ],
+                    Span::new(26, 39),
+                ),
+                CascadeMessage::new(
+                    MessageSelector::Unary("size".into()),
+                    vec![],
+                    Span::new(41, 45),
+                ),
+            ],
+            span: Span::new(0, 45),
+        };
+
+        generator.generate_expression(&cascade).unwrap();
+        let output = &generator.output;
+
+        // Should bind the underlying receiver (collection) once
+        assert!(
+            output.contains("let _Receiver1 = call 'maps':'get'('collection', State) in"),
+            "Should bind the underlying receiver collection. Got: {output}"
+        );
+
+        // Should send all three messages
+        assert!(
+            output.contains("'at:put:'"),
+            "Should send keyword message 'at:put:'. Got: {output}"
+        );
+        assert!(
+            output.contains("'size'"),
+            "Should send unary message 'size'. Got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_cascade_binary_selector_error() {
+        // counter + 1; negated  (binary selector in cascade - should error)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let counter_ident = Expression::Identifier(Identifier::new("counter", Span::new(0, 7)));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(counter_ident),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(10, 11))],
+            span: Span::new(0, 11),
+        };
+
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Unary("negated".into()),
+                vec![],
+                Span::new(13, 20),
+            )],
+            span: Span::new(0, 20),
+        };
+
+        let result = generator.generate_expression(&cascade);
+
+        // Binary selectors in cascades should return UnsupportedFeature error, not Internal
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CodeGenError::UnsupportedFeature { .. }),
+            "Binary selectors in cascades should return UnsupportedFeature, got: {err:?}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_cascade_repl_expression() {
+        // Test cascade in a full REPL module context
+        // x negated; abs
+        let x_ident = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(x_ident),
+            selector: MessageSelector::Unary("negated".into()),
+            arguments: vec![],
+            span: Span::new(0, 9),
+        };
+
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Unary("abs".into()),
+                vec![],
+                Span::new(11, 14),
+            )],
+            span: Span::new(0, 14),
+        };
+
+        let code = generate_repl_expression(&cascade, "test_cascade").expect("codegen should work");
+
+        // Should have module structure
+        assert!(
+            code.contains("module 'test_cascade' ['eval'/1]"),
+            "Should have module header. Got:\n{code}"
+        );
+
+        // Should bind the underlying receiver once
+        assert!(
+            code.contains("let _Receiver1 = call 'maps':'get'('x', State) in"),
+            "Should bind receiver x from State. Got:\n{code}"
+        );
+
+        // Should send both messages
+        assert!(
+            code.contains("'negated'"),
+            "Should have first message negated. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'abs'"),
+            "Should have second message abs. Got:\n{code}"
+        );
     }
 }

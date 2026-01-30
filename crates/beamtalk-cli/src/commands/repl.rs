@@ -53,6 +53,8 @@ use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
 use serde::Deserialize;
 
+use crate::paths::{beamtalk_dir, is_daemon_running};
+
 /// Default port for the REPL backend.
 const REPL_PORT: u16 = 9000;
 
@@ -197,12 +199,6 @@ impl ReplClient {
     }
 }
 
-/// Directory for beamtalk state files.
-fn beamtalk_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk"))
-}
-
 /// Path to REPL history file.
 fn history_path() -> Result<PathBuf> {
     let dir = beamtalk_dir()?;
@@ -256,34 +252,6 @@ fn find_runtime_dir() -> Result<PathBuf> {
     ))
 }
 
-/// Check if the compiler daemon is running.
-#[cfg(unix)]
-fn is_daemon_running() -> bool {
-    let Ok(dir) = beamtalk_dir() else {
-        return false;
-    };
-    let lockfile = dir.join("daemon.lock");
-    if !lockfile.exists() {
-        return false;
-    }
-
-    let Ok(pid_str) = fs::read_to_string(&lockfile) else {
-        return false;
-    };
-    let Ok(pid) = pid_str.trim().parse::<i32>() else {
-        return false;
-    };
-
-    // Check if process exists using kill(pid, 0)
-    // SAFETY: kill with signal 0 only checks existence
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn is_daemon_running() -> bool {
-    false
-}
-
 /// Start the compiler daemon in the background.
 fn start_daemon() -> Result<()> {
     eprintln!("Starting compiler daemon...");
@@ -304,7 +272,7 @@ fn start_daemon() -> Result<()> {
     // Wait a moment for daemon to start
     std::thread::sleep(Duration::from_millis(1000));
 
-    if !is_daemon_running() {
+    if is_daemon_running()?.is_none() {
         return Err(miette!(
             "Failed to start compiler daemon. Try: beamtalk daemon start --foreground"
         ));
@@ -456,7 +424,7 @@ pub fn run() -> Result<()> {
     println!();
 
     // Ensure compiler daemon is running
-    if !is_daemon_running() {
+    if is_daemon_running()?.is_none() {
         start_daemon()?;
     }
 
@@ -633,6 +601,7 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn format_value_string() {
@@ -682,6 +651,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn find_runtime_dir_respects_env_var() {
         // Create a temp directory with the expected structure (needs rebar.config)
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime");
@@ -703,6 +673,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn find_runtime_dir_env_var_requires_rebar_config() {
         // Create a temp directory WITHOUT rebar.config
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime_no_rebar");

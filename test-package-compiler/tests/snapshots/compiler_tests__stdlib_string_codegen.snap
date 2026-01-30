@@ -27,6 +27,8 @@ module 'stdlib_string' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change
     let DefaultState = ~{
         '__class__' => 'StdlibString',
         '__methods__' => call 'stdlib_string':'method_table'()
+        , 'greeting' => #{#<72>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#
+        , 'name' => #{#<87>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

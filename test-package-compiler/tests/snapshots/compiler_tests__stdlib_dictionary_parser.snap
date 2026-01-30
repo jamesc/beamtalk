@@ -15,58 +15,1091 @@ Module {
                     },
                 },
             ),
-            value: Error {
-                message: "Invalid assignment target",
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "name",
+                            ),
+                            Span {
+                                start: 152,
+                                end: 157,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "Alice",
+                            ),
+                            Span {
+                                start: 161,
+                                end: 168,
+                            },
+                        ),
+                        span: Span {
+                            start: 152,
+                            end: 168,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "age",
+                            ),
+                            Span {
+                                start: 170,
+                                end: 174,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                30,
+                            ),
+                            Span {
+                                start: 178,
+                                end: 180,
+                            },
+                        ),
+                        span: Span {
+                            start: 170,
+                            end: 180,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "city",
+                            ),
+                            Span {
+                                start: 182,
+                                end: 187,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "NYC",
+                            ),
+                            Span {
+                                start: 191,
+                                end: 196,
+                            },
+                        ),
+                        span: Span {
+                            start: 182,
+                            end: 196,
+                        },
+                    },
+                ],
                 span: Span {
                     start: 150,
-                    end: 203,
+                    end: 197,
                 },
             },
             span: Span {
                 start: 140,
-                end: 203,
+                end: 197,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "empty",
+                    span: Span {
+                        start: 198,
+                        end: 203,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [],
+                span: Span {
+                    start: 207,
+                    end: 210,
+                },
+            },
             span: Span {
-                start: 207,
-                end: 230,
+                start: 198,
+                end: 210,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "name",
+                    span: Span {
+                        start: 226,
+                        end: 230,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 234,
+                            end: 240,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 241,
+                                end: 244,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "name",
+                        ),
+                        Span {
+                            start: 245,
+                            end: 250,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 234,
+                    end: 250,
+                },
+            },
             span: Span {
-                start: 350,
-                end: 393,
+                start: 226,
+                end: 250,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "age",
+                    span: Span {
+                        start: 251,
+                        end: 254,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 258,
+                            end: 264,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 265,
+                                end: 268,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "age",
+                        ),
+                        Span {
+                            start: 269,
+                            end: 273,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 258,
+                    end: 273,
+                },
+            },
+            span: Span {
+                start: 251,
+                end: 273,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "title",
+                    span: Span {
+                        start: 303,
+                        end: 308,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 312,
+                            end: 318,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 319,
+                                end: 322,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "ifAbsent:",
+                            span: Span {
+                                start: 330,
+                                end: 339,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "title",
+                        ),
+                        Span {
+                            start: 323,
+                            end: 329,
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Literal(
+                                    String(
+                                        "Unknown",
+                                    ),
+                                    Span {
+                                        start: 341,
+                                        end: 350,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 340,
+                                end: 351,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 312,
+                    end: 351,
+                },
+            },
+            span: Span {
+                start: 303,
+                end: 351,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "older",
+                    span: Span {
+                        start: 388,
+                        end: 393,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 397,
+                            end: 403,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 404,
+                                end: 407,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "put:",
+                            span: Span {
+                                start: 413,
+                                end: 417,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "age",
+                        ),
+                        Span {
+                            start: 408,
+                            end: 412,
+                        },
+                    ),
+                    Literal(
+                        Integer(
+                            31,
+                        ),
+                        Span {
+                            start: 418,
+                            end: 420,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 397,
+                    end: 420,
+                },
+            },
+            span: Span {
+                start: 388,
+                end: 420,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withJob",
+                    span: Span {
+                        start: 437,
+                        end: 444,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 448,
+                            end: 454,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 455,
+                                end: 458,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "put:",
+                            span: Span {
+                                start: 464,
+                                end: 468,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "job",
+                        ),
+                        Span {
+                            start: 459,
+                            end: 463,
+                        },
+                    ),
+                    Literal(
+                        String(
+                            "Engineer",
+                        ),
+                        Span {
+                            start: 469,
+                            end: 479,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 448,
+                    end: 479,
+                },
+            },
+            span: Span {
+                start: 437,
+                end: 479,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "size",
+                    span: Span {
+                        start: 489,
+                        end: 493,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 497,
+                            end: 503,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "size",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 497,
+                    end: 508,
+                },
+            },
+            span: Span {
+                start: 489,
+                end: 508,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasName",
+                    span: Span {
+                        start: 522,
+                        end: 529,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 533,
+                            end: 539,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includesKey:",
+                            span: Span {
+                                start: 540,
+                                end: 552,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "name",
+                        ),
+                        Span {
+                            start: 553,
+                            end: 558,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 533,
+                    end: 558,
+                },
+            },
+            span: Span {
+                start: 522,
+                end: 558,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "hasJob",
+                    span: Span {
+                        start: 559,
+                        end: 565,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 569,
+                            end: 575,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includesKey:",
+                            span: Span {
+                                start: 576,
+                                end: 588,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "job",
+                        ),
+                        Span {
+                            start: 589,
+                            end: 593,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 569,
+                    end: 593,
+                },
+            },
+            span: Span {
+                start: 559,
+                end: 593,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "minimal",
+                    span: Span {
+                        start: 609,
+                        end: 616,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 620,
+                            end: 626,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "removeKey:",
+                            span: Span {
+                                start: 627,
+                                end: 637,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Symbol(
+                            "city",
+                        ),
+                        Span {
+                            start: 638,
+                            end: 643,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 620,
+                    end: 643,
+                },
+            },
+            span: Span {
+                start: 609,
+                end: 643,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "keys",
+                    span: Span {
+                        start: 668,
+                        end: 672,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 676,
+                            end: 682,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "keys",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 676,
+                    end: 687,
+                },
+            },
+            span: Span {
+                start: 668,
+                end: 687,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "values",
+                    span: Span {
+                        start: 688,
+                        end: 694,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "person",
+                        span: Span {
+                            start: 698,
+                            end: 704,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "values",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 698,
+                    end: 711,
+                },
+            },
+            span: Span {
+                start: 688,
+                end: 711,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "person",
+                    span: Span {
+                        start: 747,
+                        end: 753,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "keysAndValuesDo:",
+                        span: Span {
+                            start: 754,
+                            end: 770,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "k",
+                                span: Span {
+                                    start: 773,
+                                    end: 774,
+                                },
+                            },
+                            BlockParameter {
+                                name: "v",
+                                span: Span {
+                                    start: 776,
+                                    end: 777,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 782,
+                                            end: 792,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 793,
+                                                end: 798,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "k",
+                                            span: Span {
+                                                start: 799,
+                                                end: 800,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 782,
+                                    end: 800,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 771,
+                            end: 772,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 747,
+                end: 772,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "Transcript",
+                    span: Span {
+                        start: 803,
+                        end: 813,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "show:",
+                        span: Span {
+                            start: 814,
+                            end: 819,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Identifier(
+                    Identifier {
+                        name: "v",
+                        span: Span {
+                            start: 820,
+                            end: 821,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 803,
+                end: 821,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ]",
             span: Span {
                 start: 822,
-                end: 860,
+                end: 823,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found }",
+                span: Span {
+                    start: 884,
+                    end: 885,
+                },
+            },
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "collect:",
+                        span: Span {
+                            start: 886,
+                            end: 894,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "v",
+                                span: Span {
+                                    start: 897,
+                                    end: 898,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "v",
+                                        span: Span {
+                                            start: 901,
+                                            end: 902,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 905,
+                                            end: 906,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 901,
+                                    end: 906,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 895,
+                            end: 907,
+                        },
+                    },
+                ),
+            ],
             span: Span {
                 start: 884,
-                end: 939,
+                end: 907,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "base",
+                    span: Span {
+                        start: 935,
+                        end: 939,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "a",
+                            ),
+                            Span {
+                                start: 945,
+                                end: 947,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 951,
+                                end: 952,
+                            },
+                        ),
+                        span: Span {
+                            start: 945,
+                            end: 952,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "b",
+                            ),
+                            Span {
+                                start: 954,
+                                end: 956,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 960,
+                                end: 961,
+                            },
+                        ),
+                        span: Span {
+                            start: 954,
+                            end: 961,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 943,
+                    end: 962,
+                },
+            },
             span: Span {
-                start: 961,
-                end: 968,
+                start: 935,
+                end: 962,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "extra",
+                    span: Span {
+                        start: 963,
+                        end: 968,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "b",
+                            ),
+                            Span {
+                                start: 974,
+                                end: 976,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                3,
+                            ),
+                            Span {
+                                start: 980,
+                                end: 981,
+                            },
+                        ),
+                        span: Span {
+                            start: 974,
+                            end: 981,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "c",
+                            ),
+                            Span {
+                                start: 983,
+                                end: 985,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                4,
+                            ),
+                            Span {
+                                start: 989,
+                                end: 990,
+                            },
+                        ),
+                        span: Span {
+                            start: 983,
+                            end: 990,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 972,
+                    end: 991,
+                },
+            },
             span: Span {
-                start: 990,
-                end: 998,
+                start: 963,
+                end: 991,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "merged",
+                    span: Span {
+                        start: 992,
+                        end: 998,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "base",
+                        span: Span {
+                            start: 1002,
+                            end: 1006,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "merge:",
+                            span: Span {
+                                start: 1007,
+                                end: 1013,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "extra",
+                            span: Span {
+                                start: 1014,
+                                end: 1019,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 1002,
+                    end: 1019,
+                },
+            },
+            span: Span {
+                start: 992,
+                end: 1019,
             },
         },
     ],
@@ -111,15 +1144,6 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 150, end: 203 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 207, end: 230 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 350, end: 351 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 350, end: 393 } }
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 803, end: 813 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 822, end: 823 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 822, end: 860 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 884, end: 885 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 884, end: 939 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 961, end: 962 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 961, end: 968 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 990, end: 991 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 990, end: 998 } }

@@ -239,12 +239,12 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A map literal expression.
+    /// A map literal (dictionary/hash map).
     ///
-    /// Example: `#{#key => 'value', #age => 30}`
+    /// Example: `#{#name => 'Alice', #age => 30}`
     MapLiteral {
-        /// Key-value pairs in the map.
-        entries: Vec<MapEntry>,
+        /// The key-value pairs in the map.
+        pairs: Vec<MapPair>,
         /// Source location of the entire map literal.
         span: Span,
     },
@@ -690,6 +690,27 @@ pub enum BinaryEndianness {
     Native,
 }
 
+/// A key-value pair in a map literal.
+///
+/// Example: In `#{#name => 'Alice', #age => 30}`, each pair is a `MapPair`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapPair {
+    /// The key expression.
+    pub key: Expression,
+    /// The value expression.
+    pub value: Expression,
+    /// Source location of this key-value pair.
+    pub span: Span,
+}
+
+impl MapPair {
+    /// Creates a new map pair.
+    #[must_use]
+    pub fn new(key: Expression, value: Expression, span: Span) -> Self {
+        Self { key, value, span }
+    }
+}
+
 /// A message in a cascade.
 ///
 /// Cascades send multiple messages to the same receiver.
@@ -713,29 +734,6 @@ impl CascadeMessage {
             arguments,
             span,
         }
-    }
-}
-
-/// A key-value entry in a map literal.
-///
-/// Example: In `#{#name => 'Alice', #age => 30}`, there are two entries:
-/// - `MapEntry { key: Expression::Literal(Literal::Symbol("name")), value: Expression::Literal(Literal::String("Alice")), ... }`
-/// - `MapEntry { key: Expression::Literal(Literal::Symbol("age")), value: Expression::Literal(Literal::Integer(30)), ... }`
-#[derive(Debug, Clone, PartialEq)]
-pub struct MapEntry {
-    /// The key expression.
-    pub key: Expression,
-    /// The value expression.
-    pub value: Expression,
-    /// Source location of this map entry (key => value).
-    pub span: Span,
-}
-
-impl MapEntry {
-    /// Creates a new map entry.
-    #[must_use]
-    pub fn new(key: Expression, value: Expression, span: Span) -> Self {
-        Self { key, value, span }
     }
 }
 

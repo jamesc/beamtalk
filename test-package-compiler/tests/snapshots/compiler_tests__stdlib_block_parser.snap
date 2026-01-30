@@ -15,51 +15,567 @@ Module {
                     },
                 },
             ),
-            value: Error {
-                message: "Invalid assignment target",
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Literal(
+                            Integer(
+                                42,
+                            ),
+                            Span {
+                                start: 150,
+                                end: 152,
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 149,
+                        end: 153,
+                    },
+                },
+            ),
+            span: Span {
+                start: 140,
+                end: 153,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result",
+                    span: Span {
+                        start: 154,
+                        end: 160,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "block",
+                        span: Span {
+                            start: 164,
+                            end: 169,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "value",
+                ),
+                arguments: [],
                 span: Span {
-                    start: 149,
-                    end: 160,
+                    start: 164,
+                    end: 175,
                 },
             },
             span: Span {
-                start: 140,
-                end: 160,
+                start: 154,
+                end: 175,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "increment",
+                    span: Span {
+                        start: 204,
+                        end: 213,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [
+                        BlockParameter {
+                            name: "x",
+                            span: Span {
+                                start: 219,
+                                end: 220,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 223,
+                                        end: 224,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 227,
+                                        end: 228,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 223,
+                                end: 228,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 217,
+                        end: 229,
+                    },
+                },
+            ),
             span: Span {
-                start: 164,
-                end: 213,
+                start: 204,
+                end: 229,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result2",
+                    span: Span {
+                        start: 230,
+                        end: 237,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "increment",
+                        span: Span {
+                            start: 241,
+                            end: 250,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "value:",
+                            span: Span {
+                                start: 251,
+                                end: 257,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            5,
+                        ),
+                        Span {
+                            start: 258,
+                            end: 259,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 241,
+                    end: 259,
+                },
+            },
             span: Span {
-                start: 228,
-                end: 237,
+                start: 230,
+                end: 259,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "add",
+                    span: Span {
+                        start: 289,
+                        end: 292,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [
+                        BlockParameter {
+                            name: "x",
+                            span: Span {
+                                start: 298,
+                                end: 299,
+                            },
+                        },
+                        BlockParameter {
+                            name: "y",
+                            span: Span {
+                                start: 301,
+                                end: 302,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 305,
+                                        end: 306,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "y",
+                                        span: Span {
+                                            start: 309,
+                                            end: 310,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 305,
+                                end: 310,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 296,
+                        end: 311,
+                    },
+                },
+            ),
             span: Span {
-                start: 310,
-                end: 319,
+                start: 289,
+                end: 311,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result3",
+                    span: Span {
+                        start: 312,
+                        end: 319,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "add",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "value:",
+                            span: Span {
+                                start: 327,
+                                end: 333,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "value:",
+                            span: Span {
+                                start: 336,
+                                end: 342,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 334,
+                            end: 335,
+                        },
+                    ),
+                    Literal(
+                        Integer(
+                            4,
+                        ),
+                        Span {
+                            start: 343,
+                            end: 344,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 323,
+                    end: 344,
+                },
+            },
             span: Span {
-                start: 385,
-                end: 457,
+                start: 312,
+                end: 344,
             },
         },
-        Error {
-            message: "Invalid assignment target",
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "counter",
+                    span: Span {
+                        start: 360,
+                        end: 367,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    0,
+                ),
+                Span {
+                    start: 371,
+                    end: 372,
+                },
+            ),
             span: Span {
-                start: 490,
-                end: 499,
+                start: 360,
+                end: 372,
+            },
+        },
+        MessageSend {
+            receiver: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "counter",
+                                    span: Span {
+                                        start: 374,
+                                        end: 381,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "<",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        5,
+                                    ),
+                                    Span {
+                                        start: 384,
+                                        end: 385,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 374,
+                                end: 385,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 373,
+                        end: 386,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "whileTrue:",
+                        span: Span {
+                            start: 387,
+                            end: 397,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "counter",
+                                        span: Span {
+                                            start: 399,
+                                            end: 406,
+                                        },
+                                    },
+                                ),
+                                value: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "counter",
+                                            span: Span {
+                                                start: 410,
+                                                end: 417,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 420,
+                                                end: 421,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 410,
+                                        end: 421,
+                                    },
+                                },
+                                span: Span {
+                                    start: 399,
+                                    end: 421,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 398,
+                            end: 422,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 373,
+                end: 422,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "outer",
+                    span: Span {
+                        start: 452,
+                        end: 457,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 461,
+                    end: 463,
+                },
+            ),
+            span: Span {
+                start: 452,
+                end: 463,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "captureBlock",
+                    span: Span {
+                        start: 464,
+                        end: 476,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "outer",
+                                    span: Span {
+                                        start: 481,
+                                        end: 486,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "+",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        5,
+                                    ),
+                                    Span {
+                                        start: 489,
+                                        end: 490,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 481,
+                                end: 490,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 480,
+                        end: 491,
+                    },
+                },
+            ),
+            span: Span {
+                start: 464,
+                end: 491,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result4",
+                    span: Span {
+                        start: 492,
+                        end: 499,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "captureBlock",
+                        span: Span {
+                            start: 503,
+                            end: 515,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "value",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 503,
+                    end: 521,
+                },
+            },
+            span: Span {
+                start: 492,
+                end: 521,
             },
         },
     ],
@@ -102,15 +618,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 149, end: 160 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 164, end: 213 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 228, end: 229 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 228, end: 237 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 310, end: 311 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 310, end: 319 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 385, end: 386 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 385, end: 457 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 490, end: 491 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 490, end: 499 } }

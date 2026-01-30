@@ -37,7 +37,7 @@
 
 use crate::ast::{
     Block, BlockParameter, CascadeMessage, Comment, CommentKind, CompoundOperator, Expression,
-    Identifier, KeywordPart, Literal, MapEntry, MessageSelector, Module,
+    Identifier, KeywordPart, Literal, MapPair, MessageSelector, Module,
 };
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -610,7 +610,13 @@ impl Parser {
         let mut receiver = self.parse_primary();
 
         // Parse chain of unary messages
+        // Stop if the identifier is on a new line (start of new statement)
         while let TokenKind::Identifier(name) = self.current_kind() {
+            // A newline before the identifier indicates a new statement, not a message
+            if self.current_token().has_leading_newline() {
+                break;
+            }
+
             let selector = MessageSelector::Unary(name.clone());
             let tok = self.advance();
             let span = receiver.span().merge(tok.span());
@@ -655,6 +661,9 @@ impl Parser {
 
             // Parenthesized expression
             TokenKind::LeftParen => self.parse_parenthesized(),
+
+            // Map literal
+            TokenKind::MapOpen => self.parse_map_literal(),
 
             // Unexpected token - consume it to avoid getting stuck
             _ => {
@@ -802,6 +811,108 @@ impl Parser {
         Expression::Block(block)
     }
 
+    /// Parses a map literal: `#{key => value, ...}`
+    ///
+    /// Map keys and values are parsed as unary expressions (primaries + unary messages),
+    /// which stops at binary operators like `=>` and `,`. This allows nested maps and
+    /// simple expressions as keys/values while avoiding ambiguity with the map syntax.
+    fn parse_map_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
+        let start = start_token.map_or_else(|| self.current_token().span(), |t| t.span());
+
+        let mut pairs = Vec::new();
+
+        // Handle empty map: #{}
+        if self.check(&TokenKind::RightBrace) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::MapLiteral { pairs, span };
+        }
+
+        // Parse key-value pairs
+        loop {
+            let pair_start = self.current_token().span();
+
+            // Parse key expression (unary only - stops at `=>`, `,`, `}`)
+            let key = self.parse_unary_message();
+
+            // Expect '=>' separator between key and value
+            if !matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "=>") {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                self.diagnostics
+                    .push(Diagnostic::error("Expected '=>' after map key", span));
+                // Try to recover: skip to next comma or closing brace, handling nested braces
+                let mut brace_depth = 0;
+                while !matches!(self.current_kind(), TokenKind::Eof) {
+                    match self.current_kind() {
+                        TokenKind::MapOpen | TokenKind::LeftBrace => {
+                            brace_depth += 1;
+                            self.advance();
+                        }
+                        TokenKind::RightBrace => {
+                            if brace_depth == 0 {
+                                break;
+                            }
+                            brace_depth -= 1;
+                            self.advance();
+                        }
+                        TokenKind::BinarySelector(s) if s.as_str() == "," && brace_depth == 0 => {
+                            self.advance();
+                            break;
+                        }
+                        _ => {
+                            self.advance();
+                        }
+                    }
+                }
+                continue;
+            }
+            self.advance(); // consume '=>'
+
+            // Parse value expression (unary only - stops at `,`, `}`)
+            let value = self.parse_unary_message();
+
+            let pair_span = pair_start.merge(value.span());
+            pairs.push(MapPair::new(key, value, pair_span));
+
+            // Check for comma (continue) or closing brace (end)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBrace) {
+                    break;
+                }
+            } else if self.check(&TokenKind::RightBrace) {
+                break;
+            } else {
+                let bad_token = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Expected ',' or '}}' in map literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                ));
+                break;
+            }
+        }
+
+        // Expect closing brace
+        let end_span = if self.check(&TokenKind::RightBrace) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected '}' to close map literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::MapLiteral { pairs, span }
+    }
+
     /// Parses a parenthesized expression.
     fn parse_parenthesized(&mut self) -> Expression {
         let start = self
@@ -821,62 +932,6 @@ impl Parser {
             expression: Box::new(inner),
             span,
         }
-    }
-
-    /// Parses a map literal: `#{key => value, key2 => value2}`
-    /// Commas are optional separators (can use whitespace instead)
-    fn parse_map_literal(&mut self) -> Expression {
-        let hash_token = self.expect(&TokenKind::Hash, "Expected '#'").unwrap();
-        let start = hash_token.span();
-
-        self.expect(&TokenKind::LeftBrace, "Expected '{' after '#' for map literal");
-
-        let mut entries = Vec::new();
-
-        // Parse entries until we hit RightBrace or EOF
-        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-            let entry_start = self.current_token().span();
-
-            // Parse key expression - use comparison level to get full expressions
-            // but stop before => (which is a binary selector but not used in normal expressions)
-            let key = self.parse_comparison();
-
-            // Expect '=>' operator
-            let has_arrow = matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=>");
-            if !has_arrow {
-                self.error("Expected '=>' after map key");
-                // Try to recover by skipping to next RightBrace
-                while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
-                    self.advance();
-                }
-                break;
-            }
-            self.advance(); // consume '=>'
-
-            // Parse value expression - same level as key
-            let value = self.parse_comparison();
-
-            let entry_end = value.span();
-            let entry_span = entry_start.merge(entry_end);
-
-            entries.push(MapEntry::new(key, value, entry_span));
-
-            // Optionally consume comma separator (it's lexed as a BinarySelector)
-            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == ",") {
-                self.advance();
-            }
-
-            // Check if there's more entries - if next token is not }, continue
-            // This handles both comma-separated and space-separated entries
-        }
-
-        let end = self
-            .expect(&TokenKind::RightBrace, "Expected '}' to close map literal")
-            .map_or(start, |t| t.span());
-
-        let span = start.merge(end);
-
-        Expression::MapLiteral { entries, span }
     }
 }
 
@@ -1348,6 +1403,174 @@ mod tests {
         match &module.expressions[0] {
             Expression::FieldAccess { .. } => {}
             _ => panic!("Expected field access"),
+        }
+    }
+
+    #[test]
+    fn parse_empty_map() {
+        let module = parse_ok("#{}");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(matches!(
+            &module.expressions[0],
+            Expression::MapLiteral { pairs, .. } if pairs.is_empty()
+        ));
+    }
+
+    #[test]
+    fn parse_map_with_atom_keys() {
+        let module = parse_ok("#{#name => 'Alice', #age => 30}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                // First pair: #name => 'Alice'
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "name")
+                );
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "Alice")
+                );
+                // Second pair: #age => 30
+                assert!(
+                    matches!(&pairs[1].key, Expression::Literal(Literal::Symbol(s), _) if s == "age")
+                );
+                assert!(matches!(
+                    &pairs[1].value,
+                    Expression::Literal(Literal::Integer(30), _)
+                ));
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_string_keys() {
+        let module = parse_ok("#{'host' => 'localhost', 'port' => 8080}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::String(s), _) if s == "host")
+                );
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "localhost")
+                );
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_integer_keys() {
+        let module = parse_ok("#{1 => 'first', 2 => 'second'}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+                assert!(matches!(
+                    &pairs[0].key,
+                    Expression::Literal(Literal::Integer(1), _)
+                ));
+                assert!(
+                    matches!(&pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "first")
+                );
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_with_trailing_comma() {
+        let module = parse_ok("#{#a => 1, #b => 2,}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 2);
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_maps() {
+        let module = parse_ok("#{#outer => #{#inner => 'value'}}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MapLiteral { pairs, .. } => {
+                assert_eq!(pairs.len(), 1);
+                // Outer key is #outer
+                assert!(
+                    matches!(&pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "outer")
+                );
+                // Value is a nested map
+                match &pairs[0].value {
+                    Expression::MapLiteral {
+                        pairs: inner_pairs, ..
+                    } => {
+                        assert_eq!(inner_pairs.len(), 1);
+                        assert!(
+                            matches!(&inner_pairs[0].key, Expression::Literal(Literal::Symbol(s), _) if s == "inner")
+                        );
+                        assert!(
+                            matches!(&inner_pairs[0].value, Expression::Literal(Literal::String(s), _) if s == "value")
+                        );
+                    }
+                    _ => panic!("Expected nested MapLiteral"),
+                }
+            }
+            _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_map_assignment() {
+        let module = parse_ok("person := #{#name => 'Alice'}");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::Assignment { target, value, .. } => {
+                assert!(
+                    matches!(target.as_ref(), Expression::Identifier(id) if id.name == "person")
+                );
+                assert!(
+                    matches!(value.as_ref(), Expression::MapLiteral { pairs, .. } if pairs.len() == 1)
+                );
+            }
+            _ => panic!("Expected Assignment"),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_map_assignments() {
+        let source = "empty := #{}\nperson := #{#name => 'Alice', #age => 30}\n";
+        let module = parse_ok(source);
+
+        assert_eq!(module.expressions.len(), 2, "Expected 2 expressions");
+
+        // First: empty := #{}
+        match &module.expressions[0] {
+            Expression::Assignment { target, value, .. } => {
+                assert!(
+                    matches!(target.as_ref(), Expression::Identifier(id) if id.name == "empty")
+                );
+                assert!(
+                    matches!(value.as_ref(), Expression::MapLiteral { pairs, .. } if pairs.is_empty())
+                );
+            }
+            other => panic!("Expected Assignment for first expr, got {other:?}"),
+        }
+
+        // Second: person := #{#name => 'Alice', #age => 30}
+        match &module.expressions[1] {
+            Expression::Assignment { target, value, .. } => {
+                assert!(
+                    matches!(target.as_ref(), Expression::Identifier(id) if id.name == "person")
+                );
+                assert!(
+                    matches!(value.as_ref(), Expression::MapLiteral { pairs, .. } if pairs.len() == 2)
+                );
+            }
+            other => panic!("Expected Assignment for second expr, got {other:?}"),
         }
     }
 }
