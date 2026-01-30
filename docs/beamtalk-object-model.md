@@ -1454,6 +1454,6 @@ LFE Flavors proves that OOP semantics work well on BEAM when:
 
 **Beamtalk's additions:**
 - Async-first (futures) instead of sync-first
-- Compile-time code generation (Rust) instead of runtime macro expansion
+- Full compile-time code generation (Rust) instead of Flavors' hybrid approach (compile-time macros + runtime module generation for `-flavor` modules)
 - ETS-based instance tracking for `allInstances`
 - Integration with Smalltalk-style reflection (`class`, `respondsTo:`, etc.)
