@@ -94,14 +94,18 @@ WORKTREE_ROOT=$(dirname "$MAIN_REPO")
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 CURRENT_DIR=$(pwd)
 
+# Always fetch latest from origin first
+log_info "🔄 Fetching latest from origin..."
+pushd "$MAIN_REPO" > /dev/null
+git fetch origin --prune 2>/dev/null || true
+popd > /dev/null
+
 if [ "$CURRENT_BRANCH" = "$BRANCH" ]; then
     log_success "✅ Already on branch $BRANCH in current directory"
     WORKTREE_PATH="$CURRENT_DIR"
 else
     # Work from main repo to manage worktrees
     pushd "$MAIN_REPO" > /dev/null
-    
-    git fetch origin --prune 2>/dev/null || true
     
     EXISTING_WORKTREE=$(get_worktree_path "$BRANCH")
     
@@ -124,6 +128,20 @@ else
     
     popd > /dev/null
 fi
+
+# Update worktree with latest changes from remote
+log_info "🔄 Updating worktree with latest changes..."
+pushd "$WORKTREE_PATH" > /dev/null
+if git rev-parse --abbrev-ref "@{upstream}" &>/dev/null; then
+    if git pull --ff-only 2>/dev/null; then
+        log_success "✅ Worktree updated"
+    else
+        log_warn "⚠️  Could not fast-forward, may need manual merge"
+    fi
+else
+    log_gray "ℹ️  No upstream tracking branch, skipping pull"
+fi
+popd > /dev/null
 
 # Check for devcontainer CLI
 if ! command -v devcontainer &> /dev/null; then

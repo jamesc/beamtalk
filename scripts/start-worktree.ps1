@@ -120,6 +120,16 @@ if (-not $WorktreeRoot) {
 $currentBranch = Get-CurrentBranch
 $currentDir = Get-Location
 
+# Always fetch latest from origin first
+Write-Host "🔄 Fetching latest from origin..." -ForegroundColor Cyan
+Push-Location $mainRepo
+try {
+    git fetch origin --prune 2>$null
+}
+finally {
+    Pop-Location
+}
+
 if ($currentBranch -eq $Branch) {
     Write-Host "✅ Already on branch $Branch in current directory" -ForegroundColor Green
     $worktreePath = $currentDir.Path
@@ -128,8 +138,6 @@ else {
     # Check if worktree already exists
     Push-Location $mainRepo
     try {
-        git fetch origin --prune 2>$null
-        
         $existingWorktree = Get-WorktreePath -BranchName $Branch
         
         if ($existingWorktree) {
@@ -155,6 +163,28 @@ else {
     finally {
         Pop-Location
     }
+}
+
+# Update worktree with latest changes from remote
+Write-Host "🔄 Updating worktree with latest changes..." -ForegroundColor Cyan
+Push-Location $worktreePath
+try {
+    $trackingBranch = git rev-parse --abbrev-ref "@{upstream}" 2>$null
+    if ($trackingBranch) {
+        git pull --ff-only 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Worktree updated" -ForegroundColor Green
+        }
+        else {
+            Write-Host "⚠️  Could not fast-forward, may need manual merge" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "ℹ️  No upstream tracking branch, skipping pull" -ForegroundColor Gray
+    }
+}
+finally {
+    Pop-Location
 }
 
 # Check for devcontainer CLI
