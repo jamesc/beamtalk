@@ -4,6 +4,14 @@ How Beamtalk maps Smalltalk's "everything is an object" philosophy to the BEAM v
 
 This document analyzes the feasibility of full Smalltalk object reification on BEAM and recommends pragmatic design decisions for Beamtalk.
 
+**Related documents:**
+- [Design Principles](beamtalk-principles.md) — Core philosophy (actors, async-first, hot reload)
+- [Architecture](beamtalk-architecture.md) — Compiler, runtime, and code generation details
+- [BEAM Interop](beamtalk-interop.md) — Erlang/Elixir integration specification
+- [Language Features](beamtalk-language-features.md) — Syntax and feature reference
+
+**Important:** Beamtalk is **async-first** (see [Principle 7](beamtalk-principles.md#7-async-first-sync-when-needed)). All message sends return futures by default. This document focuses on object reification; see [Architecture](beamtalk-architecture.md#futurePromise-implementation) for async/future implementation details.
+
 ---
 
 ## Executive Summary
@@ -158,7 +166,7 @@ method selector         // => #increment
 method source           // => "increment => self.value += 1"
 method argumentCount    // => 0
 
-// Replace at runtime (hot patching)
+// Replace at runtime (hot patching) - low-level API
 Counter >> #increment put: [:self |
   Telemetry log: 'incrementing'
   self.value += 1
@@ -168,6 +176,8 @@ Counter >> #increment put: [:self |
 **BEAM implementation:**
 
 Methods are stored in the class object's method dictionary. Hot replacement updates the map entry, and BEAM's code loading makes the change visible to future invocations.
+
+**Note:** The `>>put:` API is the low-level runtime mechanism. For user-facing hot patching with state migration, use the `patch` syntax documented in [Language Features: Live Patching](beamtalk-language-features.md#live-patching). The `patch` syntax compiles down to `>>put:` calls plus `code_change/3` callbacks for state migration.
 
 **Semantic fidelity:** 100%. Methods are first-class, inspectable, replaceable.
 
@@ -225,7 +235,24 @@ Actor subclass: Proxy
 ```
 
 **BEAM implementation:**
+
+Message dispatch integrates with Beamtalk's async-first model. When a message arrives via `handle_cast` (async) or `handle_call` (sync), dispatch routes it to the appropriate handler or `doesNotUnderstand:`.
+
 ```erlang
+%% Async message dispatch (returns future to caller)
+handle_cast({Selector, Args, FuturePid}, State) ->
+    case dispatch(Selector, Args, State) of
+        {reply, Result, NewState} ->
+            FuturePid ! {resolved, Result},
+            {noreply, NewState};
+        {noreply, NewState} ->
+            {noreply, NewState}
+    end.
+
+%% Sync message dispatch (blocks caller)
+handle_call({Selector, Args}, _From, State) ->
+    dispatch(Selector, Args, State).
+
 dispatch(Selector, Args, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find(Selector, Methods) of
@@ -245,6 +272,8 @@ handle_dnu(Selector, Args, State) ->
             error({unknown_message, Selector, maps:get('__class__', State)})
     end.
 ```
+
+**Note:** `doesNotUnderstand:` follows the same async/sync semantics as regular methods. If the original send was async, the DNU handler's result resolves the future. See [Architecture: Future/Promise Implementation](beamtalk-architecture.md#futurePromise-implementation) for details.
 
 **Semantic fidelity:** 100%. Full `doesNotUnderstand:` semantics available.
 
