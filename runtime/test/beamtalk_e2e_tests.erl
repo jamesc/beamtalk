@@ -220,36 +220,42 @@ spawn_preserves_class_and_methods_test() ->
 %%% ---------------------------------------------------------------------------
 
 %% Simulate Boolean>>ifTrue:ifFalse: message dispatch
+-spec beamtalk_if_true_if_false(boolean(), fun(() -> any()), fun(() -> any())) -> any().
 beamtalk_if_true_if_false(true, TrueBlock, _FalseBlock) when is_function(TrueBlock, 0) ->
     TrueBlock();
 beamtalk_if_true_if_false(false, _TrueBlock, FalseBlock) when is_function(FalseBlock, 0) ->
     FalseBlock().
 
 %% Simulate Boolean>>ifTrue: message dispatch
+-spec beamtalk_if_true(boolean(), fun(() -> any())) -> any().
 beamtalk_if_true(true, TrueBlock) when is_function(TrueBlock, 0) ->
     TrueBlock();
 beamtalk_if_true(false, _TrueBlock) ->
     false.
 
 %% Simulate Boolean>>ifFalse: message dispatch
+-spec beamtalk_if_false(boolean(), fun(() -> any())) -> any().
 beamtalk_if_false(true, _FalseBlock) ->
     true;
 beamtalk_if_false(false, FalseBlock) when is_function(FalseBlock, 0) ->
     FalseBlock().
 
 %% Simulate Boolean>>and: message dispatch
+-spec beamtalk_and(boolean(), fun(() -> any())) -> any().
 beamtalk_and(true, Block) when is_function(Block, 0) ->
     Block();
 beamtalk_and(false, _Block) ->
     false.
 
 %% Simulate Boolean>>or: message dispatch
+-spec beamtalk_or(boolean(), fun(() -> any())) -> any().
 beamtalk_or(true, _Block) ->
     true;
 beamtalk_or(false, Block) when is_function(Block, 0) ->
     Block().
 
 %% Simulate Boolean>>not message dispatch
+-spec beamtalk_not(boolean()) -> boolean().
 beamtalk_not(true) ->
     false;
 beamtalk_not(false) ->
