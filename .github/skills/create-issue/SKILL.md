@@ -14,7 +14,7 @@ Every issue **must** have:
 | Field | Value |
 |-------|-------|
 | **Team** | `BT` |
-| **Assignee** | `jamesc` (James Casey) |
+| **Assignee** | `jamesc.000@gmail.com` (James Casey) |
 | **Agent State Label** | `agent-ready` or `needs-spec` |
 | **Estimate (Size)** | T-shirt size: S, M, L, XL |
 | **Type** | See issue types below |
@@ -101,7 +101,7 @@ Always set one of these labels:
   "action": "create",
   "title": "Implement feature X",
   "team": "BT",
-  "assignee": "jamesc",
+  "assignee": "jamesc.000@gmail.com",
   "body": "Context:\n...\n\nAcceptance Criteria:\n- [ ] ...",
   "labels": ["agent-ready", "Language Feature"],
   "priority": 3
@@ -129,7 +129,7 @@ When issues have dependencies, **always** set up Linear's "blocks" relationships
 
 ## Rules
 
-- **Always assign to jamesc** - all issues go to James Casey
+- **Always assign to jamesc.000@gmail.com** - all issues go to James Casey
 - If issue A must be completed before issue B can start, then A "blocks" B
 - Always create blocking relationships when dependencies are mentioned
 - Set estimate based on complexity, not time

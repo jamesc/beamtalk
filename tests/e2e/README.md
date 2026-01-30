@@ -39,7 +39,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | `and:` / `or:` | 🔄 | — | Returns future (needs await) |
 | `not` | 🔄 | — | Returns future (needs await) |
 | **Cascades** | | | |
-| Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Parsed, codegen not implemented |
+| Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Codegen works, needs stateful E2E¹ |
 | **Actors** | | | |
 | `spawn` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
 | Async messages | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
@@ -52,6 +52,9 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 - 🔄 = Implemented but needs refinement (returns future in REPL)
 - 📋 = Documented, implementation in progress
 - — = No separate test file (documented elsewhere)
+
+**Footnotes:**
+1. Cascades send async actor messages, so E2E testing requires spawning an actor first and maintaining state across expressions. See snapshot tests in `test-package-compiler/cases/cascades/` for codegen verification.
 
 ## Directory Structure
 

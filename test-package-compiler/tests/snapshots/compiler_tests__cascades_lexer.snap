@@ -1,0 +1,15 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("runCascade"), span: Span { start: 208, end: 218 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test cascade message sends"), Whitespace("\n"), LineComment("// Sends multiple messages to the same receiver"), Whitespace("\n\n"), LineComment("// Method that uses a cascade - all messages go to counter"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 219, end: 221 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 222, end: 223 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("counter"), span: Span { start: 224, end: 231 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("increment"), span: Span { start: 232, end: 241 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 241, end: 242 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("increment"), span: Span { start: 243, end: 252 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 252, end: 253 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("getValue"), span: Span { start: 254, end: 262 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 263, end: 264 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 265, end: 265 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

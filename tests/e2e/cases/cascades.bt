@@ -6,12 +6,17 @@
 //
 // SYNTAX: receiver msg1; msg2; msg3
 //
-// NOTE: Cascade syntax is parsed but code generation is not yet implemented.
-// These tests document the intended syntax for future implementation.
+// Implementation Status: Code generation implemented BT-86
 //
-// Cascades are useful for initialization patterns:
-//   collection add: 1; add: 2; add: 3
-//   stream write: 'hello'; nl; write: 'world'
+// Cascades are supported in compiled modules. The receiver is evaluated once,
+// and all cascade messages are sent to that same actor. The final message's
+// result is returned.
 //
-// The parser recognizes cascade syntax, but the REPL doesn't yet evaluate it.
-// See: Expression::Cascade in crates/beamtalk-core/src/ast.rs
+// Limitations:
+// - Binary selectors (like +, -, etc.) are not yet supported in cascades
+// - REPL evaluation of cascades may have limitations due to how the REPL
+//   compiles expressions
+//
+// Example in compiled modules:
+//   runCascade := [ counter increment; increment; getValue ]
+// This sends increment twice, then getValue, all to counter.
