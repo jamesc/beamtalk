@@ -35,7 +35,7 @@
       }
     }
   },
-  "postCreateCommand": "cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder}/target /usr/local/cargo/registry && cargo fetch",
   "postStartCommand": "bash .devcontainer/fix-worktree-git.sh && mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json",
   "remoteUser": "vscode",
   // Caching:
