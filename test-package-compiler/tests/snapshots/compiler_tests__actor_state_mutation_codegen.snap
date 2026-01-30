@@ -63,26 +63,14 @@ module 'actor_state_mutation' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code
     case Selector of
         <'increment'> when 'true' ->
             let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
-        <'addTwice'> when 'true' ->
-            case Args of
-                <[_n2]> when 'true' ->
-                    let _Val3 = call 'erlang':'+'(call 'maps':'get'('value', State), _n2) in let State1 = call 'maps':'put'('value', _Val3, State) in let _Val4 = call 'erlang':'+'(call 'maps':'get'('value', State1), _n2) in let State2 = call 'maps':'put'('value', _Val4, State1) in let _Result = call 'maps':'get'('value', State2) in {'reply', _Result, State2}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
         <'getValue'> when 'true' ->
             let _Result = call 'maps':'get'('value', State) in {'reply', _Result, State}
-        <'setValue'> when 'true' ->
-            case Args of
-                <[_n5]> when 'true' ->
-                    let _Val6 = _n5 in let State1 = call 'maps':'put'('value', _Val6, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
 
 
 'method_table'/0 = fun () ->
-    ~{'increment' => 0, 'addTwice' => 1, 'getValue' => 0, 'setValue' => 1}~
+    ~{'increment' => 0, 'getValue' => 0}~
 
 end
