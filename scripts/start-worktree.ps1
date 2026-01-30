@@ -1,0 +1,190 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+<#
+.SYNOPSIS
+    Start a Copilot devcontainer session for a git worktree branch.
+
+.DESCRIPTION
+    Creates a worktree for the given branch (if needed) and starts VS Code
+    in a devcontainer. Each worktree gets its own container for parallel
+    Copilot sessions.
+
+.PARAMETER Branch
+    The branch name to work on (e.g., "BT-99-feature" or "main")
+
+.PARAMETER BaseBranch
+    The base branch to create new branches from (default: "main")
+
+.PARAMETER WorktreeRoot
+    Directory where worktrees are created (default: parent of main repo)
+
+.EXAMPLE
+    .\start-worktree.ps1 BT-99-feature
+    
+.EXAMPLE
+    .\start-worktree.ps1 -Branch BT-99 -BaseBranch main
+#>
+
+param(
+    [Parameter(Mandatory=$true, Position=0)]
+    [string]$Branch,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$BaseBranch = "main",
+    
+    [Parameter(Mandatory=$false)]
+    [string]$WorktreeRoot = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+# Find the main repo root (where .git is a directory, not a file)
+function Get-MainRepoRoot {
+    $current = Get-Location
+    
+    # Check if we're in a worktree (has .git file) or main repo (has .git dir)
+    $gitPath = Join-Path $current ".git"
+    
+    if (Test-Path $gitPath -PathType Container) {
+        # We're in the main repo
+        return $current.Path
+    }
+    elseif (Test-Path $gitPath -PathType Leaf) {
+        # We're in a worktree, read the .git file to find main repo
+        $gitContent = Get-Content $gitPath -Raw
+        if ($gitContent -match "gitdir:\s*(.+)") {
+            $gitDir = $matches[1].Trim()
+            # gitDir points to .git/worktrees/name, go up to .git then to repo
+            $mainGit = Split-Path (Split-Path $gitDir -Parent) -Parent
+            return Split-Path $mainGit -Parent
+        }
+    }
+    
+    # Try to find it via git
+    $gitRoot = git rev-parse --show-toplevel 2>$null
+    if ($gitRoot) {
+        return $gitRoot
+    }
+    
+    throw "Could not find git repository root"
+}
+
+# Get current branch name
+function Get-CurrentBranch {
+    return (git branch --show-current 2>$null)
+}
+
+# Check if branch exists (local or remote)
+function Test-BranchExists {
+    param([string]$BranchName)
+    
+    $local = git branch --list $BranchName 2>$null
+    if ($local) { return $true }
+    
+    $remote = git branch -r --list "origin/$BranchName" 2>$null
+    if ($remote) { return $true }
+    
+    return $false
+}
+
+# Check if worktree exists for branch
+function Get-WorktreePath {
+    param([string]$BranchName)
+    
+    $worktrees = git worktree list --porcelain 2>$null
+    foreach ($line in $worktrees) {
+        if ($line -match "^worktree\s+(.+)") {
+            $wtPath = $matches[1]
+        }
+        if ($line -match "^branch\s+refs/heads/(.+)" -and $matches[1] -eq $BranchName) {
+            return $wtPath
+        }
+    }
+    return $null
+}
+
+# Main script
+Write-Host "🚀 Starting worktree session for branch: $Branch" -ForegroundColor Cyan
+
+# Find main repo
+$mainRepo = Get-MainRepoRoot
+Write-Host "📁 Main repo: $mainRepo" -ForegroundColor Gray
+
+# Set worktree root if not specified
+if (-not $WorktreeRoot) {
+    $WorktreeRoot = Split-Path $mainRepo -Parent
+}
+
+# Check if we're already on this branch in current directory
+$currentBranch = Get-CurrentBranch
+$currentDir = Get-Location
+
+if ($currentBranch -eq $Branch) {
+    Write-Host "✅ Already on branch $Branch in current directory" -ForegroundColor Green
+    $worktreePath = $currentDir.Path
+}
+else {
+    # Check if worktree already exists
+    Push-Location $mainRepo
+    try {
+        git fetch origin --prune 2>$null
+        
+        $existingWorktree = Get-WorktreePath -BranchName $Branch
+        
+        if ($existingWorktree) {
+            Write-Host "✅ Worktree already exists at: $existingWorktree" -ForegroundColor Green
+            $worktreePath = $existingWorktree
+        }
+        else {
+            # Create new worktree
+            $worktreePath = Join-Path $WorktreeRoot $Branch
+            
+            if (Test-BranchExists -BranchName $Branch) {
+                Write-Host "📌 Creating worktree for existing branch: $Branch" -ForegroundColor Yellow
+                git worktree add $worktreePath $Branch
+            }
+            else {
+                Write-Host "🌱 Creating worktree with new branch: $Branch (from $BaseBranch)" -ForegroundColor Yellow
+                git worktree add -b $Branch $worktreePath $BaseBranch
+            }
+            
+            Write-Host "✅ Worktree created at: $worktreePath" -ForegroundColor Green
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+# Check for devcontainer CLI
+$devcontainerCli = Get-Command devcontainer -ErrorAction SilentlyContinue
+if (-not $devcontainerCli) {
+    Write-Host "⚠️  devcontainer CLI not found. Installing..." -ForegroundColor Yellow
+    npm install -g @devcontainers/cli
+}
+
+# Check BEAMTALK_MAIN_GIT_PATH is set
+if (-not $env:BEAMTALK_MAIN_GIT_PATH) {
+    $mainGitPath = Join-Path $mainRepo ".git"
+    Write-Host "⚠️  BEAMTALK_MAIN_GIT_PATH not set. Setting for this session..." -ForegroundColor Yellow
+    $env:BEAMTALK_MAIN_GIT_PATH = $mainGitPath
+    Write-Host "   Set permanently with: setx BEAMTALK_MAIN_GIT_PATH `"$mainGitPath`"" -ForegroundColor Gray
+}
+
+# Start devcontainer
+Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
+Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
+
+# Build and start the container
+devcontainer up --workspace-folder $worktreePath
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n❌ Failed to start devcontainer" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "`n✨ Container ready! Connecting..." -ForegroundColor Green
+
+# Connect to the container
+devcontainer exec --workspace-folder $worktreePath bash
