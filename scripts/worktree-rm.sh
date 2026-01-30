@@ -55,6 +55,40 @@ log_warn() { echo -e "${YELLOW}$1${NC}"; }
 log_error() { echo -e "${RED}$1${NC}"; }
 log_gray() { echo -e "${GRAY}$1${NC}"; }
 
+# Stop and remove devcontainer for a worktree
+remove_devcontainer() {
+    local worktree_path="$1"
+    local folder_name
+    folder_name=$(basename "$worktree_path")
+    
+    # Find containers by devcontainer.local_folder label
+    # This is more reliable than matching container names
+    local containers
+    containers=$(docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>/dev/null | grep -F "$worktree_path" || true)
+    
+    if [ -n "$containers" ]; then
+        log_info "🐳 Found devcontainer(s) for $folder_name"
+        echo "$containers" | while IFS=$'\t' read -r container_id container_name _; do
+            log_gray "   Stopping: $container_name"
+            docker stop "$container_id" 2>/dev/null || true
+            
+            log_gray "   Removing: $container_name"
+            docker rm "$container_id" 2>/dev/null || true
+        done
+        log_success "✅ Devcontainer(s) removed"
+    else
+        log_gray "ℹ️  No devcontainer found for $folder_name"
+    fi
+    
+    # Also remove the target cache volume for this worktree
+    local volume_name="${folder_name}-target-cache"
+    if docker volume ls --format "{{.Name}}" 2>/dev/null | grep -q "^${volume_name}$"; then
+        log_info "🗑️  Removing target cache volume: $volume_name"
+        docker volume rm "$volume_name" 2>/dev/null || true
+        log_success "✅ Volume removed"
+    fi
+}
+
 # Find the main repo root
 get_main_repo_root() {
     local git_path=".git"
@@ -141,10 +175,18 @@ fi
 
 # Try standard worktree remove first
 log_info "🗑️  Removing worktree..."
-if git worktree remove $FORCE "$WORKTREE_PATH" 2>/dev/null; then
+REMOVE_OUTPUT=$(git worktree remove $FORCE "$WORKTREE_PATH" 2>&1)
+REMOVE_EXIT=$?
+
+if [ $REMOVE_EXIT -eq 0 ]; then
     log_success "✅ Worktree removed successfully"
+elif echo "$REMOVE_OUTPUT" | grep -q "modified or untracked files"; then
+    log_error "❌ Worktree has uncommitted changes"
+    log_warn "   Use -f/--force to delete anyway, or commit/stash your changes first."
+    popd > /dev/null
+    exit 1
 else
-    log_warn "⚠️  git worktree remove failed"
+    log_warn "⚠️  git worktree remove failed: $REMOVE_OUTPUT"
     log_info "🔧 Attempting manual cleanup..."
     
     # Manual cleanup
@@ -170,6 +212,11 @@ else
     git worktree prune
     
     log_success "✅ Manual cleanup complete"
+fi
+
+# Remove devcontainer if it exists
+if [ -n "$WORKTREE_PATH" ]; then
+    remove_devcontainer "$WORKTREE_PATH"
 fi
 
 # Ask about deleting the branch
