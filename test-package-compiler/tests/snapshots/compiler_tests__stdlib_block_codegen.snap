@@ -27,6 +27,8 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
     let DefaultState = ~{
         '__class__' => 'StdlibBlock',
         '__methods__' => call 'stdlib_block':'method_table'()
+        , 'counter' => 0
+        , 'outer' => 10
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -60,12 +62,32 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
+        <'block'> when 'true' ->
+            let Result = 42
+            in {'reply', Result, State}
+        <'increment'> when 'true' ->
+            case Args of
+                <[_x1]> when 'true' ->
+                    let Result = call 'erlang':'+'(_x1, 1)
+                    in {'reply', Result, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+            end
+        <'add'> when 'true' ->
+            case Args of
+                <[_x2, _y3]> when 'true' ->
+                    let Result = call 'erlang':'+'(_x2, _y3)
+                    in {'reply', Result, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+            end
+        <'captureBlock'> when 'true' ->
+            let Result = call 'erlang':'+'(call 'maps':'get'('outer', State), 5)
+            in {'reply', Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
 
 
 'method_table'/0 = fun () ->
-    ~{}~
+    ~{'block' => 0, 'increment' => 1, 'add' => 2, 'captureBlock' => 0}~
 
 end

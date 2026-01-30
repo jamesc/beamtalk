@@ -66,7 +66,7 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
-use crate::ast::{Block, Expression, Identifier, Literal, MessageSelector, Module};
+use crate::ast::{Block, Expression, Identifier, Literal, MapPair, MessageSelector, Module};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -728,6 +728,7 @@ impl CoreErlangGenerator {
                 receiver, field, ..
             } => self.generate_field_access(receiver, field),
             Expression::Parenthesized { expression, .. } => self.generate_expression(expression),
+            Expression::MapLiteral { pairs, .. } => self.generate_map_literal(pairs),
             Expression::Cascade {
                 receiver, messages, ..
             } => self.generate_cascade(receiver, messages),
@@ -792,6 +793,32 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Generates code for a map literal: `#{key => value, ...}`
+    fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
+        if pairs.is_empty() {
+            write!(self.output, "~{{}}~")?;
+            return Ok(());
+        }
+
+        write!(self.output, "~{{ ")?;
+
+        for (i, pair) in pairs.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+
+            // Generate the key
+            self.generate_expression(&pair.key)?;
+            write!(self.output, " => ")?;
+
+            // Generate the value
+            self.generate_expression(&pair.value)?;
+        }
+
+        write!(self.output, " }}~")?;
         Ok(())
     }
 
@@ -2494,6 +2521,118 @@ end
         );
 
         generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_empty_map_literal() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let pairs = vec![];
+        let result = generator.generate_map_literal(&pairs);
+        assert!(result.is_ok());
+        assert_eq!(generator.output.trim(), "~{}~");
+    }
+
+    #[test]
+    fn test_generate_map_literal_with_atoms() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        let pairs = vec![
+            MapPair::new(
+                Expression::Literal(Literal::Symbol("name".into()), Span::new(2, 7)),
+                Expression::Literal(Literal::String("Alice".into()), Span::new(11, 18)),
+                Span::new(2, 18),
+            ),
+            MapPair::new(
+                Expression::Literal(Literal::Symbol("age".into()), Span::new(20, 24)),
+                Expression::Literal(Literal::Integer(30), Span::new(28, 30)),
+                Span::new(20, 30),
+            ),
+        ];
+
+        let result = generator.generate_map_literal(&pairs);
+        assert!(result.is_ok());
+        // Symbols become atoms in Core Erlang
+        assert!(
+            generator.output.contains("'name'"),
+            "Output should contain 'name': {}",
+            generator.output
+        );
+        // Strings are represented as binaries with character codes
+        assert!(
+            generator.output.contains("#<65>"),
+            "Output should contain character code for 'A': {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("'age'"),
+            "Output should contain 'age': {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("30"),
+            "Output should contain 30: {}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_generate_map_literal_compiles() {
+        use std::fs;
+        use std::process::Command;
+
+        let pairs = vec![MapPair::new(
+            Expression::Literal(Literal::Symbol("key".into()), Span::new(2, 6)),
+            Expression::Literal(Literal::String("value".into()), Span::new(10, 17)),
+            Span::new(2, 17),
+        )];
+
+        let map_expr = Expression::MapLiteral {
+            pairs,
+            span: Span::new(0, 19),
+        };
+
+        let code =
+            generate_repl_expression(&map_expr, "test_map_lit").expect("codegen should succeed");
+
+        // Verify the generated Core Erlang contains the map literal syntax
+        assert!(
+            code.contains("~{"),
+            "Should contain Core Erlang map syntax ~{{"
+        );
+        // Symbols become atoms in Core Erlang
+        assert!(code.contains("'key'"));
+        // Strings are represented as binaries with character codes
+        assert!(
+            code.contains("#<"),
+            "String should be represented as binary"
+        );
+
+        // Try to compile with erlc if available
+        let temp_dir = std::env::temp_dir();
+        let core_file = temp_dir.join("test_map_lit.core");
+        if let Ok(()) = fs::write(&core_file, &code) {
+            let output = Command::new("erlc")
+                .arg("+from_core")
+                .arg(&core_file)
+                .current_dir(&temp_dir)
+                .output();
+
+            // Clean up
+            let _ = fs::remove_file(&core_file);
+            let beam_file = temp_dir.join("test_map_lit.beam");
+            let _ = fs::remove_file(&beam_file);
+
+            // Check compilation result if erlc is available
+            if let Ok(output) = output {
+                assert!(
+                    output.status.success(),
+                    "erlc compilation of map literal failed:\nstdout: {}\nstderr: {}\nGenerated code:\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    code
+                );
+            }
+        }
     }
 
     // ========================================================================

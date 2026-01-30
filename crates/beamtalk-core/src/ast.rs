@@ -239,6 +239,16 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A map literal (dictionary/hash map).
+    ///
+    /// Example: `#{#name => 'Alice', #age => 30}`
+    MapLiteral {
+        /// The key-value pairs in the map.
+        pairs: Vec<MapPair>,
+        /// Source location of the entire map literal.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -265,6 +275,7 @@ impl Expression {
             | Self::Parenthesized { span, .. }
             | Self::Pipe { span, .. }
             | Self::Match { span, .. }
+            | Self::MapLiteral { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
@@ -677,6 +688,27 @@ pub enum BinaryEndianness {
     Little,
     /// Native endianness.
     Native,
+}
+
+/// A key-value pair in a map literal.
+///
+/// Example: In `#{#name => 'Alice', #age => 30}`, each pair is a `MapPair`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapPair {
+    /// The key expression.
+    pub key: Expression,
+    /// The value expression.
+    pub value: Expression,
+    /// Source location of this key-value pair.
+    pub span: Span,
+}
+
+impl MapPair {
+    /// Creates a new map pair.
+    #[must_use]
+    pub fn new(key: Expression, value: Expression, span: Span) -> Self {
+        Self { key, value, span }
+    }
 }
 
 /// A message in a cascade.
