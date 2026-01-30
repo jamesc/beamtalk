@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Nil control flow and testing messages
+
+// Test isNil / notNil
+result1 := nil isNil       // => true
+result2 := nil notNil      // => false
+
+// Test ifNil: evaluates the block
+result3 := nil ifNil: ['default']
+
+// Test ifNotNil: returns nil (block not evaluated)
+result4 := nil ifNotNil: [:val | val + 1]
+
+// Test ifNil:ifNotNil: evaluates nilBlock
+result5 := nil ifNil: ['was nil'] ifNotNil: [:val | 'was not nil']
+
+// Test ifNotNil:ifNil: (reversed order) evaluates nilBlock
+result6 := nil ifNotNil: [:val | 'was not nil'] ifNil: ['was nil']
+
+// Test copy operations return self (singleton)
+result7 := nil copy
+result8 := nil deepCopy
+result9 := nil shallowCopy
+
+// Test describe
+result10 := nil describe   // => 'nil'

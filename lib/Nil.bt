@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Nil - The absence of a value
+//
+// Nil represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
+// Like True and False, Nil is a singleton object that responds to specific messages
+// for nil-safe control flow.
+//
+// ## Testing Messages
+//
+// - `isNil` - Returns true (only Nil returns true)
+// - `notNil` - Returns false (only Nil returns false)
+//
+// ## Control Flow Messages
+//
+// - `ifNil: nilBlock` - Evaluates nilBlock, returns result
+// - `ifNotNil: notNilBlock` - Returns self (block not evaluated)
+// - `ifNil: nilBlock ifNotNil: notNilBlock` - Evaluates nilBlock
+// - `ifNotNil: notNilBlock ifNil: nilBlock` - Evaluates nilBlock
+//
+// ## Usage Examples
+//
+// ```beamtalk
+// // Testing for nil
+// value isNil ifTrue: [self useDefault]
+//
+// // Nil-safe access
+// result ifNil: [0] ifNotNil: [:val | val * 2]
+//
+// // Providing defaults
+// name ifNil: ['Anonymous']
+// ```
+//
+// ## BEAM Mapping
+//
+// Nil is represented as the Erlang atom `nil`. This follows Elixir's convention
+// and provides seamless interop with Elixir code. The compiler optimizes
+// `isNil` tests to direct comparisons: `X =:= nil`.
+
+Nil
+  // Testing - only Nil returns true for isNil
+  isNil => ^true
+
+  // Testing - only Nil returns false for notNil
+  notNil => ^false
+
+  // Evaluate the nilBlock when receiver is nil
+  ifNil: nilBlock => nilBlock value
+
+  // Do nothing when receiver is nil
+  ifNotNil: notNilBlock => ^self
+
+  // Evaluate nilBlock when receiver is nil
+  ifNil: nilBlock ifNotNil: notNilBlock => nilBlock value
+
+  // Same as above but with reversed argument order
+  ifNotNil: notNilBlock ifNil: nilBlock => nilBlock value
+
+  // Copy operations - Nil is a singleton, always return self
+  copy => ^self
+  deepCopy => ^self
+  shallowCopy => ^self
+
+  // String representation
+  describe => 'nil'

@@ -57,6 +57,29 @@ Control flow via message sends to boolean objects.
 valid := enabled not
 ```
 
+### Nil (`Nil.bt`)
+
+Represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
+
+**Key messages:**
+- `isNil` - Returns true (only Nil returns true)
+- `notNil` - Returns false (only Nil returns false)
+- `ifNil:` - Evaluate block if nil
+- `ifNotNil:` - Evaluate block if not nil (passes receiver as argument)
+- `ifNil: ifNotNil:` - Conditional based on nil status
+
+**Usage:**
+```beamtalk
+// Testing for nil
+value isNil ifTrue: [self useDefault]
+
+// Nil-safe access with default
+name := user name ifNil: ['Anonymous']
+
+// Conditional on nil
+result ifNil: [0] ifNotNil: [:val | val * 2]
+```
+
 ### Block (`Block.bt`)
 
 First-class closures that capture lexical environment.
@@ -255,6 +278,7 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 |----------|-------------|-------|
 | `Actor` | `gen_server` process with state map | Each actor is a separate process |
 | `True` / `False` | Atoms `true` / `false` | Optimized by compiler |
+| `Nil` | Atom `nil` | Follows Elixir convention |
 | `Block` | Anonymous fun (closure) | Captures lexical scope |
 | `Integer` | Erlang integer (bignum support) | Arbitrary precision |
 | `String` | Binary `<<"UTF-8">>` | UTF-8 encoded, not charlist |
@@ -269,6 +293,7 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 |-------|--------|-------|
 | `Actor` | ✅ Defined | Needs compiler spawn support |
 | `True` / `False` | ✅ Defined | Needs compiler optimization |
+| `Nil` | ✅ Defined | Needs compiler nil handling |
 | `Block` | ✅ Defined | Needs compiler closure codegen |
 | `Integer` | ✅ Defined | Needs compiler operator codegen |
 | `String` | ✅ Defined | Needs compiler string ops |
