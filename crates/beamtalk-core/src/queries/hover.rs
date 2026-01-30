@@ -217,6 +217,26 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
             arms.iter()
                 .find_map(|arm| find_hover_in_expr(&arm.body, offset))
         }),
+        Expression::MapLiteral { pairs, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Check if hovering over a specific key or value
+                for pair in pairs {
+                    if let Some(hover) = find_hover_in_expr(&pair.key, offset) {
+                        return Some(hover);
+                    }
+                    if let Some(hover) = find_hover_in_expr(&pair.value, offset) {
+                        return Some(hover);
+                    }
+                }
+                // Hovering over the map literal itself
+                Some(HoverInfo::new(
+                    format!("Map literal with {} pairs", pairs.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Error { message, span } => {
             if offset >= span.start() && offset < span.end() {
                 Some(HoverInfo::new(format!("Error: {message}"), *span))

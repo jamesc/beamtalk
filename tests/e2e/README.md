@@ -29,11 +29,18 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | One-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x | x + 1] value: 5` |
 | Two-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x :y | x + y] value: 3 value: 4` |
 | Nested blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[[:x | x] value: 5] value` |
+| **Variable Persistence** | | | |
+| Simple assignment | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x := 42` persists |
+| Variable reference | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x` reads back |
+| Multiple variables | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x + y` works |
+| Variable reassignment | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x := 100` updates |
 | **Control Flow** | | | |
 | Block evaluation | ✅ | [control_flow.bt](cases/control_flow.bt) | `[5 + 3] value` |
-| `whileTrue:` | 📋 | — | Requires variable persistence |
-| `whileFalse:` | 📋 | — | Requires variable persistence |
-| `timesRepeat:` | 📋 | — | Requires variable persistence |
+| Block with variables | ✅ | [control_flow.bt](cases/control_flow.bt) | Uses REPL bindings |
+| `whileTrue:` | 🔧 | [blocks.bt](cases/blocks.bt) | Non-mutating loop (`[false] whileTrue: [42]`) works; assignments inside blocks don't persist (BT-90) |
+| `whileFalse:` | 🔧 | — | Implemented but assignments inside blocks don't persist (BT-90) |
+| `timesRepeat:` | 📋 | — | Not yet implemented |
+| `to:do:` | 📋 | — | Not yet implemented |
 | **Boolean Operations** | | | |
 | `ifTrue:ifFalse:` | 🔄 | — | Returns future (needs await) |
 | `and:` / `or:` | 🔄 | — | Returns future (needs await) |
@@ -50,6 +57,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 **Legend:**
 - ✅ = Fully tested and working
 - 🔄 = Implemented but needs refinement (returns future in REPL)
+- 🔧 = Implemented but blocked by another issue
 - 📋 = Documented, implementation in progress
 - — = No separate test file (documented elsewhere)
 
@@ -67,11 +75,12 @@ tests/e2e/
     ├── blocks.bt          # Block/closure tests
     ├── booleans.bt        # Boolean literals (true, false)
     ├── cascades.bt        # Cascade documentation (syntax examples)
-    ├── control_flow.bt    # Control flow (block evaluation)
+    ├── control_flow.bt    # Control flow (block evaluation, variables)
     ├── errors.bt          # Error handling tests
     ├── keyword_messages.bt # Keyword message sends
     ├── literals.bt        # Integer and string literals
-    └── unary_messages.bt  # Unary message sends
+    ├── unary_messages.bt  # Unary message sends
+    └── variable_persistence.bt # Variable assignment and persistence
 ```
 
 ## Running Tests

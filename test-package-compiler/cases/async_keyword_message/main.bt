@@ -2,5 +2,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test async keyword message send within a method
-// Returns future from array update
-update := [ ^array at: 1 put: 'hello' ]
+// Uses a non-Dictionary selector to test async message protocol
+update := [ ^object foo: 1 bar: 'hello' ]

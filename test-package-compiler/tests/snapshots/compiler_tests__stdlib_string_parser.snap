@@ -15,23 +15,73 @@ Module {
                     },
                 },
             ),
-            value: Error {
-                message: "Invalid assignment target",
-                span: Span {
+            value: Literal(
+                String(
+                    "Hello",
+                ),
+                Span {
                     start: 128,
-                    end: 140,
+                    end: 135,
                 },
-            },
+            ),
             span: Span {
                 start: 116,
-                end: 140,
+                end: 135,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "name",
+                    span: Span {
+                        start: 136,
+                        end: 140,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "World",
+                ),
+                Span {
+                    start: 144,
+                    end: 151,
+                },
+            ),
+            span: Span {
+                start: 136,
+                end: 151,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "message",
+                    span: Span {
+                        start: 170,
+                        end: 177,
+                    },
+                },
+            ),
+            value: Identifier(
+                Identifier {
+                    name: "greeting",
+                    span: Span {
+                        start: 181,
+                        end: 189,
+                    },
+                },
+            ),
+            span: Span {
+                start: 170,
+                end: 189,
             },
         },
         Error {
-            message: "Invalid assignment target",
+            message: "Unexpected token: expected expression, found ++",
             span: Span {
-                start: 144,
-                end: 177,
+                start: 190,
+                end: 192,
             },
         },
     ],
@@ -76,5 +126,4 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 128, end: 140 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 144, end: 177 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ++", span: Span { start: 190, end: 192 } }

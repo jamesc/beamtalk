@@ -1,0 +1,684 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "empty",
+                    span: Span {
+                        start: 119,
+                        end: 124,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [],
+                span: Span {
+                    start: 128,
+                    end: 131,
+                },
+            },
+            span: Span {
+                start: 119,
+                end: 131,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "person",
+                    span: Span {
+                        start: 155,
+                        end: 161,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "name",
+                            ),
+                            Span {
+                                start: 167,
+                                end: 172,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "Alice",
+                            ),
+                            Span {
+                                start: 176,
+                                end: 183,
+                            },
+                        ),
+                        span: Span {
+                            start: 167,
+                            end: 183,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "age",
+                            ),
+                            Span {
+                                start: 185,
+                                end: 189,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                30,
+                            ),
+                            Span {
+                                start: 193,
+                                end: 195,
+                            },
+                        ),
+                        span: Span {
+                            start: 185,
+                            end: 195,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 165,
+                    end: 196,
+                },
+            },
+            span: Span {
+                start: 155,
+                end: 196,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "config",
+                    span: Span {
+                        start: 222,
+                        end: 228,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            String(
+                                "host",
+                            ),
+                            Span {
+                                start: 234,
+                                end: 240,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "localhost",
+                            ),
+                            Span {
+                                start: 244,
+                                end: 255,
+                            },
+                        ),
+                        span: Span {
+                            start: 234,
+                            end: 255,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            String(
+                                "port",
+                            ),
+                            Span {
+                                start: 257,
+                                end: 263,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                8080,
+                            ),
+                            Span {
+                                start: 267,
+                                end: 271,
+                            },
+                        ),
+                        span: Span {
+                            start: 257,
+                            end: 271,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 232,
+                    end: 272,
+                },
+            },
+            span: Span {
+                start: 222,
+                end: 272,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "positions",
+                    span: Span {
+                        start: 299,
+                        end: 308,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 314,
+                                end: 315,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "first",
+                            ),
+                            Span {
+                                start: 319,
+                                end: 326,
+                            },
+                        ),
+                        span: Span {
+                            start: 314,
+                            end: 326,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 328,
+                                end: 329,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "second",
+                            ),
+                            Span {
+                                start: 333,
+                                end: 341,
+                            },
+                        ),
+                        span: Span {
+                            start: 328,
+                            end: 341,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Integer(
+                                3,
+                            ),
+                            Span {
+                                start: 343,
+                                end: 344,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "third",
+                            ),
+                            Span {
+                                start: 348,
+                                end: 355,
+                            },
+                        ),
+                        span: Span {
+                            start: 343,
+                            end: 355,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 312,
+                    end: 356,
+                },
+            },
+            span: Span {
+                start: 299,
+                end: 356,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "mixed",
+                    span: Span {
+                        start: 386,
+                        end: 391,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "type",
+                            ),
+                            Span {
+                                start: 397,
+                                end: 402,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "mixed",
+                            ),
+                            Span {
+                                start: 406,
+                                end: 413,
+                            },
+                        ),
+                        span: Span {
+                            start: 397,
+                            end: 413,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            String(
+                                "count",
+                            ),
+                            Span {
+                                start: 415,
+                                end: 422,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 426,
+                                end: 427,
+                            },
+                        ),
+                        span: Span {
+                            start: 415,
+                            end: 427,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Integer(
+                                42,
+                            ),
+                            Span {
+                                start: 429,
+                                end: 431,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "answer",
+                            ),
+                            Span {
+                                start: 435,
+                                end: 443,
+                            },
+                        ),
+                        span: Span {
+                            start: 429,
+                            end: 443,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 395,
+                    end: 444,
+                },
+            },
+            span: Span {
+                start: 386,
+                end: 444,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "data",
+                    span: Span {
+                        start: 461,
+                        end: 465,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "user",
+                            ),
+                            Span {
+                                start: 474,
+                                end: 479,
+                            },
+                        ),
+                        value: MapLiteral {
+                            pairs: [
+                                MapPair {
+                                    key: Literal(
+                                        Symbol(
+                                            "name",
+                                        ),
+                                        Span {
+                                            start: 490,
+                                            end: 495,
+                                        },
+                                    ),
+                                    value: Literal(
+                                        String(
+                                            "Bob",
+                                        ),
+                                        Span {
+                                            start: 499,
+                                            end: 504,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 490,
+                                        end: 504,
+                                    },
+                                },
+                                MapPair {
+                                    key: Literal(
+                                        Symbol(
+                                            "email",
+                                        ),
+                                        Span {
+                                            start: 510,
+                                            end: 516,
+                                        },
+                                    ),
+                                    value: Literal(
+                                        String(
+                                            "bob@example.com",
+                                        ),
+                                        Span {
+                                            start: 520,
+                                            end: 537,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 510,
+                                        end: 537,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 483,
+                                end: 541,
+                            },
+                        },
+                        span: Span {
+                            start: 474,
+                            end: 541,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "settings",
+                            ),
+                            Span {
+                                start: 545,
+                                end: 554,
+                            },
+                        ),
+                        value: MapLiteral {
+                            pairs: [
+                                MapPair {
+                                    key: Literal(
+                                        Symbol(
+                                            "theme",
+                                        ),
+                                        Span {
+                                            start: 565,
+                                            end: 571,
+                                        },
+                                    ),
+                                    value: Literal(
+                                        String(
+                                            "dark",
+                                        ),
+                                        Span {
+                                            start: 575,
+                                            end: 581,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 565,
+                                        end: 581,
+                                    },
+                                },
+                                MapPair {
+                                    key: Literal(
+                                        Symbol(
+                                            "language",
+                                        ),
+                                        Span {
+                                            start: 587,
+                                            end: 596,
+                                        },
+                                    ),
+                                    value: Literal(
+                                        String(
+                                            "en",
+                                        ),
+                                        Span {
+                                            start: 600,
+                                            end: 604,
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 587,
+                                        end: 604,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 558,
+                                end: 608,
+                            },
+                        },
+                        span: Span {
+                            start: 545,
+                            end: 608,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 469,
+                    end: 610,
+                },
+            },
+            span: Span {
+                start: 461,
+                end: 610,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withTrailing",
+                    span: Span {
+                        start: 639,
+                        end: 651,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "a",
+                            ),
+                            Span {
+                                start: 657,
+                                end: 659,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 663,
+                                end: 664,
+                            },
+                        ),
+                        span: Span {
+                            start: 657,
+                            end: 664,
+                        },
+                    },
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "b",
+                            ),
+                            Span {
+                                start: 666,
+                                end: 668,
+                            },
+                        ),
+                        value: Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 672,
+                                end: 673,
+                            },
+                        ),
+                        span: Span {
+                            start: 666,
+                            end: 673,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 655,
+                    end: 675,
+                },
+            },
+            span: Span {
+                start: 639,
+                end: 675,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "single",
+                    span: Span {
+                        start: 697,
+                        end: 703,
+                    },
+                },
+            ),
+            value: MapLiteral {
+                pairs: [
+                    MapPair {
+                        key: Literal(
+                            Symbol(
+                                "only",
+                            ),
+                            Span {
+                                start: 709,
+                                end: 714,
+                            },
+                        ),
+                        value: Literal(
+                            String(
+                                "value",
+                            ),
+                            Span {
+                                start: 718,
+                                end: 725,
+                            },
+                        ),
+                        span: Span {
+                            start: 709,
+                            end: 725,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 707,
+                    end: 726,
+                },
+            },
+            span: Span {
+                start: 697,
+                end: 726,
+            },
+        },
+    ],
+    span: Span {
+        start: 119,
+        end: 726,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 119,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 119,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test map literal syntax parsing",
+            span: Span {
+                start: 119,
+                end: 124,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Empty map",
+            span: Span {
+                start: 119,
+                end: 124,
+            },
+            kind: Line,
+        },
+    ],
+}
