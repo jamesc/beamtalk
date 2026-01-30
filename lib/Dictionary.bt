@@ -186,7 +186,7 @@ Dictionary
 
   // Set multiple keys at once
   putAll: otherDict =>
-    self keysAndValuesDo: [:k :v | self := self at: k put: v].
+    otherDict keysAndValuesDo: [:k :v | self := self at: k put: v].
     self
 
   // Remove key, returns new dictionary
