@@ -113,16 +113,16 @@ SequenceableCollection
   // Get element at index, or default if out of bounds
   at: index ifAbsent: defaultBlock =>
     (index >= 1) and: [index <= self size]
-      ifTrue: [^self at: index]
-      ifFalse: [^defaultBlock value]
+      ifTrue: [self at: index]
+      ifFalse: [defaultBlock value]
 
   // Get first element, or default if empty
   firstIfAbsent: defaultBlock =>
-    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self first]
+    self isEmpty ifTrue: [defaultBlock value] ifFalse: [self first]
 
   // Get last element, or default if empty
   lastIfAbsent: defaultBlock =>
-    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self last]
+    self isEmpty ifTrue: [defaultBlock value] ifFalse: [self last]
 
   // ═══════════════════════════════════════════════════════════════════
   // Subsequence Extraction
@@ -197,14 +197,14 @@ SequenceableCollection
   // Find index of first occurrence, or evaluate ifAbsent block
   indexOf: element ifAbsent: absentBlock =>
     index := self indexOf: element.
-    index = 0 ifTrue: [^absentBlock value] ifFalse: [^index]
+    index = 0 ifTrue: [absentBlock value] ifFalse: [index]
 
   // Find index of first element satisfying predicate
   findFirst: block =>
     1 to: self size do: [:i |
       (block value: (self at: i)) ifTrue: [^i]
     ].
-    ^0
+    0
 
   // ═══════════════════════════════════════════════════════════════════
   // Iteration with Index
@@ -228,7 +228,7 @@ SequenceableCollection
     1 to: self size do: [:i |
       result := result copyWith: (block value: i value: (self at: i))
     ].
-    ^result
+    result
 
   // ═══════════════════════════════════════════════════════════════════
   // Pairing Operations
@@ -272,7 +272,7 @@ SequenceableCollection
     1 to: self size - 1 do: [:i |
       (self at: i) > (self at: i + 1) ifTrue: [^false]
     ].
-    ^true
+    true
 
   // Test if collection equals another element-by-element
   equals: other =>
@@ -280,4 +280,4 @@ SequenceableCollection
     1 to: self size do: [:i |
       (self at: i) = (other at: i) ifFalse: [^false]
     ].
-    ^true
+    true

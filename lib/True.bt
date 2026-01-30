@@ -50,20 +50,20 @@ True
   ifTrue: trueBlock => trueBlock value
 
   // Ignore the false block (single argument version)
-  ifFalse: falseBlock => ^self
+  ifFalse: falseBlock => self
 
   // Logical AND - evaluate the block (might return false)
   and: aBlock => aBlock value
 
   // Logical OR - return self without evaluating (short-circuit)
-  or: aBlock => ^self
+  or: aBlock => self
 
   // Logical NOT - return false
-  not => ^false
+  not => false
 
   // Identity test
-  isTrue => ^true
-  isFalse => ^false
+  isTrue => true
+  isFalse => false
 
   // String representation
   describe => 'true'

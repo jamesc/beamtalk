@@ -146,17 +146,24 @@ count := 0; count := count + 1
 - Newlines naturally end statements in most modern languages
 - Less visual noise
 
-### Return: `^value` → `^value` (Keep, But Optional at Block End)
+### Return: `^value` → `^value` (Keep, But Implicit at End)
 
 ```
-// Explicit return (always works)
-getValue => ^self.value
+// Implicit return of last expression (preferred)
+getValue => self.value
 
-// Implicit return of last expression in blocks
+// Explicit return ONLY for early returns
+max: other =>
+  self > other ifTrue: [^self]   // early return - use ^
+  other                           // last expression - implicit return
+
+// Blocks also use implicit return
 [:x | x * 2]  // returns x * 2
 ```
 
-**Why:** `^` is distinctive and clear. But requiring it for every expression is noisy. Last expression in a block is implicitly returned.
+**Why:** `^` is distinctive and clear. But requiring it for every expression is noisy. Last expression in a method or block is implicitly returned.
+
+**Style Rule:** Use `^` ONLY for early returns (returning before the final expression). Never use `^` on the last line of a method or block.
 
 ### Field Access: Add Dot Notation
 
@@ -202,7 +209,7 @@ literal := 'No {interpolation} here'
 | Assignment | `:=` | `x := 5` |
 | Compound assignment | `+=`, `-=`, `*=`, `/=` | `x += 1` |
 | Field access | `self.field` | `self.value` |
-| Return | `^` | `^self.value` |
+| Return (early) | `^` | `^self` (only for early returns) |
 | Unary message | `receiver message` | `counter increment` |
 | Binary message | `a op b` | `3 + 4` |
 | Keyword message | `receiver key: arg` | `array at: 1` |
@@ -258,7 +265,7 @@ Actor subclass: Counter
 
   increment => self.value += 1
   decrement => self.value -= 1
-  getValue => ^self.value
+  getValue => self.value                    // implicit return - no ^
   incrementBy: delta => self.value += delta
 ```
 

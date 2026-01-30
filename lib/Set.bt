@@ -220,11 +220,11 @@ Set
     self each: [:elem |
       (block value: elem) ifTrue: [^elem]
     ].
-    ^nil
+    nil
 
   detect: block ifNone: defaultBlock =>
     result := self detect: block.
-    result = nil ifTrue: [^defaultBlock value] ifFalse: [^result]
+    result = nil ifTrue: [defaultBlock value] ifFalse: [result]
 
   // Get any element (useful for non-empty sets)
   anyOne =>
@@ -271,4 +271,4 @@ Set
     rest := self remove: elem.
     restPower := rest powerSet.
     withElem := restPower collect: [:subset | subset add: elem].
-    ^restPower union: withElem
+    restPower union: withElem

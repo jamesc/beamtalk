@@ -29,6 +29,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | One-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x | x + 1] value: 5` |
 | Two-arg blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[:x :y | x + y] value: 3 value: 4` |
 | Nested blocks | ✅ | [blocks.bt](cases/blocks.bt) | `[[:x | x] value: 5] value` |
+| Return statements | ✅ | [blocks.bt](cases/blocks.bt) | `[:x | ^x + 10] value: 5` (explicit vs implicit) |
 | **Variable Persistence** | | | |
 | Simple assignment | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x := 42` persists |
 | Variable reference | ✅ | [variable_persistence.bt](cases/variable_persistence.bt) | `x` reads back |

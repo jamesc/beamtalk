@@ -149,7 +149,7 @@ Array
       result at: i put: (self at: i)
     ].
     result at: newSize put: element.
-    ^result
+    result
 
   // Prepend element, returns new larger array
   prepend: element =>
@@ -159,7 +159,7 @@ Array
     1 to: self size do: [:i |
       result at: i + 1 put: (self at: i)
     ].
-    ^result
+    result
 
   // ═══════════════════════════════════════════════════════════════════
   // Conversion
@@ -185,7 +185,7 @@ Array
     1 to: self size do: [:i |
       (self at: i) = (other at: i) ifFalse: [^false]
     ].
-    ^true
+    true
 
   // Type test
   isArray => true
@@ -219,4 +219,4 @@ Array
     1 to: other size do: [:i |
       result at: self size + i put: (other at: i)
     ].
-    ^result
+    result
