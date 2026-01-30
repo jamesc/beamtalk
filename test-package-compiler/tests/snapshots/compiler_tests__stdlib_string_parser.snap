@@ -4,6 +4,7 @@ expression: output
 ---
 AST:
 Module {
+    classes: [],
     expressions: [
         Assignment {
             target: Identifier(
