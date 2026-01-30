@@ -9,9 +9,6 @@
 WORKSPACE="${1:-$PWD}"
 GIT_FILE="$WORKSPACE/.git"
 
-# Trust all directories to avoid "dubious ownership" errors in containers
-git config --global safe.directory '*'
-
 echo "fix-worktree-git.sh: Checking $GIT_FILE"
 
 # Check if .git is a file (worktree) or directory (main repo)
@@ -54,3 +51,8 @@ elif [ -d "$GIT_FILE" ]; then
 else
     echo "Warning: No .git found at $GIT_FILE"
 fi
+
+# Trust all directories to avoid "dubious ownership" errors in containers
+# This runs AFTER fixing the .git path so git commands work
+git config --global safe.directory '*'
+echo "Configured git safe.directory"
