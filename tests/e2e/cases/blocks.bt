@@ -31,3 +31,22 @@
 // Block with subtraction
 [:a :b | a - b] value: 10 value: 3
 // => 7
+// Block with three arguments
+[:x :y :z | x + y + z] value: 1 value: 2 value: 3
+// => 6
+
+// Nested blocks - outer returns inner block that captures x
+[[:x | [:y | x + y]] value: 10] value value: 5
+// => 15
+
+// Higher-order block (makeAdder pattern)
+[[:n | [:x | x + n]] value: 5] value value: 10
+// => 15
+
+// Complex expression in block body
+[:x | x * 2 + 1] value: 5
+// => 11
+
+// whileTrue: with false condition (returns immediately)
+[false] whileTrue: [42]
+// => nil

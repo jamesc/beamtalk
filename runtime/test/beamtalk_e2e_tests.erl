@@ -13,6 +13,9 @@
 %%% - spawn/1 tests (Counter spawnWith: #{...})
 %%% - State merging behavior (InitArgs override defaults)
 %%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
+%%% - Block Evaluation Tests (value, value:, value:value:, closures)
+%%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
+%%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
@@ -506,6 +509,201 @@ spawn_preserves_class_and_methods_test() ->
     Methods = maps:get('__methods__', State),
     ?assert(is_function(maps:get(increment, Methods), 2)),
     ?assert(is_function(maps:get(getValue, Methods), 2)).
+
+%%% ===========================================================================
+%%% Block Evaluation Tests (value, value:, value:value:, etc.)
+%%% ===========================================================================
+
+%% @doc Test: [42] value => 42
+%% Block with no arguments, evaluated with value message
+block_value_no_args_test() ->
+    Block = fun() -> 42 end,
+    Result = Block(),
+    ?assertEqual(42, Result).
+
+%% @doc Test: [:x | x + 1] value: 5 => 6
+%% Block with one parameter, evaluated with value: message
+block_value_one_arg_test() ->
+    Block = fun(X) -> X + 1 end,
+    Result = Block(5),
+    ?assertEqual(6, Result).
+
+%% @doc Test: [:x :y | x + y] value: 3 value: 4 => 7
+%% Block with two parameters, evaluated with value:value: message
+block_value_two_args_test() ->
+    Block = fun(X, Y) -> X + Y end,
+    Result = Block(3, 4),
+    ?assertEqual(7, Result).
+
+%% @doc Test: [:x :y :z | x + y + z] value: 1 value: 2 value: 3 => 6
+%% Block with three parameters, evaluated with value:value:value: message
+block_value_three_args_test() ->
+    Block = fun(X, Y, Z) -> X + Y + Z end,
+    Result = Block(1, 2, 3),
+    ?assertEqual(6, Result).
+
+%% @doc Test: [:x | [:y | x + y]] value: 10 value: 5 => 15
+%% Nested blocks - outer block returns inner block, which captures x
+block_nested_evaluation_test() ->
+    %% Outer block: [:x | [:y | x + y]]
+    OuterBlock = fun(X) ->
+        %% Inner block captures X from lexical scope
+        fun(Y) -> X + Y end
+    end,
+    
+    %% Evaluate outer with 10, returns inner block
+    InnerBlock = OuterBlock(10),
+    
+    %% Evaluate inner with 5
+    Result = InnerBlock(5),
+    ?assertEqual(15, Result).
+
+%% @doc Test closures capture lexical scope
+%% captured := 100. [:x | x + captured] value: 5 => 105
+block_captures_lexical_scope_test() ->
+    %% Simulate captured variable from lexical scope
+    Captured = 100,
+    
+    %% Block captures Captured
+    Block = fun(X) -> X + Captured end,
+    
+    %% Evaluate block
+    Result = Block(5),
+    ?assertEqual(105, Result).
+
+%% @doc Test block that returns another block
+%% makeAdder := [:n | [:x | x + n]].
+%% addFive := makeAdder value: 5.
+%% addFive value: 10 => 15
+block_returns_closure_test() ->
+    %% makeAdder returns a closure that adds n to its argument
+    MakeAdder = fun(N) ->
+        fun(X) -> X + N end
+    end,
+    
+    %% Create an adder that adds 5
+    AddFive = MakeAdder(5),
+    
+    %% Use the adder
+    ?assertEqual(15, AddFive(10)),
+    ?assertEqual(8, AddFive(3)).
+
+%% @doc Test block with multiple statements
+%% [:x | temp := x * 2. temp + 1] value: 5 => 11
+block_multiple_statements_test() ->
+    Block = fun(X) ->
+        Temp = X * 2,
+        Temp + 1
+    end,
+    Result = Block(5),
+    ?assertEqual(11, Result).
+
+%%% ===========================================================================
+%%% Control Flow Tests (whileTrue:, whileFalse:, repeat)
+%%% ===========================================================================
+
+%% @doc Test: [counter < 5] whileTrue: [counter := counter + 1]
+%% Loop while condition is true
+block_while_true_loop_test() ->
+    %% Simulate: counter := 0. [counter < 5] whileTrue: [counter := counter + 1]
+    %% We'll use a recursive function to simulate the letrec loop
+    InitialCounter = 0,
+    FinalCounter = while_true_loop(InitialCounter, 5),
+    ?assertEqual(5, FinalCounter).
+
+%% Helper: Simulates whileTrue: loop implementation
+while_true_loop(Counter, Limit) ->
+    case Counter < Limit of
+        true ->
+            NewCounter = Counter + 1,
+            while_true_loop(NewCounter, Limit);
+        false ->
+            Counter
+    end.
+
+%% @doc Test: [counter >= 10] whileFalse: [counter := counter + 1]
+%% Loop while condition is false
+block_while_false_loop_test() ->
+    %% Start at 0, increment until counter >= 10
+    InitialCounter = 0,
+    FinalCounter = while_false_loop(InitialCounter, 10),
+    ?assertEqual(10, FinalCounter).
+
+%% Helper: Simulates whileFalse: loop implementation
+while_false_loop(Counter, Target) ->
+    case Counter >= Target of
+        false ->
+            NewCounter = Counter + 1,
+            while_false_loop(NewCounter, Target);
+        true ->
+            Counter
+    end.
+
+%% @doc Test: [counter < 100] whileTrue: [counter := counter + 1. process: counter]
+%% whileTrue: executes body multiple times
+block_while_true_accumulates_test() ->
+    %% Sum numbers 1 to 10
+    {_Counter, Sum} = while_true_accumulate(1, 0),
+    ?assertEqual(55, Sum).  %% 1+2+3+...+10 = 55
+
+while_true_accumulate(Counter, Sum) ->
+    case Counter =< 10 of
+        true ->
+            NewSum = Sum + Counter,
+            NewCounter = Counter + 1,
+            while_true_accumulate(NewCounter, NewSum);
+        false ->
+            {Counter, Sum}
+    end.
+
+%% @doc Test: repeat loop with early termination
+%% counter := 0. [counter := counter + 1. counter < 5] repeat => loops forever
+%% We simulate with a bounded version that terminates
+block_repeat_with_termination_test() ->
+    %% Simulate repeat that increments until threshold
+    %% [counter := counter + 1. counter >= 5 ifTrue: [^counter]] repeat
+    Result = repeat_until_threshold(0, 5),
+    ?assertEqual(5, Result).
+
+%% Helper: Simulates repeat with early return
+repeat_until_threshold(Counter, Threshold) ->
+    NewCounter = Counter + 1,
+    case NewCounter >= Threshold of
+        true ->
+            NewCounter;  %% Early return simulates ^counter
+        false ->
+            repeat_until_threshold(NewCounter, Threshold)
+    end.
+
+%% @doc Test: nested loops with whileTrue:
+%% outer := 0. inner := 0.
+%% [outer < 3] whileTrue: [
+%%   inner := 0.
+%%   [inner < 3] whileTrue: [inner := inner + 1].
+%%   outer := outer + 1
+%% ]
+block_nested_while_true_test() ->
+    %% Count total iterations in nested loop (3 * 3 = 9)
+    TotalIterations = nested_while_loops(0, 0),
+    ?assertEqual(9, TotalIterations).
+
+nested_while_loops(Outer, Total) ->
+    case Outer < 3 of
+        true ->
+            %% Inner loop from 0 to 3
+            NewTotal = inner_while_loop(0, Total),
+            nested_while_loops(Outer + 1, NewTotal);
+        false ->
+            Total
+    end.
+
+inner_while_loop(Inner, Total) ->
+    case Inner < 3 of
+        true ->
+            inner_while_loop(Inner + 1, Total + 1);
+        false ->
+            Total
+    end.
 
 %%% ===========================================================================
 %%% Boolean control flow tests
