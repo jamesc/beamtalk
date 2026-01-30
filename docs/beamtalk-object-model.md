@@ -1020,6 +1020,69 @@ For Beamtalk v2+, we may consider:
 
 4. **IDE Integration:** Build debugging UI that uses tracing and post-exception info to provide a Smalltalk-like debugging experience without requiring stack reification.
 
+### Optimization via Sealing
+
+Type sealing (from Dylan) enables compile-time optimizations that reduce generated code and improve performance. See [Language Features: Sealing](beamtalk-language-features.md#sealing-for-optimization).
+
+**Abstract classes — skip instance module generation:**
+
+```
+// Abstract class: never directly instantiated
+abstract Actor subclass: Collection
+  // Methods defined for inheritance only
+  
+  size => self subclassResponsibility
+  do: block => self subclassResponsibility
+```
+
+For abstract classes, the compiler generates:
+- ✅ `beamtalk_collection_class` — Class metadata (superclass, methods, variables)
+- ❌ `beamtalk_collection` — Instance module (skipped - no instances possible)
+
+This matches Flavors' behavior where mixin modules are never generated.
+
+**Sealed classes — optimize dispatch:**
+
+```
+// Sealed class: no subclasses allowed
+sealed Actor subclass: Point
+  state: x: Float, y: Float
+  
+  distanceTo: other =>
+    ((self.x - other x) squared + (self.y - other y) squared) sqrt
+```
+
+For sealed classes, the compiler can:
+- **Inline method calls** — No dynamic dispatch needed (method set is fixed)
+- **Skip gen_server for self-calls** — Direct function calls instead of message passing
+- **Eliminate method table lookup** — Compile to direct `case` on selector
+
+**Sealed methods — final implementation:**
+
+```
+// Sealed method: subclasses cannot override
+Actor subclass: Counter
+  sealed getValue => ^self.value  // Can be inlined at call sites
+```
+
+**Code generation impact:**
+
+| Class Type | Class Module | Instance Module | Dispatch |
+|------------|--------------|-----------------|----------|
+| Normal | ✅ Generated | ✅ Generated | Dynamic (gen_server) |
+| Abstract | ✅ Generated | ❌ Skipped | N/A |
+| Sealed | ✅ Generated | ✅ Generated | Static (inlined) |
+
+**Performance implications:**
+
+| Optimization | Overhead Eliminated |
+|--------------|---------------------|
+| Skip abstract instance modules | ~2KB per abstract class |
+| Inline sealed method calls | gen_server:call round-trip (~50μs) |
+| Direct self-calls in sealed classes | Message queue overhead |
+
+This brings Beamtalk closer to Flavors' efficiency for abstract classes while enabling optimizations Flavors can't do (sealed inlining requires compile-time knowledge of the full class hierarchy).
+
 ---
 
 ## Part 5: Code Sketches
