@@ -1186,9 +1186,110 @@ source_location(#stack_frame{file = F, line = L}) -> {F, L}.
 
 ### Related Languages
 - [Newspeak Language](https://newspeaklanguage.org/) — Async actors, module system
-- [Gleam](https://gleam.run/) — Rust-to-BEAM compilation
+- [Gleam](https://gleam.run/) — Rust-to-BEAM compilation (functional, no OOP)
 - [Pony](https://www.ponylang.io/) — Actor model with capabilities
 
-### Prior Art
+### Prior Art on BEAM
+- [LFE Flavors](https://github.com/rvirding/flavors) — **Highly relevant**: OOP on BEAM by Robert Virding
+- [LFE Object System (LOS)](https://github.com/lfex/los) — CLOS-inspired objects for LFE
 - [ETOS](https://github.com/pichi/etos) — Erlang-to-Smalltalk (abandoned)
 - [LFE](https://lfe.io/) — Lisp on BEAM, similar interop challenges
+
+---
+
+## Appendix: Lessons from Gleam and LFE
+
+### Gleam's Approach: Explicit Rejection of OOP
+
+Gleam deliberately avoids OOP, preferring:
+- **Custom types (tagged unions)** instead of classes
+- **Pattern matching** instead of polymorphic dispatch
+- **Modules + functions** instead of methods
+- **No type classes/traits** — simplicity over abstraction
+
+**Gleam's Actor wrapper** (`gleam_otp`) wraps gen_server with type-safe message handling but exposes no OOP illusion — just typed processes.
+
+**Lesson for Beamtalk:** Gleam proves you can build successful BEAM languages without OOP. But Beamtalk's goal is different — we *want* the Smalltalk programming model. Gleam validates that processes-as-actors is the right foundation.
+
+### LFE Flavors: OOP Successfully Implemented on BEAM
+
+Robert Virding's [Flavors](https://github.com/rvirding/flavors) library implements Lisp Machine-style OOP on BEAM. Key design decisions:
+
+**1. Instances are gen_server processes:**
+```erlang
+%% From flavors_instance.erl
+-record(state, {name,fm,self,ivars=none}).
+
+init({Flav,Fm,Opts}) ->
+    Ivars = Fm:'instance-variables'(),
+    Mlist = make_map_list(Ivars, Opts),
+    Imap = maps:from_list(Mlist),
+    erlang:put('instance-variables', Imap),  % Process dictionary!
+    Self = #'flavor-instance'{flavor=Flav, flavor_mod=Fm, instance=self()},
+    Fm:'combined-method'(init, Self, {Opts}),
+    {ok,#state{name=Flav,fm=Fm,self=Self}}.
+```
+
+**2. Two modules per class:**
+- `*-flavor-core` — Compile-time metadata (methods, inheritance)
+- `*-flavor` — Runtime access functions (generated on first instantiation)
+
+This avoids generating modules for mixins that are never directly instantiated.
+
+**3. Instance variables in process dictionary:**
+```erlang
+erlang:put('instance-variables', Imap)
+```
+Simple but effective. Beamtalk uses maps in gen_server state instead.
+
+**4. Errors caught and re-raised at caller:**
+```erlang
+send_method(Meth, Args, #state{fm=Fm,self=Self}) ->
+    try
+        Result = Fm:'combined-method'(Meth, Self, Args),
+        {ok,Result}
+    catch
+        error:Error -> {error,Error};
+        exit:Exit -> {error,Exit};
+        throw:Thrown -> {throw,Thrown}
+    end.
+```
+Errors don't crash the instance — they're signaled to the caller. This preserves fault isolation.
+
+**5. Synchronous message sending:**
+```erlang
+send(Ins, Meth, Args) ->
+    gen_server:call(Ins, {send,Meth,Args}).
+```
+Flavors uses synchronous calls. Beamtalk uses async-first with explicit `await`.
+
+**6. The `flavor-instance` record:**
+```erlang
+-record('flavor-instance',{flavor,flavor_mod,instance}).
+```
+A handle that bundles class name, class module, and pid. Similar to what Beamtalk could use for reflection.
+
+### Lessons Applied to Beamtalk
+
+| Flavors Pattern | Beamtalk Adoption | Notes |
+|-----------------|-------------------|-------|
+| gen_server per instance | ✅ Yes | Same approach |
+| Two modules per class | ⚠️ Consider | Could reduce generated code for abstract classes |
+| Process dictionary for ivars | ❌ No | Use map in gen_server state (more explicit) |
+| Error catching at caller | ✅ Yes | Preserve fault isolation |
+| Synchronous by default | ❌ No | Beamtalk is async-first |
+| Instance handle record | ✅ Consider | Useful for reflection, passing "self" |
+
+### Key Insight: Flavors Validates Our Approach
+
+LFE Flavors proves that OOP semantics work well on BEAM when:
+1. Each object is a process
+2. Instance variables are maps
+3. Methods dispatch via a method table
+4. Errors are isolated (caught and re-raised)
+
+**Beamtalk's additions:**
+- Async-first (futures) instead of sync-first
+- Compile-time code generation (Rust) instead of runtime macro expansion
+- ETS-based instance tracking for `allInstances`
+- Integration with Smalltalk-style reflection (`class`, `respondsTo:`, etc.)
