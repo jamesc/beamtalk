@@ -2,11 +2,11 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'actor_state_mutation' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('stdlib_list', ~{}~, []) of
+    case call 'gen_server':'start_link'('actor_state_mutation', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -15,7 +15,7 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 
 
 'spawn'/1 = fun (InitArgs) ->
-    case call 'gen_server':'start_link'('stdlib_list', InitArgs, []) of
+    case call 'gen_server':'start_link'('actor_state_mutation', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -25,8 +25,9 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'StdlibList',
-        '__methods__' => call 'stdlib_list':'method_table'()
+        '__class__' => 'ActorStateMutation',
+        '__methods__' => call 'actor_state_mutation':'method_table'()
+        , 'value' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -35,7 +36,7 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'stdlib_list':'dispatch'(Selector, Args, State) of
+            case call 'actor_state_mutation':'dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
                     in {'noreply', NewState}
@@ -46,7 +47,7 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'stdlib_list':'dispatch'(Selector, Args, State) of
+            case call 'actor_state_mutation':'dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', Result, NewState}
             end
@@ -60,14 +61,14 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
-        <'numbers'> when 'true' ->
-            let _Result = 1 in {'reply', _Result, State}
+        <'increment'> when 'true' ->
+            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
 
 
 'method_table'/0 = fun () ->
-    ~{'numbers' => 0}~
+    ~{'increment' => 0}~
 
 end

@@ -174,6 +174,10 @@ struct CoreErlangGenerator {
     /// Stack of variable binding scopes. Each scope is a map of identifiers
     /// to Core Erlang variable names. Inner scopes shadow outer scopes.
     var_scopes: Vec<HashMap<String, String>>,
+    /// Current state version for state threading in method bodies.
+    /// Version 0 = "State", 1 = "State1", 2 = "State2", etc.
+    /// This is used to thread state through field assignments.
+    state_version: usize,
 }
 
 impl CoreErlangGenerator {
@@ -185,6 +189,7 @@ impl CoreErlangGenerator {
             indent: 0,
             var_counter: 0,
             var_scopes: vec![HashMap::new()],
+            state_version: 0,
         }
     }
 
@@ -593,6 +598,9 @@ impl CoreErlangGenerator {
                 if let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
                 {
+                    // Reset state version at the start of each method
+                    self.reset_state_version();
+
                     // Push a new scope for this method's parameter bindings
                     self.push_scope();
 
@@ -622,12 +630,14 @@ impl CoreErlangGenerator {
                         self.indent += 1;
                     }
 
+                    // Generate the method body with state threading
+                    // For state threading to work, we can't wrap in "let Result = ... in"
+                    // because that would put State{n} bindings out of scope for the reply.
+                    // Instead, we generate the state threading let bindings directly,
+                    // and then generate the reply tuple inline.
                     self.write_indent()?;
-                    write!(self.output, "let Result = ")?;
-                    self.generate_block_body(block)?;
+                    self.generate_method_body_with_reply(block)?;
                     writeln!(self.output)?;
-                    self.write_indent()?;
-                    writeln!(self.output, "in {{'reply', Result, State}}")?;
 
                     if !block.parameters.is_empty() {
                         self.indent -= 1;
@@ -715,9 +725,24 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
-            Expression::Assignment { value, .. } => {
-                // In REPL context and elsewhere, assignment returns the assigned value
-                // The REPL extracts the variable name separately and updates bindings
+            Expression::Assignment { target, value, .. } => {
+                // Check if this is a field assignment (self.field := value)
+                if let Expression::FieldAccess {
+                    receiver, field, ..
+                } = target.as_ref()
+                {
+                    // Verify the receiver is 'self'
+                    if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                        if recv_id.name == "self" {
+                            // Field assignment: self.field := value
+                            // Generate state-threaded update:
+                            // let _Val = <value> in let State{n} = maps:put('field', _Val, State{n-1}) in _Val
+                            return self.generate_field_assignment(&field.name, value);
+                        }
+                    }
+                }
+                // For non-field assignments (e.g., local variables in REPL),
+                // just return the value - REPL handles binding updates externally
                 self.generate_expression(value)
             }
             Expression::Return { value, .. } => {
@@ -787,8 +812,9 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     write!(self.output, "{var_name}")?;
                 } else {
-                    // Field access from state
-                    write!(self.output, "call 'maps':'get'('{}', State)", id.name)?;
+                    // Field access from state (uses current state variable for state threading)
+                    let state_var = self.current_state_var();
+                    write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
                 }
             }
         }
@@ -800,7 +826,12 @@ impl CoreErlangGenerator {
         // For now, assume receiver is 'self' and access from State
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                write!(self.output, "call 'maps':'get'('{}', State)", field.name)?;
+                let state_var = self.current_state_var();
+                write!(
+                    self.output,
+                    "call 'maps':'get'('{}', {state_var})",
+                    field.name
+                )?;
                 return Ok(());
             }
         }
@@ -809,6 +840,42 @@ impl CoreErlangGenerator {
             feature: "complex field access".to_string(),
             location: format!("{:?}", receiver.span()),
         })
+    }
+
+    /// Generates code for a field assignment (self.field := value).
+    ///
+    /// Uses state threading to simulate mutation in Core Erlang:
+    /// ```erlang
+    /// let _Val = <value> in
+    /// let State{n} = call 'maps':'put'('fieldName', _Val, State{n-1}) in
+    /// _Val
+    /// ```
+    ///
+    /// The assignment returns the assigned value (Smalltalk semantics).
+    fn generate_field_assignment(&mut self, field_name: &str, value: &Expression) -> Result<()> {
+        let val_var = self.fresh_temp_var("Val");
+
+        // Capture current state BEFORE generating value expression,
+        // because the value expression may reference state (e.g., self.value + 1)
+        let current_state = self.current_state_var();
+
+        // let _Val = <value> in
+        write!(self.output, "let {val_var} = ")?;
+        self.generate_expression(value)?;
+
+        // Now increment state version for the new state after assignment
+        let new_state = self.next_state_var();
+
+        // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
+        write!(
+            self.output,
+            " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
+        )?;
+
+        // _Val (assignment returns the assigned value)
+        write!(self.output, "{val_var}")?;
+
+        Ok(())
     }
 
     /// Generates code for a block (closure).
@@ -832,6 +899,75 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates a method body with the reply tuple embedded.
+    ///
+    /// This is used for actor method dispatch to ensure state threading works correctly.
+    /// The generated code looks like:
+    /// ```erlang
+    /// let _Val1 = <value1> in let State1 = ... in
+    /// let _Val2 = <value2> in let State2 = ... in
+    /// {'reply', <final_value>, State2}
+    /// ```
+    ///
+    /// This ensures that State{n} bindings are in scope when generating the reply tuple.
+    fn generate_method_body_with_reply(&mut self, block: &Block) -> Result<()> {
+        if block.body.is_empty() {
+            let final_state = self.current_state_var();
+            write!(self.output, "{{'reply', 'nil', {final_state}}}")?;
+            return Ok(());
+        }
+
+        // Generate all expressions except the last with state threading
+        for (i, expr) in block.body.iter().enumerate() {
+            let is_last = i == block.body.len() - 1;
+            let is_field_assignment = Self::is_field_assignment(expr);
+
+            if is_last {
+                // Last expression: bind to Result and generate reply tuple
+                let final_state = self.current_state_var();
+
+                // If the last expression is a field assignment, handle specially
+                if is_field_assignment {
+                    // Generate the assignment (leaves state binding open)
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            let val_var = self.fresh_temp_var("Val");
+                            let current_state = self.current_state_var();
+
+                            write!(self.output, "let {val_var} = ")?;
+                            self.generate_expression(value)?;
+
+                            let new_state = self.next_state_var();
+                            write!(
+                                self.output,
+                                " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                                field.name
+                            )?;
+
+                            // Reply tuple using the NEW state (after assignment)
+                            write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
+                        }
+                    }
+                } else {
+                    // Regular last expression: bind to Result and reply
+                    write!(self.output, "let _Result = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {{'reply', _Result, {final_state}}}")?;
+                }
+            } else if is_field_assignment {
+                // Field assignment not at end: generate WITHOUT closing the value
+                self.generate_field_assignment_open(expr)?;
+            } else {
+                // Non-field-assignment intermediate expression: wrap in let
+                let tmp_var = self.fresh_temp_var("seq");
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                write!(self.output, " in ")?;
+            }
+        }
+        Ok(())
+    }
+
     /// Generates the body of a block.
     fn generate_block_body(&mut self, block: &Block) -> Result<()> {
         if block.body.is_empty() {
@@ -840,19 +976,80 @@ impl CoreErlangGenerator {
         }
 
         // Generate body expressions in sequence
-        if block.body.len() == 1 {
-            self.generate_expression(&block.body[0])?;
-        } else {
-            // Multiple expressions need to be sequenced with do
-            write!(self.output, "do ")?;
-            for (i, expr) in block.body.iter().enumerate() {
-                if i > 0 {
-                    write!(self.output, " ")?;
-                }
+        // For state threading to work correctly, field assignments must leave
+        // their let bindings OPEN so that State{n} is visible to subsequent expressions.
+        //
+        // For a block like: [self.value := self.value + 1. ^self.value]
+        // We need:
+        //   let _Val1 = ... in let State1 = ... in <return expression>
+        // NOT:
+        //   let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>
+        //
+        // The difference is crucial: in the first form, State1 is visible in <return expression>.
+
+        for (i, expr) in block.body.iter().enumerate() {
+            let is_last = i == block.body.len() - 1;
+            let is_field_assignment = Self::is_field_assignment(expr);
+
+            if is_last {
+                // Last expression: generate directly (its value is the block's result)
                 self.generate_expression(expr)?;
+            } else if is_field_assignment {
+                // Field assignment not at end: generate WITHOUT closing the value
+                // This leaves the let bindings open for subsequent expressions
+                self.generate_field_assignment_open(expr)?;
+            } else {
+                // Non-field-assignment intermediate expression: wrap in let
+                let tmp_var = self.fresh_temp_var("seq");
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                write!(self.output, " in ")?;
             }
         }
         Ok(())
+    }
+
+    /// Check if an expression is a field assignment (self.field := value)
+    fn is_field_assignment(expr: &Expression) -> bool {
+        if let Expression::Assignment { target, .. } = expr {
+            if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    return recv_id.name == "self";
+                }
+            }
+        }
+        false
+    }
+
+    /// Generate a field assignment WITHOUT the closing value.
+    /// This is used when the assignment is not the last expression in a block,
+    /// so that the State binding extends to subsequent expressions.
+    fn generate_field_assignment_open(&mut self, expr: &Expression) -> Result<()> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                let val_var = self.fresh_temp_var("Val");
+                let current_state = self.current_state_var();
+
+                // let _Val = <value> in
+                write!(self.output, "let {val_var} = ")?;
+                self.generate_expression(value)?;
+
+                // Increment state version for the new state after assignment
+                let new_state = self.next_state_var();
+
+                // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
+                // Note: we do NOT close with the value - subsequent expressions are the body
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                    field.name
+                )?;
+
+                return Ok(());
+            }
+        }
+        // Fallback: should not reach here if is_field_assignment check was correct
+        self.generate_expression(expr)
     }
 
     /// Generates code for a message send.
@@ -1472,6 +1669,35 @@ impl CoreErlangGenerator {
     fn fresh_temp_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         format!("_{}{}", base.replace('_', ""), self.var_counter)
+    }
+
+    /// Returns the current state variable name for state threading.
+    ///
+    /// State threading uses incrementing variable names to simulate mutation:
+    /// - Version 0: `State` (the original state passed to the method)
+    /// - Version 1: `State1` (after first assignment)
+    /// - Version 2: `State2` (after second assignment)
+    /// - etc.
+    fn current_state_var(&self) -> String {
+        if self.state_version == 0 {
+            "State".to_string()
+        } else {
+            format!("State{}", self.state_version)
+        }
+    }
+
+    /// Increments the state version and returns the new state variable name.
+    ///
+    /// Call this when generating a field assignment (`self.field := value`)
+    /// to get the name for the new state after the update.
+    fn next_state_var(&mut self) -> String {
+        self.state_version += 1;
+        self.current_state_var()
+    }
+
+    /// Resets the state version to 0 at the start of each method.
+    fn reset_state_version(&mut self) {
+        self.state_version = 0;
     }
 
     /// Converts module name (`snake_case`) to class name (`CamelCase`).

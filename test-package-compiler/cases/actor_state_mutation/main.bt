@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test actor state mutation with proper state threading
+//
+// Each assignment to self.field should update the actor's state,
+// and the updated state should be returned to gen_server.
+
+value := 0.
+
+// Single assignment - increments value by 1
+increment := [
+    self.value := self.value + 1.
+    ^self.value
+].
+
+// Multiple assignments - adds a number twice
+addTwice := [:n |
+    self.value := self.value + n.
+    self.value := self.value + n.
+    ^self.value
+].
+
+// Get current value (no mutation)
+getValue := [ ^self.value ].
+
+// Reset to a specific value
+setValue := [:n |
+    self.value := n.
+    ^self.value
+].

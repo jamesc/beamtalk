@@ -61,8 +61,7 @@ module 'async_unary_message' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'run'> when 'true' ->
-            let Result = let _Future1 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(call 'maps':'get'('counter', State), {'increment', [], _Future1}) in _Future1
-            in {'reply', Result, State}
+            let _Result = let _Future1 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(call 'maps':'get'('counter', State), {'increment', [], _Future1}) in _Future1 in {'reply', _Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end

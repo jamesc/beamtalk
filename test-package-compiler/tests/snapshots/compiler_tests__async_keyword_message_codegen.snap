@@ -61,8 +61,7 @@ module 'async_keyword_message' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'cod
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'update'> when 'true' ->
-            let Result = let _Future1 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(call 'maps':'get'('array', State), {'at:put:', [1, #{#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#], _Future1}) in _Future1
-            in {'reply', Result, State}
+            let _Result = let _Future1 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(call 'maps':'get'('array', State), {'at:put:', [1, #{#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#], _Future1}) in _Future1 in {'reply', _Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
