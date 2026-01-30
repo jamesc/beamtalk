@@ -13,6 +13,9 @@
 %%% - spawn/1 tests (Counter spawnWith: #{...})
 %%% - State merging behavior (InitArgs override defaults)
 %%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
+%%% - Block Evaluation Tests (value, value:, value:value:, closures)
+%%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
+%%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
