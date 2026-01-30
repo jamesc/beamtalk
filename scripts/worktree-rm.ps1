@@ -1,0 +1,246 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+<#
+.SYNOPSIS
+    Stop and remove a git worktree, fixing any container path issues.
+
+.DESCRIPTION
+    Removes a worktree that may have been used with devcontainers.
+    Handles the case where the .git file was modified to point to
+    container paths and restores/cleans up properly.
+
+.PARAMETER Branch
+    The branch name of the worktree to remove (e.g., "BT-99-feature")
+
+.PARAMETER Force
+    Force removal even if there are uncommitted changes
+
+.EXAMPLE
+    .\stop-worktree.ps1 BT-99-feature
+    
+.EXAMPLE
+    .\stop-worktree.ps1 -Branch BT-99 -Force
+#>
+
+param(
+    [Parameter(Mandatory=$true, Position=0)]
+    [string]$Branch,
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$Force
+)
+
+$ErrorActionPreference = "Stop"
+
+# Find the main repo root (where .git is a directory, not a file)
+function Get-MainRepoRoot {
+    $current = Get-Location
+    
+    $gitPath = Join-Path $current ".git"
+    
+    if (Test-Path $gitPath -PathType Container) {
+        return $current.Path
+    }
+    elseif (Test-Path $gitPath -PathType Leaf) {
+        $gitContent = Get-Content $gitPath -Raw
+        if ($gitContent -match "gitdir:\s*(.+)") {
+            $gitDir = $matches[1].Trim()
+            $mainGit = Split-Path (Split-Path $gitDir -Parent) -Parent
+            return Split-Path $mainGit -Parent
+        }
+    }
+    
+    $gitRoot = git rev-parse --show-toplevel 2>$null
+    if ($gitRoot) {
+        return $gitRoot
+    }
+    
+    throw "Could not find git repository root"
+}
+
+# Get worktree path for a branch
+function Get-WorktreePath {
+    param([string]$BranchName)
+    
+    $worktrees = git worktree list --porcelain 2>$null
+    $wtPath = $null
+    foreach ($line in $worktrees) {
+        if ($line -match "^worktree\s+(.+)") {
+            $wtPath = $matches[1]
+        }
+        if ($line -match "^branch\s+refs/heads/(.+)" -and $matches[1] -eq $BranchName) {
+            return $wtPath
+        }
+    }
+    return $null
+}
+
+# Stop and remove devcontainer for a worktree
+function Remove-DevContainer {
+    param([string]$WorktreePath)
+    
+    $folderName = Split-Path $WorktreePath -Leaf
+    
+    # Find containers by devcontainer.local_folder label
+    # This is more reliable than matching container names
+    $containers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null | Where-Object { $_ -match [regex]::Escape($WorktreePath) }
+    
+    if ($containers) {
+        Write-Host "🐳 Found devcontainer(s) for $folderName" -ForegroundColor Cyan
+        foreach ($container in $containers) {
+            $parts = $container -split "\t"
+            $containerId = $parts[0]
+            $containerName = $parts[1]
+            
+            Write-Host "   Stopping: $containerName" -ForegroundColor Gray
+            docker stop $containerId 2>$null | Out-Null
+            
+            Write-Host "   Removing: $containerName" -ForegroundColor Gray
+            docker rm $containerId 2>$null | Out-Null
+        }
+        Write-Host "✅ Devcontainer(s) removed" -ForegroundColor Green
+    }
+    else {
+        Write-Host "ℹ️  No devcontainer found for $folderName" -ForegroundColor Gray
+    }
+    
+    # Also remove the target cache volume for this worktree
+    $volumeName = "$folderName-target-cache"
+    $volumeExists = docker volume ls --format "{{.Name}}" 2>$null | Where-Object { $_ -eq $volumeName }
+    if ($volumeExists) {
+        Write-Host "🗑️  Removing target cache volume: $volumeName" -ForegroundColor Cyan
+        docker volume rm $volumeName 2>$null | Out-Null
+        Write-Host "✅ Volume removed" -ForegroundColor Green
+    }
+}
+
+# Main script
+Write-Host "🛑 Stopping worktree for branch: $Branch" -ForegroundColor Cyan
+
+# Find main repo
+$mainRepo = Get-MainRepoRoot
+Write-Host "📁 Main repo: $mainRepo" -ForegroundColor Gray
+
+# Work from main repo
+Push-Location $mainRepo
+try {
+    # Find the worktree path
+    $worktreePath = Get-WorktreePath -BranchName $Branch
+    
+    if (-not $worktreePath) {
+        Write-Host "⚠️  No worktree found for branch: $Branch" -ForegroundColor Yellow
+        Write-Host "   Checking for orphaned worktree metadata..." -ForegroundColor Gray
+        
+        # Check if there's orphaned metadata
+        $worktreeMetaPath = Join-Path ".git" "worktrees" $Branch
+        if (Test-Path $worktreeMetaPath) {
+            Write-Host "🧹 Found orphaned metadata, cleaning up..." -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $worktreeMetaPath
+            Write-Host "✅ Cleaned up orphaned worktree metadata" -ForegroundColor Green
+        }
+        else {
+            Write-Host "❌ No worktree or metadata found for: $Branch" -ForegroundColor Red
+        }
+        exit 0
+    }
+    
+    Write-Host "📂 Worktree path: $worktreePath" -ForegroundColor Gray
+    
+    # Stop devcontainer FIRST (before removing worktree to release file locks)
+    Remove-DevContainer -WorktreePath $worktreePath
+    
+    # Check if the .git file in the worktree needs fixing
+    $gitFile = Join-Path $worktreePath ".git"
+    if (Test-Path $gitFile -PathType Leaf) {
+        $gitContent = Get-Content $gitFile -Raw
+        
+        # Check if it points to container path
+        if ($gitContent -match "/workspaces/") {
+            Write-Host "🔧 Fixing container path in .git file..." -ForegroundColor Yellow
+            
+            # Find the worktree name from the path
+            if ($gitContent -match "worktrees/([^/\r\n]+)") {
+                $worktreeName = $matches[1]
+                $correctPath = Join-Path $mainRepo ".git" "worktrees" $worktreeName
+                $correctPath = $correctPath -replace "\\", "/"
+                
+                Set-Content -Path $gitFile -Value "gitdir: $correctPath" -NoNewline
+                Write-Host "✅ Fixed .git to point to: $correctPath" -ForegroundColor Green
+            }
+        }
+    }
+    elseif (-not (Test-Path $gitFile)) {
+        Write-Host "⚠️  No .git file found in worktree (may be corrupted)" -ForegroundColor Yellow
+    }
+    
+    # Try standard worktree remove first
+    $removeArgs = @("worktree", "remove", $worktreePath)
+    if ($Force) {
+        $removeArgs += "--force"
+    }
+    
+    Write-Host "🗑️  Removing worktree..." -ForegroundColor Cyan
+    $result = & git @removeArgs 2>&1
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ Worktree removed successfully" -ForegroundColor Green
+    }
+    elseif ($result -match "modified or untracked files") {
+        Write-Host "❌ Worktree has uncommitted changes" -ForegroundColor Red
+        Write-Host "   Use -Force to delete anyway, or commit/stash your changes first." -ForegroundColor Yellow
+        exit 1
+    }
+    else {
+        Write-Host "⚠️  git worktree remove failed: $result" -ForegroundColor Yellow
+        Write-Host "🔧 Attempting manual cleanup..." -ForegroundColor Cyan
+        
+        # Manual cleanup
+        $worktreeMetaPath = Join-Path ".git" "worktrees" $Branch
+        
+        # Also try with the worktree directory name if different from branch
+        $worktreeDirName = Split-Path $worktreePath -Leaf
+        $worktreeMetaPathAlt = Join-Path ".git" "worktrees" $worktreeDirName
+        
+        # Remove metadata
+        foreach ($metaPath in @($worktreeMetaPath, $worktreeMetaPathAlt)) {
+            if (Test-Path $metaPath) {
+                Write-Host "   Removing: $metaPath" -ForegroundColor Gray
+                Remove-Item -Recurse -Force $metaPath
+            }
+        }
+        
+        # Remove worktree directory
+        if (Test-Path $worktreePath) {
+            Write-Host "   Removing: $worktreePath" -ForegroundColor Gray
+            Remove-Item -Recurse -Force $worktreePath
+        }
+        
+        # Prune stale entries
+        git worktree prune
+        
+        Write-Host "✅ Manual cleanup complete" -ForegroundColor Green
+    }
+    
+    # Optionally delete the branch
+    Write-Host ""
+    $deleteBranch = Read-Host "Delete local branch '$Branch'? (y/N)"
+    if ($deleteBranch -eq 'y' -or $deleteBranch -eq 'Y') {
+        git branch -d $Branch 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "⚠️  Branch not fully merged. Force delete? (y/N)" -ForegroundColor Yellow
+            $forceDelete = Read-Host
+            if ($forceDelete -eq 'y' -or $forceDelete -eq 'Y') {
+                git branch -D $Branch
+            }
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Branch deleted" -ForegroundColor Green
+        }
+    }
+}
+finally {
+    Pop-Location
+}
+
+Write-Host "`n✨ Done!" -ForegroundColor Green
