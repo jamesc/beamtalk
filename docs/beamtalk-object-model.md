@@ -22,13 +22,17 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 
 **Key insight:** BEAM's "everything is a process" aligns well with Smalltalk's "everything is an object" — we just shift the reification from memory-level objects to process-level actors.
 
+**Validation:** This approach is proven by [LFE Flavors](https://github.com/rvirding/flavors), Robert Virding's successful OOP implementation on BEAM. Our design adopts several Flavors patterns (error isolation, object reference records, method combinations) while adding Beamtalk-specific features (async-first, compile-time codegen).
+
 | Smalltalk Feature | BEAM Support | Beamtalk Approach |
 |-------------------|--------------|-------------------|
 | Classes as objects | ✅ Full | Maps with metaclass protocol |
 | Methods as objects | ✅ Full | Wrapped funs with metadata |
 | Blocks as closures | ✅ Full | Erlang funs (first-class) |
-| Objects with identity | ✅ Full | Processes with pids |
+| Objects with identity | ✅ Full | Processes with pids + `#beamtalk_object{}` record |
 | `doesNotUnderstand:` | ✅ Full | Gen_server dispatch fallback |
+| Method combinations | ✅ Full | Before/after methods (from Flavors) |
+| Error isolation | ✅ Full | Catch at instance, re-raise at caller |
 | Stack frames/thisContext | ❌ None | Post-exception stack traces only |
 | `become:` (identity swap) | ❌ None | Proxy pattern workaround |
 | Global reference scan | ❌ None | Manual tracking via ETS |
@@ -1020,7 +1024,149 @@ For Beamtalk v2+, we may consider:
 
 ## Part 5: Code Sketches
 
+The following sketches incorporate learnings from [LFE Flavors](https://github.com/rvirding/flavors), Robert Virding's successful OOP implementation on BEAM.
+
+### Actor Instance Record
+
+Following Flavors' `#flavor-instance{}` pattern, we define a record that bundles class info with the process. This enables reflection and makes "self" a proper object reference.
+
+```erlang
+%% In beamtalk.hrl
+-record(beamtalk_object, {
+    class :: atom(),           % Class name (e.g., 'Counter')
+    class_mod :: atom(),       % Class module (e.g., 'beamtalk_counter_class')
+    pid :: pid()               % The actor process
+}).
+
+%% Usage: pass this around instead of raw pid
+%% obj#beamtalk_object.pid for the process
+%% obj#beamtalk_object.class for reflection
+```
+
+### Actor Instance Implementation
+
+Each actor is a gen_server. Key patterns from Flavors:
+- **Error isolation:** Catch errors and re-raise at caller (don't crash the instance)
+- **Self reference:** Pass `#beamtalk_object{}` as "self" to methods
+
+```erlang
+-module(beamtalk_actor).
+-behaviour(gen_server).
+
+-include("beamtalk.hrl").
+
+-record(state, {
+    class :: atom(),
+    class_mod :: atom(),
+    self :: #beamtalk_object{},
+    fields :: map()
+}).
+
+%% Start an actor instance
+start_link(Class, ClassMod, InitArgs) ->
+    gen_server:start_link(?MODULE, {Class, ClassMod, InitArgs}, []).
+
+init({Class, ClassMod, InitArgs}) ->
+    Self = #beamtalk_object{class = Class, class_mod = ClassMod, pid = self()},
+    
+    %% Get default field values from class
+    DefaultFields = ClassMod:default_fields(),
+    Fields = maps:merge(DefaultFields, InitArgs),
+    
+    %% Register with instance tracker
+    beamtalk_instances:register(Class, self()),
+    
+    State = #state{class = Class, class_mod = ClassMod, self = Self, fields = Fields},
+    
+    %% Call init method if defined (Flavors pattern)
+    case catch dispatch(init, [InitArgs], State) of
+        {'EXIT', _} -> {ok, State};  % No init method, that's fine
+        {_, NewState} -> {ok, NewState}
+    end.
+
+%% Async message (returns future to caller) - Beamtalk's async-first model
+handle_cast({Selector, Args, FuturePid}, State) ->
+    case safe_dispatch(Selector, Args, State) of
+        {ok, Result, NewState} ->
+            FuturePid ! {resolved, Result},
+            {noreply, NewState};
+        {error, Error, NewState} ->
+            FuturePid ! {rejected, Error},
+            {noreply, NewState}
+    end.
+
+%% Sync message (blocks caller) - opt-in for simple cases
+handle_call({Selector, Args}, _From, State) ->
+    case safe_dispatch(Selector, Args, State) of
+        {ok, Result, NewState} ->
+            {reply, {ok, Result}, NewState};
+        {error, Error, NewState} ->
+            {reply, {error, Error}, NewState}
+    end;
+
+%% Reflection messages
+handle_call({class}, _From, #state{self = Self} = State) ->
+    {reply, Self#beamtalk_object.class, State};
+handle_call({respondsTo, Selector}, _From, #state{class_mod = Mod} = State) ->
+    {reply, Mod:has_method(Selector), State};
+handle_call({instVarNames}, _From, #state{fields = F} = State) ->
+    PublicFields = [K || K <- maps:keys(F), not is_private(K)],
+    {reply, PublicFields, State};
+handle_call({instVarAt, Name}, _From, #state{fields = F} = State) ->
+    {reply, maps:get(Name, F, undefined), State}.
+
+%% Hot patching: update method table
+handle_cast({update_methods, NewMethods}, #state{class_mod = Mod} = State) ->
+    %% Class module will use updated methods on next dispatch
+    Mod:set_methods(NewMethods),
+    {noreply, State}.
+
+%% Error-isolating dispatch (from Flavors)
+%% Errors don't crash the instance - they're returned to caller
+safe_dispatch(Selector, Args, State) ->
+    try
+        {Result, NewState} = dispatch(Selector, Args, State),
+        {ok, Result, NewState}
+    catch
+        error:Error -> 
+            {error, {error, Error, erlang:get_stacktrace()}, State};
+        exit:Exit -> 
+            {error, {exit, Exit, erlang:get_stacktrace()}, State};
+        throw:Thrown -> 
+            {error, {throw, Thrown, erlang:get_stacktrace()}, State}
+    end.
+
+dispatch(Selector, Args, #state{class_mod = Mod, self = Self, fields = Fields} = State) ->
+    case Mod:lookup_method(Selector) of
+        {ok, Fun} ->
+            %% Call method with self and fields
+            {Result, NewFields} = Fun(Self, Fields, Args),
+            {Result, State#state{fields = NewFields}};
+        error ->
+            %% Try doesNotUnderstand:
+            case Mod:lookup_method('doesNotUnderstand:args:') of
+                {ok, DnuFun} ->
+                    {Result, NewFields} = DnuFun(Self, Fields, [Selector, Args]),
+                    {Result, State#state{fields = NewFields}};
+                error ->
+                    error({unknown_message, Selector, State#state.class})
+            end
+    end.
+
+is_private('__' ++ _) -> true;
+is_private(_) -> false.
+
+terminate(_Reason, #state{class = Class, class_mod = Mod, self = Self, fields = Fields}) ->
+    %% Call terminate method if defined (Flavors pattern)
+    catch Mod:call_method(terminate, Self, Fields, []),
+    ok.
+```
+
 ### Class Object Implementation
+
+Following Flavors' two-module pattern, we separate:
+- **`beamtalk_<class>_class`** — Class metadata, factory methods (one per class)
+- **`beamtalk_<class>`** — Generated instance behavior module
 
 ```erlang
 -module(beamtalk_class).
@@ -1034,7 +1180,10 @@ For Beamtalk v2+, we may consider:
     instance_methods :: #{atom() => function()},
     class_methods :: #{atom() => function()},
     instance_variables :: [atom()],
-    method_source :: #{atom() => binary()}
+    method_source :: #{atom() => binary()},
+    %% Flavors-style: track method combinations (before/after daemons)
+    before_methods :: #{atom() => [function()]},
+    after_methods :: #{atom() => [function()]}
 }).
 
 init([Name, Super, InstVars, InstMethods, ClassMethods]) ->
@@ -1044,15 +1193,19 @@ init([Name, Super, InstVars, InstMethods, ClassMethods]) ->
         instance_methods = InstMethods,
         class_methods = ClassMethods,
         instance_variables = InstVars,
-        method_source = #{}
+        method_source = #{},
+        before_methods = #{},
+        after_methods = #{}
     },
     {ok, State}.
 
 %% Factory: Create new instance
 handle_call({new, Args}, _From, #class_state{name = Name} = State) ->
-    Module = class_to_module(Name),
-    {ok, Pid} = Module:start_link(Args),
-    {reply, Pid, State};
+    ClassMod = class_module(Name),
+    {ok, Pid} = beamtalk_actor:start_link(Name, ClassMod, Args),
+    %% Return object reference, not raw pid (Flavors pattern)
+    ObjRef = #beamtalk_object{class = Name, class_mod = ClassMod, pid = Pid},
+    {reply, ObjRef, State};
 
 %% Introspection: Get all methods
 handle_call({methods}, _From, #class_state{instance_methods = M} = State) ->
@@ -1085,10 +1238,21 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     NewState = State#class_state{instance_methods = NewMethods, method_source = NewSource},
     %% Notify running instances to pick up new method table
     notify_instances(State#class_state.name, NewMethods),
-    {reply, ok, NewState}.
+    {reply, ok, NewState};
 
-class_to_module(Name) ->
-    list_to_atom("beamtalk_" ++ string:lowercase(atom_to_list(Name))).
+%% Method combinations (Flavors' before/after daemons)
+handle_call({add_before, Selector, Fun}, _From, State) ->
+    Befores = maps:get(Selector, State#class_state.before_methods, []),
+    NewBefores = maps:put(Selector, [Fun | Befores], State#class_state.before_methods),
+    {reply, ok, State#class_state{before_methods = NewBefores}};
+
+handle_call({add_after, Selector, Fun}, _From, State) ->
+    Afters = maps:get(Selector, State#class_state.after_methods, []),
+    NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
+    {reply, ok, State#class_state{after_methods = NewAfters}}.
+
+class_module(Name) ->
+    list_to_atom("beamtalk_" ++ string:lowercase(atom_to_list(Name)) ++ "_class").
 
 notify_instances(ClassName, NewMethods) ->
     Instances = beamtalk_instances:all(ClassName),
