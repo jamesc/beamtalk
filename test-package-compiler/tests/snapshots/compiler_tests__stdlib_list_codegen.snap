@@ -61,8 +61,7 @@ module 'stdlib_list' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'numbers'> when 'true' ->
-            let Result = 1
-            in {'reply', Result, State}
+            let _Result = 1 in {'reply', _Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end

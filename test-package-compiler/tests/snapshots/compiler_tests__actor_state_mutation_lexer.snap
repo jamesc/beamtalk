@@ -1,0 +1,37 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("value"), span: Span { start: 256, end: 261 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test actor state mutation with proper state threading"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Each assignment to self.field should update the actor's state,"), Whitespace("\n"), LineComment("// and the updated state should be returned to gen_server."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 262, end: 264 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 265, end: 266 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 266, end: 267 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("increment"), span: Span { start: 314, end: 323 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Single assignment - increments value by 1"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 324, end: 326 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 327, end: 328 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 329, end: 333 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 333, end: 334 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 334, end: 339 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 340, end: 342 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 343, end: 347 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 347, end: 348 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 348, end: 353 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 354, end: 355 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 356, end: 357 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 357, end: 358 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 359, end: 360 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 360, end: 364 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 364, end: 365 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 365, end: 370 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 371, end: 372 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 372, end: 373 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getValue"), span: Span { start: 410, end: 418 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Get current value (no mutation)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 419, end: 421 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 422, end: 423 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 424, end: 425 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 425, end: 429 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 429, end: 430 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 430, end: 435 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: RightBracket, span: Span { start: 436, end: 437 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 437, end: 438 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 680, end: 680 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])"), Whitespace("\n"), LineComment("// have a known parser limitation tracked for future work. The increment and getValue"), Whitespace("\n"), LineComment("// methods above demonstrate state threading works correctly."), Whitespace("\n")], trailing_trivia: [] }
