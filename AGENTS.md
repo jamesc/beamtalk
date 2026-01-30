@@ -144,6 +144,10 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
 | `worktree-start` | `/worktree-start <branch>` | Guide for creating a new worktree |
 | `worktree-stop` | `/worktree-stop <branch>` | Guide for removing a worktree |
+| `add-ast-node` | "add AST node" | Add a new AST node to the compiler |
+| `add-cli-command` | "add CLI command" | Add a new command to the CLI |
+| `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
+| `create-issue` | "create issue" | Create Linear issues with blocking relationships |
 
 ### Skill Locations
 
