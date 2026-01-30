@@ -747,11 +747,23 @@ impl Parser {
         let mut expr = Expression::Identifier(Identifier::new(name.clone(), span));
 
         // Check for field access: identifier.field
-        // Only treat a '.' as starting a field access if it is immediately
-        // followed by an identifier. This avoids consuming '.' that might be
-        // used as a statement terminator or for other syntax.
+        // Only treat a '.' as starting a field access if:
+        // 1. The current token is a Period
+        // 2. The next token is an Identifier
+        // 3. There is no whitespace between the period and the identifier
+        //
+        // This distinguishes `self.value` (field access) from `n. self` (statement
+        // separator followed by new expression).
+        //
+        // Whitespace detection: The lexer puts trailing same-line whitespace (spaces/tabs)
+        // as trailing trivia on the period, and newlines + subsequent whitespace as leading
+        // trivia on the next token. We check BOTH to catch all cases:
+        // - `n. self` → period has trailing space
+        // - `n.\n    self` → identifier has leading newline+spaces
         while self.check(&TokenKind::Period)
             && matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+            && self.current_token().trailing_trivia().is_empty()
+            && self.peek().is_some_and(|t| t.leading_trivia().is_empty())
         {
             self.advance(); // consume the period
 
@@ -1415,6 +1427,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_multiple_statements_with_binary_op() {
+        // Regression test: ensure `. ` (period + space) is parsed as statement
+        // separator, not field access
+        let module = parse_ok("[ 1 + m. y := 1]");
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(block.body.len(), 2, "Block should have 2 statements");
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[test]
     fn parse_empty_map() {
         let module = parse_ok("#{}");
         assert_eq!(module.expressions.len(), 1);
@@ -1452,6 +1477,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_with_field_assignments() {
+        // Regression test: multiple field assignments should parse correctly
+        let module = parse_ok("[:n | self.x := self.x + n. self.x := self.x + n. ^self.x]");
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(block.body.len(), 3, "Block should have 3 statements");
+                assert!(matches!(block.body[0], Expression::Assignment { .. }));
+                assert!(matches!(block.body[1], Expression::Assignment { .. }));
+                assert!(matches!(block.body[2], Expression::Return { .. }));
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[test]
     fn parse_map_with_string_keys() {
         let module = parse_ok("#{'host' => 'localhost', 'port' => 8080}");
         assert_eq!(module.expressions.len(), 1);
@@ -1466,6 +1506,24 @@ mod tests {
                 );
             }
             _ => panic!("Expected MapLiteral"),
+        }
+    }
+
+    #[test]
+    fn parse_block_with_newlines_between_statements() {
+        // Regression test: newlines after period should not be treated as field access
+        let module = parse_ok(
+            "[:n |
+    self.value := self.value + n.
+    self.value := self.value + n.
+    ^self.value
+]",
+        );
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(block.body.len(), 3, "Block should have 3 statements");
+            }
+            _ => panic!("Expected block"),
         }
     }
 
