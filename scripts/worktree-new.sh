@@ -173,7 +173,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-log_success "✨ Container ready! Connecting..."
+log_success "✨ Container ready! Starting Copilot..."
 
-# Connect to the container
-devcontainer exec --workspace-folder "$WORKTREE_PATH" bash
+# Connect to the container and start Copilot in yolo mode
+devcontainer exec --workspace-folder "$WORKTREE_PATH" copilot --yolo
