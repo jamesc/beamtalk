@@ -2,6 +2,23 @@
 
 This document provides guidance for AI coding agents working on the beamtalk compiler and ecosystem.
 
+## Repository Information
+
+**Always use these values for GitHub API calls:**
+
+| Property | Value |
+|----------|-------|
+| Owner | `jamesc` |
+| Repository | `beamtalk` |
+| Full name | `jamesc/beamtalk` |
+| URL | `https://github.com/jamesc/beamtalk` |
+
+Example `gh` CLI usage:
+```bash
+gh api repos/jamesc/beamtalk/pulls
+gh pr create --repo jamesc/beamtalk
+```
+
 ## Project Overview
 
 Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to the BEAM virtual machine. The compiler is written in Rust and generates Core Erlang, which is then compiled to BEAM bytecode via erlc.
