@@ -37,7 +37,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | **Control Flow** | | | |
 | Block evaluation | ✅ | [control_flow.bt](cases/control_flow.bt) | `[5 + 3] value` |
 | Block with variables | ✅ | [control_flow.bt](cases/control_flow.bt) | Uses REPL bindings |
-| `whileTrue:` | 🔧 | — | Implemented but assignments inside blocks don't persist (BT-90) |
+| `whileTrue:` | 🔧 | [blocks.bt](cases/blocks.bt) | Non-mutating loop (`[false] whileTrue: [42]`) works; assignments inside blocks don't persist (BT-90) |
 | `whileFalse:` | 🔧 | — | Implemented but assignments inside blocks don't persist (BT-90) |
 | `timesRepeat:` | 📋 | — | Not yet implemented |
 | `to:do:` | 📋 | — | Not yet implemented |

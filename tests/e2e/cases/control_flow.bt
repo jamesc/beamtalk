@@ -55,7 +55,7 @@
 // VARIABLE PERSISTENCE IN REPL
 // ===========================================================================
 // Note: Variables persist across expressions within the same test file.
-// Assignments inside blocks DON'T propagate back (requires BT-58).
+// Assignments inside blocks DON'T propagate back (requires BT-90).
 
 // Set up a value
 baseValue := 100
