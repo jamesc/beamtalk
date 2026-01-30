@@ -3,25 +3,29 @@
   "team": "Beamtalk",
   "issuePrefix": "BT",
   "labels": {
-    "workflow": [
+    "agentState": [
       "agent-ready",
       "needs-spec",
       "blocked",
-      "human-review"
+      "human-review",
+      "done"
     ],
-    "area": [
-      "lexer",
-      "parser",
-      "codegen",
-      "cli",
-      "stdlib",
-      "docs"
+    "issueType": [
+      "Feature",
+      "Bug",
+      "Improvement",
+      "Documentation",
+      "Infra",
+      "Language Feature",
+      "Refactor",
+      "Research",
+      "Samples"
     ],
-    "complexity": [
-      "trivial",
-      "small",
-      "medium",
-      "large"
+    "itemSize": [
+      "S",
+      "M",
+      "L",
+      "XM"
     ]
   },
   "customFields": {

@@ -16,8 +16,22 @@ Every issue **must** have:
 | **Team** | `BT` |
 | **Assignee** | `jamesc` (James Casey) |
 | **Agent State Label** | `agent-ready` or `needs-spec` |
-| **Estimate (Size)** | 1 (XS), 2 (S), 3 (M), 5 (L), 8 (XL) |
-| **Type** | `feature`, `bug`, `improvement`, or `chore` |
+| **Estimate (Size)** | T-shirt size: S, M, L, XM |
+| **Type** | See issue types below |
+
+## Issue Types
+
+| Type | Description |
+|------|-------------|
+| `Feature` | A chunk of customer visible work |
+| `Bug` | Bugs, broken tests, broken code |
+| `Improvement` | Incremental work on top of a feature |
+| `Documentation` | Words that explain things to humans and non-humans |
+| `Infra` | Tools, CI, dev environment configuration |
+| `Language Feature` | New Beamtalk language syntax/semantics |
+| `Refactor` | Code cleanups, tech debt |
+| `Research` | Research projects, code spikes |
+| `Samples` | Code, examples, things to help devs get started |
 
 ## Optional Fields
 
@@ -71,14 +85,14 @@ Always set one of these labels:
 - `needs-spec` - Requires human clarification before work can start
 - `blocked` - Waiting on external dependency or another issue
 
-## Size Estimates
+## Size Estimates (T-Shirt Sizing)
 
-Use Fibonacci sizing based on complexity:
-- **1 (XS)** - Trivial change, < 1 hour (typo fix, config change)
-- **2 (S)** - Small change, few hours (add a test, simple refactor)
-- **3 (M)** - Medium change, ~1 day (new feature, moderate complexity)
-- **5 (L)** - Large change, 2-3 days (significant feature, multiple files)
-- **8 (XL)** - Very large, consider breaking down (major feature, architectural change)
+| Size | Description |
+|------|-------------|
+| **S** | Small change, few hours (add a test, simple refactor) |
+| **M** | Medium change, ~1 day (new feature, moderate complexity) |
+| **L** | Large change, 2-3 days (significant feature, multiple files) |
+| **XM** | Extra large, consider breaking down (major feature, architectural change) |
 
 ## Creating via Linear Tool
 
@@ -89,7 +103,7 @@ Use Fibonacci sizing based on complexity:
   "team": "BT",
   "assignee": "jamesc",
   "body": "Context:\n...\n\nAcceptance Criteria:\n- [ ] ...",
-  "labels": ["agent-ready", "feature"],
+  "labels": ["agent-ready", "Language Feature"],
   "priority": 3
 }
 ```
