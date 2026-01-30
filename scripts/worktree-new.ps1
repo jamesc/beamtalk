@@ -216,7 +216,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "`n✨ Container ready! Connecting..." -ForegroundColor Green
+Write-Host "`n✨ Container ready! Starting Copilot..." -ForegroundColor Green
 
-# Connect to the container
-devcontainer exec --workspace-folder $worktreePath bash
+# Connect to the container and start Copilot in yolo mode
+devcontainer exec --workspace-folder $worktreePath copilot --yolo
