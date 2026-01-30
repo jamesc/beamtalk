@@ -130,6 +130,47 @@ mutation {
 
 ---
 
+## Agent Skills
+
+This repository includes custom skills in `.github/skills/` that teach Copilot specialized workflows for this project. Skills are automatically loaded when relevant to your prompt.
+
+### Available Skills
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| `next-issue` | `/next-issue` | Pick up the next Linear issue from backlog |
+| `done` | `/done` | Complete work, commit, push, and create PR |
+| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
+| `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
+| `worktree-start` | `/worktree-start <branch>` | Guide for creating a new worktree |
+| `worktree-stop` | `/worktree-stop <branch>` | Guide for removing a worktree |
+
+### Skill Locations
+
+- **Project skills** (this repo): `.github/skills/<skill-name>/SKILL.md`
+- **Personal skills** (all projects): `~/.copilot/skills/<skill-name>/SKILL.md`
+
+### Creating New Skills
+
+1. Create a directory: `.github/skills/<skill-name>/`
+2. Add a `SKILL.md` file with YAML frontmatter:
+   ```markdown
+   ---
+   name: skill-name
+   description: When to use this skill. Be specific so Copilot knows when to activate it.
+   ---
+
+   # Skill Instructions
+
+   Step-by-step instructions for Copilot to follow...
+   ```
+
+3. Optionally add scripts or resources to the skill directory
+
+For more details, see [About Agent Skills](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills).
+
+---
+
 ## Parallel Development with Worktrees
 
 We use git worktrees to enable multiple parallel development sessions. Each worktree is an independent working directory with its own branch, allowing multiple Copilot agents to work simultaneously on different issues.
