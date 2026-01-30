@@ -1317,21 +1317,15 @@ impl CoreErlangGenerator {
     ///
     /// # Note
     ///
-    /// Currently only applies to map literal receivers to avoid collisions with
-    /// Array/List/Set selectors. Future type inference will enable this for all
-    /// Dictionary-typed expressions.
+    /// These selectors are treated as Dictionary operations for ALL receivers.
+    /// This means Array/List/Set must use different selectors (e.g., `elementAt:`
+    /// instead of `at:`). Future type inference may allow disambiguation.
     fn try_generate_dictionary_message(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<()>> {
-        // Only apply to map literal receivers to avoid collision with Array/List/Set selectors
-        // like `at:`, `size`, etc. Future type inference will enable broader application.
-        if !matches!(receiver, Expression::MapLiteral { .. }) {
-            return Ok(None);
-        }
-
         match selector {
             // Unary messages
             MessageSelector::Unary(name) => match name.as_str() {
@@ -2790,6 +2784,89 @@ end
                 );
             }
         }
+    }
+
+    // ========================================================================
+    // Dictionary Method Code Generation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dictionary_at_on_identifier() {
+        // person at: #name -> maps:get('name', Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Keyword(vec![KeywordPart::new("at:", Span::new(7, 10))]);
+        let arguments = vec![Expression::Literal(
+            Literal::Symbol("name".into()),
+            Span::new(11, 16),
+        )];
+
+        generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'get'('name', Person)"),
+            "Should generate maps:get call. Got: {output}"
+        );
+        // Should NOT create a future (synchronous operation)
+        assert!(
+            !output.contains("beamtalk_future"),
+            "Dictionary methods should be synchronous. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_dictionary_at_put_on_identifier() {
+        // person at: #age put: 31 -> maps:put('age', 31, Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("at:", Span::new(7, 10)),
+            KeywordPart::new("put:", Span::new(14, 18)),
+        ]);
+        let arguments = vec![
+            Expression::Literal(Literal::Symbol("age".into()), Span::new(11, 14)),
+            Expression::Literal(Literal::Integer(31), Span::new(19, 21)),
+        ];
+
+        generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'put'('age', 31, Person)"),
+            "Should generate maps:put call. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_dictionary_size_on_identifier() {
+        // person size -> maps:size(Person)
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+        generator.bind_var("person", "Person");
+
+        let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
+        let selector = MessageSelector::Unary("size".into());
+
+        generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = &generator.output;
+
+        assert!(
+            output.contains("call 'maps':'size'(Person)"),
+            "Should generate maps:size call. Got: {output}"
+        );
     }
 
     // ========================================================================
