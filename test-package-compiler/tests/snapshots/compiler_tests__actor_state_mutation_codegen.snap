@@ -2,11 +2,11 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'actor_state_mutation' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('stdlib_block', ~{}~, []) of
+    case call 'gen_server':'start_link'('actor_state_mutation', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -15,7 +15,7 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 
 
 'spawn'/1 = fun (InitArgs) ->
-    case call 'gen_server':'start_link'('stdlib_block', InitArgs, []) of
+    case call 'gen_server':'start_link'('actor_state_mutation', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -25,10 +25,9 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'StdlibBlock',
-        '__methods__' => call 'stdlib_block':'method_table'()
-        , 'counter' => 0
-        , 'outer' => 10
+        '__class__' => 'ActorStateMutation',
+        '__methods__' => call 'actor_state_mutation':'method_table'()
+        , 'value' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -37,7 +36,7 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'stdlib_block':'dispatch'(Selector, Args, State) of
+            case call 'actor_state_mutation':'dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
                     in {'noreply', NewState}
@@ -48,7 +47,7 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'stdlib_block':'dispatch'(Selector, Args, State) of
+            case call 'actor_state_mutation':'dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', Result, NewState}
             end
@@ -62,28 +61,16 @@ module 'stdlib_block' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
-        <'block'> when 'true' ->
-            let _Result = 42 in {'reply', _Result, State}
         <'increment'> when 'true' ->
-            case Args of
-                <[_x1]> when 'true' ->
-                    let _Result = call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
-        <'add'> when 'true' ->
-            case Args of
-                <[_x2, _y3]> when 'true' ->
-                    let _Result = call 'erlang':'+'(_x2, _y3) in {'reply', _Result, State}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
-        <'captureBlock'> when 'true' ->
-            let _Result = call 'erlang':'+'(call 'maps':'get'('outer', State), 5) in {'reply', _Result, State}
+            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in let _Result = call 'maps':'get'('value', State1) in {'reply', _Result, State1}
+        <'getValue'> when 'true' ->
+            let _Result = call 'maps':'get'('value', State) in {'reply', _Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
 
 
 'method_table'/0 = fun () ->
-    ~{'block' => 0, 'increment' => 1, 'add' => 2, 'captureBlock' => 0}~
+    ~{'increment' => 0, 'getValue' => 0}~
 
 end

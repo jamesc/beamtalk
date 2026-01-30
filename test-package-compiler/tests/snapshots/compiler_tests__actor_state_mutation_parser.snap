@@ -1,0 +1,266 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "value",
+                    span: Span {
+                        start: 256,
+                        end: 261,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    0,
+                ),
+                Span {
+                    start: 265,
+                    end: 266,
+                },
+            ),
+            span: Span {
+                start: 256,
+                end: 266,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "increment",
+                    span: Span {
+                        start: 314,
+                        end: 323,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 329,
+                                            end: 333,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 334,
+                                        end: 339,
+                                    },
+                                },
+                                span: Span {
+                                    start: 329,
+                                    end: 339,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 343,
+                                                end: 347,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 348,
+                                            end: 353,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 343,
+                                        end: 353,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 356,
+                                            end: 357,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 343,
+                                    end: 357,
+                                },
+                            },
+                            span: Span {
+                                start: 329,
+                                end: 357,
+                            },
+                        },
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 360,
+                                            end: 364,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 365,
+                                        end: 370,
+                                    },
+                                },
+                                span: Span {
+                                    start: 360,
+                                    end: 370,
+                                },
+                            },
+                            span: Span {
+                                start: 359,
+                                end: 370,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 327,
+                        end: 372,
+                    },
+                },
+            ),
+            span: Span {
+                start: 314,
+                end: 372,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "getValue",
+                    span: Span {
+                        start: 410,
+                        end: 418,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 425,
+                                            end: 429,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 430,
+                                        end: 435,
+                                    },
+                                },
+                                span: Span {
+                                    start: 425,
+                                    end: 435,
+                                },
+                            },
+                            span: Span {
+                                start: 424,
+                                end: 435,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 422,
+                        end: 437,
+                    },
+                },
+            ),
+            span: Span {
+                start: 410,
+                end: 437,
+            },
+        },
+    ],
+    span: Span {
+        start: 256,
+        end: 438,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test actor state mutation with proper state threading",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Each assignment to self.field should update the actor's state,",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// and the updated state should be returned to gen_server.",
+            span: Span {
+                start: 256,
+                end: 261,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -61,8 +61,7 @@ module 'cascades' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'runCascade'> when 'true' ->
-            let Result = let _Receiver1 = call 'maps':'get'('counter', State) in let _ = let _Future2 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'increment', [], _Future2}) in _Future2 in let _ = let _Future3 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'increment', [], _Future3}) in _Future3 in let _Future4 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'getValue', [], _Future4}) in _Future4
-            in {'reply', Result, State}
+            let _Result = let _Receiver1 = call 'maps':'get'('counter', State) in let _ = let _Future2 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'increment', [], _Future2}) in _Future2 in let _ = let _Future3 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'increment', [], _Future3}) in _Future3 in let _Future4 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Receiver1, {'getValue', [], _Future4}) in _Future4 in {'reply', _Result, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end

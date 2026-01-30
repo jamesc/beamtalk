@@ -62,8 +62,7 @@ module 'actor_spawn_with_args' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'cod
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'increment'> when 'true' ->
-            let Result = call 'erlang':'+'(call 'maps':'get'('value', State), 1)
-            in {'reply', Result, State}
+            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in {'reply', _Val1, State1}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
