@@ -8,11 +8,15 @@
 //
 // Implementation Status: Code generation implemented BT-86
 //
-// These tests are currently documentation-only as the REPL doesn't yet support cascades.
-// When REPL support is added, uncomment these tests:
+// Cascades are supported in compiled modules. The receiver is evaluated once,
+// and all cascade messages are sent to that same actor. The final message's
+// result is returned.
 //
-// Simple cascade example (returns result of final message):
-// [1, 2, 3] size; isEmpty; not
-// // => future (when supported)
+// Limitations:
+// - Binary selectors (like +, -, etc.) are not yet supported in cascades
+// - REPL evaluation of cascades may have limitations due to how the REPL
+//   compiles expressions
 //
-// For now, cascades work in compiled modules but not in the REPL.
+// Example in compiled modules:
+//   runCascade := [ counter increment; increment; getValue ]
+// This sends increment twice, then getValue, all to counter.

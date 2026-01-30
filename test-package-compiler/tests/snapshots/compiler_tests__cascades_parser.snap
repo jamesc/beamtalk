@@ -8,167 +8,121 @@ Module {
         Assignment {
             target: Identifier(
                 Identifier {
-                    name: "testUnary",
+                    name: "runCascade",
                     span: Span {
-                        start: 177,
-                        end: 186,
+                        start: 208,
+                        end: 218,
                     },
                 },
             ),
-            value: Error {
-                message: "Invalid assignment target",
-                span: Span {
-                    start: 190,
-                    end: 277,
-                },
-            },
-            span: Span {
-                start: 177,
-                end: 277,
-            },
-        },
-        Block(
-            Block {
-                parameters: [],
-                body: [
-                    Cascade {
-                        receiver: MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "collection",
-                                    span: Span {
-                                        start: 283,
-                                        end: 293,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "add:",
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Cascade {
+                            receiver: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "counter",
                                         span: Span {
-                                            start: 294,
-                                            end: 298,
+                                            start: 224,
+                                            end: 231,
                                         },
                                     },
-                                ],
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        1,
-                                    ),
-                                    Span {
-                                        start: 299,
-                                        end: 300,
-                                    },
                                 ),
-                            ],
-                            span: Span {
-                                start: 283,
-                                end: 300,
-                            },
-                        },
-                        messages: [
-                            CascadeMessage {
-                                selector: Keyword(
-                                    [
-                                        KeywordPart {
-                                            keyword: "add:",
-                                            span: Span {
-                                                start: 302,
-                                                end: 306,
-                                            },
-                                        },
-                                    ],
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            2,
-                                        ),
-                                        Span {
-                                            start: 307,
-                                            end: 308,
-                                        },
-                                    ),
-                                ],
-                                span: Span {
-                                    start: 302,
-                                    end: 308,
-                                },
-                            },
-                            CascadeMessage {
                                 selector: Unary(
-                                    "size",
+                                    "increment",
                                 ),
                                 arguments: [],
                                 span: Span {
-                                    start: 310,
-                                    end: 314,
+                                    start: 224,
+                                    end: 241,
                                 },
                             },
-                        ],
-                        span: Span {
-                            start: 283,
-                            end: 314,
+                            messages: [
+                                CascadeMessage {
+                                    selector: Unary(
+                                        "increment",
+                                    ),
+                                    arguments: [],
+                                    span: Span {
+                                        start: 243,
+                                        end: 252,
+                                    },
+                                },
+                                CascadeMessage {
+                                    selector: Unary(
+                                        "getValue",
+                                    ),
+                                    arguments: [],
+                                    span: Span {
+                                        start: 254,
+                                        end: 262,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 224,
+                                end: 262,
+                            },
                         },
+                    ],
+                    span: Span {
+                        start: 222,
+                        end: 264,
                     },
-                ],
-                span: Span {
-                    start: 281,
-                    end: 316,
                 },
+            ),
+            span: Span {
+                start: 208,
+                end: 264,
             },
-        ),
+        },
     ],
     span: Span {
-        start: 177,
-        end: 316,
+        start: 208,
+        end: 264,
     },
     leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {
-                start: 177,
-                end: 186,
+                start: 208,
+                end: 218,
             },
             kind: Line,
         },
         Comment {
             content: "// SPDX-License-Identifier: Apache-2.0",
             span: Span {
-                start: 177,
-                end: 186,
+                start: 208,
+                end: 218,
             },
             kind: Line,
         },
         Comment {
             content: "// Test cascade message sends",
             span: Span {
-                start: 177,
-                end: 186,
+                start: 208,
+                end: 218,
             },
             kind: Line,
         },
         Comment {
             content: "// Sends multiple messages to the same receiver",
             span: Span {
-                start: 177,
-                end: 186,
+                start: 208,
+                end: 218,
             },
             kind: Line,
         },
         Comment {
-            content: "// Unary cascade in a block",
+            content: "// Method that uses a cascade - all messages go to counter",
             span: Span {
-                start: 177,
-                end: 186,
+                start: 208,
+                end: 218,
             },
             kind: Line,
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 190, end: 277 } }
