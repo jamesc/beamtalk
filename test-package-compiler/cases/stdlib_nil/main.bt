@@ -3,9 +3,17 @@
 
 // Test Nil control flow and testing messages
 
+// ═══════════════════════════════════════════════════════════════════════
+// Basic Testing Methods
+// ═══════════════════════════════════════════════════════════════════════
+
 // Test isNil / notNil
 result1 := nil isNil       // => true
 result2 := nil notNil      // => false
+
+// ═══════════════════════════════════════════════════════════════════════
+// Control Flow Methods
+// ═══════════════════════════════════════════════════════════════════════
 
 // Test ifNil: evaluates the block
 result3 := nil ifNil: ['default']
@@ -19,6 +27,10 @@ result5 := nil ifNil: ['was nil'] ifNotNil: [:val | 'was not nil']
 // Test ifNotNil:ifNil: (reversed order) evaluates nilBlock
 result6 := nil ifNotNil: [:val | 'was not nil'] ifNil: ['was nil']
 
+// ═══════════════════════════════════════════════════════════════════════
+// Copy Operations (Singleton)
+// ═══════════════════════════════════════════════════════════════════════
+
 // Test copy operations return self (singleton)
 result7 := nil copy
 result8 := nil deepCopy
@@ -26,3 +38,81 @@ result9 := nil shallowCopy
 
 // Test describe
 result10 := nil describe   // => 'nil'
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Chaining and Composition
+// ═══════════════════════════════════════════════════════════════════════
+
+// Chaining: use ifNil: result in further computation
+result11 := (nil ifNil: [10]) + 5  // => 15
+
+// Chaining: ifNil: with message send on result
+result12 := (nil ifNil: ['hello']) uppercase  // => 'HELLO'
+
+// Nested ifNil: - outer nil, inner returns value from block
+result13 := nil ifNil: [nil ifNil: ['nested default']]  // => 'nested default'
+
+// Block that itself returns nil
+result14 := nil ifNil: [nil]  // => nil
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Equality and Identity
+// ═══════════════════════════════════════════════════════════════════════
+
+// nil equality with itself
+result15 := nil = nil  // => true
+
+// nil inequality with other values
+result16 := nil = 0    // => false
+result17 := nil = ''   // => false
+result18 := nil = false  // => false (nil is not false!)
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Boolean Logic Integration
+// ═══════════════════════════════════════════════════════════════════════
+
+// Combining isNil with boolean logic
+result19 := nil isNil and: [true]   // => true
+result20 := nil isNil or: [false]   // => true (short-circuits)
+result21 := nil notNil and: [true]  // => false (short-circuits)
+result22 := nil notNil or: [true]   // => true
+
+// Using isNil result in ifTrue:ifFalse:
+result23 := nil isNil ifTrue: ['is nil'] ifFalse: ['not nil']  // => 'is nil'
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Block Expressions
+// ═══════════════════════════════════════════════════════════════════════
+
+// ifNil: with arithmetic in block
+result24 := nil ifNil: [1 + 2 * 3]  // => 7
+
+// ifNotNil: block should NOT be evaluated
+result25 := nil ifNotNil: [:val | val + 100 * 2]  // => nil (block not evaluated)
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Multiple Consecutive Checks  
+// ═══════════════════════════════════════════════════════════════════════
+
+// Multiple isNil checks in sequence (should all be consistent)
+check1 := nil isNil
+check2 := nil isNil  
+check3 := nil isNil
+result26 := check1 and: [check2 and: [check3]]  // => true
+
+// Assigning nil and then checking
+maybeValue := nil
+result27 := maybeValue isNil  // => true
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: ifNil: vs ifNotNil: Return Values
+// ═══════════════════════════════════════════════════════════════════════
+
+// ifNil: returns block result, not nil
+result28 := nil ifNil: [42]  // => 42 (not nil)
+
+// ifNotNil: on nil returns nil itself
+result29 := nil ifNotNil: [42]  // => nil (block not evaluated)
+
+// Verify ifNotNil: truly doesn't evaluate by checking return is nil
+result30 := (nil ifNotNil: [9999]) isNil  // => true
