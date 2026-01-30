@@ -9,6 +9,9 @@
 WORKSPACE="${1:-$PWD}"
 GIT_FILE="$WORKSPACE/.git"
 
+# Trust all directories to avoid "dubious ownership" errors in containers
+git config --global safe.directory '*'
+
 echo "fix-worktree-git.sh: Checking $GIT_FILE"
 
 # Check if .git is a file (worktree) or directory (main repo)

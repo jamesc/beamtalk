@@ -76,6 +76,45 @@ function Get-WorktreePath {
     return $null
 }
 
+# Stop and remove devcontainer for a worktree
+function Remove-DevContainer {
+    param([string]$WorktreePath)
+    
+    $folderName = Split-Path $WorktreePath -Leaf
+    
+    # Find containers by devcontainer.local_folder label
+    # This is more reliable than matching container names
+    $containers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null | Where-Object { $_ -match [regex]::Escape($WorktreePath) }
+    
+    if ($containers) {
+        Write-Host "🐳 Found devcontainer(s) for $folderName" -ForegroundColor Cyan
+        foreach ($container in $containers) {
+            $parts = $container -split "\t"
+            $containerId = $parts[0]
+            $containerName = $parts[1]
+            
+            Write-Host "   Stopping: $containerName" -ForegroundColor Gray
+            docker stop $containerId 2>$null | Out-Null
+            
+            Write-Host "   Removing: $containerName" -ForegroundColor Gray
+            docker rm $containerId 2>$null | Out-Null
+        }
+        Write-Host "✅ Devcontainer(s) removed" -ForegroundColor Green
+    }
+    else {
+        Write-Host "ℹ️  No devcontainer found for $folderName" -ForegroundColor Gray
+    }
+    
+    # Also remove the target cache volume for this worktree
+    $volumeName = "$folderName-target-cache"
+    $volumeExists = docker volume ls --format "{{.Name}}" 2>$null | Where-Object { $_ -eq $volumeName }
+    if ($volumeExists) {
+        Write-Host "🗑️  Removing target cache volume: $volumeName" -ForegroundColor Cyan
+        docker volume rm $volumeName 2>$null | Out-Null
+        Write-Host "✅ Volume removed" -ForegroundColor Green
+    }
+}
+
 # Main script
 Write-Host "🛑 Stopping worktree for branch: $Branch" -ForegroundColor Cyan
 
@@ -144,6 +183,11 @@ try {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Worktree removed successfully" -ForegroundColor Green
     }
+    elseif ($result -match "modified or untracked files") {
+        Write-Host "❌ Worktree has uncommitted changes" -ForegroundColor Red
+        Write-Host "   Use -Force to delete anyway, or commit/stash your changes first." -ForegroundColor Yellow
+        exit 1
+    }
     else {
         Write-Host "⚠️  git worktree remove failed: $result" -ForegroundColor Yellow
         Write-Host "🔧 Attempting manual cleanup..." -ForegroundColor Cyan
@@ -173,6 +217,11 @@ try {
         git worktree prune
         
         Write-Host "✅ Manual cleanup complete" -ForegroundColor Green
+    }
+    
+    # Remove devcontainer if it exists
+    if ($worktreePath) {
+        Remove-DevContainer -WorktreePath $worktreePath
     }
     
     # Optionally delete the branch

@@ -35,7 +35,7 @@
       }
     }
   },
-  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder}/target /usr/local/cargo/registry && cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
   "postStartCommand": "bash .devcontainer/fix-worktree-git.sh && mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json",
   "remoteUser": "vscode",
   // Caching:
@@ -45,7 +45,7 @@
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
     "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
-    "source=${localEnv:BEAMTALK_MAIN_GIT_PATH},target=/workspaces/.beamtalk-git,type=bind,readonly"
+    "source=${localEnv:BEAMTALK_MAIN_GIT_PATH},target=/workspaces/.beamtalk-git,type=bind"
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // GIT WORKTREES: Parallel Copilot Sessions

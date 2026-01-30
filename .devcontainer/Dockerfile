@@ -42,5 +42,3 @@ RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:syste
 
 # Set up Erlang paths
 ENV PATH="/usr/lib/erlang/bin:${PATH}"
-
-WORKDIR /workspace
