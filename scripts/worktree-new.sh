@@ -113,7 +113,9 @@ else
         log_success "✅ Worktree already exists at: $EXISTING_WORKTREE"
         WORKTREE_PATH="$EXISTING_WORKTREE"
     else
-        WORKTREE_PATH="$WORKTREE_ROOT/$BRANCH"
+        # Sanitize branch name for directory (replace / with -)
+        DIR_NAME=$(echo "$BRANCH" | tr '/' '-')
+        WORKTREE_PATH="$WORKTREE_ROOT/$DIR_NAME"
         
         if branch_exists "$BRANCH"; then
             log_warn "📌 Creating worktree for existing branch: $BRANCH"
