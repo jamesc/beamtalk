@@ -4,10 +4,12 @@
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 #FROM mcr.microsoft.com/devcontainers/rust:latest
 
-# Install Erlang/OTP and git from Debian packages
+# Install Erlang/OTP, git, and networking/debugging tools
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
         erlang rebar3 git \
+        socat netcat-openbsd lsof \
+        curl wget jq htop strace \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
