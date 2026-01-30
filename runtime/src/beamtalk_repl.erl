@@ -476,7 +476,10 @@ term_to_json(Value) when is_list(Value) ->
     end;
 term_to_json(Value) when is_pid(Value) ->
     %% Format pid as Actor (class lookup not yet implemented)
-    iolist_to_binary([<<"#Actor<">>, pid_to_list(Value), <<">">>]);
+    %% pid_to_list/1 returns "<0.123.0>", so strip the outer angle brackets
+    PidStr = pid_to_list(Value),
+    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+    iolist_to_binary([<<"#Actor<">>, Inner, <<">">>]);
 term_to_json(Value) when is_function(Value) ->
     %% Format function with arity as "a Block/N"
     {arity, Arity} = erlang:fun_info(Value, arity),
