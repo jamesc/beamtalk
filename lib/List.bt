@@ -127,7 +127,7 @@ List
   new: size withAll: element =>
     result := [].
     size timesRepeat: [result := result prepend: element].
-    ^result
+    result
 
   // Create list from array
   fromArray: anArray => anArray asList
@@ -150,10 +150,10 @@ List
 
   // Safe access with default
   headIfEmpty: defaultBlock =>
-    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self head]
+    self isEmpty ifTrue: [defaultBlock value] ifFalse: [self head]
 
   tailIfEmpty: defaultBlock =>
-    self isEmpty ifTrue: [^defaultBlock value] ifFalse: [^self tail]
+    self isEmpty ifTrue: [defaultBlock value] ifFalse: [self tail]
 
   // ═══════════════════════════════════════════════════════════════════
   // Cons Operations (Building Lists)
@@ -246,7 +246,7 @@ List
     self with: other do: [:a :b |
       a = b ifFalse: [^false]
     ].
-    ^true
+    true
 
   // Type tests
   isArray => false
@@ -284,7 +284,7 @@ List
   unzip =>
     firsts := self collect: [:pair | pair at: 1].
     seconds := self collect: [:pair | pair at: 2].
-    ^{firsts, seconds}
+    {firsts, seconds}
 
   // Take while predicate is true
   takeWhile: block => // implemented by compiler - lists:takewhile
@@ -296,13 +296,13 @@ List
   splitWith: block =>
     before := self takeWhile: [:e | (block value: e) not].
     after := self dropWhile: [:e | (block value: e) not].
-    ^{before, after}
+    {before, after}
 
   // Partition into two lists by predicate
   partition: block =>
     matching := self select: block.
     notMatching := self reject: block.
-    ^{matching, notMatching}
+    {matching, notMatching}
 
   // Intersperse element between all elements
   intersperse: separator =>
@@ -312,4 +312,4 @@ List
     self tail each: [:e |
       result := result ++ [separator, e]
     ].
-    ^result
+    result

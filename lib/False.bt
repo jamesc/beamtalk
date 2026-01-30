@@ -47,23 +47,23 @@ False
   ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
 
   // Ignore the true block (single argument version)
-  ifTrue: trueBlock => ^self
+  ifTrue: trueBlock => self
 
   // Evaluate the false block (single argument version)
   ifFalse: falseBlock => falseBlock value
 
   // Logical AND - return self without evaluating (short-circuit)
-  and: aBlock => ^self
+  and: aBlock => self
 
   // Logical OR - evaluate the block (might return true)
   or: aBlock => aBlock value
 
   // Logical NOT - return true
-  not => ^true
+  not => true
 
   // Identity test
-  isTrue => ^false
-  isFalse => ^true
+  isTrue => false
+  isFalse => true
 
   // String representation
   describe => 'false'

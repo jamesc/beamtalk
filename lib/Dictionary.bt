@@ -173,8 +173,8 @@ Dictionary
   // Get value for key, or nil if not found
   at: key ifAbsentPut: valueBlock =>
     (self includesKey: key)
-      ifTrue: [^self at: key]
-      ifFalse: [^self at: key put: valueBlock value]
+      ifTrue: [self at: key]
+      ifFalse: [self at: key put: valueBlock value]
 
   // ═══════════════════════════════════════════════════════════════════
   // Modification (returns new dictionary)
@@ -187,7 +187,7 @@ Dictionary
   // Set multiple keys at once
   putAll: otherDict =>
     otherDict keysAndValuesDo: [:k :v | self := self at: k put: v].
-    ^self
+    self
 
   // Remove key, returns new dictionary
   // No error if key not present
@@ -196,8 +196,8 @@ Dictionary
   // Remove key, evaluate block if not present
   removeKey: key ifAbsent: absentBlock =>
     (self includesKey: key)
-      ifTrue: [^self removeKey: key]
-      ifFalse: [^absentBlock value]
+      ifTrue: [self removeKey: key]
+      ifFalse: [absentBlock value]
 
   // ═══════════════════════════════════════════════════════════════════
   // Key Testing
@@ -256,7 +256,7 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       result := result at: k put: (block value: v)
     ].
-    ^result
+    result
 
   // Transform with key and value
   // block receives key and value, returns new value
@@ -265,7 +265,7 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       result := result at: k put: (block value: k value: v)
     ].
-    ^result
+    result
 
   // Filter by predicate on values
   select: block =>
@@ -273,7 +273,7 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       (block value: v) ifTrue: [result := result at: k put: v]
     ].
-    ^result
+    result
 
   // Filter by predicate on key and value
   selectWithKey: block =>
@@ -281,7 +281,7 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       (block value: k value: v) ifTrue: [result := result at: k put: v]
     ].
-    ^result
+    result
 
   // Reject by predicate on values
   reject: block =>
@@ -293,7 +293,7 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       result := block value: result value: k value: v
     ].
-    ^result
+    result
 
   // ═══════════════════════════════════════════════════════════════════
   // Merging
@@ -312,7 +312,7 @@ Dictionary
         ifTrue: [result := result at: k put: (block value: k value: (self at: k) value: v)]
         ifFalse: [result := result at: k put: v]
     ].
-    ^result
+    result
 
   // ═══════════════════════════════════════════════════════════════════
   // Conversion
@@ -339,7 +339,7 @@ Dictionary
       (other includesKey: k) ifFalse: [^false].
       (other at: k) = v ifFalse: [^false]
     ].
-    ^true
+    true
 
   // Type tests
   isArray => false
@@ -360,7 +360,7 @@ Dictionary
         ifTrue: [self error: 'Cannot invert: duplicate value ', v asString]
         ifFalse: [result := result at: v put: k]
     ].
-    ^result
+    result
 
   // Count entries matching predicate
   count: block =>
@@ -371,10 +371,10 @@ Dictionary
     self keysAndValuesDo: [:k :v |
       (block value: v) ifTrue: [^{k, v}]
     ].
-    ^nil
+    nil
 
   detectKey: keyBlock =>
     self keysAndValuesDo: [:k :v |
       (keyBlock value: k) ifTrue: [^{k, v}]
     ].
-    ^nil
+    nil

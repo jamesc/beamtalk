@@ -147,7 +147,7 @@ Collection
   // Find first element matching predicate, or evaluate default
   detect: block ifNone: defaultBlock =>
     result := self detect: block.
-    result = nil ifTrue: [^defaultBlock value] ifFalse: [^result]
+    result = nil ifTrue: [defaultBlock value] ifFalse: [result]
 
   // ═══════════════════════════════════════════════════════════════════
   // Reduction

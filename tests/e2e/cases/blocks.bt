@@ -31,6 +31,7 @@
 // Block with subtraction
 [:a :b | a - b] value: 10 value: 3
 // => 7
+
 // Block with three arguments
 [:x :y :z | x + y + z] value: 1 value: 2 value: 3
 // => 6
@@ -46,6 +47,22 @@
 // Complex expression in block body
 [:x | x * 2 + 1] value: 5
 // => 11
+
+// ===========================================================================
+// RETURN STATEMENTS (^)
+// ===========================================================================
+
+// Explicit return with ^ (returns from block)
+[:x | ^x + 10] value: 5
+// => 15
+
+// Explicit return of literal
+[^42] value
+// => 42
+
+// Implicit return (last expression) - same behavior
+[:x | x + 10] value: 5
+// => 15
 
 // whileTrue: with false condition (returns immediately)
 [false] whileTrue: [42]

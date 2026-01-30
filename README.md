@@ -50,7 +50,7 @@ Actor subclass: Counter
 
   increment => self.value += 1
   decrement => self.value -= 1
-  getValue => ^self.value
+  getValue => self.value
 ```
 
 ### Async Message Passing
