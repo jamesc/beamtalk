@@ -29,6 +29,14 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_classes]
+        },
+        #{
+            id => beamtalk_instances,
+            start => {beamtalk_instances, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_instances]
         }
     ],
     
