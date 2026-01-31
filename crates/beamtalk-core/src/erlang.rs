@@ -2633,6 +2633,15 @@ impl CoreErlangGenerator {
             return Ok(());
         }
 
+        // Special case: exponentiation requires math:pow wrapped in trunc for integer result
+        if op == "**" {
+            write!(self.output, "call 'erlang':'trunc'(call 'math':'pow'(")?;
+            self.generate_expression(left)?;
+            write!(self.output, ", ")?;
+            self.generate_expression(&arguments[0])?;
+            write!(self.output, "))")?;
+            return Ok(());
+        }
         let erlang_op = match op {
             "+" => "+",
             "-" => "-",
