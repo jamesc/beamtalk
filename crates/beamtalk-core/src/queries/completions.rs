@@ -188,6 +188,16 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for code completion functionality.
+    //!
+    //! Tests verify that completions:
+    //! - Include language keywords (self, super, true, false, nil)
+    //! - Include identifiers from the current scope
+    //! - Include common message selectors (at:, do:, size)
+    //! - Deduplicate repeated identifiers
+    //! - Handle edge cases (invalid positions, empty source, block parameters)
+    //! - Provide appropriate documentation and completion kinds
+
     use super::*;
     use crate::parse::{lex_with_eof, parse};
 

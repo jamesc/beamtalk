@@ -76,8 +76,13 @@ pub fn accept_connection(
 
 #[cfg(test)]
 mod tests {
-    // Most functions in this module involve I/O and are tested via integration tests.
-    // Unit tests are limited to verifying that functions exist and have correct signatures.
+    //! Unit tests for daemon transport layer.
+    //!
+    //! Most functions in this module involve I/O operations (Unix sockets, network streams)
+    //! that are better tested via integration tests with real sockets and connections.
+    //!
+    //! Unit tests here are limited to verifying that functions exist and have correct
+    //! signatures, ensuring the API surface is stable.
 
     #[cfg(unix)]
     #[test]

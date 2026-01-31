@@ -485,6 +485,18 @@ fn extract_class_names(_module: &beamtalk_core::ast::Module) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for the JSON-RPC 2.0 daemon protocol.
+    //!
+    //! Tests are organized by functionality:
+    //! - **JSON-RPC Response Tests**: Protocol conformance (version checks, error codes)
+    //! - **Path Validation Tests**: Security validation (empty paths, root directory)
+    //! - **Source Reading Tests**: Parameter handling and file I/O fallback
+    //! - **Request Handling Tests**: Message dispatch and error handling
+    //! - **Compile Expression Tests**: REPL expression compilation
+    //! - **Diagnostics Method Tests**: Syntax error detection
+    //! - **Compile Method Tests**: Full module compilation
+    //! - **Helper Function Tests**: Utility function validation
+
     use super::*;
 
     // ========================================================================
