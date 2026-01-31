@@ -909,3 +909,132 @@ chained_or_operations_test() ->
     ?assertEqual(false, FirstResult),
     Result = beamtalk_or(FirstResult, SecondBlock),
     ?assertEqual(true, Result).
+
+%%% ===========================================================================
+%%% Block Closure Tests - Captures from outer scope
+%%% ===========================================================================
+
+%% Test: Block captures single variable from outer scope
+block_captures_single_variable_test() ->
+    Outer = 10,
+    Block = fun(X) -> X + Outer end,
+    Result = Block(5),
+    ?assertEqual(15, Result).
+
+%% Test: Block captures multiple variables from outer scope
+block_captures_multiple_variables_test() ->
+    Base = 100,
+    Multiplier = 2,
+    Block = fun(X) -> (X + Base) * Multiplier end,
+    Result = Block(50),
+    ?assertEqual(300, Result).
+
+%% Test: Nested closure - outer block returns inner block with capture
+nested_closure_with_capture_test() ->
+    OuterBlock = fun(N) -> fun(X) -> X + N end end,
+    InnerBlock = OuterBlock(10),
+    Result = InnerBlock(5),
+    ?assertEqual(15, Result).
+
+%% Test: Multiple closures sharing same captured variable
+shared_captured_variable_test() ->
+    Shared = 1000,
+    AddShared = fun(X) -> X + Shared end,
+    SubtractShared = fun(X) -> X - Shared end,
+    ?assertEqual(1500, AddShared(500)),
+    ?assertEqual(200, SubtractShared(1200)).
+
+%%% ===========================================================================
+%%% Complex Keyword Message Tests
+%%% ===========================================================================
+
+%% Test: Three-argument block with mixed operations
+three_arg_block_mixed_operations_test() ->
+    Block = fun(X, Y, Z) -> X * Y + Z end,
+    Result = Block(2, 3, 4),
+    ?assertEqual(10, Result).
+
+%% Test: Nested keyword messages - block returning block
+nested_keyword_block_test() ->
+    OuterBlock = fun(X) -> fun(Y) -> X + Y end end,
+    InnerBlock = OuterBlock(10),
+    Result = InnerBlock(5),
+    ?assertEqual(15, Result).
+
+%% Test: Higher-order function - block taking block as argument
+higher_order_block_test() ->
+    ApplyBlock = fun(BlockFun, Arg) -> BlockFun(Arg) end,
+    InnerBlock = fun(X) -> X + 100 end,
+    Result = ApplyBlock(InnerBlock, 42),
+    ?assertEqual(142, Result).
+
+%%% ===========================================================================
+%%% Nested Block Evaluation Tests
+%%% ===========================================================================
+
+%% Test: Three levels of nested blocks
+three_level_nested_blocks_test() ->
+    Level1 = fun(A) -> fun(B) -> fun(C) -> A + B + C end end end,
+    Level2 = Level1(1),
+    Level3 = Level2(2),
+    Result = Level3(3),
+    ?assertEqual(6, Result).
+
+%% Test: Nested block evaluation with arithmetic
+nested_blocks_arithmetic_test() ->
+    Outer = fun() -> fun(X) -> X * 3 end end,
+    Inner = Outer(),
+    Result = Inner(4),
+    ?assertEqual(12, Result).
+
+%% Test: Block returning result of nested block evaluation
+block_returns_nested_result_test() ->
+    Block = fun() -> (fun() -> 100 end)() end,
+    Result = Block(),
+    ?assertEqual(100, Result).
+
+%%% ===========================================================================
+%%% String Operation Tests
+%%% ===========================================================================
+
+%% Test: String concatenation (when stdlib implemented, this will use methods)
+%% For now, test basic string handling in blocks
+string_in_block_test() ->
+    Block = fun(S) -> S end,
+    Result = Block(<<"test">>),
+    ?assertEqual(<<"test">>, Result).
+
+%% Test: String as block parameter
+string_parameter_test() ->
+    Block = fun(S) -> S end,
+    Result = Block(<<"hello world">>),
+    ?assertEqual(<<"hello world">>, Result).
+
+%%% ===========================================================================
+%%% Complex Message Send Patterns
+%%% ===========================================================================
+
+%% Test: Sequential operations pattern (not true cascades)
+%% Note: This simulates the effect of cascades but doesn't test actual
+%% cascade message sends, which require actor infrastructure
+sequential_operations_pattern_test() ->
+    %% Simulate effect of: value increment; increment; getValue
+    InitialValue = 0,
+    Value1 = InitialValue + 1,
+    Value2 = Value1 + 1,
+    FinalValue = Value2,
+    ?assertEqual(2, FinalValue).
+
+%% Test: Block with complex arithmetic precedence
+complex_arithmetic_in_block_test() ->
+    Block = fun(X) -> X * 2 + 1 end,
+    Result = Block(5),
+    ?assertEqual(11, Result).
+
+%% Test: Chained block evaluations
+chained_block_evaluation_test() ->
+    Block1 = fun(X) -> X + 10 end,
+    Block2 = fun(X) -> X * 2 end,
+    Intermediate = Block1(5),
+    Result = Block2(Intermediate),
+    ?assertEqual(30, Result).
