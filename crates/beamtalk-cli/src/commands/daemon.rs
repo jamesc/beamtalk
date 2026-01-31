@@ -985,29 +985,65 @@ mod tests {
     fn test_compile_file_read_error_uses_custom_code() {
         let mut service = SimpleLanguageService::new();
         let running = make_running();
-        // Request compile without source param for a nonexistent file
-        let response = handle_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"/nonexistent/file.bt"}}"#,
-            &mut service,
-            &running,
+
+        // Use tempdir to construct a guaranteed-missing path (hermetic test)
+        let tempdir = tempfile::tempdir().expect("failed to create tempdir");
+        let missing_path = tempdir.path().join("missing.bt");
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"compile","params":{{"path":"{}"}}}}"#,
+            missing_path.display()
         );
-        assert!(response.contains("error"));
-        assert!(response.contains("Failed to read file"));
-        assert!(response.contains(&FILE_READ_ERROR.to_string()));
+
+        let response = handle_request(&request, &mut service, &running);
+
+        // Parse JSON and assert on structured error code
+        let parsed: serde_json::Value =
+            serde_json::from_str(&response).expect("response should be valid JSON");
+        let error = parsed.get("error").expect("response should have error");
+        assert_eq!(
+            error.get("code").and_then(serde_json::Value::as_i64),
+            Some(i64::from(FILE_READ_ERROR)),
+            "error code should be FILE_READ_ERROR"
+        );
+        assert!(
+            error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|m| m.contains("Failed to read file")),
+            "error message should mention file read failure"
+        );
     }
 
     #[test]
     fn test_diagnostics_file_read_error_uses_custom_code() {
         let mut service = SimpleLanguageService::new();
         let running = make_running();
-        // Request diagnostics without source param for a nonexistent file
-        let response = handle_request(
-            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"/nonexistent/file.bt"}}"#,
-            &mut service,
-            &running,
+
+        // Use tempdir to construct a guaranteed-missing path (hermetic test)
+        let tempdir = tempfile::tempdir().expect("failed to create tempdir");
+        let missing_path = tempdir.path().join("missing.bt");
+        let request = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{{"path":"{}"}}}}"#,
+            missing_path.display()
         );
-        assert!(response.contains("error"));
-        assert!(response.contains("Failed to read file"));
-        assert!(response.contains(&FILE_READ_ERROR.to_string()));
+
+        let response = handle_request(&request, &mut service, &running);
+
+        // Parse JSON and assert on structured error code
+        let parsed: serde_json::Value =
+            serde_json::from_str(&response).expect("response should be valid JSON");
+        let error = parsed.get("error").expect("response should have error");
+        assert_eq!(
+            error.get("code").and_then(serde_json::Value::as_i64),
+            Some(i64::from(FILE_READ_ERROR)),
+            "error code should be FILE_READ_ERROR"
+        );
+        assert!(
+            error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|m| m.contains("Failed to read file")),
+            "error message should mention file read failure"
+        );
     }
 }
