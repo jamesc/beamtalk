@@ -50,7 +50,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Test
-        run: cargo test --all-targets
+        run: cargo test --all-targets -- --skip erlang_runtime_unit_tests
 
       - name: Test Erlang runtime (unit tests)
         run: |
@@ -131,7 +131,8 @@ jobs:
           cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
             -- --skip commands::build::tests::test_build_single_file \
                --skip commands::build::tests::test_build_multiple_files \
-               --skip commands::run::tests::test_run_calls_build
+               --skip commands::run::tests::test_run_calls_build \
+               --skip erlang_runtime_unit_tests
 
       - name: Generate Erlang coverage
         run: |
