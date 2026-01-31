@@ -43,6 +43,8 @@
     monitors = #{} :: #{{class_name(), pid()} => reference()}
 }).
 
+-type state() :: #state{}.
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -140,20 +142,24 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'DOWN', Ref, process, Pid, _Reason}, State) ->
-    %% Find and remove entries for this Pid
-    %% We need to find which Class(es) this Pid was registered under
-    NewMonitors = maps:filter(
-        fun({Class, P}, R) ->
-            case P =:= Pid andalso R =:= Ref of
-                true ->
-                    ets:delete_object(?TABLE, {Class, Pid}),
-                    false;  %% Remove from monitors map
-                false ->
-                    true    %% Keep in monitors map
-            end
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
+    %% Find which classes this Pid was registered under
+    %% This is more efficient than scanning all monitors when there are many instances
+    Matches = ets:match(?TABLE, {'$1', Pid}),
+    Classes = [Class || [Class] <- Matches],
+    
+    %% Remove from ETS
+    lists:foreach(fun(Class) ->
+        ets:delete_object(?TABLE, {Class, Pid})
+    end, Classes),
+    
+    %% Remove from monitors map
+    NewMonitors = lists:foldl(
+        fun(Class, Monitors) ->
+            maps:remove({Class, Pid}, Monitors)
         end,
-        State#state.monitors
+        State#state.monitors,
+        Classes
     ),
     {noreply, State#state{monitors = NewMonitors}};
 

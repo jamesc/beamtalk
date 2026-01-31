@@ -368,3 +368,44 @@ monitor_cleanup_test_() ->
               ?assertNot(maps:is_key({'Counter', Instance}, Monitors2))
           end)]
      end}.
+
+same_pid_multiple_classes_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(_Pid) ->
+         [?_test(begin
+              %% A single process can be registered as an instance of multiple classes
+              %% This is valid - the key is {Class, Pid}
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              %% Register under multiple classes
+              ok = beamtalk_instances:register('Counter', Instance),
+              ok = beamtalk_instances:register('Actor', Instance),
+              ok = beamtalk_instances:register('Object', Instance),
+              
+              %% Should appear in all classes
+              ?assertEqual([Instance], beamtalk_instances:all('Counter')),
+              ?assertEqual([Instance], beamtalk_instances:all('Actor')),
+              ?assertEqual([Instance], beamtalk_instances:all('Object')),
+              
+              %% Counts should all be 1
+              ?assertEqual(1, beamtalk_instances:count('Counter')),
+              ?assertEqual(1, beamtalk_instances:count('Actor')),
+              ?assertEqual(1, beamtalk_instances:count('Object')),
+              
+              %% Kill the process
+              Instance ! stop,
+              timer:sleep(50),
+              
+              %% Should be removed from all classes
+              ?assertEqual(0, beamtalk_instances:count('Counter')),
+              ?assertEqual(0, beamtalk_instances:count('Actor')),
+              ?assertEqual(0, beamtalk_instances:count('Object'))
+          end)]
+     end}.
