@@ -129,12 +129,8 @@ fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Additive (includes string concatenation ++)
         "+" | "-" | "++" => Some(BindingPower::left_assoc(30)),
 
-        // Multiplicative
+        // Multiplicative (highest binary precedence)
         "*" | "/" | "%" => Some(BindingPower::left_assoc(40)),
-
-        // Exponentiation (right-associative, highest binary precedence)
-        // 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512
-        "**" => Some(BindingPower::right_assoc(50)),
 
         // Unknown operator - return None to stop binary expression parsing
         _ => None,

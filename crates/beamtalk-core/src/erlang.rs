@@ -2261,32 +2261,7 @@ impl CoreErlangGenerator {
                 _ => Ok(None),
             },
 
-            // Integer keyword messages
-            MessageSelector::Keyword(parts) if parts.len() == 1 => {
-                match parts[0].keyword.as_str() {
-                    "div:" if arguments.len() == 1 => {
-                        // Integer division: call 'erlang':'div'(Receiver, Arg)
-                        write!(self.output, "call 'erlang':'div'(")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, ", ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, ")")?;
-                        Ok(Some(()))
-                    }
-                    "mod:" if arguments.len() == 1 => {
-                        // Modulo (alias for %): call 'erlang':'rem'(Receiver, Arg)
-                        write!(self.output, "call 'erlang':'rem'(")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, ", ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, ")")?;
-                        Ok(Some(()))
-                    }
-                    _ => Ok(None),
-                }
-            }
-
-            // No binary Integer methods handled here (they go through generate_binary_op)
+            // No keyword or binary Integer methods handled here
             _ => Ok(None),
         }
     }
@@ -2667,17 +2642,14 @@ impl CoreErlangGenerator {
             write!(self.output, "))")?;
             return Ok(());
         }
-
         let erlang_op = match op {
-            // Arithmetic
             "+" => "+",
             "-" => "-",
             "*" => "*",
             "/" => "/",
             "%" => "rem",
-            // Comparison (strict equality only - simpler, safer)
-            "=" => "=:=",
-            "~=" => "=/=", // ~ means "not"
+            "==" => "==",
+            "!=" => "/=",
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
