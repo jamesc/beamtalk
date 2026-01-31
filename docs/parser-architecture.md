@@ -122,16 +122,22 @@ Tools like `lalrpop` or `pest` were not evaluated because:
 | Dependencies | None | None | +1 crate |
 | API stability | N/A | N/A | Alpha |
 
-## Implementation Plan
+## Implementation Status
 
-### Phase 1: Integrate Pratt Parsing
+### Phase 1: Integrate Pratt Parsing ✅ (BT-110)
 
-1. Rename `parser_pratt.rs` functions to be private parser helpers
-2. Replace `parse_comparison`, `parse_additive`, `parse_multiplicative` with single Pratt-based function
-3. Update existing tests (should pass unchanged)
-4. Add tests for edge cases (unknown operators, single operand)
+**Completed in BT-110:**
 
-**Estimated effort:** ~2 hours
+1. ✅ Moved `BindingPower` struct and `binary_binding_power()` function into `parser.rs` as private helpers
+2. ✅ Replaced `parse_comparison`, `parse_additive`, `parse_multiplicative` with single `parse_binary_with_pratt()` method
+3. ✅ All existing tests pass unchanged (200+ tests)
+4. ✅ Added edge case tests for unknown operators and single operand expressions
+5. ✅ Removed `parser_pratt.rs` prototype (functionality integrated into main parser)
+
+**Location:** `crates/beamtalk-core/src/parse/parser.rs`
+- `BindingPower` struct (lines ~70-95)
+- `binary_binding_power()` function (lines ~97-130)
+- `parse_binary_with_pratt()` method in Parser
 
 ### Phase 2: Add New Operators (Future)
 
@@ -165,5 +171,5 @@ Chumsky was not adopted because it provides the same underlying algorithm with m
 - [Pratt Parsing Made Easy](https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html) - matklad's tutorial
 - [rust-analyzer parser](https://github.com/rust-lang/rust-analyzer/tree/master/crates/parser) - Production Pratt parser example
 - [Simple but Powerful Pratt Parsing](https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/) - Bob Nystrom's explanation
-- Prototype: `crates/beamtalk-core/src/parse/parser_pratt.rs`
+- Implementation: `crates/beamtalk-core/src/parse/parser.rs` (search for `binary_binding_power`)
 - Chumsky evaluation: `crates/beamtalk-core/src/parse/parser_chumsky.rs`

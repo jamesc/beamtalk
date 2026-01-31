@@ -4,6 +4,35 @@
 // E2E tests for actor features
 // Actors are lightweight processes that communicate via messages
 //
+// ===========================================================================
+// STATEFUL E2E TESTS
+// ===========================================================================
+//
+// Actors require a class definition to be loaded first. Use the @load directive:
+//
+//   // @load tests/e2e/fixtures/counter.bt
+//
+//   // Spawn an actor
+//   counter := Counter spawn
+//   // => <pid>
+//
+//   // Send message and get future
+//   future := counter increment
+//   // => <future>
+//
+//   // Await result
+//   future await
+//   // => 1
+//
+// The test harness maintains state between expressions, so you can:
+// 1. Load an actor class definition
+// 2. Spawn an actor (assigned to a variable)
+// 3. Send messages to it across multiple expressions
+//
+// ===========================================================================
+// SYNTAX REFERENCE
+// ===========================================================================
+//
 // NOTE: Actor definitions and spawning require full module compilation,
 // not single REPL expressions. These tests document the intended syntax.
 //
