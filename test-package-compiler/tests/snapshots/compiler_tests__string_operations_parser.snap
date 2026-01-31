@@ -1,0 +1,1030 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "greeting",
+                    span: Span {
+                        start: 177,
+                        end: 185,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Hello",
+                ),
+                Span {
+                    start: 189,
+                    end: 196,
+                },
+            ),
+            span: Span {
+                start: 177,
+                end: 196,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "name",
+                    span: Span {
+                        start: 197,
+                        end: 201,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "World",
+                ),
+                Span {
+                    start: 205,
+                    end: 212,
+                },
+            ),
+            span: Span {
+                start: 197,
+                end: 212,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "message",
+                    span: Span {
+                        start: 213,
+                        end: 220,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: MessageSend {
+                        receiver: Identifier(
+                            Identifier {
+                                name: "greeting",
+                                span: Span {
+                                    start: 224,
+                                    end: 232,
+                                },
+                            },
+                        ),
+                        selector: Binary(
+                            "++",
+                        ),
+                        arguments: [
+                            Literal(
+                                String(
+                                    ", ",
+                                ),
+                                Span {
+                                    start: 236,
+                                    end: 240,
+                                },
+                            ),
+                        ],
+                        span: Span {
+                            start: 224,
+                            end: 240,
+                        },
+                    },
+                    selector: Binary(
+                        "++",
+                    ),
+                    arguments: [
+                        Identifier(
+                            Identifier {
+                                name: "name",
+                                span: Span {
+                                    start: 244,
+                                    end: 248,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 224,
+                        end: 248,
+                    },
+                },
+                selector: Binary(
+                    "++",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "!",
+                        ),
+                        Span {
+                            start: 252,
+                            end: 255,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 224,
+                    end: 255,
+                },
+            },
+            span: Span {
+                start: 213,
+                end: 255,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "len",
+                    span: Span {
+                        start: 286,
+                        end: 289,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "greeting",
+                        span: Span {
+                            start: 293,
+                            end: 301,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "length",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 293,
+                    end: 308,
+                },
+            },
+            span: Span {
+                start: 286,
+                end: 308,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isEqual",
+                    span: Span {
+                        start: 343,
+                        end: 350,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 354,
+                        end: 361,
+                    },
+                ),
+                selector: Binary(
+                    "=",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "hello",
+                        ),
+                        Span {
+                            start: 364,
+                            end: 371,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 354,
+                    end: 371,
+                },
+            },
+            span: Span {
+                start: 343,
+                end: 371,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "notEqual",
+                    span: Span {
+                        start: 372,
+                        end: 380,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 384,
+                        end: 391,
+                    },
+                ),
+                selector: Binary(
+                    "~=",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "world",
+                        ),
+                        Span {
+                            start: 395,
+                            end: 402,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 384,
+                    end: 402,
+                },
+            },
+            span: Span {
+                start: 372,
+                end: 402,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isLess",
+                    span: Span {
+                        start: 403,
+                        end: 409,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "apple",
+                    ),
+                    Span {
+                        start: 413,
+                        end: 420,
+                    },
+                ),
+                selector: Binary(
+                    "<",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "banana",
+                        ),
+                        Span {
+                            start: 423,
+                            end: 431,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 413,
+                    end: 431,
+                },
+            },
+            span: Span {
+                start: 403,
+                end: 431,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isGreater",
+                    span: Span {
+                        start: 432,
+                        end: 441,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "zebra",
+                    ),
+                    Span {
+                        start: 445,
+                        end: 452,
+                    },
+                ),
+                selector: Binary(
+                    ">",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "apple",
+                        ),
+                        Span {
+                            start: 455,
+                            end: 462,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 445,
+                    end: 462,
+                },
+            },
+            span: Span {
+                start: 432,
+                end: 462,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "upper",
+                    span: Span {
+                        start: 506,
+                        end: 511,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "greeting",
+                        span: Span {
+                            start: 515,
+                            end: 523,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "uppercase",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 515,
+                    end: 533,
+                },
+            },
+            span: Span {
+                start: 506,
+                end: 533,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "lower",
+                    span: Span {
+                        start: 534,
+                        end: 539,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "upper",
+                        span: Span {
+                            start: 543,
+                            end: 548,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "lowercase",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 543,
+                    end: 558,
+                },
+            },
+            span: Span {
+                start: 534,
+                end: 558,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "padded",
+                    span: Span {
+                        start: 591,
+                        end: 597,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "  hello  ",
+                ),
+                Span {
+                    start: 601,
+                    end: 612,
+                },
+            ),
+            span: Span {
+                start: 591,
+                end: 612,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "trimmed",
+                    span: Span {
+                        start: 613,
+                        end: 620,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "padded",
+                        span: Span {
+                            start: 624,
+                            end: 630,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "trim",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 624,
+                    end: 635,
+                },
+            },
+            span: Span {
+                start: 613,
+                end: 635,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "empty",
+                    span: Span {
+                        start: 682,
+                        end: 687,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "",
+                ),
+                Span {
+                    start: 691,
+                    end: 693,
+                },
+            ),
+            span: Span {
+                start: 682,
+                end: 693,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isEmpty",
+                    span: Span {
+                        start: 694,
+                        end: 701,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "empty",
+                        span: Span {
+                            start: 705,
+                            end: 710,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "isEmpty",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 705,
+                    end: 718,
+                },
+            },
+            span: Span {
+                start: 694,
+                end: 718,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isNotEmpty",
+                    span: Span {
+                        start: 719,
+                        end: 729,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 733,
+                            end: 740,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "isNotEmpty",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 733,
+                    end: 751,
+                },
+            },
+            span: Span {
+                start: 719,
+                end: 751,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "firstChar",
+                    span: Span {
+                        start: 811,
+                        end: 820,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 824,
+                        end: 831,
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 832,
+                                end: 835,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            1,
+                        ),
+                        Span {
+                            start: 836,
+                            end: 837,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 824,
+                    end: 837,
+                },
+            },
+            span: Span {
+                start: 811,
+                end: 837,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "thirdChar",
+                    span: Span {
+                        start: 838,
+                        end: 847,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 851,
+                        end: 858,
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 859,
+                                end: 862,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 863,
+                            end: 864,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 851,
+                    end: 864,
+                },
+            },
+            span: Span {
+                start: 838,
+                end: 864,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "found",
+                    span: Span {
+                        start: 906,
+                        end: 911,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 915,
+                            end: 922,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 923,
+                                end: 932,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "World",
+                        ),
+                        Span {
+                            start: 933,
+                            end: 940,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 915,
+                    end: 940,
+                },
+            },
+            span: Span {
+                start: 906,
+                end: 940,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "notFound",
+                    span: Span {
+                        start: 941,
+                        end: 949,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 953,
+                            end: 960,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "includes:",
+                            span: Span {
+                                start: 961,
+                                end: 970,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "xyz",
+                        ),
+                        Span {
+                            start: 971,
+                            end: 976,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 953,
+                    end: 976,
+                },
+            },
+            span: Span {
+                start: 941,
+                end: 976,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "starts",
+                    span: Span {
+                        start: 1021,
+                        end: 1027,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 1031,
+                            end: 1038,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "startsWith:",
+                            span: Span {
+                                start: 1039,
+                                end: 1050,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "Hello",
+                        ),
+                        Span {
+                            start: 1051,
+                            end: 1058,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 1031,
+                    end: 1058,
+                },
+            },
+            span: Span {
+                start: 1021,
+                end: 1058,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "ends",
+                    span: Span {
+                        start: 1059,
+                        end: 1063,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 1067,
+                            end: 1074,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "endsWith:",
+                            span: Span {
+                                start: 1075,
+                                end: 1084,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "!",
+                        ),
+                        Span {
+                            start: 1085,
+                            end: 1088,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 1067,
+                    end: 1088,
+                },
+            },
+            span: Span {
+                start: 1059,
+                end: 1088,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "csv",
+                    span: Span {
+                        start: 1122,
+                        end: 1125,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "a,b,c,d",
+                ),
+                Span {
+                    start: 1129,
+                    end: 1138,
+                },
+            ),
+            span: Span {
+                start: 1122,
+                end: 1138,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "parts",
+                    span: Span {
+                        start: 1139,
+                        end: 1144,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "csv",
+                        span: Span {
+                            start: 1148,
+                            end: 1151,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "split:",
+                            span: Span {
+                                start: 1152,
+                                end: 1158,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            ",",
+                        ),
+                        Span {
+                            start: 1159,
+                            end: 1162,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 1148,
+                    end: 1162,
+                },
+            },
+            span: Span {
+                start: 1139,
+                end: 1162,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "reversed",
+                    span: Span {
+                        start: 1194,
+                        end: 1202,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    String(
+                        "hello",
+                    ),
+                    Span {
+                        start: 1206,
+                        end: 1213,
+                    },
+                ),
+                selector: Unary(
+                    "reverse",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 1206,
+                    end: 1221,
+                },
+            },
+            span: Span {
+                start: 1194,
+                end: 1221,
+            },
+        },
+    ],
+    span: Span {
+        start: 177,
+        end: 1221,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 177,
+                end: 185,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 177,
+                end: 185,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test string operations - comprehensive coverage of string messages",
+            span: Span {
+                start: 177,
+                end: 185,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// ===== String Concatenation =====",
+            span: Span {
+                start: 177,
+                end: 185,
+            },
+            kind: Line,
+        },
+    ],
+}

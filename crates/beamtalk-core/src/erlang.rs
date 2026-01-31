@@ -1530,6 +1530,12 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // Special case: String methods - synchronous Erlang string operations
+        // Check BEFORE Dictionary because both use at: but string handles literal strings
+        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: Dictionary/Map methods - direct calls to Erlang maps module
         // These are synchronous operations, not async actor messages
         if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
@@ -1545,12 +1551,6 @@ impl CoreErlangGenerator {
         // Special case: Integer methods - synchronous Erlang operations
         // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
         if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: String methods - synchronous Erlang string operations
-        // length, isEmpty generate direct calls to Erlang string functions
-        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
             return Ok(result);
         }
 
@@ -2266,19 +2266,188 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Tries to generate code for String methods.
+    /// Generates string unary messages (length, isEmpty, uppercase, etc.)
     ///
     /// String methods are synchronous operations that generate direct Erlang calls.
-    /// This function:
-    ///
-    /// - Returns `Ok(Some(()))` if the message was a String method and code was generated
-    /// - Returns `Ok(None)` if the message is NOT a String method (caller should continue)
-    /// - Returns `Err(...)` on error
-    ///
-    /// # String Methods
-    ///
-    /// - `length` (0 args) → `string:length(Receiver)`
-    /// - `isEmpty` (0 args) → `string:length(Receiver) =:= 0`
+    fn try_generate_string_unary_message(
+        &mut self,
+        receiver: &Expression,
+        name: &str,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match name {
+            // Length in graphemes (Unicode-aware)
+            "length" if arguments.is_empty() => {
+                // call 'string':'length'(Receiver)
+                write!(self.output, "call 'string':'length'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ")")?;
+                Ok(Some(()))
+            }
+
+            // Empty check: length == 0
+            "isEmpty" if arguments.is_empty() => {
+                // call 'erlang':'=:='(call 'string':'length'(Receiver), 0)
+                write!(self.output, "call 'erlang':'=:='(call 'string':'length'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, "), 0)")?;
+                Ok(Some(()))
+            }
+
+            // Non-empty check: length > 0
+            "isNotEmpty" if arguments.is_empty() => {
+                // call 'erlang':'>'(call 'string':'length'(Receiver), 0)
+                write!(self.output, "call 'erlang':'>'(call 'string':'length'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, "), 0)")?;
+                Ok(Some(()))
+            }
+
+            // Case transformation (Unicode-aware via string module)
+            "uppercase" if arguments.is_empty() => {
+                write!(self.output, "call 'string':'uppercase'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ")")?;
+                Ok(Some(()))
+            }
+
+            "lowercase" if arguments.is_empty() => {
+                write!(self.output, "call 'string':'lowercase'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ")")?;
+                Ok(Some(()))
+            }
+
+            // Whitespace trimming (both sides)
+            "trim" if arguments.is_empty() => {
+                write!(self.output, "call 'string':'trim'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ")")?;
+                Ok(Some(()))
+            }
+
+            // Reverse (codepoint-aware) - string:reverse returns list, convert back to binary
+            "reverse" if arguments.is_empty() => {
+                write!(
+                    self.output,
+                    "call 'erlang':'list_to_binary'(call 'string':'reverse'("
+                )?;
+                self.generate_expression(receiver)?;
+                write!(self.output, "))")?;
+                Ok(Some(()))
+            }
+
+            _ => Ok(None),
+        }
+    }
+
+    /// Generates string keyword messages (at:, includes:, split:, etc.)
+    fn try_generate_string_keyword_message(
+        &mut self,
+        receiver: &Expression,
+        keyword: &str,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        if arguments.len() != 1 {
+            return Ok(None);
+        }
+
+        // Check if receiver is a string literal for string-specific operations
+        let is_string_literal = matches!(receiver, Expression::Literal(Literal::String(_), _));
+
+        match keyword {
+            // Character access by codepoint index (1-based) - only for string literals
+            // For non-literals, at: falls through to dictionary handler
+            // Returns empty string for out-of-bounds (index <= 0 or > length)
+            "at:" if is_string_literal => {
+                let str_var = self.fresh_temp_var("Str");
+                let idx_var = self.fresh_temp_var("Idx");
+                write!(self.output, "let {str_var} = ")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, " in let {idx_var} = ")?;
+                self.generate_expression(&arguments[0])?;
+                // Guard against index <= 0 to avoid negative slice index
+                write!(
+                    self.output,
+                    " in case call 'erlang':'=<'({idx_var}, 0) of \
+                     <'true'> when 'true' -> <<>> \
+                     <'false'> when 'true' -> call 'string':'slice'({str_var}, call 'erlang':'-'({idx_var}, 1), 1) \
+                     end"
+                )?;
+                Ok(Some(()))
+            }
+
+            // Substring check
+            "includes:" => {
+                // string:find returns 'nomatch' if not found
+                let str_var = self.fresh_temp_var("Str");
+                write!(self.output, "let {str_var} = ")?;
+                self.generate_expression(receiver)?;
+                write!(
+                    self.output,
+                    " in call 'erlang':'=/='(call 'string':'find'({str_var}, "
+                )?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "), 'nomatch')")?;
+                Ok(Some(()))
+            }
+
+            // Prefix check
+            "startsWith:" => {
+                // string:prefix returns 'nomatch' if not a prefix
+                let str_var = self.fresh_temp_var("Str");
+                write!(self.output, "let {str_var} = ")?;
+                self.generate_expression(receiver)?;
+                write!(
+                    self.output,
+                    " in call 'erlang':'=/='(call 'string':'prefix'({str_var}, "
+                )?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "), 'nomatch')")?;
+                Ok(Some(()))
+            }
+
+            // Suffix check using string:slice comparison
+            "endsWith:" => {
+                let str_var = self.fresh_temp_var("Str");
+                let suffix_var = self.fresh_temp_var("Suffix");
+                let str_len_var = self.fresh_temp_var("StrLen");
+                let suffix_len_var = self.fresh_temp_var("SuffixLen");
+
+                write!(self.output, "let {str_var} = ")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, " in let {suffix_var} = ")?;
+                self.generate_expression(&arguments[0])?;
+                // Guard against suffix longer than string to avoid negative slice index
+                write!(
+                    self.output,
+                    " in let {str_len_var} = call 'string':'length'({str_var}) \
+                     in let {suffix_len_var} = call 'string':'length'({suffix_var}) \
+                     in case call 'erlang':'>'({suffix_len_var}, {str_len_var}) of \
+                       <'true'> when 'true' -> 'false' \
+                       <'false'> when 'true' -> call 'erlang':'=:='(\
+                         call 'string':'slice'({str_var}, call 'erlang':'-'({str_len_var}, {suffix_len_var})), \
+                         {suffix_var}) \
+                     end"
+                )?;
+                Ok(Some(()))
+            }
+
+            // Split string by delimiter
+            "split:" => {
+                // call 'string':'split'(Receiver, Delimiter, 'all')
+                write!(self.output, "call 'string':'split'(")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ", ")?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, ", 'all')")?;
+                Ok(Some(()))
+            }
+
+            _ => Ok(None),
+        }
+    }
+
     fn try_generate_string_message(
         &mut self,
         receiver: &Expression,
@@ -2286,27 +2455,16 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<()>> {
         match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "length" if arguments.is_empty() => {
-                    // call 'string':'length'(Receiver)
-                    write!(self.output, "call 'string':'length'(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, ")")?;
-                    Ok(Some(()))
-                }
-                "isEmpty" if arguments.is_empty() => {
-                    // call 'erlang':'=:='(call 'string':'length'(Receiver), 0)
-                    // Using string:length == 0 because Core Erlang empty binary syntax is complex
-                    write!(self.output, "call 'erlang':'=:='(call 'string':'length'(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, "), 0)")?;
-                    Ok(Some(()))
-                }
-                _ => Ok(None),
-            },
+            MessageSelector::Unary(name) => {
+                self.try_generate_string_unary_message(receiver, name, arguments)
+            }
 
-            // No keyword or binary String methods handled here
-            _ => Ok(None),
+            MessageSelector::Keyword(parts) if parts.len() == 1 => {
+                self.try_generate_string_keyword_message(receiver, &parts[0].keyword, arguments)
+            }
+
+            // Binary operators handled in generate_binary_op, multi-keyword not supported
+            MessageSelector::Keyword(_) | MessageSelector::Binary(_) => Ok(None),
         }
     }
 
@@ -2464,6 +2622,17 @@ impl CoreErlangGenerator {
             ));
         }
 
+        // Handle string concatenation: binaries need iolist_to_binary, not ++
+        // erlang:'++' only works on lists, but Beamtalk strings are binaries
+        if op == "++" {
+            write!(self.output, "call 'erlang':'iolist_to_binary'([")?;
+            self.generate_expression(left)?;
+            write!(self.output, ", ")?;
+            self.generate_expression(&arguments[0])?;
+            write!(self.output, "])")?;
+            return Ok(());
+        }
+
         let erlang_op = match op {
             "+" => "+",
             "-" => "-",
@@ -2476,6 +2645,8 @@ impl CoreErlangGenerator {
             ">" => ">",
             "<=" => "=<",
             ">=" => ">=",
+            "=" => "=:=",  // Exact equality for comparison
+            "~=" => "=/=", // Exact inequality for comparison
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: format!("binary operator: {op}"),
@@ -4003,6 +4174,399 @@ end
         assert!(
             code.contains("'abs'"),
             "Should have second message abs. Got:\n{code}"
+        );
+    }
+
+    // =====================================================
+    // String Operation Tests
+    // =====================================================
+
+    #[test]
+    fn test_string_concatenation() {
+        // 'hello' ++ ' world'
+        let left = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let right = Expression::Literal(Literal::String(" world".into()), Span::new(11, 18));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(left),
+            selector: MessageSelector::Binary("++".into()),
+            arguments: vec![right],
+            span: Span::new(0, 18),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator
+                .output
+                .contains("call 'erlang':'iolist_to_binary'"),
+            "Should generate iolist_to_binary call for binary concat. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_length() {
+        // 'hello' length
+        let str_expr = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("length".into()),
+            arguments: vec![],
+            span: Span::new(0, 14),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'length'"),
+            "Should generate string:length call. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_uppercase() {
+        // 'hello' uppercase
+        let str_expr = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("uppercase".into()),
+            arguments: vec![],
+            span: Span::new(0, 16),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'uppercase'"),
+            "Should generate string:uppercase call. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_lowercase() {
+        // 'HELLO' lowercase
+        let str_expr = Expression::Literal(Literal::String("HELLO".into()), Span::new(0, 7));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("lowercase".into()),
+            arguments: vec![],
+            span: Span::new(0, 16),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'lowercase'"),
+            "Should generate string:lowercase call. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_trim() {
+        // '  hello  ' trim
+        let str_expr = Expression::Literal(Literal::String("  hello  ".into()), Span::new(0, 11));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("trim".into()),
+            arguments: vec![],
+            span: Span::new(0, 16),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'trim'"),
+            "Should generate string:trim call. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_is_empty() {
+        // '' isEmpty
+        let str_expr = Expression::Literal(Literal::String("".into()), Span::new(0, 2));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("isEmpty".into()),
+            arguments: vec![],
+            span: Span::new(0, 10),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator
+                .output
+                .contains("call 'erlang':'=:='(call 'string':'length'"),
+            "Should generate length == 0 check. Got:\n{}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("), 0)"),
+            "Should compare to 0. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_is_not_empty() {
+        // 'hello' isNotEmpty
+        let str_expr = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("isNotEmpty".into()),
+            arguments: vec![],
+            span: Span::new(0, 18),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator
+                .output
+                .contains("call 'erlang':'>'(call 'string':'length'"),
+            "Should generate length > 0 check. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_at() {
+        // 'hello' at: 2
+        let str_expr = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let index = Expression::Literal(Literal::Integer(2), Span::new(12, 13));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "at:",
+                Span::new(8, 11),
+            )]),
+            arguments: vec![index],
+            span: Span::new(0, 13),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'slice'"),
+            "Should generate string:slice call. Got:\n{}",
+            generator.output
+        );
+        // Check for bounds guard against index <= 0
+        assert!(
+            generator.output.contains("call 'erlang':'=<'"),
+            "Should guard against index <= 0. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_includes() {
+        // 'hello world' includes: 'world'
+        let str_expr = Expression::Literal(Literal::String("hello world".into()), Span::new(0, 13));
+        let substr = Expression::Literal(Literal::String("world".into()), Span::new(24, 31));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "includes:",
+                Span::new(14, 23),
+            )]),
+            arguments: vec![substr],
+            span: Span::new(0, 31),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'find'"),
+            "Should generate string:find call. Got:\n{}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("'nomatch'"),
+            "Should compare against nomatch. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_starts_with() {
+        // 'hello world' startsWith: 'hello'
+        let str_expr = Expression::Literal(Literal::String("hello world".into()), Span::new(0, 13));
+        let prefix = Expression::Literal(Literal::String("hello".into()), Span::new(26, 33));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "startsWith:",
+                Span::new(14, 25),
+            )]),
+            arguments: vec![prefix],
+            span: Span::new(0, 33),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'prefix'"),
+            "Should generate string:prefix call. Got:\n{}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("'nomatch'"),
+            "Should compare against nomatch. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_ends_with() {
+        // 'hello world' endsWith: 'world'
+        let str_expr = Expression::Literal(Literal::String("hello world".into()), Span::new(0, 13));
+        let suffix = Expression::Literal(Literal::String("world".into()), Span::new(24, 31));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "endsWith:",
+                Span::new(14, 23),
+            )]),
+            arguments: vec![suffix],
+            span: Span::new(0, 31),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        // endsWith uses string:slice to compare the end of the string
+        assert!(
+            generator.output.contains("call 'string':'slice'"),
+            "Should generate string:slice call. Got:\n{}",
+            generator.output
+        );
+        // Guard against suffix longer than string
+        assert!(
+            generator.output.contains("call 'erlang':'>'"),
+            "Should guard against suffix > string length. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_split() {
+        // 'a,b,c' split: ','
+        let str_expr = Expression::Literal(Literal::String("a,b,c".into()), Span::new(0, 7));
+        let delimiter = Expression::Literal(Literal::String(",".into()), Span::new(15, 18));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "split:",
+                Span::new(8, 14),
+            )]),
+            arguments: vec![delimiter],
+            span: Span::new(0, 18),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'split'"),
+            "Should generate string:split call. Got:\n{}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("'all'"),
+            "Should pass 'all' option. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_reverse() {
+        // 'hello' reverse
+        let str_expr = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(str_expr),
+            selector: MessageSelector::Unary("reverse".into()),
+            arguments: vec![],
+            span: Span::new(0, 15),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'string':'reverse'"),
+            "Should generate string:reverse call. Got:\n{}",
+            generator.output
+        );
+        // Result must be converted back to binary
+        assert!(
+            generator.output.contains("call 'erlang':'list_to_binary'"),
+            "Should wrap in list_to_binary. Got:\n{}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_string_comparison_equal() {
+        // 'hello' = 'hello'
+        let left = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+        let right = Expression::Literal(Literal::String("hello".into()), Span::new(10, 17));
+        let expr = Expression::MessageSend {
+            receiver: Box::new(left),
+            selector: MessageSelector::Binary("=".into()),
+            arguments: vec![right],
+            span: Span::new(0, 17),
+        };
+
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .generate_expression(&expr)
+            .expect("codegen should work");
+
+        assert!(
+            generator.output.contains("call 'erlang':'=:='"),
+            "Should generate exact equality. Got:\n{}",
+            generator.output
         );
     }
 }

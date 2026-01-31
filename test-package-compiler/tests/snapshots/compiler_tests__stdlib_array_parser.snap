@@ -93,11 +93,45 @@ Module {
                 end: 591,
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found }",
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found }",
+                span: Span {
+                    start: 675,
+                    end: 676,
+                },
+            },
+            selector: Binary(
+                "++",
+            ),
+            arguments: [
+                Error {
+                    message: "Unexpected token: expected expression, found {",
+                    span: Span {
+                        start: 680,
+                        end: 681,
+                    },
+                },
+            ],
             span: Span {
                 start: 675,
-                end: 676,
+                end: 681,
+            },
+        },
+        Literal(
+            Integer(
+                3,
+            ),
+            Span {
+                start: 681,
+                end: 682,
+            },
+        ),
+        Error {
+            message: "Unexpected token: expected expression, found ,",
+            span: Span {
+                start: 682,
+                end: 683,
             },
         },
         Error {
@@ -159,4 +193,6 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 529, end: 530 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 590, end: 591 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 675, end: 676 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 680, end: 681 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 682, end: 683 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 } }
