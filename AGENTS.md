@@ -593,11 +593,19 @@ let lexer = Lexer::builder()
 
 ### Testing
 
+**Test Requirements:**
+- **All new or changed code MUST have tests** - flag missing tests in code review
 - Unit tests go in the same file as the code (`#[cfg(test)] mod tests`)
 - Use `insta` for snapshot testing of parser output and codegen
 - Integration tests in `test-package-compiler/cases/` directories
 - Name test functions descriptively: `fn parse_message_send_with_multiple_keywords()`
 - Use `?` in examples, not `.unwrap()` or `try!`
+
+**Test Priorities:**
+1. **Edge cases first:** Nulls, empty strings, empty collections, zero values
+2. **Error conditions:** Invalid input, out-of-bounds, parse errors, IO failures
+3. **Boundary conditions:** Min/max values, collection limits, buffer boundaries
+4. **Happy path:** Normal operation (test last, not first)
 
 ```rust
 #[cfg(test)]
@@ -610,8 +618,72 @@ mod tests {
         assert_eq!(tokens.len(), 3);
         assert_eq!(tokens[1].kind, TokenKind::Keyword("at:".into()));
     }
+
+    #[test]
+    fn lexer_handles_empty_input() {
+        let tokens = Lexer::new("").collect::<Vec<_>>();
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn lexer_reports_unterminated_string() {
+        let result = Lexer::new("'unterminated").collect::<Result<Vec<_>, _>>();
+        assert!(result.is_err());
+    }
 }
 ```
+
+### Code Coverage Standards
+
+**Coverage Thresholds by Code Type:**
+
+| Code Type | Overall Coverage | Branch Coverage | Notes |
+|-----------|-----------------|-----------------|-------|
+| **Critical logic** (auth, APIs, business rules) | 80-90% | 80-90% | High scrutiny required |
+| **High-risk files** (security, data integrity) | 90%+ | 90%+ | Extra tests for edge cases |
+| **Standard code** | 70-80% | 80%+ | Normal development |
+| **Trivial code** (getters, setters, simple DTOs) | Ignore | Ignore | Use `#[cfg(not(tarpaulin_include))]` |
+
+**Hard Thresholds (CI Failure):**
+- Overall coverage drops below **70%**
+- Branch coverage drops below **80%**
+- Any PR that decreases overall coverage without justification
+
+**CI Integration:**
+- Always append coverage metrics to `$GITHUB_STEP_SUMMARY` for visibility in Actions UI
+- Add coverage badge and summary to PR comments using `irongut/CodeCoverageSummary` action
+- **Do not use external services** (Codecov, Coveralls) - keep metrics in GitHub Actions
+- For README badges, use Shields.io endpoints with Gist or gh-pages JSON artifacts
+- Generate Cobertura XML format for summary actions
+
+**Example CI step:**
+```yaml
+- name: Add Coverage to Job Summary
+  run: |
+    echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+    cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+    echo "**Badge:** ${{ steps.coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+
+- name: Fail if coverage below threshold
+  run: |
+    COVERAGE=$(grep -oE 'Line Rate: [0-9.]+' code-coverage-results.txt | grep -oE '[0-9.]+' || echo "0")
+    if awk -v cov="$COVERAGE" 'BEGIN { exit (cov < 70.0) ? 0 : 1 }'; then
+      echo "Coverage $COVERAGE% is below 70% threshold"
+      exit 1
+    fi
+```
+
+**README Badge Example:**
+```markdown
+![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/user/id/raw/coverage.json)
+```
+
+**Reviewing PRs:**
+- Check Actions summary tab for coverage metrics
+- Flag any coverage drops in code review
+- **Require tests for all new/changed code** - no exceptions
+- Require coverage metrics visible in PR before merge
+- Verify edge cases and error conditions are tested
 
 ### AI-Friendly Design
 
