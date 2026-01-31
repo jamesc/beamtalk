@@ -16,6 +16,12 @@
 %%% - Block Evaluation Tests (value, value:, value:value:, closures)
 %%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
 %%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
+%%% - Cascade message sends (BT-133)
+%%% - Multi-keyword messages (BT-133)
+%%% - Actor interaction patterns (BT-133)
+%%% - Error handling (BT-133)
+%%% - Instance variable access patterns (BT-133)
+%%% - Nested message sends and binary operators (BT-133)
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
