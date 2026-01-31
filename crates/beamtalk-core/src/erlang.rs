@@ -1129,6 +1129,24 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // Special case: Boolean methods - synchronous case expressions
+        // ifTrue:ifFalse:, and:, or:, not generate direct Erlang case expressions
+        if let Some(result) = self.try_generate_boolean_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: Integer methods - synchronous Erlang operations
+        // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
+        if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: String methods - synchronous Erlang string operations
+        // length, isEmpty generate direct calls to Erlang string functions
+        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: unary "spawn" message on a class/identifier
         // This creates a new actor instance via gen_server:start_link
         if let MessageSelector::Unary(name) = selector {
@@ -1640,6 +1658,248 @@ impl CoreErlangGenerator {
 
             // Binary selectors - not used for Dictionary methods
             MessageSelector::Binary(_) => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for Boolean methods.
+    ///
+    /// Boolean methods are synchronous operations that generate Erlang case expressions.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a Boolean method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a Boolean method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Boolean Methods
+    ///
+    /// - `ifTrue:ifFalse:` (2 args) → case Receiver of true -> `TrueBlock()`; false -> `FalseBlock()` end
+    /// - `ifTrue:` (1 arg) → case Receiver of true -> `TrueBlock()`; false -> Receiver end
+    /// - `ifFalse:` (1 arg) → case Receiver of true -> Receiver; false -> `FalseBlock()` end
+    /// - `and:` (1 arg) → case Receiver of true -> `Block()`; false -> false end (short-circuit)
+    /// - `or:` (1 arg) → case Receiver of true -> true; false -> `Block()` end (short-circuit)
+    /// - `not` (0 args) → case Receiver of true -> false; false -> true end
+    fn try_generate_boolean_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            // Unary messages
+            MessageSelector::Unary(name) => match name.as_str() {
+                "not" if arguments.is_empty() => {
+                    // case Receiver of 'true' -> 'false'; 'false' -> 'true' end
+                    let recv_var = self.fresh_temp_var("Bool");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case {recv_var} of <'true'> when 'true' -> 'false' <'false'> when 'true' -> 'true' end"
+                    )?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            // Keyword messages
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "ifTrue:ifFalse:" if arguments.len() == 2 => {
+                        // case Receiver of 'true' -> apply TrueBlock (); 'false' -> apply FalseBlock () end
+                        let recv_var = self.fresh_temp_var("Bool");
+                        let true_var = self.fresh_temp_var("TrueBlk");
+                        let false_var = self.fresh_temp_var("FalseBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {true_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in let {false_var} = ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'true'> when 'true' -> apply {true_var} () <'false'> when 'true' -> apply {false_var} () end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "ifTrue:" if arguments.len() == 1 => {
+                        // case Receiver of 'true' -> apply TrueBlock (); 'false' -> Receiver end
+                        let recv_var = self.fresh_temp_var("Bool");
+                        let true_var = self.fresh_temp_var("TrueBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {true_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'true'> when 'true' -> apply {true_var} () <'false'> when 'true' -> {recv_var} end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "ifFalse:" if arguments.len() == 1 => {
+                        // case Receiver of 'true' -> Receiver; 'false' -> apply FalseBlock () end
+                        let recv_var = self.fresh_temp_var("Bool");
+                        let false_var = self.fresh_temp_var("FalseBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {false_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'true'> when 'true' -> {recv_var} <'false'> when 'true' -> apply {false_var} () end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "and:" if arguments.len() == 1 => {
+                        // case Receiver of 'true' -> apply Block (); 'false' -> 'false' end
+                        let recv_var = self.fresh_temp_var("Bool");
+                        let block_var = self.fresh_temp_var("AndBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {block_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'true'> when 'true' -> apply {block_var} () <'false'> when 'true' -> 'false' end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "or:" if arguments.len() == 1 => {
+                        // case Receiver of 'true' -> 'true'; 'false' -> apply Block () end
+                        let recv_var = self.fresh_temp_var("Bool");
+                        let block_var = self.fresh_temp_var("OrBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {block_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'true'> when 'true' -> 'true' <'false'> when 'true' -> apply {block_var} () end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            // Binary selectors - not used for Boolean methods
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for Integer methods.
+    ///
+    /// Integer methods are synchronous operations that generate direct Erlang arithmetic.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was an Integer method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT an Integer method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Integer Methods
+    ///
+    /// - `negated` (0 args) → `0 - Receiver`
+    /// - `abs` (0 args) → case Receiver < 0 of true -> 0 - Receiver; false -> Receiver end
+    /// - `isZero` (0 args) → `Receiver =:= 0`
+    /// - `isEven` (0 args) → `Receiver rem 2 =:= 0`
+    /// - `isOdd` (0 args) → `Receiver rem 2 =/= 0`
+    fn try_generate_integer_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "negated" if arguments.is_empty() => {
+                    // call 'erlang':'-'(0, Receiver)
+                    write!(self.output, "call 'erlang':'-'(0, ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "abs" if arguments.is_empty() => {
+                    // case call 'erlang':'<'(N, 0) of 'true' -> call 'erlang':'-'(0, N); 'false' -> N end
+                    let n_var = self.fresh_temp_var("N");
+                    write!(self.output, "let {n_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case call 'erlang':'<'({n_var}, 0) of <'true'> when 'true' -> call 'erlang':'-'(0, {n_var}) <'false'> when 'true' -> {n_var} end"
+                    )?;
+                    Ok(Some(()))
+                }
+                "isZero" if arguments.is_empty() => {
+                    // call 'erlang':'=:='(Receiver, 0)
+                    write!(self.output, "call 'erlang':'=:='(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ", 0)")?;
+                    Ok(Some(()))
+                }
+                "isEven" if arguments.is_empty() => {
+                    // call 'erlang':'=:='(call 'erlang':'rem'(Receiver, 2), 0)
+                    write!(self.output, "call 'erlang':'=:='(call 'erlang':'rem'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ", 2), 0)")?;
+                    Ok(Some(()))
+                }
+                "isOdd" if arguments.is_empty() => {
+                    // call 'erlang':'=/='(call 'erlang':'rem'(Receiver, 2), 0)
+                    write!(self.output, "call 'erlang':'=/='(call 'erlang':'rem'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ", 2), 0)")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            // No keyword or binary Integer methods handled here
+            _ => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for String methods.
+    ///
+    /// String methods are synchronous operations that generate direct Erlang calls.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a String method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a String method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # String Methods
+    ///
+    /// - `length` (0 args) → `string:length(Receiver)`
+    /// - `isEmpty` (0 args) → `string:length(Receiver) =:= 0`
+    fn try_generate_string_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "length" if arguments.is_empty() => {
+                    // call 'string':'length'(Receiver)
+                    write!(self.output, "call 'string':'length'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "isEmpty" if arguments.is_empty() => {
+                    // call 'erlang':'=:='(call 'string':'length'(Receiver), 0)
+                    // Using string:length == 0 because Core Erlang empty binary syntax is complex
+                    write!(self.output, "call 'erlang':'=:='(call 'string':'length'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, "), 0)")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            // No keyword or binary String methods handled here
+            _ => Ok(None),
         }
     }
 
