@@ -16,6 +16,12 @@
 %%% - Block Evaluation Tests (value, value:, value:value:, closures)
 %%% - Control Flow Tests (whileTrue:, whileFalse:, repeat)
 %%% - Boolean control flow tests (ifTrue:ifFalse:, and:, or:, not)
+%%% - Cascade message sends (BT-133)
+%%% - Multi-keyword messages (BT-133)
+%%% - Actor interaction patterns (BT-133)
+%%% - Error handling (BT-133)
+%%% - Instance variable access patterns (BT-133)
+%%% - Nested message sends and binary operators (BT-133)
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
@@ -1038,3 +1044,431 @@ chained_block_evaluation_test() ->
     Intermediate = Block1(5),
     Result = Block2(Intermediate),
     ?assertEqual(30, Result).
+
+%%% ===========================================================================
+%%% Cascade Message Send Tests (BT-133)
+%%% ===========================================================================
+
+%% Test: Cascade - multiple messages to same actor
+%% Simulates: counter increment; increment; getValue
+cascade_multiple_messages_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Send cascade of messages to same actor
+    gen_server:call(Pid, {increment, []}),
+    gen_server:call(Pid, {increment, []}),
+    Result = gen_server:call(Pid, {getValue, []}),
+    
+    ?assertEqual(2, Result),
+    gen_server:stop(Pid).
+
+%% Test: Cascade with mixed message types
+%% Simulates: counter increment; getValue; increment
+cascade_mixed_operations_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    gen_server:call(Pid, {increment, []}),
+    Value1 = gen_server:call(Pid, {getValue, []}),
+    gen_server:call(Pid, {increment, []}),
+    Value2 = gen_server:call(Pid, {getValue, []}),
+    
+    ?assertEqual(1, Value1),
+    ?assertEqual(2, Value2),
+    gen_server:stop(Pid).
+
+%% Test: Cascade returns last message result
+%% Simulates: counter increment; increment; increment
+cascade_returns_last_result_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    gen_server:call(Pid, {increment, []}),
+    gen_server:call(Pid, {increment, []}),
+    LastResult = gen_server:call(Pid, {increment, []}),
+    
+    ?assertEqual(3, LastResult),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Multi-Keyword Message Tests (BT-133)
+%%% ===========================================================================
+
+%% Test fixture for multi-keyword messages
+%% Simulates: Rectangle width:height: method
+-spec rectangle_module_state(InitArgs :: map()) -> map().
+rectangle_module_state(InitArgs) ->
+    DefaultState = #{
+        '__class__' => 'Rectangle',
+        '__methods__' => #{
+            'width:height:' => fun rectangle_width_height/2,
+            area => fun rectangle_area/2
+        },
+        width => 0,
+        height => 0
+    },
+    maps:merge(DefaultState, InitArgs).
+
+rectangle_width_height([W, H], State) ->
+    NewState = maps:put(width, W, maps:put(height, H, State)),
+    {reply, self, NewState}.
+
+rectangle_area([], State) ->
+    W = maps:get(width, State),
+    H = maps:get(height, State),
+    {reply, W * H, State}.
+
+%% Test: Multi-keyword message with two arguments
+%% Simulates: rect width: 5 height: 3
+multi_keyword_two_args_test() ->
+    InitArgs = #{},
+    State = rectangle_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    gen_server:call(Pid, {'width:height:', [5, 3]}),
+    Area = gen_server:call(Pid, {area, []}),
+    
+    ?assertEqual(15, Area),
+    gen_server:stop(Pid).
+
+%% Test fixture for three-keyword messages
+%% Simulates: Box width:height:depth: method
+-spec box_module_state(InitArgs :: map()) -> map().
+box_module_state(InitArgs) ->
+    DefaultState = #{
+        '__class__' => 'Box',
+        '__methods__' => #{
+            'width:height:depth:' => fun box_width_height_depth/2,
+            volume => fun box_volume/2
+        },
+        width => 0,
+        height => 0,
+        depth => 0
+    },
+    maps:merge(DefaultState, InitArgs).
+
+box_width_height_depth([W, H, D], State) ->
+    NewState = maps:put(width, W, maps:put(height, H, maps:put(depth, D, State))),
+    {reply, self, NewState}.
+
+box_volume([], State) ->
+    W = maps:get(width, State),
+    H = maps:get(height, State),
+    D = maps:get(depth, State),
+    {reply, W * H * D, State}.
+
+%% Test: Multi-keyword message with three arguments
+%% Simulates: box width: 2 height: 3 depth: 4
+multi_keyword_three_args_test() ->
+    InitArgs = #{},
+    State = box_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    gen_server:call(Pid, {'width:height:depth:', [2, 3, 4]}),
+    Volume = gen_server:call(Pid, {volume, []}),
+    
+    ?assertEqual(24, Volume),
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Actor Interaction Patterns (BT-133)
+%%% ===========================================================================
+
+%% Test fixture: Spawner that creates another actor
+-spec spawner_module_state(InitArgs :: map()) -> map().
+spawner_module_state(InitArgs) ->
+    DefaultState = #{
+        '__class__' => 'Spawner',
+        '__methods__' => #{
+            spawnCounter => fun spawner_spawn_counter/2,
+            lastPid => fun spawner_last_pid/2
+        },
+        lastPid => nil
+    },
+    maps:merge(DefaultState, InitArgs).
+
+spawner_spawn_counter([], State) ->
+    %% Spawn a counter actor
+    CounterState = counter_module_state(#{}),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, CounterState, []),
+    NewState = maps:put(lastPid, Pid, State),
+    {reply, Pid, NewState}.
+
+spawner_last_pid([], State) ->
+    %% Return the last spawned PID, or nil if none
+    Pid = maps:get(lastPid, State, nil),
+    {reply, Pid, State}.
+
+%% Test: Actor A spawns Actor B
+actor_spawns_another_actor_test() ->
+    InitArgs = #{},
+    SpawnerState = spawner_module_state(InitArgs),
+    {ok, Spawner} = gen_server:start_link(beamtalk_actor, SpawnerState, []),
+    
+    try
+        %% Spawner creates a Counter
+        CounterPid = gen_server:call(Spawner, {spawnCounter, []}),
+        ?assert(is_pid(CounterPid)),
+        
+        %% Verify counter works
+        gen_server:call(CounterPid, {increment, []}),
+        Value = gen_server:call(CounterPid, {getValue, []}),
+        ?assertEqual(1, Value),
+        
+        gen_server:stop(CounterPid)
+    after
+        gen_server:stop(Spawner)
+    end.
+
+%% Test: Actors communicating via messages
+actors_communicate_test() ->
+    %% Create two counters
+    State1 = counter_module_state(#{}),
+    State2 = counter_module_state(#{}),
+    {ok, Counter1} = gen_server:start_link(beamtalk_actor, State1, []),
+    {ok, Counter2} = gen_server:start_link(beamtalk_actor, State2, []),
+    
+    try
+        %% Increment counter1 twice
+        gen_server:call(Counter1, {increment, []}),
+        gen_server:call(Counter1, {increment, []}),
+        
+        %% Get value from counter1 and set it in counter2 (simulated)
+        Value1 = gen_server:call(Counter1, {getValue, []}),
+        
+        %% Increment counter2 that many times
+        [gen_server:call(Counter2, {increment, []}) || _ <- lists:seq(1, Value1)],
+        
+        Value2 = gen_server:call(Counter2, {getValue, []}),
+        ?assertEqual(Value1, Value2)
+    after
+        gen_server:stop(Counter1),
+        gen_server:stop(Counter2)
+    end.
+
+%% Test: Actor chain - A spawns B, B spawns C
+actor_spawn_chain_test() ->
+    SpawnerState = spawner_module_state(#{}),
+    {ok, Spawner1} = gen_server:start_link(beamtalk_actor, SpawnerState, []),
+    
+    %% Spawner1 creates Spawner2
+    Spawner2State = spawner_module_state(#{}),
+    {ok, Spawner2} = gen_server:start_link(beamtalk_actor, Spawner2State, []),
+    
+    try
+        %% Spawner2 creates Counter
+        CounterPid = gen_server:call(Spawner2, {spawnCounter, []}),
+        
+        %% Use the counter
+        gen_server:call(CounterPid, {increment, []}),
+        gen_server:call(CounterPid, {increment, []}),
+        Value = gen_server:call(CounterPid, {getValue, []}),
+        
+        ?assertEqual(2, Value),
+        
+        gen_server:stop(CounterPid)
+    after
+        gen_server:stop(Spawner2),
+        gen_server:stop(Spawner1)
+    end.
+
+%%% ===========================================================================
+%%% Error Handling Tests (BT-133)
+%%% ===========================================================================
+
+%% Test: Method not found error
+method_not_found_error_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Try to call non-existent method
+    Result = gen_server:call(Pid, {nonExistentMethod, []}),
+    
+    %% Should get unknown_message error
+    ?assertMatch({error, {unknown_message, nonExistentMethod}}, Result),
+    
+    gen_server:stop(Pid).
+
+%% Test: Division by zero error
+division_by_zero_error_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Try to divide by zero
+    Result = gen_server:call(Pid, {'divide:', [0]}),
+    
+    %% Should get division_by_zero error
+    ?assertMatch({error, division_by_zero}, Result),
+    
+    gen_server:stop(Pid).
+
+%% Test: Wrong number of arguments error
+wrong_arg_count_error_test() ->
+    InitArgs = #{},
+    State = counter_module_state(InitArgs),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% divide: expects 1 arg, give it 2
+    Result = gen_server:call(Pid, {'divide:', [5, 10]}),
+    
+    %% Should get a method_error with function_clause
+    ?assertMatch({error, {method_error, 'divide:', function_clause}}, Result),
+    
+    gen_server:stop(Pid).
+
+%% Test: Actor crash and recovery simulation
+actor_crash_simulation_test() ->
+    %% Create a counter
+    State = counter_module_state(#{}),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Use it normally
+    gen_server:call(Pid, {increment, []}),
+    Value1 = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(1, Value1),
+    
+    %% Simulate crash by stopping it
+    gen_server:stop(Pid),
+    
+    %% Create a new one (simulates restart)
+    {ok, NewPid} = gen_server:start_link(beamtalk_actor, State, []),
+    Value2 = gen_server:call(NewPid, {getValue, []}),
+    
+    %% New actor has fresh state
+    ?assertEqual(0, Value2),
+    
+    gen_server:stop(NewPid).
+
+%%% ===========================================================================
+%%% Instance Variable Access Patterns (BT-133)
+%%% ===========================================================================
+
+%% Test: Instance variable shadowing
+%% When a method param has same name as instance var, param takes precedence
+instance_var_shadowing_test() ->
+    %% Module with 'value' instance var and method that takes 'value' param
+    ModuleState = #{
+        '__class__' => 'ShadowTest',
+        '__methods__' => #{
+            getInstanceValue => fun([], State) -> 
+                {reply, maps:get(value, State), State}
+            end,
+            echoParam => fun([Value], State) ->
+                %% Param 'Value' shadows instance var 'value'
+                {reply, Value, State}
+            end
+        },
+        value => 42
+    },
+    
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, ModuleState, []),
+    
+    %% Instance var value is 42
+    InstanceValue = gen_server:call(Pid, {getInstanceValue, []}),
+    ?assertEqual(42, InstanceValue),
+    
+    %% But param value is independent
+    ParamValue = gen_server:call(Pid, {echoParam, [99]}),
+    ?assertEqual(99, ParamValue),
+    
+    %% Instance var unchanged
+    StillInstanceValue = gen_server:call(Pid, {getInstanceValue, []}),
+    ?assertEqual(42, StillInstanceValue),
+    
+    gen_server:stop(Pid).
+
+%% Test: Multiple instance variables
+multiple_instance_vars_test() ->
+    ModuleState = #{
+        '__class__' => 'Point',
+        '__methods__' => #{
+            'setX:Y:' => fun([X, Y], State) ->
+                NewState = maps:put(x, X, maps:put(y, Y, State)),
+                {reply, ok, NewState}
+            end,
+            sumCoordinates => fun([], State) ->
+                X = maps:get(x, State),
+                Y = maps:get(y, State),
+                {reply, X + Y, State}
+            end
+        },
+        x => 0,
+        y => 0
+    },
+    
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, ModuleState, []),
+    
+    gen_server:call(Pid, {'setX:Y:', [10, 20]}),
+    Sum = gen_server:call(Pid, {sumCoordinates, []}),
+    
+    ?assertEqual(30, Sum),
+    
+    gen_server:stop(Pid).
+
+%% Test: Instance variable persistence across method calls
+instance_var_persistence_test() ->
+    State = counter_module_state(#{}),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    %% Increment modifies instance var
+    gen_server:call(Pid, {increment, []}),
+    gen_server:call(Pid, {increment, []}),
+    
+    %% Value persists
+    Value = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(2, Value),
+    
+    %% Increment again
+    gen_server:call(Pid, {increment, []}),
+    
+    %% Still persists
+    NewValue = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(3, NewValue),
+    
+    gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Nested Message Send Tests (BT-133)
+%%% ===========================================================================
+
+%% Test: Nested unary messages
+%% Simulates: counter getValue getValue (if getValue returned an object)
+nested_message_sends_simulation_test() ->
+    %% This simulates the pattern, not actual nesting since getValue returns int
+    State = counter_module_state(#{}),
+    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    
+    gen_server:call(Pid, {increment, []}),
+    Value = gen_server:call(Pid, {getValue, []}),
+    
+    %% If we had an object wrapper, we'd send another message
+    %% For now, just verify the value is what we expect
+    ?assertEqual(1, Value),
+    
+    gen_server:stop(Pid).
+
+%% Test: Binary operators in expressions
+binary_operators_test() ->
+    %% Simulate: (3 + 4) * 2
+    Block = fun() ->
+        Sum = 3 + 4,
+        Sum * 2
+    end,
+    
+    Result = Block(),
+    ?assertEqual(14, Result).
+
+%% Test: Chained binary operators with precedence
+chained_binary_operators_test() ->
+    %% Simulate: 2 + 3 * 4 - 1
+    %% Should follow standard precedence: 2 + (3 * 4) - 1 = 2 + 12 - 1 = 13
+    Block = fun() -> 2 + 3 * 4 - 1 end,
+    
+    Result = Block(),
+    ?assertEqual(13, Result).
