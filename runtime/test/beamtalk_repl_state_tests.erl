@@ -36,10 +36,17 @@ new_with_daemon_socket_path_test() ->
 
 new_default_daemon_socket_path_test() ->
     %% Default path should be ~/.beamtalk/daemon.sock
-    State = beamtalk_repl_state:new(undefined, 0),
-    Path = beamtalk_repl_state:get_daemon_socket_path(State),
-    ?assert(lists:suffix("/daemon.sock", Path)),
-    ?assert(lists:prefix(os:getenv("HOME"), Path)).
+    case os:getenv("HOME") of
+        false ->
+            %% Skip test if HOME not set - the module itself will error
+            %% in this case, which is expected behavior
+            ok;
+        Home ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            Path = beamtalk_repl_state:get_daemon_socket_path(State),
+            ?assert(lists:suffix("/daemon.sock", Path)),
+            ?assert(lists:prefix(Home, Path))
+    end.
 
 %%% Bindings tests
 

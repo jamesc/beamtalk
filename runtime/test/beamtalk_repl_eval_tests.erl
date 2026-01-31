@@ -67,6 +67,11 @@ format_daemon_diagnostics_multiple_test() ->
     ?assert(binary:match(Result, <<"Error 3">>) =/= nomatch).
 
 %%% Core Erlang compilation tests
+%%%
+%%% Note: Valid Core Erlang compilation requires proper erlc environment setup
+%%% and module name matching. These tests focus on error handling and are
+%%% suitable for unit testing. Valid compilation paths are better tested in
+%%% integration tests with a running compiler daemon.
 
 compile_core_erlang_invalid_test() ->
     %% Invalid Core Erlang
@@ -95,10 +100,10 @@ do_eval_no_daemon_error_test() ->
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
     ?assertMatch({error, {compile_error, _}, _}, Result),
     
-    %% Error message should mention daemon
+    %% Error message should mention daemon (case-insensitive)
     {error, {compile_error, Msg}, _} = Result,
-    ?assert(binary:match(Msg, <<"daemon">>) =/= nomatch orelse 
-            binary:match(Msg, <<"Daemon">>) =/= nomatch).
+    LowerMsg = string:lowercase(Msg),
+    ?assert(binary:match(LowerMsg, <<"daemon">>) =/= nomatch).
 
 %%% File loading tests
 

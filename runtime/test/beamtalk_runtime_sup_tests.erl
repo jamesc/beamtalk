@@ -47,23 +47,15 @@ children_are_workers_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
     %% All children should be workers
-    lists:foreach(
-        fun(Spec) ->
-            ?assertEqual(worker, maps:get(type, Spec))
-        end,
-        ChildSpecs
-    ).
+    Types = [maps:get(type, Spec) || Spec <- ChildSpecs],
+    ?assertEqual([worker, worker], Types).
 
 children_are_permanent_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
     %% All children should have permanent restart
-    lists:foreach(
-        fun(Spec) ->
-            ?assertEqual(permanent, maps:get(restart, Spec))
-        end,
-        ChildSpecs
-    ).
+    RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
+    ?assertEqual([permanent, permanent], RestartTypes).
 
 %%% Child ordering tests
 

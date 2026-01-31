@@ -24,10 +24,15 @@ start_returns_supervisor_pid_test() ->
     Children = supervisor:which_children(Pid),
     ?assert(is_list(Children)),
     
-    %% Clean up
+    %% Clean up using monitor for reliable termination
     unlink(Pid),
+    Ref = monitor(process, Pid),
     exit(Pid, shutdown),
-    timer:sleep(50).
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 ->
+        error(supervisor_cleanup_timeout)
+    end.
 
 %%% Application stop tests
 

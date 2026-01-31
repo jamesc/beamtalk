@@ -49,10 +49,10 @@ parse_request_unknown_type_test() ->
 
 parse_request_missing_expression_test() ->
     Request = <<"{\"type\": \"eval\"}">>,
-    %% Should fail to parse properly
+    %% Missing expression field - parser can't extract the expression value
+    %% so it returns an invalid_request error
     Result = beamtalk_repl_server:parse_request(Request),
-    %% Either parse error or treated as raw expression
-    ?assert(element(1, Result) =:= error orelse element(1, Result) =:= eval).
+    ?assertMatch({error, {invalid_request, _}}, Result).
 
 %%% Response formatting tests
 
@@ -200,13 +200,6 @@ format_loaded_multiple_test() ->
     ?assert(lists:member(<<"Actor">>, Classes)).
 
 %%% JSON parsing tests (internal parser)
-
-parse_json_object_simple_test() ->
-    %% Test the internal JSON parser
-    Json = <<"{\"type\": \"eval\"}">>,
-    Result = beamtalk_repl_server:parse_request(Json),
-    %% Should parse as eval with missing expression, handled gracefully
-    ?assert(element(1, Result) =:= error orelse element(1, Result) =:= eval).
 
 parse_json_not_json_test() ->
     %% Non-JSON should be treated as raw expression

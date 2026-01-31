@@ -10,9 +10,11 @@
 
 -export([do_eval/2, handle_load/2]).
 
-%% Exported for testing
+%% Exported for testing (only in test builds)
+-ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1]).
+-endif.
 
 -define(RECV_TIMEOUT, 30000).
 -define(DAEMON_CONNECT_TIMEOUT, 5000).
