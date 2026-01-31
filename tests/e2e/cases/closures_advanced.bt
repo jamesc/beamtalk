@@ -1,0 +1,159 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for closure behavior (blocks capturing outer scope)
+// Closures allow blocks to capture and use variables from their defining scope
+
+// ===========================================================================
+// BASIC CLOSURE CAPTURE
+// ===========================================================================
+
+// Closure capturing single variable
+outer := 10
+// => 10
+
+closure := [:x | x + outer]
+// => a Block/1
+
+closure value: 5
+// => 15
+
+// Verify outer variable unchanged
+outer
+// => 10
+
+// ===========================================================================
+// MULTIPLE CAPTURES
+// ===========================================================================
+
+// Closure capturing multiple variables
+base := 100
+// => 100
+
+multiplier := 2
+// => 2
+
+compute := [:x | (x + base) * multiplier]
+// => a Block/1
+
+compute value: 50
+// => 300
+
+// ===========================================================================
+// NESTED CLOSURES
+// ===========================================================================
+
+// Closure returning closure (currying pattern)
+makeAdder := [:amount | [:value | value + amount]]
+// => a Block/1
+
+add10 := makeAdder value: 10
+// => a Block/1
+
+add10 value: 5
+// => 15
+
+add10 value: 20
+// => 30
+
+// Different closure from same factory
+add100 := makeAdder value: 100
+// => a Block/1
+
+add100 value: 5
+// => 105
+
+// ===========================================================================
+// CLOSURE CHAINS
+// ===========================================================================
+
+// Multiple levels of nesting
+makeMultiplier := [:factor | [:makeAdder | [:value | (value + makeAdder) * factor]]]
+// => a Block/1
+
+times2 := makeMultiplier value: 2
+// => a Block/1
+
+times2Plus10 := times2 value: 10
+// => a Block/1
+
+times2Plus10 value: 5
+// => 30
+
+// ===========================================================================
+// CLOSURE WITH OPERATORS
+// ===========================================================================
+
+// Closure using binary operators
+threshold := 100
+// => 100
+
+isAboveThreshold := [:n | n > threshold]
+// => a Block/1
+
+isAboveThreshold value: 150
+// => true
+
+isAboveThreshold value: 50
+// => false
+
+// ===========================================================================
+// SHARED CAPTURES
+// ===========================================================================
+
+// Multiple closures sharing same captured variable
+shared := 1000
+// => 1000
+
+addShared := [:x | x + shared]
+// => a Block/1
+
+subtractShared := [:x | x - shared]
+// => a Block/1
+
+multiplyShared := [:x | x * shared]
+// => a Block/1
+
+addShared value: 500
+// => 1500
+
+subtractShared value: 1200
+// => 200
+
+multiplyShared value: 2
+// => 2000
+
+// ===========================================================================
+// CLOSURE COMPOSITION
+// ===========================================================================
+
+// Using one closure's result as input to another
+double := [:x | x * 2]
+// => a Block/1
+
+addOne := [:x | x + 1]
+// => a Block/1
+
+// Apply double first, then addOne
+doubleResult := double value: 5
+// => 10
+
+addOne value: doubleResult
+// => 11
+
+// ===========================================================================
+// DEEP NESTING
+// ===========================================================================
+
+// Three levels deep
+level1 := [:a | [:b | [:c | a + b + c]]]
+// => a Block/1
+
+level2 := level1 value: 1
+// => a Block/1
+
+level3 := level2 value: 2
+// => a Block/1
+
+level3 value: 3
+// => 6

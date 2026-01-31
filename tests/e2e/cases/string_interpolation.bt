@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for string operations
+//
+// ===========================================================================
+// IMPLEMENTATION STATUS
+// ===========================================================================
+// 
+// Double-quoted string interpolation with {expression} syntax is NOT YET 
+// IMPLEMENTED in Beamtalk. This file serves as placeholder documentation.
+//
+// Planned syntax:
+//   "Hello, {name}!"  // Interpolation with {expr}
+//   "Result: {x + 10}" // Expressions inside {}
+//
+// For now, this file contains basic string tests.
+//
+// ===========================================================================
+// BASIC STRING TESTS (single-quoted)
+// ===========================================================================
+
+// Simple string assignment
+name := 'World'
+// => World
+
+// String literal
+'Hello'
+// => Hello
+
+// Number for testing
+count := 42
+// => 42
+
+// Verify variable persistence
+name
+// => World
