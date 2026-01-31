@@ -71,7 +71,7 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 - — = No separate test file (documented elsewhere)
 
 **Footnotes:**
-1. Cascades send async actor messages. Use `// @load fixtures/counter.bt` to load an actor class, then test cascades with stateful expressions.
+1. Cascades send async actor messages. Use `// @load tests/e2e/fixtures/counter.bt` to load an actor class, then test cascades with stateful expressions.
 2. Actor classes must be defined in files and loaded with `// @load`. See `tests/e2e/fixtures/` for example actors.
 
 ## Directory Structure
