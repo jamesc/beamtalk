@@ -31,11 +31,18 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 
 /// Embedded compile.escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
+
+/// Atomic counter for generating unique escript filenames.
+///
+/// This ensures each temporary escript file has a unique name, preventing
+/// collisions when multiple compilation processes run in parallel.
+static ESCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Escapes a string for use in an Erlang term.
 ///
@@ -139,12 +146,13 @@ impl BeamCompiler {
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
         // Write compile.escript to a temporary file with unique name
-        // Use both process ID and thread ID to ensure uniqueness when tests run in parallel
+        // Use both process ID and atomic counter to ensure uniqueness when tests run in parallel
         let temp_dir = std::env::temp_dir();
+        let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let escript_path = temp_dir.join(format!(
-            "beamtalk_compile_{}_{:?}.escript",
+            "beamtalk_compile_{}_{}.escript",
             std::process::id(),
-            std::thread::current().id()
+            counter
         ));
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
@@ -558,5 +566,41 @@ end
         // Special characters
         let result = write_core_erlang(&module, "foo-bar", &output_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_escript_counter_uniqueness_parallel() {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+
+        // Test that ESCRIPT_COUNTER produces unique values even when called from multiple threads
+        let values = std::sync::Arc::new(Mutex::new(HashSet::new()));
+        let mut handles = vec![];
+
+        // Spawn 10 threads that each fetch 100 counter values
+        for _ in 0..10 {
+            let values_clone = std::sync::Arc::clone(&values);
+            let handle = std::thread::spawn(move || {
+                for _ in 0..100 {
+                    let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let mut set = values_clone.lock().unwrap();
+                    // Each counter value should be unique
+                    assert!(
+                        set.insert(counter),
+                        "Counter value {counter} was not unique"
+                    );
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify we got exactly 1000 unique values
+        let final_set = values.lock().unwrap();
+        assert_eq!(final_set.len(), 1000, "Expected 1000 unique counter values");
     }
 }
