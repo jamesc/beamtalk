@@ -2736,6 +2736,79 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_exponentiation_operator() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::Integer(2), Span::new(0, 1));
+        let right = vec![Expression::Literal(Literal::Integer(3), Span::new(4, 5))];
+        let result = generator.generate_binary_op("**", &left, &right);
+        assert!(result.is_ok());
+        assert!(
+            generator.output.contains("call 'math':'pow'"),
+            "Should use math:pow for exponentiation. Got: {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("call 'erlang':'trunc'"),
+            "Should wrap in trunc for integer result. Got: {}",
+            generator.output
+        );
+        assert_eq!(
+            generator.output,
+            "call 'erlang':'trunc'(call 'math':'pow'(2, 3))"
+        );
+    }
+
+    #[test]
+    fn test_generate_string_concatenation_operator() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::String("Hello".into()), Span::new(0, 7));
+        let right = vec![Expression::Literal(
+            Literal::String(" World".into()),
+            Span::new(11, 19),
+        )];
+        let result = generator.generate_binary_op("++", &left, &right);
+        assert!(result.is_ok());
+        assert!(
+            generator.output.contains("iolist_to_binary"),
+            "Should use iolist_to_binary for string concatenation. Got: {}",
+            generator.output
+        );
+        assert!(
+            generator.output.contains("binary_to_list"),
+            "Should convert binaries to lists first. Got: {}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_generate_strict_equality_operator() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
+        let right = vec![Expression::Literal(Literal::Integer(42), Span::new(6, 8))];
+        let result = generator.generate_binary_op("=", &left, &right);
+        assert!(result.is_ok());
+        assert!(
+            generator.output.contains("call 'erlang':'=:='"),
+            "Should use strict equality =:=. Got: {}",
+            generator.output
+        );
+    }
+
+    #[test]
+    fn test_generate_strict_inequality_operator() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
+        let right = vec![Expression::Literal(Literal::Integer(99), Span::new(7, 9))];
+        let result = generator.generate_binary_op("~=", &left, &right);
+        assert!(result.is_ok());
+        assert!(
+            generator.output.contains("call 'erlang':'=/='"),
+            "Should use strict inequality =/=. Got: {}",
+            generator.output
+        );
+    }
+
+    #[test]
     fn test_fresh_var_generation() {
         let mut generator = CoreErlangGenerator::new("test");
         let var1 = generator.fresh_var("temp");
