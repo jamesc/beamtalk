@@ -1,0 +1,84 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Identifier(
+            Identifier {
+                name: "caf",
+                span: Span {
+                    start: 323,
+                    end: 326,
+                },
+            },
+        ),
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 326,
+                end: 328,
+            },
+        },
+    ],
+    span: Span {
+        start: 323,
+        end: 800,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test boundary condition: Unicode in identifiers and strings",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Validate proper UTF-8 handling in lexer and parser",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Unicode characters in identifiers (if supported)",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Note: This tests whether the lexer/parser gracefully handles or rejects Unicode",
+            span: Span {
+                start: 323,
+                end: 326,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found <error: é>", span: Span { start: 326, end: 328 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 326, end: 328 } }

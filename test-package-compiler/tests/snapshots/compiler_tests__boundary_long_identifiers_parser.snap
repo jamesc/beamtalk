@@ -1,0 +1,242 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "thisIsAVeryLongIdentifierNameThatTestsTheParserAbilityToHandleExtremelyLongVariableNamesWithoutIssues",
+                    span: Span {
+                        start: 218,
+                        end: 319,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 323,
+                    end: 325,
+                },
+            ),
+            span: Span {
+                start: 218,
+                end: 325,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "longString",
+                    span: Span {
+                        start: 373,
+                        end: 383,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation",
+                ),
+                Span {
+                    start: 387,
+                    end: 602,
+                },
+            ),
+            span: Span {
+                start: 373,
+                end: 602,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result",
+                    span: Span {
+                        start: 662,
+                        end: 668,
+                    },
+                },
+            ),
+            value: Identifier(
+                Identifier {
+                    name: "veryLongObjectWithManyMethods",
+                    span: Span {
+                        start: 672,
+                        end: 701,
+                    },
+                },
+            ),
+            span: Span {
+                start: 662,
+                end: 701,
+            },
+        },
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:",
+                span: Span {
+                    start: 707,
+                    end: 734,
+                },
+            },
+            selector: Unary(
+                "value1",
+            ),
+            arguments: [],
+            span: Span {
+                start: 707,
+                end: 741,
+            },
+        },
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:",
+                span: Span {
+                    start: 747,
+                    end: 777,
+                },
+            },
+            selector: Unary(
+                "value2",
+            ),
+            arguments: [],
+            span: Span {
+                start: 747,
+                end: 784,
+            },
+        },
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:",
+                span: Span {
+                    start: 789,
+                    end: 827,
+                },
+            },
+            selector: Unary(
+                "value3",
+            ),
+            arguments: [],
+            span: Span {
+                start: 789,
+                end: 834,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "anotherVeryLongIdentifierForTestingPurposes",
+                    span: Span {
+                        start: 873,
+                        end: 916,
+                    },
+                },
+            ),
+            value: Parenthesized {
+                expression: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "yetAnotherLongIdentifierName",
+                            span: Span {
+                                start: 926,
+                                end: 954,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 955,
+                                    end: 958,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Identifier(
+                            Identifier {
+                                name: "evenMoreLongIdentifierNames",
+                                span: Span {
+                                    start: 968,
+                                    end: 995,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 926,
+                        end: 995,
+                    },
+                },
+                span: Span {
+                    start: 920,
+                    end: 997,
+                },
+            },
+            span: Span {
+                start: 873,
+                end: 997,
+            },
+        },
+    ],
+    span: Span {
+        start: 218,
+        end: 997,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 218,
+                end: 319,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 218,
+                end: 319,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test boundary condition: long identifiers and strings",
+            span: Span {
+                start: 218,
+                end: 319,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Validate parser handles extremely long tokens",
+            span: Span {
+                start: 218,
+                end: 319,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Very long identifier (100 characters)",
+            span: Span {
+                start: 218,
+                end: 319,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:", span: Span { start: 707, end: 734 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:", span: Span { start: 747, end: 777 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:", span: Span { start: 789, end: 827 } }

@@ -1,0 +1,24 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("x"), span: Span { start: 224, end: 225 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test boundary condition: mixed error scenarios"), Whitespace("\n"), LineComment("// Multiple errors in single expressions and compound statements"), Whitespace("\n\n"), LineComment("// Multiple syntax errors in one line"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 226, end: 228 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 229, end: 231 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 232, end: 233 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 234, end: 236 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 237, end: 239 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("str"), span: Span { start: 287, end: 290 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Unterminated string followed by valid code"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 291, end: 293 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("unterminated\ny := 10\n\n// Invalid assignment with missing operand\nresult := x + + y\n\n// Multiple malformed messages in sequence\nobject at: put: get:\narray add: remove:\n\n// Nested error (malformed message inside valid structure)\nouter := (inner at: missing: broken)\n\n// Mixed errors: unterminated string + invalid syntax + malformed message\nbroken := "), span: Span { start: 294, end: 645 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("unclosed"), span: Span { start: 645, end: 653 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 654, end: 655 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 656, end: 658 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("at:"), span: Span { start: 659, end: 662 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 663, end: 665 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("validAfterErrors"), span: Span { start: 722, end: 738 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Valid code after multiple errors should still parse"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 739, end: 741 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("100"), span: Span { start: 742, end: 745 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 746, end: 747 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("200"), span: Span { start: 748, end: 751 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 752, end: 752 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

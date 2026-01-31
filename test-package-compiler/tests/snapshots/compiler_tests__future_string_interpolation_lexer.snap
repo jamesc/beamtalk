@@ -1,0 +1,57 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("name"), span: Span { start: 300, end: 304 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test future feature: string interpolation"), Whitespace("\n"), LineComment("// Double-quoted strings with embedded expressions using {expr} syntax"), Whitespace("\n"), LineComment("// NOTE: This feature is not yet implemented - test documents expected behavior"), Whitespace("\n\n"), LineComment("// Simple variable interpolation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 305, end: 307 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Alice"), span: Span { start: 308, end: 315 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greeting"), span: Span { start: 316, end: 324 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 325, end: 327 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Hello, {name}!"), span: Span { start: 328, end: 344 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("age"), span: Span { start: 374, end: 377 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Expression interpolation"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 378, end: 380 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("25"), span: Span { start: 381, end: 383 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("message"), span: Span { start: 384, end: 391 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 392, end: 394 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("You are {age + 5} years old in 5 years"), span: Span { start: 395, end: 435 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("firstName"), span: Span { start: 478, end: 487 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Multiple interpolations in one string"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 488, end: 490 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Bob"), span: Span { start: 491, end: 496 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("lastName"), span: Span { start: 497, end: 505 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 506, end: 508 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Smith"), span: Span { start: 509, end: 516 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("fullName"), span: Span { start: 517, end: 525 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 526, end: 528 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Name: {firstName} {lastName}"), span: Span { start: 529, end: 559 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("user"), span: Span { start: 604, end: 608 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Nested interpolation with message sends"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 609, end: 611 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("User"), span: Span { start: 612, end: 616 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("new"), span: Span { start: 617, end: 620 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("profile"), span: Span { start: 621, end: 628 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 629, end: 631 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("User: {user getName}, Email: {user getEmail}"), span: Span { start: 632, end: 678 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("count"), span: Span { start: 723, end: 728 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Interpolation with operators and blocks"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 729, end: 731 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("10"), span: Span { start: 732, end: 734 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("summary"), span: Span { start: 735, end: 742 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 743, end: 745 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Total: {count * 2}, Double: {[:x | x * 2] value: count}"), span: Span { start: 746, end: 803 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("escaped"), span: Span { start: 849, end: 856 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Escape sequences in interpolated strings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 857, end: 859 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Literal braces: \\{ and \\}, variable: {name}"), span: Span { start: 860, end: 905 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("multiLine"), span: Span { start: 941, end: 950 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Multi-line interpolated string"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 951, end: 953 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("First line: {firstName}\nSecond line: {lastName}\nThird line: {age}"), span: Span { start: 954, end: 1021 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("emojiVar"), span: Span { start: 1058, end: 1066 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Unicode in interpolated strings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1067, end: 1069 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("🎉"), span: Span { start: 1070, end: 1076 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("withEmoji"), span: Span { start: 1077, end: 1086 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1087, end: 1089 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Celebration: {emojiVar} {name}!"), span: Span { start: 1090, end: 1123 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("emptyInterp"), span: Span { start: 1160, end: 1171 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Empty interpolation (edge case)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1172, end: 1174 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Before {} After"), span: Span { start: 1175, end: 1192 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("nested"), span: Span { start: 1226, end: 1232 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Nested braces (complex case)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1233, end: 1235 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: InterpolatedString("Outer {inner at: {key get}}"), span: Span { start: 1236, end: 1265 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1266, end: 1266 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
