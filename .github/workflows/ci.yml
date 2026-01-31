@@ -181,6 +181,31 @@ jobs:
             echo "**Overall Line Coverage:** $erlang_coverage" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Check Coverage Thresholds
+        run: |
+          # Extract Rust line coverage percentage
+          rust_coverage=$(grep -oP 'Line Rate: \K[0-9.]+' code-coverage-results.txt | head -1)
+          
+          # Extract branch coverage percentage
+          rust_branch=$(grep -oP 'Branch Rate: \K[0-9.]+' code-coverage-results.txt | head -1)
+          
+          echo "Rust Line Coverage: ${rust_coverage}%"
+          echo "Rust Branch Coverage: ${rust_branch}%"
+          
+          # Check thresholds (using bc for floating point comparison)
+          if command -v bc &> /dev/null; then
+            if (( $(echo "$rust_coverage < 70.0" | bc -l) )); then
+              echo "❌ FAILURE: Rust line coverage ${rust_coverage}% is below 70% threshold"
+              exit 1
+            fi
+            if (( $(echo "$rust_branch < 80.0" | bc -l) )); then
+              echo "⚠️ WARNING: Rust branch coverage ${rust_branch}% is below 80% threshold"
+              echo "This will become a failure in future releases"
+            fi
+          fi
+          
+          echo "✅ Coverage thresholds met"
+
       - name: Add PR Comment
         if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
