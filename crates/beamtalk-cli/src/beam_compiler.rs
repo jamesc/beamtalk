@@ -139,9 +139,13 @@ impl BeamCompiler {
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
         // Write compile.escript to a temporary file with unique name
+        // Use both process ID and thread ID to ensure uniqueness when tests run in parallel
         let temp_dir = std::env::temp_dir();
-        let escript_path =
-            temp_dir.join(format!("beamtalk_compile_{}.escript", std::process::id()));
+        let escript_path = temp_dir.join(format!(
+            "beamtalk_compile_{}_{:?}.escript",
+            std::process::id(),
+            std::thread::current().id()
+        ));
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
             .wrap_err("Failed to write compile escript")?;
