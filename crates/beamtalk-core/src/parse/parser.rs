@@ -126,8 +126,8 @@ fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
 
-        // Additive
-        "+" | "-" => Some(BindingPower::left_assoc(30)),
+        // Additive (includes string concatenation ++)
+        "+" | "-" | "++" => Some(BindingPower::left_assoc(30)),
 
         // Multiplicative
         "*" | "/" | "%" => Some(BindingPower::left_assoc(40)),

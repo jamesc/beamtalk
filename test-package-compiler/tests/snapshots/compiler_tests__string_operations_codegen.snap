@@ -2,15 +2,15 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'string_operations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'start_link'/1 = fun (InitArgs) ->
-    call 'gen_server':'start_link'('actor_spawn', InitArgs, [])
+    call 'gen_server':'start_link'('string_operations', InitArgs, [])
 
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('actor_spawn', ~{}~, []) of
+    case call 'gen_server':'start_link'('string_operations', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -19,7 +19,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 
 
 'spawn'/1 = fun (InitArgs) ->
-    case call 'gen_server':'start_link'('actor_spawn', InitArgs, []) of
+    case call 'gen_server':'start_link'('string_operations', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -29,9 +29,13 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'ActorSpawn',
-        '__methods__' => call 'actor_spawn':'method_table'()
-        , 'value' => 0
+        '__class__' => 'StringOperations',
+        '__methods__' => call 'string_operations':'method_table'()
+        , 'greeting' => #{#<72>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#
+        , 'name' => #{#<87>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#
+        , 'padded' => #{#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']])}#
+        , 'empty' => #{}#
+        , 'csv' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<44>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<44>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<44>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -40,7 +44,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'actor_spawn':'safe_dispatch'(Selector, Args, State) of
+            case call 'string_operations':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
                     in {'noreply', NewState}
@@ -54,7 +58,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'actor_spawn':'safe_dispatch'(Selector, Args, State) of
+            case call 'string_operations':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, NewState}> when 'true' ->
@@ -70,7 +74,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 
 'terminate'/2 = fun (Reason, State) ->
     %% Call terminate method if defined (Flavors pattern)
-    case call 'actor_spawn':'dispatch'('terminate', [Reason], State) of
+    case call 'string_operations':'dispatch'('terminate', [Reason], State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
         <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
@@ -78,15 +82,13 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    try call 'actor_spawn':'dispatch'(Selector, Args, State)
+    try call 'string_operations':'dispatch'(Selector, Args, State)
     of Result -> Result
     catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
-        <'increment'> when 'true' ->
-            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in {'reply', _Val1, State1}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
@@ -94,7 +96,7 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
             case call 'maps':'is_key'(DnuSelector, Methods) of
                 <'true'> when 'true' ->
                     %% Call doesNotUnderstand:args: with [Selector, Args]
-                    call 'actor_spawn':'dispatch'(DnuSelector, [OtherSelector, Args], State)
+                    call 'string_operations':'dispatch'(DnuSelector, [OtherSelector, Args], State)
                 <'false'> when 'true' ->
                     %% No DNU handler - return unknown_message error
                     let ClassName = call 'maps':'get'('__class__', State) in
@@ -104,6 +106,6 @@ module 'actor_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 
 
 'method_table'/0 = fun () ->
-    ~{'increment' => 0}~
+    ~{}~
 
 end
