@@ -82,3 +82,9 @@ When activated, execute this workflow to systematically address all PR review co
    - Links to any Linear issues created for follow-up work
 
 11. **Report summary**: Provide a summary table of all comments and how they were resolved.
+
+12. **Auto-chain to done**: If all review comments have been successfully resolved (no failures, no pending issues), automatically activate the `done` skill:
+    - Inform the user that all PR comments have been addressed
+    - Activate the `done` skill without waiting for user confirmation
+    
+    If there are any issues or manual steps needed, report them and wait for user input instead.

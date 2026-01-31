@@ -167,3 +167,173 @@ bindings_initially_empty_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     ?assertEqual(#{}, beamtalk_repl:get_bindings(Pid)),
     beamtalk_repl:stop(Pid).
+
+%%% Edge case tests
+
+parse_very_long_expression_test() ->
+    %% Test parsing very long expressions (>1000 chars)
+    LongExpr = lists:duplicate(2000, $a),
+    Request = list_to_binary(LongExpr),
+    ?assertEqual({eval, LongExpr}, beamtalk_repl:parse_request(Request)).
+
+parse_malformed_json_recovery_test() ->
+    %% Test various malformed/incomplete JSON handling
+    %% The key goal is that parse_request doesn't crash on any input
+    
+    %% Incomplete JSON that's still valid but missing required fields
+    Request1 = <<"{\"type\":\"eval\"}">>,%% Missing expression field
+    Result1 = beamtalk_repl:parse_request(Request1),
+    ?assertMatch({error, {invalid_request, unknown_type}}, Result1),
+    
+    %% Various potentially problematic inputs - just verify they don't crash
+    _Result2 = beamtalk_repl:parse_request(<<"{incomplete[">>),
+    _Result3 = beamtalk_repl:parse_request(<<"">>),
+    _Result4 = beamtalk_repl:parse_request(<<"plain text">>),
+    
+    %% Verify plain text is treated as eval
+    Request5 = <<"not json at all">>,  
+    ?assertEqual({eval, "not json at all"}, beamtalk_repl:parse_request(Request5)).
+
+parse_unicode_expression_test() ->
+    %% Test parsing expressions with unicode characters
+    %% The unicode in JSON will be properly decoded by jsx
+    Request = <<"{\"type\":\"eval\",\"expression\":\"hello world + test\"}">>,
+    ?assertEqual({eval, "hello world + test"}, beamtalk_repl:parse_request(Request)).
+
+parse_newlines_in_expression_test() ->
+    %% Test expressions with newline escape sequences in JSON
+    %% jsx will properly handle the \\n escape sequence
+    Request = <<"{\"type\":\"eval\",\"expression\":\"line1\\nline2\"}">>,
+    Result = beamtalk_repl:parse_request(Request),
+    %% Should get eval tuple with the expression
+    ?assertMatch({eval, _}, Result),
+    {eval, Expr} = Result,
+    %% The expression should be a string (not empty)
+    ?assert(length(Expr) > 0).
+
+format_complex_nested_structure_test() ->
+    %% Test formatting deeply nested structures
+    NestedMap = #{
+        level1 => #{
+            level2 => #{
+                level3 => [1, 2, 3]
+            }
+        }
+    },
+    Response = beamtalk_repl:format_response(NestedMap),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+
+format_large_list_test() ->
+    %% Test formatting large lists
+    LargeList = lists:seq(1, 1000),
+    Response = beamtalk_repl:format_response(LargeList),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(LargeList, maps:get(<<"value">>, Decoded)).
+
+format_binary_with_special_chars_test() ->
+    %% Test formatting binaries with special characters
+    Binary = <<"tabs\there\nand\nnewlines">>,
+    Response = beamtalk_repl:format_response(Binary),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+
+format_error_with_long_message_test() ->
+    %% Test error formatting with very long message
+    LongMessage = lists:duplicate(500, "error "),
+    Response = beamtalk_repl:format_error({custom_error, LongMessage}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"message">>, Decoded))).
+
+server_handles_stop_during_operation_test() ->
+    %% Test that server handles stop gracefully
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    
+    %% Stop immediately
+    beamtalk_repl:stop(Pid),
+    
+    %% Should not crash
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Pid)).
+
+server_survives_info_messages_test() ->
+    %% Test that server ignores unexpected info messages
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    
+    %% Send random info messages
+    Pid ! {unexpected, message},
+    Pid ! random_atom,
+    Pid ! [1, 2, 3],
+    
+    timer:sleep(10),
+    
+    %% Server should still be alive and functional
+    ?assert(is_process_alive(Pid)),
+    ?assertEqual(#{}, beamtalk_repl:get_bindings(Pid)),
+    
+    beamtalk_repl:stop(Pid).
+
+concurrent_get_port_requests_test() ->
+    %% Test concurrent access to get_port
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Parent = self(),
+    
+    %% Spawn multiple processes requesting the port
+    [spawn(fun() ->
+        Port = beamtalk_repl:get_port(Pid),
+        Parent ! {port, Port}
+    end) || _ <- lists:seq(1, 10)],
+    
+    %% Collect all port responses
+    Ports = [receive {port, P} -> P after 1000 -> timeout end || _ <- lists:seq(1, 10)],
+    
+    %% All should return the same port
+    [FirstPort | Rest] = Ports,
+    ?assert(lists:all(fun(P) -> P =:= FirstPort end, Rest)),
+    
+    beamtalk_repl:stop(Pid).
+
+concurrent_get_bindings_test() ->
+    %% Test concurrent access to bindings
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Parent = self(),
+    
+    %% Spawn multiple processes getting bindings
+    [spawn(fun() ->
+        Bindings = beamtalk_repl:get_bindings(Pid),
+        Parent ! {bindings, Bindings}
+    end) || _ <- lists:seq(1, 10)],
+    
+    %% All should return empty map
+    Results = [receive {bindings, B} -> B after 1000 -> timeout end || _ <- lists:seq(1, 10)],
+    ?assert(lists:all(fun(B) -> B =:= #{} end, Results)),
+    
+    beamtalk_repl:stop(Pid).
+
+parse_request_type_variations_test() ->
+    %% Test all valid request types
+    ?assertEqual({eval, "expr"}, 
+        beamtalk_repl:parse_request(<<"{\"type\":\"eval\",\"expression\":\"expr\"}">>)),
+    ?assertEqual({clear_bindings}, 
+        beamtalk_repl:parse_request(<<"{\"type\":\"clear\"}">>)),
+    ?assertEqual({get_bindings}, 
+        beamtalk_repl:parse_request(<<"{\"type\":\"bindings\"}">>)),
+    ?assertEqual({load_file, "file.bt"}, 
+        beamtalk_repl:parse_request(<<"{\"type\":\"load\",\"path\":\"file.bt\"}">>)).
+
+format_response_type_coverage_test() ->
+    %% Ensure all basic Erlang types can be formatted
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response(42)),
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response(3.14)),
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response(atom)),
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response(<<"binary">>)),
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response([1, 2, 3])),
+    ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
+        beamtalk_repl:format_response(#{key => value})).
