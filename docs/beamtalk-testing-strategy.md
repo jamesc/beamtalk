@@ -57,11 +57,14 @@ cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
 cd runtime
 rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
 rebar3 cover --verbose
+# Generate Cobertura XML for CI
+rebar3 covertool generate
 ```
 
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
+- Erlang Cobertura XML: `runtime/_build/test/covertool/beamtalk_runtime.covertool.xml`
 
 **Current Coverage (as of BT-136):**
 

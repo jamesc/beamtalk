@@ -138,11 +138,12 @@ jobs:
           cd runtime
           rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
           rebar3 cover --verbose
+          rebar3 covertool generate
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./lcov.info,./runtime/_build/test/cover/eunit.coverdata
+          files: ./lcov.info,./runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
           flags: rust,erlang
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
