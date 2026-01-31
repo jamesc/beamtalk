@@ -16,6 +16,7 @@ Every issue **must** have:
 | **Team** | `BT` |
 | **Assignee** | `jamesc.000@gmail.com` (James Casey) |
 | **Agent State Label** | `agent-ready` or `needs-spec` |
+| **Item Area Label** | Component affected (see below) |
 | **Estimate (Size)** | T-shirt size: S, M, L, XL |
 | **Type** | See issue types below |
 
@@ -32,6 +33,20 @@ Every issue **must** have:
 | `Refactor` | Code cleanups, tech debt |
 | `Research` | Research projects, code spikes |
 | `Samples` | Code, examples, things to help devs get started |
+
+## Item Area Labels
+
+Every issue should have an area label to identify which component is affected:
+
+| Area | Description | Key Directories |
+|------|-------------|----------------|
+| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/parse/` |
+| `stdlib` | Standard library: collections, primitives, strings | `lib/` |
+| `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
+| `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
+| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
+| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/src/` |
+| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/parse/`, `crates/beamtalk-core/src/ast.rs` |
 
 ## Optional Fields
 
@@ -103,10 +118,15 @@ Always set one of these labels:
   "team": "BT",
   "assignee": "jamesc.000@gmail.com",
   "body": "Context:\n...\n\nAcceptance Criteria:\n- [ ] ...",
-  "labels": ["agent-ready", "Language Feature"],
+  "labels": ["agent-ready", "Language Feature", "parser"],
   "priority": 3
 }
 ```
+
+**Labels should include:**
+- One **Agent State** label: `agent-ready`, `needs-spec`, or `blocked`
+- One **Issue Type** label: `Feature`, `Bug`, `Improvement`, etc.
+- One **Item Area** label: `parser`, `codegen`, `stdlib`, `repl`, `cli`, `runtime`, or `class-system`
 
 After creation, use GraphQL to set estimate and project:
 ```json
