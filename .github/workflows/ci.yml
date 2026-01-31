@@ -153,7 +153,7 @@ jobs:
         with:
           filename: coverage.cobertura.xml
           badge: true
-          format: markdown
+          format: text
           output: file
 
       - name: Erlang Coverage Summary
@@ -163,16 +163,16 @@ jobs:
         with:
           filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
           badge: true
-          format: markdown
-          output: file
+          format: text
+          output: console
 
       - name: Add Coverage to Job Summary
         run: |
           echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f code-coverage-results.md ]; then
-            cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY
+          if [ -f code-coverage-results.txt ]; then
+            cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
           else
@@ -184,6 +184,8 @@ jobs:
           if [ -f runtime/_build/test/covertool/beamtalk_runtime.covertool.xml ]; then
             erlang_coverage=$(grep 'line-rate=' runtime/_build/test/covertool/beamtalk_runtime.covertool.xml | head -1 | sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' | awk '{printf "%.2f%%", $1 * 100}')
             echo "**Overall Line Coverage:** $erlang_coverage" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Badge:** ${{ steps.erlang_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
           else
             echo "**Overall Line Coverage:** N/A (covertool output not found)" >> $GITHUB_STEP_SUMMARY
           fi
@@ -191,23 +193,21 @@ jobs:
       - name: Check Coverage Thresholds
         run: |
           # Extract Rust line coverage percentage from CodeCoverageSummary output
-          # The action outputs to code-coverage-results.md (markdown format)
-          if [ ! -f code-coverage-results.md ]; then
-            echo "⚠️ WARNING: code-coverage-results.md not found, skipping threshold check"
+          # The action outputs to code-coverage-results.txt (text format)
+          if [ ! -f code-coverage-results.txt ]; then
+            echo "⚠️ WARNING: code-coverage-results.txt not found, skipping threshold check"
             exit 0
           fi
           
           # Debug: show the file content
-          echo "=== code-coverage-results.md content ==="
-          cat code-coverage-results.md
+          echo "=== code-coverage-results.txt content ==="
+          cat code-coverage-results.txt
           echo "=== end of file ==="
           
-          # Extract coverage percentage from markdown table Summary row
-          # Format: | **Summary** | **83%** (6635 / 8035) | **69%** (262 / 378) | 682 | ✔
-          summary_line=$(grep -E '\*\*Summary\*\*' code-coverage-results.md)
-          echo "Summary line: $summary_line"
-          rust_coverage=$(echo "$summary_line" | grep -oE '\*\*[0-9]+%\*\*' | head -1 | grep -oE '[0-9]+' || echo "0")
-          rust_branch=$(echo "$summary_line" | grep -oE '\*\*[0-9]+%\*\*' | sed -n '2p' | grep -oE '[0-9]+' || echo "0")
+          # Extract coverage percentages from text format
+          # Text format: "Summary: Line Rate = 83% (6635 / 8035), Branch Rate = 69% (262 / 378)"
+          rust_coverage=$(grep -E 'Summary.*Line Rate' code-coverage-results.txt | grep -oE 'Line Rate = [0-9]+%' | grep -oE '[0-9]+' || echo "0")
+          rust_branch=$(grep -E 'Summary.*Branch Rate' code-coverage-results.txt | grep -oE 'Branch Rate = [0-9]+%' | grep -oE '[0-9]+' || echo "0")
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
@@ -236,8 +236,10 @@ jobs:
           
           ### Rust Coverage
           EOF
-          if [ -f code-coverage-results.md ]; then
-            cat code-coverage-results.md >> pr-comment.md
+          if [ -f code-coverage-results.txt ]; then
+            echo '```' >> pr-comment.md
+            cat code-coverage-results.txt >> pr-comment.md
+            echo '```' >> pr-comment.md
             echo "" >> pr-comment.md
             echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> pr-comment.md
           else
