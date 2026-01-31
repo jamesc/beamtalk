@@ -161,9 +161,12 @@ impl BeamCompiler {
             std::fs::set_permissions(&escript_path, perms).into_diagnostic()?;
         }
 
-        // Start the escript process
+        // Start the escript process with explicit working directory
+        // Use temp_dir as working directory to avoid getcwd() errors
+        // when test temp directories are deleted before subprocess completes
         let mut child = Command::new("escript")
             .arg(&escript_path)
+            .current_dir(&temp_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
