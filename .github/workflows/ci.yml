@@ -171,8 +171,8 @@ jobs:
           echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f code-coverage-results.txt ]; then
-            cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+          if [ -f code-coverage-results.md ]; then
+            cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
           else
@@ -191,15 +191,16 @@ jobs:
       - name: Check Coverage Thresholds
         run: |
           # Extract Rust line coverage percentage from CodeCoverageSummary output
-          # The action outputs to code-coverage-results.txt
-          if [ ! -f code-coverage-results.txt ]; then
-            echo "⚠️ WARNING: code-coverage-results.txt not found, skipping threshold check"
+          # The action outputs to code-coverage-results.md (markdown format)
+          if [ ! -f code-coverage-results.md ]; then
+            echo "⚠️ WARNING: code-coverage-results.md not found, skipping threshold check"
             exit 0
           fi
           
-          # Extract coverage percentages (CodeCoverageSummary format: "Line Rate: XX.XX%")
-          rust_coverage=$(grep -oE 'Line Rate: [0-9.]+' code-coverage-results.txt | head -1 | grep -oE '[0-9.]+' || echo "0")
-          rust_branch=$(grep -oE 'Branch Rate: [0-9.]+' code-coverage-results.txt | head -1 | grep -oE '[0-9.]+' || echo "0")
+          # Extract coverage percentage from markdown table
+          # Format: **Summary** | **83%** (6635 / 8035) | **69%** (262 / 378) | 682 | ✔
+          rust_coverage=$(grep -E '^\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | head -1 | grep -oE '[0-9]+' || echo "0")
+          rust_branch=$(grep -E '^\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | sed -n '2p' | grep -oE '[0-9]+' || echo "0")
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
