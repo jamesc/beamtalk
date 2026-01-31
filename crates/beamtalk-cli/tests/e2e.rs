@@ -64,7 +64,12 @@ fn workspace_root() -> PathBuf {
 fn beamtalk_binary() -> PathBuf {
     let root = workspace_root();
 
-    // Try debug first, then release
+    // Try llvm-cov target first (for coverage runs), then debug, then release
+    let llvm_cov_debug_path = root.join("target/llvm-cov-target/debug/beamtalk");
+    if llvm_cov_debug_path.exists() {
+        return llvm_cov_debug_path;
+    }
+
     let debug_path = root.join("target/debug/beamtalk");
     if debug_path.exists() {
         return debug_path;
@@ -77,7 +82,8 @@ fn beamtalk_binary() -> PathBuf {
 
     panic!(
         "beamtalk binary not found. Run `cargo build` first.\n\
-         Checked:\n  - {}\n  - {}",
+         Checked:\n  - {}\n  - {}\n  - {}",
+        llvm_cov_debug_path.display(),
         debug_path.display(),
         release_path.display()
     );

@@ -1,6 +1,7 @@
 # Beamtalk
 
 [![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jamesc/beamtalk/branch/main/graph/badge.svg)](https://codecov.io/gh/jamesc/beamtalk)
 
 **A live, interactive Smalltalk for the BEAM VM**
 

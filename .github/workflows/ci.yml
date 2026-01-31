@@ -94,3 +94,56 @@ jobs:
           # Run integration tests
           cd runtime
           rebar3 eunit --module=beamtalk_repl_integration_tests
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.23'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate Rust coverage
+        run: |
+          cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
+            -- --skip commands::build::tests::test_build_single_file \
+               --skip commands::build::tests::test_build_multiple_files \
+               --skip commands::run::tests::test_run_calls_build
+
+      - name: Generate Erlang coverage
+        run: |
+          cd runtime
+          rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
+          rebar3 cover --verbose
+          rebar3 covertool generate
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./lcov.info,./runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
+          flags: rust,erlang
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false

@@ -36,7 +36,7 @@ RUN npm install -g @githubnext/github-copilot-cli
 
 # Install cargo tools for development (using cargo-binstall for faster binary installs)
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-    && cargo binstall -y cargo-watch cargo-nextest cargo-insta
+    && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov
 
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \

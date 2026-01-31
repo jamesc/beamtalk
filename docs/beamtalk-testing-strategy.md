@@ -27,6 +27,58 @@ cargo fmt --all -- --check
 cargo test --all-targets
 ```
 
+### Code Coverage
+
+Generate coverage reports for both Rust and Erlang tests:
+
+**Rust coverage:**
+```bash
+# Text output with summary
+cargo llvm-cov --all-targets --workspace \
+  -- --skip commands::build::tests::test_build_single_file \
+     --skip commands::build::tests::test_build_multiple_files \
+     --skip commands::run::tests::test_run_calls_build
+
+# HTML report (opens in browser)
+cargo llvm-cov --all-targets --workspace --html --open \
+  -- --skip commands::build::tests::test_build_single_file \
+     --skip commands::build::tests::test_build_multiple_files \
+     --skip commands::run::tests::test_run_calls_build
+
+# LCOV format for CI integration
+cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
+  -- --skip commands::build::tests::test_build_single_file \
+     --skip commands::build::tests::test_build_multiple_files \
+     --skip commands::run::tests::test_run_calls_build
+```
+
+**Erlang coverage:**
+```bash
+cd runtime
+rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
+rebar3 cover --verbose
+# Generate Cobertura XML for CI
+rebar3 covertool generate
+```
+
+Coverage reports are saved to:
+- Rust HTML: `target/llvm-cov/html/index.html`
+- Erlang HTML: `runtime/_build/test/cover/index.html`
+- Erlang Cobertura XML: `runtime/_build/test/covertool/beamtalk_runtime.covertool.xml`
+
+**Current Coverage (as of BT-136):**
+
+| Language | Line Coverage | Notes |
+|----------|--------------|-------|
+| Rust | 81.98% | Overall workspace coverage |
+| Erlang | 34% | Overall runtime coverage; some modules unused in tests |
+
+**Target Coverage:**
+- Rust unit tests: >90% line coverage
+- Overall: >80% coverage for all test types
+
+**Note:** Some Rust tests are skipped in coverage due to pre-existing failures unrelated to the test framework. See BT-136 for details.
+
 ### Erlang Runtime Tests
 
 ```bash
