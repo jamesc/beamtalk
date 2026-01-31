@@ -208,15 +208,17 @@ handle_load_read_error_directory_test() ->
 
 handle_load_compile_error_test() ->
     %% Test with a file that exists but will fail compilation
-    %% We need to create a temporary file
-    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"), "test_invalid_bt_file.bt"),
+    %% Use unique filename to avoid collisions in concurrent test runs
+    UniqueId = erlang:unique_integer([positive]),
+    TempFile = filename:join(os:getenv("TMPDIR", "/tmp"), 
+                             io_lib:format("test_invalid_bt_~p.bt", [UniqueId])),
     ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
     
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:handle_load(TempFile, State),
     
-    %% Clean up
-    file:delete(TempFile),
+    %% Clean up - ensure it's deleted even if assertion fails
+    ok = file:delete(TempFile),
     
     %% Should get daemon_unavailable or compile error
     case Result of

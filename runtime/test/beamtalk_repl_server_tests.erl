@@ -222,12 +222,20 @@ format_response_large_number_test() ->
 
 format_response_complex_pid_test() ->
     %% Test that PID formatting includes #Actor< prefix
-    Pid = spawn(fun() -> timer:sleep(100) end),
+    Parent = self(),
+    Pid = spawn(fun() -> 
+        receive stop -> Parent ! stopped
+        after 100 -> ok
+        end
+    end),
     Response = beamtalk_repl_server:format_response(Pid),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Actor<">>) =/= nomatch),
-    ?assert(binary:match(Value, <<">">>) =/= nomatch).
+    ?assert(binary:match(Value, <<">">>) =/= nomatch),
+    %% Clean up spawned process
+    Pid ! stop,
+    receive stopped -> ok after 200 -> ok end.
 
 format_response_multi_arity_function_test() ->
     %% Test function with different arity
