@@ -758,7 +758,10 @@ impl CoreErlangGenerator {
     ///
     /// This function is complex because it handles both legacy expression-based modules
     /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.
-    #[expect(clippy::too_many_lines, reason = "dispatch codegen is inherently complex")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "dispatch codegen is inherently complex"
+    )]
     fn generate_dispatch(&mut self, module: &Module) -> Result<()> {
         writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, State) ->")?;
         self.indent += 1;
