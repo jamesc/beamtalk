@@ -409,3 +409,195 @@ same_pid_multiple_classes_test_() ->
               ?assertEqual(0, beamtalk_instances:count('Object'))
           end)]
      end}.
+
+concurrent_registration_stress_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(_Pid) ->
+         [?_test(begin
+              %% Spawn many instances and register them concurrently
+              NumInstances = 50,
+              Self = self(),
+              
+              Instances = [spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end) || _ <- lists:seq(1, NumInstances)],
+              
+              %% Wait for all to be ready
+              [receive ready -> ok after 1000 -> ?assert(false) end || _ <- lists:seq(1, NumInstances)],
+              
+              %% Register all concurrently (spawn registration tasks)
+              _RegPids = [spawn(fun() ->
+                  ok = beamtalk_instances:register('Counter', Pid),
+                  Self ! {registered, Pid}
+              end) || Pid <- Instances],
+              
+              %% Wait for all registrations to complete
+              [receive {registered, _} -> ok after 1000 -> ?assert(false) end || _ <- lists:seq(1, NumInstances)],
+              
+              %% Verify count
+              timer:sleep(50),  % Give ETS time to stabilize
+              ?assertEqual(NumInstances, beamtalk_instances:count('Counter')),
+              
+              %% Clean up
+              [Pid ! stop || Pid <- Instances],
+              timer:sleep(100),
+              
+              %% Verify all cleaned up
+              ?assertEqual(0, beamtalk_instances:count('Counter'))
+          end)]
+     end}.
+
+terminate_callback_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Register an instance
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              ok = beamtalk_instances:register('Counter', Instance),
+              
+              %% Get the state
+              State = sys:get_state(Pid),
+              
+              %% Call terminate callback
+              ok = beamtalk_instances:terminate(normal, State),
+              
+              %% This just verifies terminate/2 doesn't crash
+              Instance ! stop
+          end)]
+     end}.
+
+handle_cast_ignored_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Register an instance
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              ok = beamtalk_instances:register('Counter', Instance),
+              
+              %% Send a cast message (not part of API, should be ignored)
+              gen_server:cast(Pid, {unknown, cast}),
+              
+              %% Give it time to process
+              timer:sleep(10),
+              
+              %% Verify server still works
+              ?assertEqual(1, beamtalk_instances:count('Counter')),
+              
+              %% Clean up
+              Instance ! stop
+          end)]
+     end}.
+
+unknown_call_format_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Register an instance
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              ok = beamtalk_instances:register('Counter', Instance),
+              
+              %% Send a malformed call request
+              Result = gen_server:call(Pid, unknown_call_format),
+              ?assertEqual({error, unknown_request}, Result),
+              
+              %% Clean up
+              Instance ! stop
+          end)]
+     end}.
+
+handle_info_down_multiple_classes_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(_Pid) ->
+         [?_test(begin
+              %% Register instance under multiple classes, then kill it
+              %% This tests the DOWN handler's ability to clean up multiple entries
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              %% Register under three different classes
+              ok = beamtalk_instances:register('ClassA', Instance),
+              ok = beamtalk_instances:register('ClassB', Instance),
+              ok = beamtalk_instances:register('ClassC', Instance),
+              
+              %% Verify all registered
+              ?assertEqual(1, beamtalk_instances:count('ClassA')),
+              ?assertEqual(1, beamtalk_instances:count('ClassB')),
+              ?assertEqual(1, beamtalk_instances:count('ClassC')),
+              
+              %% Kill the instance
+              Instance ! stop,
+              timer:sleep(100),
+              
+              %% Verify cleaned up from all three classes
+              ?assertEqual(0, beamtalk_instances:count('ClassA')),
+              ?assertEqual(0, beamtalk_instances:count('ClassB')),
+              ?assertEqual(0, beamtalk_instances:count('ClassC'))
+          end)]
+     end}.
+
+code_change_callback_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Register some instances
+              Self = self(),
+              I1 = spawn(fun() -> Self ! ready, receive stop -> ok end end),
+              I2 = spawn(fun() -> Self ! ready, receive stop -> ok end end),
+              receive ready -> ok end,
+              receive ready -> ok end,
+              
+              ok = beamtalk_instances:register('Counter', I1),
+              ok = beamtalk_instances:register('Counter', I2),
+              
+              %% Get state
+              State = sys:get_state(Pid),
+              
+              %% Call code_change
+              {ok, NewState} = beamtalk_instances:code_change(old_version, State, extra),
+              
+              %% State should be unchanged
+              ?assertEqual(State, NewState),
+              
+              %% Verify server still works
+              ?assertEqual(2, beamtalk_instances:count('Counter')),
+              
+              %% Clean up
+              I1 ! stop,
+              I2 ! stop
+          end)]
+     end}.
