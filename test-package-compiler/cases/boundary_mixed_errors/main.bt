@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test boundary condition: mixed error scenarios
+// Multiple errors in single expressions and compound statements
+
+// Multiple syntax errors in one line
+x := := + := 42
+
+// Unterminated string followed by valid code
+str := 'unterminated
+y := 10
+
+// Invalid assignment with missing operand
+result := x + + y
+
+// Multiple malformed messages in sequence
+object at: put: get:
+array add: remove:
+
+// Nested error (malformed message inside valid structure)
+outer := (inner at: missing: broken)
+
+// Mixed errors: unterminated string + invalid syntax + malformed message
+broken := 'unclosed + := at: 42
+
+// Valid code after multiple errors should still parse
+validAfterErrors := 100 + 200

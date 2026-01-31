@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test future feature: pattern matching
+// Match expressions with destructuring and guards
+// NOTE: This feature is not yet implemented - test documents expected behavior
+
+// Simple value matching
+result := match value with
+  | 0 => 'zero'
+  | 1 => 'one'
+  | _ => 'other'
+end
+
+// Matching with guards
+classify := match number with
+  | n when n < 0 => 'negative'
+  | 0 => 'zero'
+  | n when n > 0 => 'positive'
+end
+
+// Tuple/Array pattern matching
+point := match coordinates with
+  | [0, 0] => 'origin'
+  | [x, 0] => "on x-axis at {x}"
+  | [0, y] => "on y-axis at {y}"
+  | [x, y] => "at ({x}, {y})"
+end
+
+// Dictionary pattern matching
+user := match userData with
+  | { name: 'Admin', role: 'admin' } => createAdmin
+  | { name: userName, role: 'user' } => createUser: userName
+  | { name: userName } => createGuest: userName
+  | _ => defaultUser
+end
+
+// Nested pattern matching
+shape := match figure with
+  | Circle(radius: r) when r > 10 => 'large circle'
+  | Circle(radius: r) => "small circle {r}"
+  | Rectangle(width: w, height: h) => "rectangle {w}x{h}"
+  | _ => 'unknown shape'
+end
+
+// Matching on types (if type system supports it)
+process := match input with
+  | String(s) => processString: s
+  | Integer(n) => processNumber: n
+  | Array(items) => processArray: items
+  | _ => error: 'unknown type'
+end
+
+// Match as expression in assignment
+status := match response with
+  | { success: true, data: d } => d
+  | { success: false, error: e } => nil
+end
+
+// Match in block
+handler := [:value |
+  match value with
+    | 'start' => startProcess
+    | 'stop' => stopProcess
+    | _ => unknownCommand: value
+  end
+]
+
+// Exhaustive matching (compiler should warn if non-exhaustive)
+bool := match flag with
+  | true => 'yes'
+  | false => 'no'
+end
+
+// Complex nested destructuring
+result := match data with
+  | { users: [first, second | rest], count: n } when n > 2 => 
+      "Found {n} users: {first}, {second}, and {rest size} more"
+  | { users: [single], count: 1 } => 
+      "Only user: {single}"
+  | { users: [], count: 0 } => 
+      'No users'
+  | _ => 
+      'Invalid data'
+end

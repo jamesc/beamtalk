@@ -188,6 +188,16 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for code completion functionality.
+    //!
+    //! Tests verify that completions:
+    //! - Include language keywords (self, super, true, false, nil)
+    //! - Include identifiers from the current scope
+    //! - Include common message selectors (at:, do:, size)
+    //! - Deduplicate repeated identifiers
+    //! - Handle edge cases (invalid positions, empty source, block parameters)
+    //! - Provide appropriate documentation and completion kinds
+
     use super::*;
     use crate::parse::{lex_with_eof, parse};
 
@@ -239,5 +249,80 @@ mod tests {
 
         let x_count = completions.iter().filter(|c| c.label == "x").count();
         assert_eq!(x_count, 1);
+    }
+
+    #[test]
+    fn compute_completions_with_invalid_position() {
+        let source = "x := 42";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        // Position beyond end of file
+        let completions = compute_completions(&module, source, Position::new(100, 100));
+
+        // Should return empty vec for out-of-bounds position
+        assert!(completions.is_empty());
+    }
+
+    #[test]
+    fn compute_completions_with_block_expressions() {
+        let source = "block := [:x | x + 1]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let completions = compute_completions(&module, source, Position::new(0, 0));
+
+        // Should include both the block variable and parameter
+        assert!(completions.iter().any(|c| c.label == "block"));
+        assert!(completions.iter().any(|c| c.label == "x"));
+    }
+
+    #[test]
+    fn compute_completions_with_message_sends() {
+        let source = "obj doSomething";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let completions = compute_completions(&module, source, Position::new(0, 0));
+
+        // Should include the identifier
+        assert!(completions.iter().any(|c| c.label == "obj"));
+    }
+
+    #[test]
+    fn compute_completions_empty_source() {
+        let source = "";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        let completions = compute_completions(&module, source, Position::new(0, 0));
+
+        // Should still return keywords and common messages
+        assert!(!completions.is_empty());
+        assert!(completions.iter().any(|c| c.label == "self"));
+    }
+
+    #[test]
+    fn keyword_completions_have_documentation() {
+        let mut completions = Vec::new();
+        add_keyword_completions(&mut completions);
+
+        // All keywords should have documentation
+        for completion in completions {
+            if let CompletionKind::Keyword = completion.kind {
+                assert!(completion.documentation.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn message_completions_have_correct_kind() {
+        let mut completions = Vec::new();
+        add_message_completions(&mut completions);
+
+        // All message completions should have Function kind
+        for completion in completions {
+            assert!(matches!(completion.kind, CompletionKind::Function));
+        }
     }
 }

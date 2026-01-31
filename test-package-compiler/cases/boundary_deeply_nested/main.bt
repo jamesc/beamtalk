@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test boundary condition: deeply nested expressions
+// Stress test parser stack depth with multiple nesting levels
+
+// Deeply nested parenthesized expressions (10 levels)
+result1 := ((((((((((1 + 2))))))))))
+
+// Deeply nested message sends (8 levels)
+result2 := object method1 method2 method3 method4 method5 method6 method7 method8
+
+// Deeply nested keyword messages (5 levels)
+result3 := object at: (dict at: (array at: (list at: (map at: 'key'))))
+
+// Deeply nested blocks (6 levels)
+result4 := [[[[[[42]]]]]]
+
+// Complex mixed nesting (blocks + messages + operators)
+result5 := [[:x | [[:y | [[:z | x + y * z]]]]]
+
+// Nested cascades with nested arguments
+result6 := (object
+    at: (a at: (b at: 1)) put: (x get: (y get: 2));
+    at: (c at: (d at: 3)) put: (z get: (w get: 4)))

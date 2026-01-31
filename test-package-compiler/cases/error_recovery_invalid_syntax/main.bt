@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test error recovery: invalid syntax
+// Parser should create error nodes and continue
+
+// Unexpected token
+x := := 5
+
+// Missing operand
+y := 10 +
+
+// Invalid assignment target
+42 := value
+
+// Malformed keyword message (missing part)
+object at: 42 put:
+
+// Code after errors should parse
+valid := 100

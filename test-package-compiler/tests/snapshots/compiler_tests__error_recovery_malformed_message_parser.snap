@@ -1,0 +1,247 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "dict",
+                    span: Span {
+                        start: 193,
+                        end: 197,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "at:",
+                        span: Span {
+                            start: 198,
+                            end: 201,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Identifier(
+                    Identifier {
+                        name: "key",
+                        span: Span {
+                            start: 202,
+                            end: 205,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 193,
+                end: 205,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "array",
+                    span: Span {
+                        start: 231,
+                        end: 236,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "at:",
+                        span: Span {
+                            start: 237,
+                            end: 240,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "index",
+                            span: Span {
+                                start: 241,
+                                end: 246,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "put",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 241,
+                        end: 250,
+                    },
+                },
+            ],
+            span: Span {
+                start: 231,
+                end: 250,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "object",
+                    span: Span {
+                        start: 286,
+                        end: 292,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "foo:",
+                        span: Span {
+                            start: 293,
+                            end: 297,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "bar:",
+                        span: Span {
+                            start: 300,
+                            end: 304,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        1,
+                    ),
+                    Span {
+                        start: 298,
+                        end: 299,
+                    },
+                ),
+                Error {
+                    message: "Unexpected token: expected expression, found at:",
+                    span: Span {
+                        start: 334,
+                        end: 337,
+                    },
+                },
+            ],
+            span: Span {
+                start: 286,
+                end: 337,
+            },
+        },
+        Literal(
+            Integer(
+                42,
+            ),
+            Span {
+                start: 338,
+                end: 340,
+            },
+        ),
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result",
+                    span: Span {
+                        start: 368,
+                        end: 374,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        5,
+                    ),
+                    Span {
+                        start: 378,
+                        end: 379,
+                    },
+                ),
+                selector: Binary(
+                    "+",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            5,
+                        ),
+                        Span {
+                            start: 382,
+                            end: 383,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 378,
+                    end: 383,
+                },
+            },
+            span: Span {
+                start: 368,
+                end: 383,
+            },
+        },
+    ],
+    span: Span {
+        start: 193,
+        end: 383,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 193,
+                end: 197,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 193,
+                end: 197,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test error recovery: malformed message sends",
+            span: Span {
+                start: 193,
+                end: 197,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Parser should handle incomplete messages",
+            span: Span {
+                start: 193,
+                end: 197,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Incomplete keyword message",
+            span: Span {
+                start: 193,
+                end: 197,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 334, end: 337 } }

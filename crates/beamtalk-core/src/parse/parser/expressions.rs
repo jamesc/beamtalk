@@ -687,3 +687,109 @@ impl Parser {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for expression parsing utilities.
+    //!
+    //! Primary focus: `parse_integer()` function which handles:
+    //! - Standard decimal integers
+    //! - Radix notation (e.g., `2r1010` for binary, `16rFF` for hex)
+    //! - Validation of radix values (2-36)
+    //! - Detection of invalid digits for a given radix
+    //! - Overflow detection for values exceeding i64 range
+
+    use super::*;
+
+    // ========================================================================
+    // parse_integer Tests
+    // ========================================================================
+
+    #[test]
+    fn parse_integer_decimal() {
+        assert_eq!(parse_integer("123").unwrap(), 123);
+        assert_eq!(parse_integer("0").unwrap(), 0);
+        assert_eq!(parse_integer("-42").unwrap(), -42);
+    }
+
+    #[test]
+    fn parse_integer_binary() {
+        assert_eq!(parse_integer("2r1010").unwrap(), 10);
+        assert_eq!(parse_integer("2r0").unwrap(), 0);
+        assert_eq!(parse_integer("2r1111").unwrap(), 15);
+    }
+
+    #[test]
+    fn parse_integer_octal() {
+        assert_eq!(parse_integer("8r777").unwrap(), 511);
+        assert_eq!(parse_integer("8r100").unwrap(), 64);
+    }
+
+    #[test]
+    fn parse_integer_hexadecimal() {
+        assert_eq!(parse_integer("16rFF").unwrap(), 255);
+        assert_eq!(parse_integer("16r10").unwrap(), 16);
+        assert_eq!(parse_integer("16rABCD").unwrap(), 43981);
+    }
+
+    #[test]
+    fn parse_integer_base_36() {
+        assert_eq!(parse_integer("36rZ").unwrap(), 35);
+        assert_eq!(parse_integer("36r10").unwrap(), 36);
+    }
+
+    #[test]
+    fn parse_integer_invalid_radix() {
+        assert!(parse_integer("1r0").is_err()); // radix too small
+        assert!(parse_integer("37r0").is_err()); // radix too large
+        assert!(parse_integer("0r0").is_err()); // radix < 2
+    }
+
+    #[test]
+    fn parse_integer_invalid_digit_for_radix() {
+        assert!(parse_integer("2r2").is_err()); // 2 is not a valid binary digit
+        assert!(parse_integer("8r9").is_err()); // 9 is not a valid octal digit
+        assert!(parse_integer("10rA").is_err()); // A is not a valid decimal digit
+    }
+
+    #[test]
+    fn parse_integer_invalid_format() {
+        assert!(parse_integer("not_a_number").is_err());
+        assert!(parse_integer("12.34").is_err());
+        assert!(parse_integer("").is_err());
+    }
+
+    #[test]
+    fn parse_integer_overflow() {
+        // i64::MAX is 9223372036854775807
+        // Test values that exceed i64::MAX
+        assert!(parse_integer("9223372036854775808").is_err()); // i64::MAX + 1
+        assert!(parse_integer("99999999999999999999").is_err()); // Way over i64::MAX
+
+        // Test hex overflow: i64::MAX is 0x7FFFFFFFFFFFFFFF
+        assert!(parse_integer("16r8000000000000000").is_err()); // Just over i64::MAX
+        assert!(parse_integer("16rFFFFFFFFFFFFFFFF").is_err()); // u64::MAX (overflows i64)
+
+        // Test negative overflow: i64::MIN is -9223372036854775808
+        assert!(parse_integer("-9223372036854775809").is_err()); // i64::MIN - 1
+    }
+
+    #[test]
+    fn parse_integer_edge_cases() {
+        // Valid radix specifier with no digits
+        assert!(parse_integer("10r").is_err());
+
+        // Malformed radix
+        assert!(parse_integer("rABC").is_err());
+    }
+
+    #[test]
+    fn parse_integer_max_valid_values() {
+        // Test boundary values that should succeed
+        assert_eq!(parse_integer("9223372036854775807").unwrap(), i64::MAX);
+        assert_eq!(parse_integer("-9223372036854775808").unwrap(), i64::MIN);
+
+        // Test i64::MAX in hex
+        assert_eq!(parse_integer("16r7FFFFFFFFFFFFFFF").unwrap(), i64::MAX);
+    }
+}

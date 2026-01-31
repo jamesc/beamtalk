@@ -1,0 +1,25 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("x"), span: Span { start: 161, end: 162 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test comment handling"), Whitespace("\n"), LineComment("// Comments should be preserved as trivia"), Whitespace("\n\n"), LineComment("// Single line comment"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 163, end: 165 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("5"), span: Span { start: 166, end: 167 }, leading_trivia: [], trailing_trivia: [Whitespace(" "), LineComment("// inline comment")] }
+Token { kind: Identifier("y"), span: Span { start: 244, end: 245 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Multiple comments"), Whitespace("\n"), LineComment("// Comment line 1"), Whitespace("\n"), LineComment("// Comment line 2"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 246, end: 248 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("10"), span: Span { start: 249, end: 251 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("a"), span: Span { start: 284, end: 285 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Comment between expressions"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 286, end: 288 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 289, end: 290 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("b"), span: Span { start: 309, end: 310 }, leading_trivia: [Whitespace("\n"), LineComment("// Middle comment"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 311, end: 313 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("2"), span: Span { start: 314, end: 315 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("object"), span: Span { start: 344, end: 350 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Comment in message send"), Whitespace("\n")], trailing_trivia: [Whitespace(" "), LineComment("// comment here")] }
+Token { kind: Keyword("message:"), span: Span { start: 371, end: 379 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 380, end: 385 }, leading_trivia: [], trailing_trivia: [Whitespace(" "), LineComment("// and here")] }
+Token { kind: Identifier("block"), span: Span { start: 422, end: 427 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Block with comments"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 428, end: 430 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 431, end: 432 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Integer("42"), span: Span { start: 457, end: 459 }, leading_trivia: [Whitespace("\n    "), LineComment("// Inside block"), Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 460, end: 461 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 526, end: 526 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Commented out code (still comments)"), Whitespace("\n"), LineComment("// x := 999"), Whitespace("\n"), LineComment("// y := 888"), Whitespace("\n")], trailing_trivia: [] }
