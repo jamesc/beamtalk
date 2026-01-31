@@ -175,5 +175,5 @@ fi
 echo ""
 log_success "✨ Container ready! Starting Copilot..."
 
-# Connect to the container and start Copilot in yolo mode
-devcontainer exec --workspace-folder "$WORKTREE_PATH" copilot --yolo
+# Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
+devcontainer exec --workspace-folder "$WORKTREE_PATH" copilot --yolo --model claude-sonnet-4.5
