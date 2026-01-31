@@ -2,7 +2,7 @@
 
 Helper scripts for Beamtalk development.
 
-## `worktree-new.ps1` / `worktree-new.sh`
+## `worktree-new.ps1` / `linux/worktree-new.sh`
 
 Start a Copilot devcontainer session for a git worktree branch. This enables running multiple parallel Copilot sessions, each in its own container working on a different branch.
 
@@ -18,10 +18,10 @@ Start a Copilot devcontainer session for a git worktree branch. This enables run
 
 **Linux/Mac:**
 ```bash
-./scripts/worktree-new.sh BT-99-feature
+./scripts/linux/worktree-new.sh BT-99-feature
 
 # Create new branch from main
-./scripts/worktree-new.sh BT-99 main
+./scripts/linux/worktree-new.sh BT-99 main
 ```
 
 ### What it does
@@ -58,7 +58,7 @@ Then add the worktree mount to `.devcontainer/devcontainer.json` (see comments i
 
 ---
 
-## `worktree-rm.ps1` / `worktree-rm.sh`
+## `worktree-rm.ps1` / `linux/worktree-rm.sh`
 
 Stop and remove a git worktree, handling container path fixups automatically.
 
@@ -74,10 +74,10 @@ Stop and remove a git worktree, handling container path fixups automatically.
 
 **Linux/Mac:**
 ```bash
-./scripts/worktree-rm.sh BT-99-feature
+./scripts/linux/worktree-rm.sh BT-99-feature
 
 # Force remove
-./scripts/worktree-rm.sh BT-99 --force
+./scripts/linux/worktree-rm.sh BT-99 --force
 ```
 
 ### What it does
