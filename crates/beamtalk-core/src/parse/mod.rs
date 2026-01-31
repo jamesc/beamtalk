@@ -20,6 +20,12 @@
 //!
 //! See [`TokenKind`] for all supported syntactic elements.
 //!
+//! # Parsing
+//!
+//! The [`parse`] function converts tokens into a [`Module`](crate::ast::Module) AST.
+//! Binary operator precedence uses Pratt parsing for correct associativity and
+//! easy extensibility (see [`parser`] module for details).
+//!
 //! # Error Handling
 //!
 //! The lexer uses error recovery: invalid input is converted into
@@ -34,7 +40,6 @@ mod lexer;
 mod parser;
 #[cfg(feature = "chumsky-parser")]
 mod parser_chumsky;
-mod parser_pratt;
 mod span;
 mod token;
 
