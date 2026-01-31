@@ -25,7 +25,15 @@ When creating Linear issues with dependencies:
 2. **Set agent-state label**:
    - `agent-ready` if fully specified (all acceptance criteria clear)
    - `needs-spec` if human clarification needed before work can start
-3. **Always set up blocking relationships** using Linear's GraphQL API:
+3. **Set Item Area label** (which component is affected):
+   - `class-system` - Class definition, parsing, codegen, and runtime
+   - `stdlib` - Standard library: collections, primitives, strings
+   - `repl` - REPL backend and CLI interaction
+   - `cli` - Command-line interface and build tooling
+   - `codegen` - Code generation to Core Erlang/BEAM
+   - `runtime` - Erlang runtime: actors, futures, OTP integration
+   - `parser` - Lexer, parser, AST
+4. **Always set up blocking relationships** using Linear's GraphQL API:
    ```graphql
    mutation {
      issueRelationCreate(input: {
@@ -35,8 +43,8 @@ When creating Linear issues with dependencies:
      }) { success }
    }
    ```
-4. **Add to relevant projects** if applicable
-5. **Set priority** based on urgency
+5. **Add to relevant projects** if applicable
+6. **Set priority** based on urgency
 
 See [AGENTS.md](../AGENTS.md) "Creating Issue Blocking Relationships" section for details.
 
