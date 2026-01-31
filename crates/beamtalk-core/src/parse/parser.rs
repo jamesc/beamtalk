@@ -31,7 +31,7 @@
 //!
 //! | Level | Operators | Associativity |
 //! |-------|-----------|---------------|
-//! | 10 | `=` `!=` | Left |
+//! | 10 | `=` `~=` | Left |
 //! | 20 | `<` `>` `<=` `>=` | Left |
 //! | 30 | `+` `-` | Left |
 //! | 40 | `*` `/` `%` | Left |
@@ -104,7 +104,7 @@ impl BindingPower {
 ///
 /// | Level | Operators | Associativity |
 /// |-------|-----------|---------------|
-/// | 10 | `=` `!=` | Left |
+/// | 10 | `=` `~=` | Left |
 /// | 20 | `<` `>` `<=` `>=` | Left |
 /// | 30 | `+` `-` | Left |
 /// | 40 | `*` `/` `%` | Left |
@@ -121,7 +121,7 @@ fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
         // Equality (lowest binary precedence)
         // `~=` is the Smalltalk-style not-equal operator
-        "=" | "!=" | "~=" => Some(BindingPower::left_assoc(10)),
+        "=" | "~=" => Some(BindingPower::left_assoc(10)),
 
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
@@ -1108,7 +1108,7 @@ impl Parser {
     /// Beamtalk binary messages follow standard operator precedence:
     /// - Multiplicative: `* / %` (higher precedence)
     /// - Additive: `+ -` (lower precedence)
-    /// - Comparison: `< > <= >= = !=` (lowest precedence)
+    /// - Comparison: `< > <= >= = ~=` (lowest precedence)
     ///
     /// This implementation uses Pratt parsing (top-down operator precedence)
     /// which makes adding new operators a single-line change in the
@@ -2587,7 +2587,6 @@ Actor subclass: Rectangle
     #[test]
     fn pratt_all_operators() {
         // Test all supported operators parse correctly
-        // Note: `!=` is documented but not yet lexable (lexer doesn't include `!`)
         // Using `~=` as the not-equal operator (Smalltalk tradition)
         let expressions = vec![
             "1 = 2", "1 ~= 2", // Smalltalk-style not-equal
