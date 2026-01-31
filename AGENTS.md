@@ -50,7 +50,11 @@ git commit -m "Implement lexer tokens BT-123"
 
 ### Labels
 
-We use a label group called **Agent State** to track work status:
+We use several label groups to categorize issues:
+
+#### Agent State
+
+Tracks workflow status:
 
 - `agent-ready` - Task is fully specified, agent can start immediately
 - `needs-spec` - Requires human to clarify requirements before work begins
@@ -58,7 +62,43 @@ We use a label group called **Agent State** to track work status:
 - `human-review` - Agent completed work, needs human verification
 - `done` - Issue is complete and closed
 
-**When creating issues:** Always set the appropriate agent-state label based on whether the issue has all requirements specified (`agent-ready`) or needs clarification (`needs-spec`).
+#### Item Area
+
+Identifies which component of the codebase the issue affects:
+
+| Label | Description | Key Directories |
+|-------|-------------|----------------|
+| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/parse/` |
+| `stdlib` | Standard library: collections, primitives, strings | `lib/` |
+| `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
+| `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
+| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
+| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/src/` |
+| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/parse/`, `crates/beamtalk-core/src/ast.rs` |
+
+#### Issue Type
+
+Categorizes the kind of work:
+
+- `Feature` - A chunk of customer visible work
+- `Bug` - Bugs, broken tests, broken code
+- `Improvement` - Incremental work on top of a feature
+- `Documentation` - Words that explain things
+- `Infra` - Tools, CI, dev environment configuration
+- `Language Feature` - New Beamtalk language syntax/semantics
+- `Refactor` - Code cleanups, tech debt
+- `Research` - Research projects, code spikes
+- `Samples` - Code, examples, things to help devs get started
+
+#### Item Size
+
+T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
+
+**When creating issues:** Always set:
+1. An **Agent State** label (`agent-ready` or `needs-spec`)
+2. An **Item Area** label (what part of codebase)
+3. An **Issue Type** label (what kind of work)
+4. An **Item Size** label (how big)
 
 ### Writing Agent-Ready Issues
 
