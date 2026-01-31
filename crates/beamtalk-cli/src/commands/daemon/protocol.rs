@@ -157,9 +157,28 @@ fn dispatch_method(
 
 /// Validate a file path for daemon methods.
 ///
+/// This function provides centralized path validation to prevent common security
+/// and usability issues. It should be used by all methods that accept file paths.
+///
+/// # Validation Rules
+///
 /// Returns an error message if the path is invalid:
-/// - Empty or whitespace-only paths
-/// - Root path "/"
+/// - Empty or whitespace-only paths (usability: prevents accidental empty input)
+/// - Root path "/" (security: prevents operations on root directory)
+///
+/// # Future Considerations
+///
+/// If path validation is needed in other modules (e.g., for file operations outside
+/// the daemon), consider extracting this to a shared utilities module such as
+/// `crates/beamtalk-cli/src/validation.rs` or `crates/beamtalk-core/src/validation.rs`.
+///
+/// # Examples
+///
+/// ```ignore
+/// assert!(validate_path("src/main.bt").is_ok());
+/// assert!(validate_path("").is_err());
+/// assert!(validate_path("/").is_err());
+/// ```
 fn validate_path(path: &str) -> Result<(), String> {
     let trimmed = path.trim();
 

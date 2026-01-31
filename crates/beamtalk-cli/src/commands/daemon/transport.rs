@@ -59,7 +59,14 @@ pub fn handle_connection(
 
 /// Accept connections from the Unix socket listener.
 ///
-/// This is a helper function used by the main daemon loop.
+/// This is a thin wrapper around `UnixListener::accept()` that provides:
+/// - A clear abstraction boundary between transport and lifecycle modules
+/// - A central point for future enhancements (e.g., connection filtering, rate limiting)
+/// - Consistent error handling for connection acceptance
+///
+/// The wrapper exists for modularity - the lifecycle module doesn't need to know
+/// the details of how connections are accepted, only that they can be obtained
+/// from the transport layer.
 #[cfg(unix)]
 pub fn accept_connection(
     listener: &UnixListener,
