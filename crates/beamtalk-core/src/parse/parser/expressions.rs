@@ -1,0 +1,691 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Expression parsing for Beamtalk.
+//!
+//! This module contains all expression parsing methods extracted from the main
+//! `Parser` implementation. Expression parsing handles:
+//!
+//! - Return statements (`^`)
+//! - Assignment (`:=` and compound assignments like `+=`)
+//! - Message sends (unary, binary, keyword)
+//! - Cascade expressions (`;`)
+//! - Literals (numbers, strings, symbols, characters)
+//! - Blocks (`[...]`)
+//! - Map literals (`#{...}`)
+//! - Parenthesized expressions
+//! - Field access (`object.field`)
+
+use crate::ast::{
+    Block, BlockParameter, CascadeMessage, CompoundOperator, Expression, Identifier, KeywordPart,
+    Literal, MapPair, MessageSelector,
+};
+use crate::parse::TokenKind;
+use ecow::EcoString;
+
+use super::{Diagnostic, Parser, binary_binding_power};
+
+/// Helper function for parsing integers with radix notation.
+pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
+    if let Some((radix_str, digits)) = s.split_once('r') {
+        let radix = radix_str
+            .parse::<u32>()
+            .map_err(|_| format!("Invalid radix: {radix_str}"))?;
+
+        if !(2..=36).contains(&radix) {
+            return Err(format!("Radix must be between 2 and 36, got {radix}"));
+        }
+
+        i64::from_str_radix(digits, radix)
+            .map_err(|_| format!("Invalid digit for radix {radix}: {digits}"))
+    } else {
+        s.parse::<i64>()
+            .map_err(|_| format!("Invalid integer: {s}"))
+    }
+}
+
+impl Parser {
+    // ========================================================================
+    // Expression Parsing
+    // ========================================================================
+
+    /// Parses any expression.
+    ///
+    /// Entry point for expression parsing. Handles all precedence levels.
+    pub(super) fn parse_expression(&mut self) -> Expression {
+        // Check for return statement first
+        if self.match_token(&TokenKind::Caret) {
+            return self.parse_return();
+        }
+
+        // Try to parse assignment or regular expression
+        self.parse_assignment()
+    }
+
+    /// Parses a return statement.
+    fn parse_return(&mut self) -> Expression {
+        let start = self.tokens[self.current - 1].span();
+        let value = Box::new(self.parse_assignment());
+        let end = value.span();
+        let span = start.merge(end);
+
+        Expression::Return { value, span }
+    }
+
+    /// Parses an assignment or regular expression.
+    fn parse_assignment(&mut self) -> Expression {
+        let expr = self.parse_cascade();
+
+        // Check for assignment operators
+        if self.match_token(&TokenKind::Assign) {
+            // Validate assignment target
+            if !matches!(
+                expr,
+                Expression::Identifier(_) | Expression::FieldAccess { .. }
+            ) {
+                let span = expr.span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Assignment target must be an identifier or field access",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid assignment target".into(),
+                    span,
+                };
+            }
+
+            let value = Box::new(self.parse_assignment());
+            let span = expr.span().merge(value.span());
+            return Expression::Assignment {
+                target: Box::new(expr),
+                value,
+                span,
+            };
+        }
+
+        // Check for compound assignment (+=, -=, etc.)
+        if let Some(op) = self.match_compound_operator() {
+            // Validate assignment target
+            if !matches!(
+                expr,
+                Expression::Identifier(_) | Expression::FieldAccess { .. }
+            ) {
+                let span = expr.span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Assignment target must be an identifier or field access",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid assignment target".into(),
+                    span,
+                };
+            }
+
+            let value = Box::new(self.parse_assignment());
+            let span = expr.span().merge(value.span());
+            return Expression::CompoundAssignment {
+                target: Box::new(expr),
+                operator: op,
+                value,
+                span,
+            };
+        }
+
+        expr
+    }
+
+    /// Checks for compound assignment operators.
+    fn match_compound_operator(&mut self) -> Option<CompoundOperator> {
+        let kind = self.current_kind();
+        let op = match kind {
+            TokenKind::BinarySelector(s) if s.as_str() == "+=" => CompoundOperator::Add,
+            TokenKind::BinarySelector(s) if s.as_str() == "-=" => CompoundOperator::Subtract,
+            TokenKind::BinarySelector(s) if s.as_str() == "*=" => CompoundOperator::Multiply,
+            TokenKind::BinarySelector(s) if s.as_str() == "/=" => CompoundOperator::Divide,
+            TokenKind::BinarySelector(s) if s.as_str() == "%=" => CompoundOperator::Remainder,
+            _ => return None,
+        };
+        self.advance();
+        Some(op)
+    }
+
+    /// Parses a cascade (multiple messages to the same receiver).
+    ///
+    /// Syntax: `receiver message1; message2; message3`
+    fn parse_cascade(&mut self) -> Expression {
+        let receiver = self.parse_keyword_message();
+
+        // Check if this is a cascade
+        if !self.match_token(&TokenKind::Semicolon) {
+            return receiver;
+        }
+
+        // This is a cascade - parse additional messages
+        let mut messages = Vec::new();
+
+        loop {
+            let message = self.parse_cascade_message();
+            messages.push(message);
+
+            // Continue if there's another semicolon
+            if !self.match_token(&TokenKind::Semicolon) {
+                break;
+            }
+        }
+
+        let last_span = messages.last().map_or(receiver.span(), |m| m.span);
+        let span = receiver.span().merge(last_span);
+
+        Expression::Cascade {
+            receiver: Box::new(receiver),
+            messages,
+            span,
+        }
+    }
+
+    /// Parses a single message in a cascade.
+    ///
+    /// This can be a unary, binary, or keyword message.
+    fn parse_cascade_message(&mut self) -> CascadeMessage {
+        let start_span = self.current_token().span();
+
+        // Try keyword message first
+        if matches!(self.current_kind(), TokenKind::Keyword(_)) {
+            let mut keywords = Vec::new();
+            let mut arguments = Vec::new();
+
+            while let TokenKind::Keyword(keyword) = self.current_kind() {
+                let span = self.current_token().span();
+                keywords.push(KeywordPart::new(keyword.clone(), span));
+                self.advance();
+
+                // Parse argument (which is a binary message)
+                arguments.push(self.parse_binary_message());
+            }
+
+            let end_span = arguments.last().map_or(start_span, Expression::span);
+            let span = start_span.merge(end_span);
+
+            return CascadeMessage::new(MessageSelector::Keyword(keywords), arguments, span);
+        }
+
+        // Try binary message
+        if let TokenKind::BinarySelector(op) = self.current_kind() {
+            let selector = MessageSelector::Binary(op.clone());
+            self.advance();
+            let arg = self.parse_unary_message();
+            let span = start_span.merge(arg.span());
+            return CascadeMessage::new(selector, vec![arg], span);
+        }
+
+        // Try unary message
+        if let TokenKind::Identifier(name) = self.current_kind() {
+            let selector = MessageSelector::Unary(name.clone());
+            let tok = self.advance();
+            let span = start_span.merge(tok.span());
+            return CascadeMessage::new(selector, Vec::new(), span);
+        }
+
+        // Error - expected a message
+        self.error("Expected message selector in cascade");
+        CascadeMessage::new(
+            MessageSelector::Unary("error".into()),
+            Vec::new(),
+            start_span,
+        )
+    }
+
+    /// Parses a keyword message (lowest precedence).
+    pub(super) fn parse_keyword_message(&mut self) -> Expression {
+        let receiver = self.parse_binary_message();
+
+        // Check if this is a keyword message
+        // A newline before the keyword indicates a new statement, not a message
+        if !matches!(self.current_kind(), TokenKind::Keyword(_))
+            || self.current_token().has_leading_newline()
+        {
+            return receiver;
+        }
+
+        // Parse keyword message
+        let mut keywords = Vec::new();
+        let mut arguments = Vec::new();
+
+        while let TokenKind::Keyword(keyword) = self.current_kind() {
+            // Stop if the keyword is on a new line (start of new statement)
+            if self.current_token().has_leading_newline() && !keywords.is_empty() {
+                break;
+            }
+            let span = self.current_token().span();
+            keywords.push(KeywordPart::new(keyword.clone(), span));
+            self.advance();
+
+            // Parse argument (which is a binary message)
+            arguments.push(self.parse_binary_message());
+        }
+
+        let span = receiver.span().merge(arguments.last().unwrap().span());
+
+        Expression::MessageSend {
+            receiver: Box::new(receiver),
+            selector: MessageSelector::Keyword(keywords),
+            arguments,
+            span,
+        }
+    }
+
+    /// Parses a binary message with standard math precedence using Pratt parsing.
+    ///
+    /// Unlike traditional Smalltalk (which is strictly left-to-right),
+    /// Beamtalk binary messages follow standard operator precedence:
+    /// - Multiplicative: `* / %` (higher precedence)
+    /// - Additive: `+ -` (lower precedence)
+    /// - Comparison: `< > <= >= = ~=` (lowest precedence)
+    ///
+    /// This implementation uses Pratt parsing (top-down operator precedence)
+    /// which makes adding new operators a single-line change in the
+    /// [`binary_binding_power`] function.
+    pub(super) fn parse_binary_message(&mut self) -> Expression {
+        self.parse_binary_with_pratt(0)
+    }
+
+    /// Pratt parsing for binary expressions.
+    ///
+    /// This function implements the core Pratt parsing algorithm using binding
+    /// powers from [`binary_binding_power`]. The `min_bp` parameter controls the
+    /// minimum binding power required to continue parsing, enabling correct
+    /// precedence handling through recursion.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_bp` - Minimum binding power to continue parsing (0 for top-level)
+    fn parse_binary_with_pratt(&mut self, min_bp: u8) -> Expression {
+        // Parse the left-hand side (unary expression)
+        let mut left = self.parse_unary_message();
+
+        while let TokenKind::BinarySelector(op) = self.current_kind() {
+            let op = op.clone();
+
+            // Get binding power; unknown operators end the expression
+            let Some(bp) = binary_binding_power(&op) else {
+                break;
+            };
+
+            // Stop if this operator binds less tightly than our minimum
+            if bp.left < min_bp {
+                break;
+            }
+
+            // Consume the operator
+            self.advance();
+
+            // Parse the right-hand side with the operator's right binding power
+            let right = self.parse_binary_with_pratt(bp.right);
+
+            // Build the message send expression
+            let span = left.span().merge(right.span());
+            left = Expression::MessageSend {
+                receiver: Box::new(left),
+                selector: MessageSelector::Binary(op),
+                arguments: vec![right],
+                span,
+            };
+        }
+
+        left
+    }
+
+    /// Parses unary messages (highest message precedence).
+    pub(super) fn parse_unary_message(&mut self) -> Expression {
+        let mut receiver = self.parse_primary();
+
+        // Parse chain of unary messages
+        // Stop if the identifier is on a new line (start of new statement)
+        while let TokenKind::Identifier(name) = self.current_kind() {
+            // A newline before the identifier indicates a new statement, not a message
+            if self.current_token().has_leading_newline() {
+                break;
+            }
+
+            let selector = MessageSelector::Unary(name.clone());
+            let tok = self.advance();
+            let span = receiver.span().merge(tok.span());
+
+            receiver = Expression::MessageSend {
+                receiver: Box::new(receiver),
+                selector,
+                arguments: Vec::new(),
+                span,
+            };
+        }
+
+        receiver
+    }
+
+    /// Parses a primary expression (literals, identifiers, blocks, parentheses).
+    fn parse_primary(&mut self) -> Expression {
+        match self.current_kind() {
+            // Literals
+            TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::String(_)
+            | TokenKind::InterpolatedString(_)
+            | TokenKind::Symbol(_)
+            | TokenKind::Character(_) => self.parse_literal(),
+
+            // Map literal: #{...}
+            TokenKind::Hash => {
+                // Check if it's a map literal (followed by {)
+                if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
+                    self.parse_map_literal()
+                } else {
+                    // Standalone '#' is not a valid primary expression
+                    let bad_token = self.advance();
+                    let span = bad_token.span();
+                    let message: EcoString =
+                        "Unexpected '#': expected '#{' for a map literal or a valid expression"
+                            .into();
+                    self.diagnostics
+                        .push(Diagnostic::error(message.clone(), span));
+                    Expression::Error { message, span }
+                }
+            }
+
+            // Identifier or field access
+            TokenKind::Identifier(_) => self.parse_identifier_or_field_access(),
+
+            // Block
+            TokenKind::LeftBracket => self.parse_block(),
+
+            // Parenthesized expression
+            TokenKind::LeftParen => self.parse_parenthesized(),
+
+            // Map literal
+            TokenKind::MapOpen => self.parse_map_literal(),
+
+            // Unexpected token - consume it to avoid getting stuck
+            _ => {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                let message: EcoString = format!(
+                    "Unexpected token: expected expression, found {}",
+                    bad_token.kind()
+                )
+                .into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
+            }
+        }
+    }
+
+    /// Parses a literal value.
+    fn parse_literal(&mut self) -> Expression {
+        let token = self.advance();
+        let span = token.span();
+
+        let literal = match token.into_kind() {
+            TokenKind::Integer(s) => {
+                // Parse integer (handle radix notation like 16rFF)
+                match parse_integer(&s) {
+                    Ok(val) => Literal::Integer(val),
+                    Err(e) => {
+                        self.diagnostics.push(Diagnostic::error(e, span));
+                        return Expression::Error {
+                            message: "Invalid integer literal".into(),
+                            span,
+                        };
+                    }
+                }
+            }
+            TokenKind::Float(s) => {
+                if let Ok(val) = s.parse::<f64>() {
+                    Literal::Float(val)
+                } else {
+                    self.diagnostics.push(Diagnostic::error(
+                        format!("Invalid float literal: {s}"),
+                        span,
+                    ));
+                    return Expression::Error {
+                        message: "Invalid float literal".into(),
+                        span,
+                    };
+                }
+            }
+            TokenKind::String(s) => Literal::String(s),
+            TokenKind::InterpolatedString(s) => {
+                // For now, treat interpolated strings as regular strings
+                // TODO: Implement proper string interpolation in AST
+                Literal::String(s)
+            }
+            TokenKind::Symbol(s) => Literal::Symbol(s),
+            TokenKind::Character(c) => Literal::Character(c),
+            _ => unreachable!(),
+        };
+
+        Expression::Literal(literal, span)
+    }
+
+    /// Parses an identifier or field access.
+    fn parse_identifier_or_field_access(&mut self) -> Expression {
+        let name_token = self.advance();
+        let TokenKind::Identifier(name) = name_token.kind() else {
+            unreachable!()
+        };
+        let span = name_token.span();
+
+        let mut expr = Expression::Identifier(Identifier::new(name.clone(), span));
+
+        // Check for field access: identifier.field
+        // Only treat a '.' as starting a field access if:
+        // 1. The current token is a Period
+        // 2. The next token is an Identifier
+        // 3. There is no whitespace between the period and the identifier
+        //
+        // This distinguishes `self.value` (field access) from `n. self` (statement
+        // separator followed by new expression).
+        //
+        // Whitespace detection: The lexer puts trailing same-line whitespace (spaces/tabs)
+        // as trailing trivia on the period, and newlines + subsequent whitespace as leading
+        // trivia on the next token. We check BOTH to catch all cases:
+        // - `n. self` → period has trailing space
+        // - `n.\n    self` → identifier has leading newline+spaces
+        while self.check(&TokenKind::Period)
+            && matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+            && self.current_token().trailing_trivia().is_empty()
+            && self
+                .peek()
+                .is_some_and(|t: &crate::parse::Token| t.leading_trivia().is_empty())
+        {
+            self.advance(); // consume the period
+
+            let field_token = self.advance();
+            let TokenKind::Identifier(field_name) = field_token.kind() else {
+                unreachable!()
+            };
+            let field_span = field_token.span();
+
+            let full_span = expr.span().merge(field_span);
+            expr = Expression::FieldAccess {
+                receiver: Box::new(expr),
+                field: Identifier::new(field_name.clone(), field_span),
+                span: full_span,
+            };
+        }
+
+        expr
+    }
+
+    /// Parses a block: `[:x :y | x + y]`
+    fn parse_block(&mut self) -> Expression {
+        let start = self
+            .expect(&TokenKind::LeftBracket, "Expected '['")
+            .unwrap()
+            .span();
+
+        let mut parameters = Vec::new();
+
+        // Parse block parameters: [:x :y |
+        while self.match_token(&TokenKind::Colon) {
+            if let TokenKind::Identifier(name) = self.current_kind() {
+                let span = self.current_token().span();
+                parameters.push(BlockParameter::new(name.clone(), span));
+                self.advance();
+            } else {
+                self.error("Expected parameter name after ':'");
+                break;
+            }
+        }
+
+        // Expect pipe separator if there are parameters
+        if !parameters.is_empty() {
+            self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
+        }
+
+        // Parse block body
+        let mut body = Vec::new();
+        while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
+            let expr = self.parse_expression();
+            body.push(expr);
+
+            // Optional statement separator
+            if !self.match_token(&TokenKind::Period) {
+                break;
+            }
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBracket, "Expected ']' to close block")
+            .map_or(start, |t: crate::parse::Token| t.span());
+
+        let span = start.merge(end);
+        let block = Block::new(parameters, body, span);
+        Expression::Block(block)
+    }
+
+    /// Parses a map literal: `#{key => value, ...}`
+    ///
+    /// Map keys and values are parsed as unary expressions (primaries + unary messages),
+    /// which stops at binary operators like `=>` and `,`. This allows nested maps and
+    /// simple expressions as keys/values while avoiding ambiguity with the map syntax.
+    fn parse_map_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
+        let start = start_token.map_or_else(
+            || self.current_token().span(),
+            |t: crate::parse::Token| t.span(),
+        );
+
+        let mut pairs = Vec::new();
+
+        // Handle empty map: #{}
+        if self.check(&TokenKind::RightBrace) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::MapLiteral { pairs, span };
+        }
+
+        // Parse key-value pairs
+        loop {
+            let pair_start = self.current_token().span();
+
+            // Parse key expression (unary only - stops at `=>`, `,`, `}`)
+            let key = self.parse_unary_message();
+
+            // Expect '=>' separator between key and value
+            if !matches!(self.current_kind(), TokenKind::FatArrow) {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                self.diagnostics
+                    .push(Diagnostic::error("Expected '=>' after map key", span));
+                // Try to recover: skip to next comma or closing brace, handling nested braces
+                let mut brace_depth = 0;
+                while !matches!(self.current_kind(), TokenKind::Eof) {
+                    match self.current_kind() {
+                        TokenKind::MapOpen | TokenKind::LeftBrace => {
+                            brace_depth += 1;
+                            self.advance();
+                        }
+                        TokenKind::RightBrace => {
+                            if brace_depth == 0 {
+                                break;
+                            }
+                            brace_depth -= 1;
+                            self.advance();
+                        }
+                        TokenKind::BinarySelector(s) if s.as_str() == "," && brace_depth == 0 => {
+                            self.advance();
+                            break;
+                        }
+                        _ => {
+                            self.advance();
+                        }
+                    }
+                }
+                continue;
+            }
+            self.advance(); // consume '=>'
+
+            // Parse value expression (unary only - stops at `,`, `}`)
+            let value = self.parse_unary_message();
+
+            let pair_span = pair_start.merge(value.span());
+            pairs.push(MapPair::new(key, value, pair_span));
+
+            // Check for comma (continue) or closing brace (end)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBrace) {
+                    break;
+                }
+            } else if self.check(&TokenKind::RightBrace) {
+                break;
+            } else {
+                let bad_token = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Expected ',' or '}}' in map literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                ));
+                break;
+            }
+        }
+
+        // Expect closing brace
+        let end_span = if self.check(&TokenKind::RightBrace) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected '}' to close map literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::MapLiteral { pairs, span }
+    }
+
+    /// Parses a parenthesized expression.
+    fn parse_parenthesized(&mut self) -> Expression {
+        let start = self
+            .expect(&TokenKind::LeftParen, "Expected '('")
+            .unwrap()
+            .span();
+
+        let inner = self.parse_expression();
+
+        let end = self
+            .expect(&TokenKind::RightParen, "Expected ')' to close parentheses")
+            .map_or(start, |t: crate::parse::Token| t.span());
+
+        let span = start.merge(end);
+
+        Expression::Parenthesized {
+            expression: Box::new(inner),
+            span,
+        }
+    }
+}

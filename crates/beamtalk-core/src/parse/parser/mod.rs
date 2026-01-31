@@ -50,13 +50,19 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::ast::{
-    Block, BlockParameter, CascadeMessage, ClassDefinition, Comment, CommentKind, CompoundOperator,
-    Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector, MethodDefinition,
-    MethodKind, Module, StateDeclaration, TypeAnnotation,
-};
+use crate::ast::{Comment, CommentKind, Module};
+#[cfg(test)]
+use crate::ast::{CompoundOperator, Expression, Literal, MessageSelector};
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
+
+// Submodules with additional impl blocks for Parser
+mod declarations;
+mod expressions;
+
+// Re-export helper functions for tests
+#[cfg(test)]
+use expressions::parse_integer;
 
 // ============================================================================
 // Pratt Parsing for Binary Operator Precedence
@@ -69,11 +75,11 @@ use ecow::EcoString;
 /// - Left-associative: `left_bp == right_bp - 1` (e.g., `+`, `-`)
 /// - Right-associative: `left_bp == right_bp + 1` (e.g., `**`)
 #[derive(Debug, Clone, Copy)]
-struct BindingPower {
+pub(super) struct BindingPower {
     /// Left binding power (how tightly this operator binds to its left operand).
-    left: u8,
+    pub(super) left: u8,
     /// Right binding power (how tightly this operator binds to its right operand).
-    right: u8,
+    pub(super) right: u8,
 }
 
 impl BindingPower {
@@ -117,7 +123,7 @@ impl BindingPower {
 /// // Exponentiation (right-associative, higher than multiplication)
 /// "**" => Some(BindingPower::right_assoc(50)),
 /// ```
-fn binary_binding_power(op: &str) -> Option<BindingPower> {
+pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
         // Equality (lowest binary precedence)
         // `~=` is the Smalltalk-style not-equal operator
@@ -203,13 +209,13 @@ pub enum Severity {
 }
 
 /// The parser state.
-struct Parser {
+pub(super) struct Parser {
     /// The tokens being parsed.
-    tokens: Vec<Token>,
+    pub(super) tokens: Vec<Token>,
     /// Current token index.
-    current: usize,
+    pub(super) current: usize,
     /// Accumulated diagnostics.
-    diagnostics: Vec<Diagnostic>,
+    pub(super) diagnostics: Vec<Diagnostic>,
 }
 
 impl Parser {
@@ -227,7 +233,7 @@ impl Parser {
     // ========================================================================
 
     /// Returns the current token.
-    fn current_token(&self) -> &Token {
+    pub(super) fn current_token(&self) -> &Token {
         if self.current < self.tokens.len() {
             &self.tokens[self.current]
         } else {
@@ -240,27 +246,27 @@ impl Parser {
     }
 
     /// Returns the current token kind.
-    fn current_kind(&self) -> &TokenKind {
+    pub(super) fn current_kind(&self) -> &TokenKind {
         self.current_token().kind()
     }
 
     /// Peeks at the next token without consuming.
-    fn peek(&self) -> Option<&Token> {
+    pub(super) fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.current + 1)
     }
 
     /// Peeks at the next token kind.
-    fn peek_kind(&self) -> Option<&TokenKind> {
+    pub(super) fn peek_kind(&self) -> Option<&TokenKind> {
         self.peek().map(Token::kind)
     }
 
     /// Checks if we're at the end of input.
-    fn is_at_end(&self) -> bool {
+    pub(super) fn is_at_end(&self) -> bool {
         matches!(self.current_kind(), TokenKind::Eof)
     }
 
     /// Advances to the next token and returns the previous one.
-    fn advance(&mut self) -> Token {
+    pub(super) fn advance(&mut self) -> Token {
         if !self.is_at_end() {
             self.current += 1;
         }
@@ -268,7 +274,7 @@ impl Parser {
     }
 
     /// Checks if the current token matches the given kind.
-    fn check(&self, kind: &TokenKind) -> bool {
+    pub(super) fn check(&self, kind: &TokenKind) -> bool {
         if self.is_at_end() {
             return false;
         }
@@ -276,7 +282,7 @@ impl Parser {
     }
 
     /// Consumes the current token if it matches the given kind.
-    fn match_token(&mut self, kind: &TokenKind) -> bool {
+    pub(super) fn match_token(&mut self, kind: &TokenKind) -> bool {
         if self.check(kind) {
             self.advance();
             true
@@ -288,7 +294,7 @@ impl Parser {
     /// Expects the current token to match the given kind, advancing if it does.
     ///
     /// If the token doesn't match, reports an error and returns `None`.
-    fn expect(&mut self, kind: &TokenKind, message: &str) -> Option<Token> {
+    pub(super) fn expect(&mut self, kind: &TokenKind, message: &str) -> Option<Token> {
         if self.check(kind) {
             Some(self.advance())
         } else {
@@ -303,7 +309,7 @@ impl Parser {
     // ========================================================================
 
     /// Reports an error at the current token.
-    fn error(&mut self, message: impl Into<EcoString>) {
+    pub(super) fn error(&mut self, message: impl Into<EcoString>) {
         let span = self.current_token().span();
         self.diagnostics.push(Diagnostic::error(message, span));
     }
@@ -316,7 +322,7 @@ impl Parser {
     /// - Right paren (`)`) - expression end
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
-    fn synchronize(&mut self) {
+    pub(super) fn synchronize(&mut self) {
         self.advance();
 
         while !self.is_at_end() {
@@ -410,7 +416,7 @@ impl Parser {
     /// - `abstract? sealed? <Superclass> subclass: <ClassName>`
     ///
     /// We look ahead to detect the `subclass:` keyword.
-    fn is_at_class_definition(&self) -> bool {
+    pub(super) fn is_at_class_definition(&self) -> bool {
         let mut offset = 0;
 
         // Skip optional `abstract` or `sealed` modifiers
@@ -434,1115 +440,8 @@ impl Parser {
     }
 
     /// Peeks at a token at the given offset from current position.
-    fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
+    pub(super) fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
         self.tokens.get(self.current + offset).map(Token::kind)
-    }
-
-    // ========================================================================
-    // Class Definition Parsing
-    // ========================================================================
-
-    /// Parses a class definition.
-    ///
-    /// Syntax:
-    /// ```text
-    /// abstract? sealed? <Superclass> subclass: <ClassName>
-    ///   state: fieldName = defaultValue
-    ///   state: fieldName: TypeName = defaultValue
-    ///
-    ///   methodName => body
-    ///   before methodName => body
-    ///   after methodName => body
-    ///   around methodName => body
-    ///   sealed methodName => body
-    /// ```
-    fn parse_class_definition(&mut self) -> ClassDefinition {
-        let start = self.current_token().span();
-        let mut is_abstract = false;
-        let mut is_sealed = false;
-
-        // Parse optional modifiers: abstract, sealed
-        while let TokenKind::Identifier(name) = self.current_kind() {
-            if name == "abstract" {
-                is_abstract = true;
-                self.advance();
-            } else if name == "sealed" {
-                is_sealed = true;
-                self.advance();
-            } else {
-                break;
-            }
-        }
-
-        // Parse superclass name
-        let superclass = self.parse_identifier("Expected superclass name");
-
-        // Expect `subclass:` keyword
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "subclass:") {
-            self.error("Expected 'subclass:' keyword");
-            return ClassDefinition::new(
-                Identifier::new("Error", start),
-                superclass,
-                Vec::new(),
-                Vec::new(),
-                start,
-            );
-        }
-        self.advance(); // consume `subclass:`
-
-        // Parse class name
-        let name = self.parse_identifier("Expected class name");
-
-        // Parse class body (state declarations and methods)
-        let (state, methods) = self.parse_class_body();
-
-        let end = if !methods.is_empty() {
-            methods.last().unwrap().span
-        } else if !state.is_empty() {
-            state.last().unwrap().span
-        } else {
-            name.span
-        };
-        let span = start.merge(end);
-
-        ClassDefinition::with_modifiers(
-            name,
-            superclass,
-            is_abstract,
-            is_sealed,
-            state,
-            methods,
-            span,
-        )
-    }
-
-    /// Helper to parse an identifier, reporting an error if not found.
-    fn parse_identifier(&mut self, error_message: &str) -> Identifier {
-        if let TokenKind::Identifier(name) = self.current_kind() {
-            let span = self.current_token().span();
-            let ident = Identifier::new(name.clone(), span);
-            self.advance();
-            ident
-        } else {
-            let span = self.current_token().span();
-            self.error(error_message);
-            Identifier::new("Error", span)
-        }
-    }
-
-    /// Parses the body of a class (state declarations and methods).
-    ///
-    /// State declarations start with `state:`.
-    /// Methods are identified by having a `=>` somewhere.
-    fn parse_class_body(&mut self) -> (Vec<StateDeclaration>, Vec<MethodDefinition>) {
-        let mut state = Vec::new();
-        let mut methods = Vec::new();
-
-        // Skip any periods/statement terminators
-        while self.match_token(&TokenKind::Period) {}
-
-        while !self.is_at_end() && !self.is_at_class_definition() {
-            // Check for state declaration: `state: fieldName ...`
-            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
-                if let Some(state_decl) = self.parse_state_declaration() {
-                    state.push(state_decl);
-                }
-            }
-            // Check for method definition (with optional modifiers)
-            else if self.is_at_method_definition() {
-                if let Some(method) = self.parse_method_definition() {
-                    methods.push(method);
-                }
-            } else {
-                // Not a state or method - end of class body
-                break;
-            }
-
-            // Skip any periods/statement terminators
-            while self.match_token(&TokenKind::Period) {}
-        }
-
-        (state, methods)
-    }
-
-    /// Checks if the current position is at the start of a method definition.
-    ///
-    /// Methods can start with:
-    /// - An identifier followed directly by `=>` (unary method)
-    /// - A binary selector followed by identifier and `=>` (binary method)
-    /// - Keywords followed by identifiers and eventually `=>` (keyword method)
-    /// - `before`, `after`, `around`, `sealed` followed by one of the above
-    fn is_at_method_definition(&self) -> bool {
-        let mut offset = 0;
-
-        // Skip optional modifiers: before, after, around, sealed
-        while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
-            if matches!(name.as_str(), "before" | "after" | "around" | "sealed") {
-                offset += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Check for method selector pattern followed by =>
-        match self.peek_at(offset) {
-            // Unary method: `identifier =>` (fat arrow must be next token)
-            Some(TokenKind::Identifier(_)) => {
-                matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
-            }
-            // Binary method: `+ other =>`
-            Some(TokenKind::BinarySelector(_)) => {
-                // Binary selector, then parameter name, then =>
-                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
-            }
-            // Keyword method: `at: index =>` or `at: index put: value =>`
-            Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
-            _ => false,
-        }
-    }
-
-    /// Checks if there's a keyword method definition starting at the given offset.
-    ///
-    /// Pattern: `keyword: param keyword: param ... =>`
-    fn is_keyword_method_at(&self, start_offset: usize) -> bool {
-        let mut offset = start_offset;
-
-        // Must have at least one keyword-parameter pair
-        loop {
-            // Expect keyword
-            if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // Expect parameter (identifier)
-            if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // Check for => (end of method selector) or another keyword
-            match self.peek_at(offset) {
-                Some(TokenKind::FatArrow) => return true,
-                Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                _ => return false,
-            }
-        }
-    }
-
-    /// Parses a state declaration.
-    ///
-    /// Syntax:
-    /// - `state: fieldName`
-    /// - `state: fieldName = defaultValue`
-    /// - `state: fieldName: TypeName`
-    /// - `state: fieldName: TypeName = defaultValue`
-    fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
-        let start = self.current_token().span();
-
-        // Consume `state:`
-        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
-            return None;
-        }
-        self.advance();
-
-        // Parse field name and optional type annotation
-        // Two cases:
-        // 1. `state: fieldName = value` - Identifier followed by = or newline
-        // 2. `state: fieldName: Type = value` - lexed as Keyword("fieldName:") + Identifier("Type")
-        let (name, type_annotation) = match self.current_kind() {
-            // Case 2: field name with type annotation, lexed as keyword
-            TokenKind::Keyword(keyword) => {
-                // Strip the trailing colon to get the field name
-                let field_name = keyword.trim_end_matches(':');
-                let span = self.current_token().span();
-                let name_ident = Identifier::new(field_name, span);
-                self.advance();
-
-                // Parse the type name
-                let type_ann = self.parse_type_annotation();
-                (name_ident, Some(type_ann))
-            }
-            // Case 1: simple field name
-            TokenKind::Identifier(_) => {
-                let name_ident = self.parse_identifier("Expected field name after 'state:'");
-
-                // Check for optional type annotation (: TypeName)
-                let type_ann = if self.match_token(&TokenKind::Colon) {
-                    Some(self.parse_type_annotation())
-                } else {
-                    None
-                };
-                (name_ident, type_ann)
-            }
-            _ => {
-                self.error("Expected field name after 'state:'");
-                let span = self.current_token().span();
-                (Identifier::new("Error", span), None)
-            }
-        };
-
-        // Check for default value (= expression)
-        let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
-        {
-            self.advance(); // consume `=`
-            Some(self.parse_expression())
-        } else {
-            None
-        };
-
-        let end = default_value
-            .as_ref()
-            .map(Expression::span)
-            .or(type_annotation.as_ref().map(TypeAnnotation::span))
-            .unwrap_or(name.span);
-        let span = start.merge(end);
-
-        Some(StateDeclaration {
-            name,
-            type_annotation,
-            default_value,
-            span,
-        })
-    }
-
-    /// Parses a simple type annotation (identifier).
-    fn parse_type_annotation(&mut self) -> TypeAnnotation {
-        if let TokenKind::Identifier(name) = self.current_kind() {
-            let span = self.current_token().span();
-            let ident = Identifier::new(name.clone(), span);
-            self.advance();
-            TypeAnnotation::Simple(ident)
-        } else {
-            let span = self.current_token().span();
-            self.error("Expected type name");
-            TypeAnnotation::Simple(Identifier::new("Error", span))
-        }
-    }
-
-    /// Parses a method definition.
-    ///
-    /// Syntax:
-    /// - `methodName => body`
-    /// - `+ other => body`
-    /// - `at: index put: value => body`
-    /// - `before methodName => body`
-    /// - `after methodName => body`
-    /// - `around methodName => body`
-    /// - `sealed methodName => body`
-    fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
-        let start = self.current_token().span();
-        let mut method_kind = MethodKind::Primary;
-        let mut method_is_sealed = false;
-
-        // Parse optional modifiers
-        while let TokenKind::Identifier(name) = self.current_kind() {
-            match name.as_str() {
-                "before" => {
-                    method_kind = MethodKind::Before;
-                    self.advance();
-                }
-                "after" => {
-                    method_kind = MethodKind::After;
-                    self.advance();
-                }
-                "around" => {
-                    method_kind = MethodKind::Around;
-                    self.advance();
-                }
-                "sealed" => {
-                    method_is_sealed = true;
-                    self.advance();
-                }
-                _ => break,
-            }
-        }
-
-        // Parse method selector and parameters
-        let (selector, parameters) = self.parse_method_selector()?;
-
-        // Expect fat arrow
-        if !self.match_token(&TokenKind::FatArrow) {
-            self.error("Expected '=>' after method selector");
-            return None;
-        }
-
-        // Parse method body
-        let body = self.parse_method_body();
-
-        let end = body.last().map_or(start, Expression::span);
-        let span = start.merge(end);
-
-        Some(MethodDefinition::with_options(
-            selector,
-            parameters,
-            body,
-            None, // return_type - could add parsing later
-            method_is_sealed,
-            method_kind,
-            span,
-        ))
-    }
-
-    /// Parses a method selector and its parameters.
-    ///
-    /// Returns the selector and parameter names.
-    fn parse_method_selector(&mut self) -> Option<(MessageSelector, Vec<Identifier>)> {
-        match self.current_kind() {
-            // Unary method: `methodName`
-            TokenKind::Identifier(name) => {
-                let selector = MessageSelector::Unary(name.clone());
-                self.advance();
-                Some((selector, Vec::new()))
-            }
-            // Binary method: `+ other`
-            TokenKind::BinarySelector(op) => {
-                let selector = MessageSelector::Binary(op.clone());
-                self.advance();
-
-                // Parse the single parameter
-                let param = self.parse_identifier("Expected parameter name after binary selector");
-                Some((selector, vec![param]))
-            }
-            // Keyword method: `at: index put: value`
-            TokenKind::Keyword(_) => {
-                let mut keywords = Vec::new();
-                let mut parameters = Vec::new();
-
-                while let TokenKind::Keyword(keyword) = self.current_kind() {
-                    let span = self.current_token().span();
-                    keywords.push(KeywordPart::new(keyword.clone(), span));
-                    self.advance();
-
-                    // Parse parameter name
-                    let param = self.parse_identifier("Expected parameter name after keyword");
-                    parameters.push(param);
-                }
-
-                let selector = MessageSelector::Keyword(keywords);
-                Some((selector, parameters))
-            }
-            _ => {
-                self.error("Expected method selector");
-                None
-            }
-        }
-    }
-
-    /// Parses a method body (expressions until the next method or end of class).
-    ///
-    /// The body consists of expressions separated by periods.
-    fn parse_method_body(&mut self) -> Vec<Expression> {
-        let mut body = Vec::new();
-
-        // Parse expressions until we hit something that looks like a new method,
-        // state declaration, or class definition
-        while !self.is_at_end()
-            && !self.is_at_class_definition()
-            && !self.is_at_method_definition()
-            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
-        {
-            let expr = self.parse_expression();
-            let is_error = expr.is_error();
-            body.push(expr);
-
-            // If we got an error, try to recover
-            if is_error {
-                self.synchronize();
-                break;
-            }
-
-            // Period terminates the expression - check if we should continue
-            if self.match_token(&TokenKind::Period) {
-                // Check if next token starts a new method/state/class
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
-                {
-                    break;
-                }
-                // Otherwise continue parsing more expressions
-            } else {
-                // No period - this was the last expression in the body
-                break;
-            }
-        }
-
-        body
-    }
-
-    // ========================================================================
-    // Expression Parsing
-    // ========================================================================
-
-    /// Parses any expression.
-    ///
-    /// Entry point for expression parsing. Handles all precedence levels.
-    fn parse_expression(&mut self) -> Expression {
-        // Check for return statement first
-        if self.match_token(&TokenKind::Caret) {
-            return self.parse_return();
-        }
-
-        // Try to parse assignment or regular expression
-        self.parse_assignment()
-    }
-
-    /// Parses a return statement.
-    fn parse_return(&mut self) -> Expression {
-        let start = self.tokens[self.current - 1].span();
-        let value = Box::new(self.parse_assignment());
-        let end = value.span();
-        let span = start.merge(end);
-
-        Expression::Return { value, span }
-    }
-
-    /// Parses an assignment or regular expression.
-    fn parse_assignment(&mut self) -> Expression {
-        let expr = self.parse_cascade();
-
-        // Check for assignment operators
-        if self.match_token(&TokenKind::Assign) {
-            // Validate assignment target
-            if !matches!(
-                expr,
-                Expression::Identifier(_) | Expression::FieldAccess { .. }
-            ) {
-                let span = expr.span();
-                self.diagnostics.push(Diagnostic::error(
-                    "Assignment target must be an identifier or field access",
-                    span,
-                ));
-                return Expression::Error {
-                    message: "Invalid assignment target".into(),
-                    span,
-                };
-            }
-
-            let value = Box::new(self.parse_assignment());
-            let span = expr.span().merge(value.span());
-            return Expression::Assignment {
-                target: Box::new(expr),
-                value,
-                span,
-            };
-        }
-
-        // Check for compound assignment (+=, -=, etc.)
-        if let Some(op) = self.match_compound_operator() {
-            // Validate assignment target
-            if !matches!(
-                expr,
-                Expression::Identifier(_) | Expression::FieldAccess { .. }
-            ) {
-                let span = expr.span();
-                self.diagnostics.push(Diagnostic::error(
-                    "Assignment target must be an identifier or field access",
-                    span,
-                ));
-                return Expression::Error {
-                    message: "Invalid assignment target".into(),
-                    span,
-                };
-            }
-
-            let value = Box::new(self.parse_assignment());
-            let span = expr.span().merge(value.span());
-            return Expression::CompoundAssignment {
-                target: Box::new(expr),
-                operator: op,
-                value,
-                span,
-            };
-        }
-
-        expr
-    }
-
-    /// Checks for compound assignment operators.
-    fn match_compound_operator(&mut self) -> Option<CompoundOperator> {
-        let kind = self.current_kind();
-        let op = match kind {
-            TokenKind::BinarySelector(s) if s.as_str() == "+=" => CompoundOperator::Add,
-            TokenKind::BinarySelector(s) if s.as_str() == "-=" => CompoundOperator::Subtract,
-            TokenKind::BinarySelector(s) if s.as_str() == "*=" => CompoundOperator::Multiply,
-            TokenKind::BinarySelector(s) if s.as_str() == "/=" => CompoundOperator::Divide,
-            TokenKind::BinarySelector(s) if s.as_str() == "%=" => CompoundOperator::Remainder,
-            _ => return None,
-        };
-        self.advance();
-        Some(op)
-    }
-
-    /// Parses a cascade (multiple messages to the same receiver).
-    ///
-    /// Syntax: `receiver message1; message2; message3`
-    fn parse_cascade(&mut self) -> Expression {
-        let receiver = self.parse_keyword_message();
-
-        // Check if this is a cascade
-        if !self.match_token(&TokenKind::Semicolon) {
-            return receiver;
-        }
-
-        // This is a cascade - parse additional messages
-        let mut messages = Vec::new();
-
-        loop {
-            let message = self.parse_cascade_message();
-            messages.push(message);
-
-            // Continue if there's another semicolon
-            if !self.match_token(&TokenKind::Semicolon) {
-                break;
-            }
-        }
-
-        let last_span = messages.last().map_or(receiver.span(), |m| m.span);
-        let span = receiver.span().merge(last_span);
-
-        Expression::Cascade {
-            receiver: Box::new(receiver),
-            messages,
-            span,
-        }
-    }
-
-    /// Parses a single message in a cascade.
-    ///
-    /// This can be a unary, binary, or keyword message.
-    fn parse_cascade_message(&mut self) -> CascadeMessage {
-        let start_span = self.current_token().span();
-
-        // Try keyword message first
-        if matches!(self.current_kind(), TokenKind::Keyword(_)) {
-            let mut keywords = Vec::new();
-            let mut arguments = Vec::new();
-
-            while let TokenKind::Keyword(keyword) = self.current_kind() {
-                let span = self.current_token().span();
-                keywords.push(KeywordPart::new(keyword.clone(), span));
-                self.advance();
-
-                // Parse argument (which is a binary message)
-                arguments.push(self.parse_binary_message());
-            }
-
-            let end_span = arguments.last().map_or(start_span, Expression::span);
-            let span = start_span.merge(end_span);
-
-            return CascadeMessage::new(MessageSelector::Keyword(keywords), arguments, span);
-        }
-
-        // Try binary message
-        if let TokenKind::BinarySelector(op) = self.current_kind() {
-            let selector = MessageSelector::Binary(op.clone());
-            self.advance();
-            let arg = self.parse_unary_message();
-            let span = start_span.merge(arg.span());
-            return CascadeMessage::new(selector, vec![arg], span);
-        }
-
-        // Try unary message
-        if let TokenKind::Identifier(name) = self.current_kind() {
-            let selector = MessageSelector::Unary(name.clone());
-            let tok = self.advance();
-            let span = start_span.merge(tok.span());
-            return CascadeMessage::new(selector, Vec::new(), span);
-        }
-
-        // Error - expected a message
-        self.error("Expected message selector in cascade");
-        CascadeMessage::new(
-            MessageSelector::Unary("error".into()),
-            Vec::new(),
-            start_span,
-        )
-    }
-
-    /// Parses a keyword message (lowest precedence).
-    fn parse_keyword_message(&mut self) -> Expression {
-        let receiver = self.parse_binary_message();
-
-        // Check if this is a keyword message
-        // A newline before the keyword indicates a new statement, not a message
-        if !matches!(self.current_kind(), TokenKind::Keyword(_))
-            || self.current_token().has_leading_newline()
-        {
-            return receiver;
-        }
-
-        // Parse keyword message
-        let mut keywords = Vec::new();
-        let mut arguments = Vec::new();
-
-        while let TokenKind::Keyword(keyword) = self.current_kind() {
-            // Stop if the keyword is on a new line (start of new statement)
-            if self.current_token().has_leading_newline() && !keywords.is_empty() {
-                break;
-            }
-            let span = self.current_token().span();
-            keywords.push(KeywordPart::new(keyword.clone(), span));
-            self.advance();
-
-            // Parse argument (which is a binary message)
-            arguments.push(self.parse_binary_message());
-        }
-
-        let span = receiver.span().merge(arguments.last().unwrap().span());
-
-        Expression::MessageSend {
-            receiver: Box::new(receiver),
-            selector: MessageSelector::Keyword(keywords),
-            arguments,
-            span,
-        }
-    }
-
-    /// Parses a binary message with standard math precedence using Pratt parsing.
-    ///
-    /// Unlike traditional Smalltalk (which is strictly left-to-right),
-    /// Beamtalk binary messages follow standard operator precedence:
-    /// - Multiplicative: `* / %` (higher precedence)
-    /// - Additive: `+ -` (lower precedence)
-    /// - Comparison: `< > <= >= = ~=` (lowest precedence)
-    ///
-    /// This implementation uses Pratt parsing (top-down operator precedence)
-    /// which makes adding new operators a single-line change in the
-    /// [`binary_binding_power`] function.
-    fn parse_binary_message(&mut self) -> Expression {
-        self.parse_binary_with_pratt(0)
-    }
-
-    /// Pratt parsing for binary expressions.
-    ///
-    /// This function implements the core Pratt parsing algorithm using binding
-    /// powers from [`binary_binding_power`]. The `min_bp` parameter controls the
-    /// minimum binding power required to continue parsing, enabling correct
-    /// precedence handling through recursion.
-    ///
-    /// # Arguments
-    ///
-    /// * `min_bp` - Minimum binding power to continue parsing (0 for top-level)
-    fn parse_binary_with_pratt(&mut self, min_bp: u8) -> Expression {
-        // Parse the left-hand side (unary expression)
-        let mut left = self.parse_unary_message();
-
-        while let TokenKind::BinarySelector(op) = self.current_kind() {
-            let op = op.clone();
-
-            // Get binding power; unknown operators end the expression
-            let Some(bp) = binary_binding_power(&op) else {
-                break;
-            };
-
-            // Stop if this operator binds less tightly than our minimum
-            if bp.left < min_bp {
-                break;
-            }
-
-            // Consume the operator
-            self.advance();
-
-            // Parse the right-hand side with the operator's right binding power
-            let right = self.parse_binary_with_pratt(bp.right);
-
-            // Build the message send expression
-            let span = left.span().merge(right.span());
-            left = Expression::MessageSend {
-                receiver: Box::new(left),
-                selector: MessageSelector::Binary(op),
-                arguments: vec![right],
-                span,
-            };
-        }
-
-        left
-    }
-
-    /// Parses unary messages (highest message precedence).
-    fn parse_unary_message(&mut self) -> Expression {
-        let mut receiver = self.parse_primary();
-
-        // Parse chain of unary messages
-        // Stop if the identifier is on a new line (start of new statement)
-        while let TokenKind::Identifier(name) = self.current_kind() {
-            // A newline before the identifier indicates a new statement, not a message
-            if self.current_token().has_leading_newline() {
-                break;
-            }
-
-            let selector = MessageSelector::Unary(name.clone());
-            let tok = self.advance();
-            let span = receiver.span().merge(tok.span());
-
-            receiver = Expression::MessageSend {
-                receiver: Box::new(receiver),
-                selector,
-                arguments: Vec::new(),
-                span,
-            };
-        }
-
-        receiver
-    }
-
-    /// Parses a primary expression (literals, identifiers, blocks, parentheses).
-    fn parse_primary(&mut self) -> Expression {
-        match self.current_kind() {
-            // Literals
-            TokenKind::Integer(_)
-            | TokenKind::Float(_)
-            | TokenKind::String(_)
-            | TokenKind::InterpolatedString(_)
-            | TokenKind::Symbol(_)
-            | TokenKind::Character(_) => self.parse_literal(),
-
-            // Map literal: #{...}
-            TokenKind::Hash => {
-                // Check if it's a map literal (followed by {)
-                if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
-                    self.parse_map_literal()
-                } else {
-                    // Standalone '#' is not a valid primary expression
-                    let bad_token = self.advance();
-                    let span = bad_token.span();
-                    let message: EcoString =
-                        "Unexpected '#': expected '#{' for a map literal or a valid expression"
-                            .into();
-                    self.diagnostics
-                        .push(Diagnostic::error(message.clone(), span));
-                    Expression::Error { message, span }
-                }
-            }
-
-            // Identifier or field access
-            TokenKind::Identifier(_) => self.parse_identifier_or_field_access(),
-
-            // Block
-            TokenKind::LeftBracket => self.parse_block(),
-
-            // Parenthesized expression
-            TokenKind::LeftParen => self.parse_parenthesized(),
-
-            // Map literal
-            TokenKind::MapOpen => self.parse_map_literal(),
-
-            // Unexpected token - consume it to avoid getting stuck
-            _ => {
-                let bad_token = self.advance();
-                let span = bad_token.span();
-                let message: EcoString = format!(
-                    "Unexpected token: expected expression, found {}",
-                    bad_token.kind()
-                )
-                .into();
-                self.diagnostics
-                    .push(Diagnostic::error(message.clone(), span));
-                Expression::Error { message, span }
-            }
-        }
-    }
-
-    /// Parses a literal value.
-    fn parse_literal(&mut self) -> Expression {
-        let token = self.advance();
-        let span = token.span();
-
-        let literal = match token.into_kind() {
-            TokenKind::Integer(s) => {
-                // Parse integer (handle radix notation like 16rFF)
-                match parse_integer(&s) {
-                    Ok(val) => Literal::Integer(val),
-                    Err(e) => {
-                        self.diagnostics.push(Diagnostic::error(e, span));
-                        return Expression::Error {
-                            message: "Invalid integer literal".into(),
-                            span,
-                        };
-                    }
-                }
-            }
-            TokenKind::Float(s) => {
-                if let Ok(val) = s.parse::<f64>() {
-                    Literal::Float(val)
-                } else {
-                    self.diagnostics.push(Diagnostic::error(
-                        format!("Invalid float literal: {s}"),
-                        span,
-                    ));
-                    return Expression::Error {
-                        message: "Invalid float literal".into(),
-                        span,
-                    };
-                }
-            }
-            TokenKind::String(s) => Literal::String(s),
-            TokenKind::InterpolatedString(s) => {
-                // For now, treat interpolated strings as regular strings
-                // TODO: Implement proper string interpolation in AST
-                Literal::String(s)
-            }
-            TokenKind::Symbol(s) => Literal::Symbol(s),
-            TokenKind::Character(c) => Literal::Character(c),
-            _ => unreachable!(),
-        };
-
-        Expression::Literal(literal, span)
-    }
-
-    /// Parses an identifier or field access.
-    fn parse_identifier_or_field_access(&mut self) -> Expression {
-        let name_token = self.advance();
-        let TokenKind::Identifier(name) = name_token.kind() else {
-            unreachable!()
-        };
-        let span = name_token.span();
-
-        let mut expr = Expression::Identifier(Identifier::new(name.clone(), span));
-
-        // Check for field access: identifier.field
-        // Only treat a '.' as starting a field access if:
-        // 1. The current token is a Period
-        // 2. The next token is an Identifier
-        // 3. There is no whitespace between the period and the identifier
-        //
-        // This distinguishes `self.value` (field access) from `n. self` (statement
-        // separator followed by new expression).
-        //
-        // Whitespace detection: The lexer puts trailing same-line whitespace (spaces/tabs)
-        // as trailing trivia on the period, and newlines + subsequent whitespace as leading
-        // trivia on the next token. We check BOTH to catch all cases:
-        // - `n. self` → period has trailing space
-        // - `n.\n    self` → identifier has leading newline+spaces
-        while self.check(&TokenKind::Period)
-            && matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
-            && self.current_token().trailing_trivia().is_empty()
-            && self.peek().is_some_and(|t| t.leading_trivia().is_empty())
-        {
-            self.advance(); // consume the period
-
-            let field_token = self.advance();
-            let TokenKind::Identifier(field_name) = field_token.kind() else {
-                unreachable!()
-            };
-            let field_span = field_token.span();
-
-            let full_span = expr.span().merge(field_span);
-            expr = Expression::FieldAccess {
-                receiver: Box::new(expr),
-                field: Identifier::new(field_name.clone(), field_span),
-                span: full_span,
-            };
-        }
-
-        expr
-    }
-
-    /// Parses a block: `[:x :y | x + y]`
-    fn parse_block(&mut self) -> Expression {
-        let start = self
-            .expect(&TokenKind::LeftBracket, "Expected '['")
-            .unwrap()
-            .span();
-
-        let mut parameters = Vec::new();
-
-        // Parse block parameters: [:x :y |
-        while self.match_token(&TokenKind::Colon) {
-            if let TokenKind::Identifier(name) = self.current_kind() {
-                let span = self.current_token().span();
-                parameters.push(BlockParameter::new(name.clone(), span));
-                self.advance();
-            } else {
-                self.error("Expected parameter name after ':'");
-                break;
-            }
-        }
-
-        // Expect pipe separator if there are parameters
-        if !parameters.is_empty() {
-            self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
-        }
-
-        // Parse block body
-        let mut body = Vec::new();
-        while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
-            let expr = self.parse_expression();
-            body.push(expr);
-
-            // Optional statement separator
-            if !self.match_token(&TokenKind::Period) {
-                break;
-            }
-        }
-
-        let end = self
-            .expect(&TokenKind::RightBracket, "Expected ']' to close block")
-            .map_or(start, |t| t.span());
-
-        let span = start.merge(end);
-        let block = Block::new(parameters, body, span);
-        Expression::Block(block)
-    }
-
-    /// Parses a map literal: `#{key => value, ...}`
-    ///
-    /// Map keys and values are parsed as unary expressions (primaries + unary messages),
-    /// which stops at binary operators like `=>` and `,`. This allows nested maps and
-    /// simple expressions as keys/values while avoiding ambiguity with the map syntax.
-    fn parse_map_literal(&mut self) -> Expression {
-        let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
-        let start = start_token.map_or_else(|| self.current_token().span(), |t| t.span());
-
-        let mut pairs = Vec::new();
-
-        // Handle empty map: #{}
-        if self.check(&TokenKind::RightBrace) {
-            let end_token = self.advance();
-            let span = start.merge(end_token.span());
-            return Expression::MapLiteral { pairs, span };
-        }
-
-        // Parse key-value pairs
-        loop {
-            let pair_start = self.current_token().span();
-
-            // Parse key expression (unary only - stops at `=>`, `,`, `}`)
-            let key = self.parse_unary_message();
-
-            // Expect '=>' separator between key and value
-            if !matches!(self.current_kind(), TokenKind::FatArrow) {
-                let bad_token = self.advance();
-                let span = bad_token.span();
-                self.diagnostics
-                    .push(Diagnostic::error("Expected '=>' after map key", span));
-                // Try to recover: skip to next comma or closing brace, handling nested braces
-                let mut brace_depth = 0;
-                while !matches!(self.current_kind(), TokenKind::Eof) {
-                    match self.current_kind() {
-                        TokenKind::MapOpen | TokenKind::LeftBrace => {
-                            brace_depth += 1;
-                            self.advance();
-                        }
-                        TokenKind::RightBrace => {
-                            if brace_depth == 0 {
-                                break;
-                            }
-                            brace_depth -= 1;
-                            self.advance();
-                        }
-                        TokenKind::BinarySelector(s) if s.as_str() == "," && brace_depth == 0 => {
-                            self.advance();
-                            break;
-                        }
-                        _ => {
-                            self.advance();
-                        }
-                    }
-                }
-                continue;
-            }
-            self.advance(); // consume '=>'
-
-            // Parse value expression (unary only - stops at `,`, `}`)
-            let value = self.parse_unary_message();
-
-            let pair_span = pair_start.merge(value.span());
-            pairs.push(MapPair::new(key, value, pair_span));
-
-            // Check for comma (continue) or closing brace (end)
-            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
-                self.advance(); // consume comma
-                // Allow trailing comma
-                if self.check(&TokenKind::RightBrace) {
-                    break;
-                }
-            } else if self.check(&TokenKind::RightBrace) {
-                break;
-            } else {
-                let bad_token = self.advance();
-                self.diagnostics.push(Diagnostic::error(
-                    format!(
-                        "Expected ',' or '}}' in map literal, found {}",
-                        bad_token.kind()
-                    ),
-                    bad_token.span(),
-                ));
-                break;
-            }
-        }
-
-        // Expect closing brace
-        let end_span = if self.check(&TokenKind::RightBrace) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected '}' to close map literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
-
-        let span = start.merge(end_span);
-        Expression::MapLiteral { pairs, span }
-    }
-
-    /// Parses a parenthesized expression.
-    fn parse_parenthesized(&mut self) -> Expression {
-        let start = self
-            .expect(&TokenKind::LeftParen, "Expected '('")
-            .unwrap()
-            .span();
-
-        let inner = self.parse_expression();
-
-        let end = self
-            .expect(&TokenKind::RightParen, "Expected ')' to close parentheses")
-            .map_or(start, |t| t.span());
-
-        let span = start.merge(end);
-
-        Expression::Parenthesized {
-            expression: Box::new(inner),
-            span,
-        }
-    }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Parses an integer literal, handling different radix notations.
-///
-/// Examples:
-/// - `42` → 42 (decimal)
-/// - `16rFF` → 255 (hexadecimal)
-/// - `2r1010` → 10 (binary)
-fn parse_integer(s: &str) -> Result<i64, String> {
-    // Check for radix notation: NrVALUE
-    if let Some(r_pos) = s.find('r') {
-        let radix_str = &s[..r_pos];
-        let value_str = &s[r_pos + 1..];
-
-        let radix = radix_str
-            .parse::<u32>()
-            .map_err(|_| format!("Invalid radix: {radix_str}"))?;
-
-        if !(2..=36).contains(&radix) {
-            return Err(format!("Radix must be between 2 and 36, got {radix}"));
-        }
-
-        i64::from_str_radix(value_str, radix)
-            .map_err(|_| format!("Invalid integer value '{value_str}' for radix {radix}"))
-    } else {
-        // Standard decimal integer
-        s.parse::<i64>()
-            .map_err(|_| format!("Invalid integer literal: {s}"))
     }
 }
 
