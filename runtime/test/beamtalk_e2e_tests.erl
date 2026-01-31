@@ -1199,7 +1199,8 @@ spawner_spawn_counter([], State) ->
     {reply, Pid, NewState}.
 
 spawner_last_pid([], State) ->
-    Pid = maps:get(lastPid, State),
+    %% Return the last spawned PID, or nil if none
+    Pid = maps:get(lastPid, State, nil),
     {reply, Pid, State}.
 
 %% Test: Actor A spawns Actor B
@@ -1208,17 +1209,20 @@ actor_spawns_another_actor_test() ->
     SpawnerState = spawner_module_state(InitArgs),
     {ok, Spawner} = gen_server:start_link(beamtalk_actor, SpawnerState, []),
     
-    %% Spawner creates a Counter
-    CounterPid = gen_server:call(Spawner, {spawnCounter, []}),
-    ?assert(is_pid(CounterPid)),
-    
-    %% Verify counter works
-    gen_server:call(CounterPid, {increment, []}),
-    Value = gen_server:call(CounterPid, {getValue, []}),
-    ?assertEqual(1, Value),
-    
-    gen_server:stop(CounterPid),
-    gen_server:stop(Spawner).
+    try
+        %% Spawner creates a Counter
+        CounterPid = gen_server:call(Spawner, {spawnCounter, []}),
+        ?assert(is_pid(CounterPid)),
+        
+        %% Verify counter works
+        gen_server:call(CounterPid, {increment, []}),
+        Value = gen_server:call(CounterPid, {getValue, []}),
+        ?assertEqual(1, Value),
+        
+        gen_server:stop(CounterPid)
+    after
+        gen_server:stop(Spawner)
+    end.
 
 %% Test: Actors communicating via messages
 actors_communicate_test() ->
@@ -1228,21 +1232,23 @@ actors_communicate_test() ->
     {ok, Counter1} = gen_server:start_link(beamtalk_actor, State1, []),
     {ok, Counter2} = gen_server:start_link(beamtalk_actor, State2, []),
     
-    %% Increment counter1 twice
-    gen_server:call(Counter1, {increment, []}),
-    gen_server:call(Counter1, {increment, []}),
-    
-    %% Get value from counter1 and set it in counter2 (simulated)
-    Value1 = gen_server:call(Counter1, {getValue, []}),
-    
-    %% Increment counter2 that many times
-    [gen_server:call(Counter2, {increment, []}) || _ <- lists:seq(1, Value1)],
-    
-    Value2 = gen_server:call(Counter2, {getValue, []}),
-    ?assertEqual(Value1, Value2),
-    
-    gen_server:stop(Counter1),
-    gen_server:stop(Counter2).
+    try
+        %% Increment counter1 twice
+        gen_server:call(Counter1, {increment, []}),
+        gen_server:call(Counter1, {increment, []}),
+        
+        %% Get value from counter1 and set it in counter2 (simulated)
+        Value1 = gen_server:call(Counter1, {getValue, []}),
+        
+        %% Increment counter2 that many times
+        [gen_server:call(Counter2, {increment, []}) || _ <- lists:seq(1, Value1)],
+        
+        Value2 = gen_server:call(Counter2, {getValue, []}),
+        ?assertEqual(Value1, Value2)
+    after
+        gen_server:stop(Counter1),
+        gen_server:stop(Counter2)
+    end.
 
 %% Test: Actor chain - A spawns B, B spawns C
 actor_spawn_chain_test() ->
@@ -1253,19 +1259,22 @@ actor_spawn_chain_test() ->
     Spawner2State = spawner_module_state(#{}),
     {ok, Spawner2} = gen_server:start_link(beamtalk_actor, Spawner2State, []),
     
-    %% Spawner2 creates Counter
-    CounterPid = gen_server:call(Spawner2, {spawnCounter, []}),
-    
-    %% Use the counter
-    gen_server:call(CounterPid, {increment, []}),
-    gen_server:call(CounterPid, {increment, []}),
-    Value = gen_server:call(CounterPid, {getValue, []}),
-    
-    ?assertEqual(2, Value),
-    
-    gen_server:stop(CounterPid),
-    gen_server:stop(Spawner2),
-    gen_server:stop(Spawner1).
+    try
+        %% Spawner2 creates Counter
+        CounterPid = gen_server:call(Spawner2, {spawnCounter, []}),
+        
+        %% Use the counter
+        gen_server:call(CounterPid, {increment, []}),
+        gen_server:call(CounterPid, {increment, []}),
+        Value = gen_server:call(CounterPid, {getValue, []}),
+        
+        ?assertEqual(2, Value),
+        
+        gen_server:stop(CounterPid)
+    after
+        gen_server:stop(Spawner2),
+        gen_server:stop(Spawner1)
+    end.
 
 %%% ===========================================================================
 %%% Error Handling Tests (BT-133)
