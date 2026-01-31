@@ -1,0 +1,187 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Counter",
+                span: Span {
+                    start: 120,
+                    end: 127,
+                },
+            },
+            superclass: Identifier {
+                name: "Actor",
+                span: Span {
+                    start: 104,
+                    end: 109,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "value",
+                        span: Span {
+                            start: 137,
+                            end: 142,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 145,
+                                end: 146,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 130,
+                        end: 146,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "increment",
+                    ),
+                    parameters: [],
+                    body: [
+                        CompoundAssignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 163,
+                                            end: 167,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 168,
+                                        end: 173,
+                                    },
+                                },
+                                span: Span {
+                                    start: 163,
+                                    end: 173,
+                                },
+                            },
+                            operator: Add,
+                            value: Literal(
+                                Integer(
+                                    1,
+                                ),
+                                Span {
+                                    start: 177,
+                                    end: 178,
+                                },
+                            ),
+                            span: Span {
+                                start: 163,
+                                end: 178,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 150,
+                        end: 178,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getValue",
+                    ),
+                    parameters: [],
+                    body: [
+                        Return {
+                            value: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 194,
+                                            end: 198,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 199,
+                                        end: 204,
+                                    },
+                                },
+                                span: Span {
+                                    start: 194,
+                                    end: 204,
+                                },
+                            },
+                            span: Span {
+                                start: 193,
+                                end: 204,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 181,
+                        end: 204,
+                    },
+                },
+            ],
+            span: Span {
+                start: 104,
+                end: 204,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 104,
+        end: 204,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 104,
+                end: 109,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 104,
+                end: 109,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test class definition parsing",
+            span: Span {
+                start: 104,
+                end: 109,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -155,6 +155,10 @@ pub struct ClassDefinition {
     pub name: Identifier,
     /// The superclass name (e.g., `Actor`).
     pub superclass: Identifier,
+    /// Whether this is an abstract class (cannot be instantiated).
+    pub is_abstract: bool,
+    /// Whether this is a sealed class (cannot be subclassed).
+    pub is_sealed: bool,
     /// Instance variable declarations.
     pub state: Vec<StateDeclaration>,
     /// Method definitions.
@@ -176,6 +180,30 @@ impl ClassDefinition {
         Self {
             name,
             superclass,
+            is_abstract: false,
+            is_sealed: false,
+            state,
+            methods,
+            span,
+        }
+    }
+
+    /// Creates a class definition with modifiers.
+    #[must_use]
+    pub fn with_modifiers(
+        name: Identifier,
+        superclass: Identifier,
+        is_abstract: bool,
+        is_sealed: bool,
+        state: Vec<StateDeclaration>,
+        methods: Vec<MethodDefinition>,
+        span: Span,
+    ) -> Self {
+        Self {
+            name,
+            superclass,
+            is_abstract,
+            is_sealed,
             state,
             methods,
             span,
@@ -249,6 +277,25 @@ impl StateDeclaration {
     }
 }
 
+/// The kind of method (primary, before, after, around).
+///
+/// Method combinations (from CLOS/Dylan) allow cross-cutting concerns:
+/// - **Before** methods run before the primary method
+/// - **After** methods run after the primary method
+/// - **Around** methods wrap the primary method
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MethodKind {
+    /// A normal/primary method.
+    #[default]
+    Primary,
+    /// A before method - runs before the primary method.
+    Before,
+    /// An after method - runs after the primary method.
+    After,
+    /// An around method - wraps the primary method.
+    Around,
+}
+
 /// A method definition.
 ///
 /// Example: `getValue -> Integer => ^self.value`
@@ -262,6 +309,10 @@ pub struct MethodDefinition {
     pub body: Vec<Expression>,
     /// Optional return type annotation.
     pub return_type: Option<TypeAnnotation>,
+    /// Whether this method is sealed (cannot be overridden).
+    pub is_sealed: bool,
+    /// The kind of method (primary, before, after, around).
+    pub kind: MethodKind,
     /// Source location.
     pub span: Span,
 }
@@ -280,6 +331,8 @@ impl MethodDefinition {
             parameters,
             body,
             return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
             span,
         }
     }
@@ -298,6 +351,30 @@ impl MethodDefinition {
             parameters,
             body,
             return_type: Some(return_type),
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            span,
+        }
+    }
+
+    /// Creates a method definition with full options.
+    #[must_use]
+    pub fn with_options(
+        selector: MessageSelector,
+        parameters: Vec<Identifier>,
+        body: Vec<Expression>,
+        return_type: Option<TypeAnnotation>,
+        is_sealed: bool,
+        kind: MethodKind,
+        span: Span,
+    ) -> Self {
+        Self {
+            selector,
+            parameters,
+            body,
+            return_type,
+            is_sealed,
+            kind,
             span,
         }
     }

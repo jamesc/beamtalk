@@ -277,8 +277,19 @@ impl<'src> Lexer<'src> {
             // Colon or assignment
             ':' => self.lex_colon_or_assign(),
 
+            // Fat arrow (=>) for method definitions - must check before binary operators
+            '=' => {
+                if self.peek_char_second() == Some('>') {
+                    self.advance(); // =
+                    self.advance(); // >
+                    TokenKind::FatArrow
+                } else {
+                    self.lex_binary_selector()
+                }
+            }
+
             // Binary operators
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '@' | '%' | '&' | '?' | ',' | '\\' => {
+            '+' | '-' | '*' | '/' | '<' | '>' | '~' | '@' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()
             }
 
