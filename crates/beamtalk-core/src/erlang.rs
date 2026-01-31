@@ -2326,11 +2326,14 @@ impl CoreErlangGenerator {
                 Ok(Some(()))
             }
 
-            // Reverse (grapheme-aware)
+            // Reverse (codepoint-aware) - string:reverse returns list, convert back to binary
             "reverse" if arguments.is_empty() => {
-                write!(self.output, "call 'string':'reverse'(")?;
+                write!(
+                    self.output,
+                    "call 'erlang':'list_to_binary'(call 'string':'reverse'("
+                )?;
                 self.generate_expression(receiver)?;
-                write!(self.output, ")")?;
+                write!(self.output, "))")?;
                 Ok(Some(()))
             }
 
@@ -2353,19 +2356,23 @@ impl CoreErlangGenerator {
         let is_string_literal = matches!(receiver, Expression::Literal(Literal::String(_), _));
 
         match keyword {
-            // Character access by grapheme index (1-based) - only for string literals
+            // Character access by codepoint index (1-based) - only for string literals
             // For non-literals, at: falls through to dictionary handler
+            // Returns empty string for out-of-bounds (index <= 0 or > length)
             "at:" if is_string_literal => {
-                // string:slice(String, Index-1, 1) for grapheme-aware access
                 let str_var = self.fresh_temp_var("Str");
                 let idx_var = self.fresh_temp_var("Idx");
                 write!(self.output, "let {str_var} = ")?;
                 self.generate_expression(receiver)?;
                 write!(self.output, " in let {idx_var} = ")?;
                 self.generate_expression(&arguments[0])?;
+                // Guard against index <= 0 to avoid negative slice index
                 write!(
                     self.output,
-                    " in call 'string':'slice'({str_var}, call 'erlang':'-'({idx_var}, 1), 1)"
+                    " in case call 'erlang':'=<'({idx_var}, 0) of \
+                     <'true'> when 'true' -> <<>> \
+                     <'false'> when 'true' -> call 'string':'slice'({str_var}, call 'erlang':'-'({idx_var}, 1), 1) \
+                     end"
                 )?;
                 Ok(Some(()))
             }
@@ -2411,13 +2418,17 @@ impl CoreErlangGenerator {
                 self.generate_expression(receiver)?;
                 write!(self.output, " in let {suffix_var} = ")?;
                 self.generate_expression(&arguments[0])?;
+                // Guard against suffix longer than string to avoid negative slice index
                 write!(
                     self.output,
                     " in let {str_len_var} = call 'string':'length'({str_var}) \
                      in let {suffix_len_var} = call 'string':'length'({suffix_var}) \
-                     in call 'erlang':'=:='(\
-                       call 'string':'slice'({str_var}, call 'erlang':'-'({str_len_var}, {suffix_len_var})), \
-                       {suffix_var})"
+                     in case call 'erlang':'>'({suffix_len_var}, {str_len_var}) of \
+                       <'true'> when 'true' -> 'false' \
+                       <'false'> when 'true' -> call 'erlang':'=:='(\
+                         call 'string':'slice'({str_var}, call 'erlang':'-'({str_len_var}, {suffix_len_var})), \
+                         {suffix_var}) \
+                     end"
                 )?;
                 Ok(Some(()))
             }
@@ -2611,13 +2622,14 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Handle string concatenation separately - it stays as '++'
+        // Handle string concatenation: binaries need iolist_to_binary, not ++
+        // erlang:'++' only works on lists, but Beamtalk strings are binaries
         if op == "++" {
-            write!(self.output, "call 'erlang':'++'(")?;
+            write!(self.output, "call 'erlang':'iolist_to_binary'([")?;
             self.generate_expression(left)?;
             write!(self.output, ", ")?;
             self.generate_expression(&arguments[0])?;
-            write!(self.output, ")")?;
+            write!(self.output, "])")?;
             return Ok(());
         }
 
@@ -4187,8 +4199,10 @@ end
             .expect("codegen should work");
 
         assert!(
-            generator.output.contains("call 'erlang':'++'"),
-            "Should generate erlang:++ call. Got:\n{}",
+            generator
+                .output
+                .contains("call 'erlang':'iolist_to_binary'"),
+            "Should generate iolist_to_binary call for binary concat. Got:\n{}",
             generator.output
         );
     }
@@ -4365,10 +4379,10 @@ end
             "Should generate string:slice call. Got:\n{}",
             generator.output
         );
-        // Check for 1-based to 0-based conversion
+        // Check for bounds guard against index <= 0
         assert!(
-            generator.output.contains("call 'erlang':'-'"),
-            "Should subtract 1 for 0-based indexing. Got:\n{}",
+            generator.output.contains("call 'erlang':'=<'"),
+            "Should guard against index <= 0. Got:\n{}",
             generator.output
         );
     }
@@ -4463,9 +4477,10 @@ end
             "Should generate string:slice call. Got:\n{}",
             generator.output
         );
+        // Guard against suffix longer than string
         assert!(
-            generator.output.contains("call 'string':'length'"),
-            "Should get lengths for calculation. Got:\n{}",
+            generator.output.contains("call 'erlang':'>'"),
+            "Should guard against suffix > string length. Got:\n{}",
             generator.output
         );
     }
@@ -4521,6 +4536,12 @@ end
         assert!(
             generator.output.contains("call 'string':'reverse'"),
             "Should generate string:reverse call. Got:\n{}",
+            generator.output
+        );
+        // Result must be converted back to binary
+        assert!(
+            generator.output.contains("call 'erlang':'list_to_binary'"),
+            "Should wrap in list_to_binary. Got:\n{}",
             generator.output
         );
     }
