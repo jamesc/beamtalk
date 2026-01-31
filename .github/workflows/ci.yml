@@ -197,9 +197,15 @@ jobs:
             exit 0
           fi
           
+          # Debug: show the file content
+          echo "=== code-coverage-results.md content ==="
+          cat code-coverage-results.md
+          echo "=== end of file ==="
+          
           # Extract coverage percentage from markdown table Summary row
           # Format: | **Summary** | **83%** (6635 / 8035) | **69%** (262 / 378) | 682 | ✔
           summary_line=$(grep -E '\*\*Summary\*\*' code-coverage-results.md)
+          echo "Summary line: $summary_line"
           rust_coverage=$(echo "$summary_line" | grep -oE '\*\*[0-9]+%\*\*' | head -1 | grep -oE '[0-9]+' || echo "0")
           rust_branch=$(echo "$summary_line" | grep -oE '\*\*[0-9]+%\*\*' | sed -n '2p' | grep -oE '[0-9]+' || echo "0")
           
