@@ -1345,10 +1345,8 @@ impl Parser {
             // Parse key expression (unary only - stops at `=>`, `,`, `}`)
             let key = self.parse_unary_message();
 
-            // Expect '=>' separator between key and value (can be FatArrow or BinarySelector)
-            let is_arrow = matches!(self.current_kind(), TokenKind::FatArrow)
-                || matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "=>");
-            if !is_arrow {
+            // Expect '=>' separator between key and value
+            if !matches!(self.current_kind(), TokenKind::FatArrow) {
                 let bad_token = self.advance();
                 let span = bad_token.span();
                 self.diagnostics

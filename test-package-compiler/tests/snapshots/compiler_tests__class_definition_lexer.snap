@@ -14,12 +14,16 @@ Token { kind: FatArrow, span: Span { start: 160, end: 162 }, leading_trivia: [],
 Token { kind: Identifier("self"), span: Span { start: 163, end: 167 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Period, span: Span { start: 167, end: 168 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("value"), span: Span { start: 168, end: 173 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: BinarySelector("+="), span: Span { start: 174, end: 176 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Integer("1"), span: Span { start: 177, end: 178 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("getValue"), span: Span { start: 181, end: 189 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 190, end: 192 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Caret, span: Span { start: 193, end: 194 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("self"), span: Span { start: 194, end: 198 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 198, end: 199 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("value"), span: Span { start: 199, end: 204 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 205, end: 205 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Assign, span: Span { start: 174, end: 176 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 177, end: 181 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 181, end: 182 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 182, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 188, end: 189 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 190, end: 191 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getValue"), span: Span { start: 194, end: 202 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 203, end: 205 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 206, end: 207 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 207, end: 211 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 211, end: 212 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 212, end: 217 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 218, end: 218 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

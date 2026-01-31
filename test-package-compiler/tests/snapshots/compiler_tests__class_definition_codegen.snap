@@ -27,6 +27,7 @@ module 'class_definition' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_cha
     let DefaultState = ~{
         '__class__' => 'ClassDefinition',
         '__methods__' => call 'class_definition':'method_table'()
+        , 'value' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -60,12 +61,16 @@ module 'class_definition' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_cha
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
+        <'increment'> when 'true' ->
+            let _Val1 = call 'erlang':'+'(call 'maps':'get'('value', State), 1) in let State1 = call 'maps':'put'('value', _Val1, State) in {'reply', _Val1, State1}
+        <'getValue'> when 'true' ->
+            let _ReturnValue = call 'maps':'get'('value', State) in {'reply', _ReturnValue, State}
         <_> when 'true' ->
             {'reply', {'error', 'does_not_understand'}, State}
     end
 
 
 'method_table'/0 = fun () ->
-    ~{}~
+    ~{'increment' => 0, 'getValue' => 0}~
 
 end

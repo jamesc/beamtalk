@@ -56,7 +56,7 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        CompoundAssignment {
+                        Assignment {
                             target: FieldAccess {
                                 receiver: Identifier(
                                     Identifier {
@@ -79,19 +79,51 @@ Module {
                                     end: 173,
                                 },
                             },
-                            operator: Add,
-                            value: Literal(
-                                Integer(
-                                    1,
-                                ),
-                                Span {
-                                    start: 177,
-                                    end: 178,
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 177,
+                                                end: 181,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 182,
+                                            end: 187,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 177,
+                                        end: 187,
+                                    },
                                 },
-                            ),
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 190,
+                                            end: 191,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 177,
+                                    end: 191,
+                                },
+                            },
                             span: Span {
                                 start: 163,
-                                end: 178,
+                                end: 191,
                             },
                         },
                     ],
@@ -100,7 +132,7 @@ Module {
                     kind: Primary,
                     span: Span {
                         start: 150,
-                        end: 178,
+                        end: 191,
                     },
                 },
                 MethodDefinition {
@@ -115,26 +147,26 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 194,
-                                            end: 198,
+                                            start: 207,
+                                            end: 211,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "value",
                                     span: Span {
-                                        start: 199,
-                                        end: 204,
+                                        start: 212,
+                                        end: 217,
                                     },
                                 },
                                 span: Span {
-                                    start: 194,
-                                    end: 204,
+                                    start: 207,
+                                    end: 217,
                                 },
                             },
                             span: Span {
-                                start: 193,
-                                end: 204,
+                                start: 206,
+                                end: 217,
                             },
                         },
                     ],
@@ -142,21 +174,21 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 181,
-                        end: 204,
+                        start: 194,
+                        end: 217,
                     },
                 },
             ],
             span: Span {
                 start: 104,
-                end: 204,
+                end: 217,
             },
         },
     ],
     expressions: [],
     span: Span {
         start: 104,
-        end: 204,
+        end: 217,
     },
     leading_comments: [
         Comment {
