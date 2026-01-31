@@ -2,8 +2,12 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_boolean' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'stdlib_boolean' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
+
+'start_link'/1 = fun (InitArgs) ->
+    call 'gen_server':'start_link'('stdlib_boolean', InitArgs, [])
+
 
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('stdlib_boolean', ~{}~, []) of
@@ -35,9 +39,12 @@ module 'stdlib_boolean' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_chang
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'stdlib_boolean':'dispatch'(Selector, Args, State) of
+            case call 'stdlib_boolean':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
+                    in {'noreply', NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'rejected', Error})
                     in {'noreply', NewState}
             end
     end
@@ -46,9 +53,11 @@ module 'stdlib_boolean' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_chang
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'stdlib_boolean':'dispatch'(Selector, Args, State) of
+            case call 'stdlib_boolean':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
-                    {'reply', Result, NewState}
+                    {'reply', {'ok', Result}, NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    {'reply', {'error', Error}, NewState}
             end
     end
 
@@ -58,10 +67,36 @@ module 'stdlib_boolean' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_chang
     {'ok', State}
 
 
+'terminate'/2 = fun (Reason, State) ->
+    %% Call terminate method if defined (Flavors pattern)
+    case call 'stdlib_boolean':'dispatch'('terminate', [Reason], State) of
+        <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
+        <_TermOther> when 'true' -> 'ok'
+    end
+
+
+'safe_dispatch'/3 = fun (Selector, Args, State) ->
+    try call 'stdlib_boolean':'dispatch'(Selector, Args, State)
+    of Result -> Result
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
+
+
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
-        <_> when 'true' ->
-            {'reply', {'error', 'does_not_understand'}, State}
+        <OtherSelector> when 'true' ->
+            %% Try doesNotUnderstand:args: fallback (BT-29)
+            let DnuSelector = 'doesNotUnderstand:args:' in
+            let Methods = call 'maps':'get'('__methods__', State) in
+            case call 'maps':'is_key'(DnuSelector, Methods) of
+                <'true'> when 'true' ->
+                    %% Call doesNotUnderstand:args: with [Selector, Args]
+                    call 'stdlib_boolean':'dispatch'(DnuSelector, [OtherSelector, Args], State)
+                <'false'> when 'true' ->
+                    %% No DNU handler - return unknown_message error
+                    let ClassName = call 'maps':'get'('__class__', State) in
+                    {'error', {'unknown_message', OtherSelector, ClassName}, State}
+            end
     end
 
 

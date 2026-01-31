@@ -218,5 +218,5 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`n✨ Container ready! Starting Copilot..." -ForegroundColor Green
 
-# Connect to the container and start Copilot in yolo mode
-devcontainer exec --workspace-folder $worktreePath copilot --yolo
+# Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
+devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5

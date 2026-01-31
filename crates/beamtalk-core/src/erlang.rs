@@ -227,14 +227,29 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a full module with `gen_server` behaviour.
+    ///
+    /// Per BT-29 design doc, each class generates a `gen_server` module with:
+    /// - Error isolation via `safe_dispatch/3`
+    /// - `doesNotUnderstand:args:` fallback dispatch
+    /// - `terminate/2` with method call support
+    ///
+    /// NOTE: The `#beamtalk_object{}` record is defined in `runtime/include/beamtalk.hrl`
+    /// but not yet used in generated code. Currently `spawn/0` and `spawn/1` return raw
+    /// pids. Record-based object wrappers are deferred work (requires BT-95).
     fn generate_module(&mut self, module: &Module) -> Result<()> {
-        // Module header
+        // Module header with expanded exports per BT-29
         writeln!(
             self.output,
-            "module '{}' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]",
+            "module '{}' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
+             'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, \
+             'method_table'/0, 'spawn'/0, 'spawn'/1]",
             self.module_name
         )?;
         writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
+        writeln!(self.output)?;
+
+        // Generate start_link/1 (standard gen_server entry point)
+        self.generate_start_link()?;
         writeln!(self.output)?;
 
         // Generate spawn/0 function (class method to instantiate actors)
@@ -249,11 +264,11 @@ impl CoreErlangGenerator {
         self.generate_init_function(module)?;
         writeln!(self.output)?;
 
-        // Generate handle_cast/2 function
+        // Generate handle_cast/2 function with error handling
         self.generate_handle_cast()?;
         writeln!(self.output)?;
 
-        // Generate handle_call/3 function
+        // Generate handle_call/3 function with error handling
         self.generate_handle_call()?;
         writeln!(self.output)?;
 
@@ -261,7 +276,15 @@ impl CoreErlangGenerator {
         self.generate_code_change()?;
         writeln!(self.output)?;
 
-        // Generate dispatch function
+        // Generate terminate/2 function (per BT-29)
+        self.generate_terminate(module)?;
+        writeln!(self.output)?;
+
+        // Generate safe_dispatch/3 with error isolation (per BT-29)
+        self.generate_safe_dispatch()?;
+        writeln!(self.output)?;
+
+        // Generate dispatch function with DNU fallback
         self.generate_dispatch(module)?;
         writeln!(self.output)?;
 
@@ -327,6 +350,32 @@ impl CoreErlangGenerator {
 
         // Module end
         writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates the `start_link/1` function for supervised `gen_server` startup.
+    ///
+    /// This is the standard OTP entry point for starting a supervised `gen_server`.
+    /// It calls `gen_server:start_link/3` directly with the provided init args.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'start_link'/1 = fun (InitArgs) ->
+    ///     call 'gen_server':'start_link'('module_name', InitArgs, [])
+    /// ```
+    fn generate_start_link(&mut self) -> Result<()> {
+        writeln!(self.output, "'start_link'/1 = fun (InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call 'gen_server':'start_link'('{}', InitArgs, [])",
+            self.module_name
+        )?;
+        self.indent -= 1;
+        writeln!(self.output)?;
 
         Ok(())
     }
@@ -489,6 +538,9 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.
+    ///
+    /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
+    /// sends `{resolved, Result}` or `{rejected, Error}` to the `FuturePid`.
     fn generate_handle_cast(&mut self) -> Result<()> {
         writeln!(self.output, "'handle_cast'/2 = fun (Msg, State) ->")?;
         self.indent += 1;
@@ -502,12 +554,14 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
+        // Use safe_dispatch for error isolation per BT-29
         writeln!(
             self.output,
-            "case call '{}':'dispatch'(Selector, Args, State) of",
+            "case call '{}':'safe_dispatch'(Selector, Args, State) of",
             self.module_name
         )?;
         self.indent += 1;
+        // Success case: resolve the future
         self.write_indent()?;
         writeln!(
             self.output,
@@ -518,6 +572,18 @@ impl CoreErlangGenerator {
         writeln!(
             self.output,
             "let _Ignored = call 'erlang':'!'(FuturePid, {{'resolved', Result}})"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "in {{'noreply', NewState}}")?;
+        self.indent -= 1;
+        // Error case: reject the future (error isolation - don't crash the instance)
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', Error, NewState}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let _Ignored = call 'erlang':'!'(FuturePid, {{'rejected', Error}})"
         )?;
         self.write_indent()?;
         writeln!(self.output, "in {{'noreply', NewState}}")?;
@@ -534,6 +600,9 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `handle_call/3` callback for sync message sends.
+    ///
+    /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
+    /// returns `{ok, Result}` or `{error, Error}` tuples.
     fn generate_handle_call(&mut self) -> Result<()> {
         writeln!(self.output, "'handle_call'/3 = fun (Msg, _From, State) ->")?;
         self.indent += 1;
@@ -544,12 +613,14 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{Selector, Args}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
+        // Use safe_dispatch for error isolation per BT-29
         writeln!(
             self.output,
-            "case call '{}':'dispatch'(Selector, Args, State) of",
+            "case call '{}':'safe_dispatch'(Selector, Args, State) of",
             self.module_name
         )?;
         self.indent += 1;
+        // Success case: return {ok, Result}
         self.write_indent()?;
         writeln!(
             self.output,
@@ -557,7 +628,14 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "{{'reply', Result, NewState}}")?;
+        writeln!(self.output, "{{'reply', {{'ok', Result}}, NewState}}")?;
+        self.indent -= 1;
+        // Error case: return {error, Error}
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', Error, NewState}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', {{'error', Error}}, NewState}}")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -587,7 +665,112 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates the `terminate/2` callback for `gen_server` shutdown.
+    ///
+    /// Per BT-29 design doc, this calls the `terminate` method if defined.
+    /// Instance tracking cleanup (BT-96) is automatic via process monitor.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'terminate'/2 = fun (Reason, State) ->
+    ///     %% Call terminate method if defined
+    ///     case call 'module':'dispatch'('terminate', [Reason], State) of
+    ///         <{'reply', _Result, _State}> when 'true' -> 'ok'
+    ///         <_Other> when 'true' -> 'ok'
+    ///     end
+    /// ```
+    fn generate_terminate(&mut self, _module: &Module) -> Result<()> {
+        writeln!(self.output, "'terminate'/2 = fun (Reason, State) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Call terminate method if defined (Flavors pattern)"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call '{}':'dispatch'('terminate', [Reason], State) of",
+            self.module_name
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        // Core Erlang doesn't allow duplicate _ patterns, use unique ignored vars
+        writeln!(
+            self.output,
+            "<{{'reply', _TermResult, _TermState}}> when 'true' -> 'ok'"
+        )?;
+        self.write_indent()?;
+        // dispatch returns 3-tuple {'error', Error, State}, not 2-tuple
+        writeln!(
+            self.output,
+            "<{{'error', _TermError, _TermState2}}> when 'true' -> 'ok'"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "<_TermOther> when 'true' -> 'ok'")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `safe_dispatch/3` function with error isolation.
+    ///
+    /// Per BT-29 design doc (following LFE Flavors pattern), errors in method
+    /// dispatch are caught and returned to the caller rather than crashing
+    /// the actor instance.
+    ///
+    /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
+    /// Stacktrace is captured but not returned to caller to prevent information leakage.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
+    ///     try call 'module':'dispatch'(Selector, Args, State)
+    ///     of Result -> Result
+    ///     catch <Type, Error, _Stacktrace> ->
+    ///         {'error', {Type, Error}, State}
+    /// ```
+    fn generate_safe_dispatch(&mut self) -> Result<()> {
+        writeln!(
+            self.output,
+            "'safe_dispatch'/3 = fun (Selector, Args, State) ->"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        // Core Erlang try uses simple variable patterns in of/catch, not case-style <Pattern> when Guard
+        writeln!(
+            self.output,
+            "try call '{}':'dispatch'(Selector, Args, State)",
+            self.module_name
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "of Result -> Result")?;
+        self.write_indent()?;
+        // Capture but don't return stacktrace to prevent information leakage to callers
+        writeln!(
+            self.output,
+            "catch <Type, Error, _Stacktrace> -> {{'error', {{Type, Error}}, State}}"
+        )?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
     /// Generates the dispatch/3 function for message routing.
+    ///
+    /// This function is complex because it handles both legacy expression-based modules
+    /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "dispatch codegen is inherently complex"
+    )]
     fn generate_dispatch(&mut self, module: &Module) -> Result<()> {
         writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, State) ->")?;
         self.indent += 1;
@@ -667,15 +850,67 @@ impl CoreErlangGenerator {
             self.generate_class_method_dispatches(class)?;
         }
 
-        // Default case for unknown messages
+        // Default case for unknown messages - try doesNotUnderstand:args: first (per BT-29)
         self.write_indent()?;
-        writeln!(self.output, "<_> when 'true' ->")?;
+        writeln!(self.output, "<OtherSelector> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
-            "{{'reply', {{'error', 'does_not_understand'}}, State}}"
+            "%% Try doesNotUnderstand:args: fallback (BT-29)"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let DnuSelector = 'doesNotUnderstand:args:' in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Methods = call 'maps':'get'('__methods__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'maps':'is_key'(DnuSelector, Methods) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Call doesNotUnderstand:args: with [Selector, Args]"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{}':'dispatch'(DnuSelector, [OtherSelector, Args], State)",
+            self.module_name
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% No DNU handler - return unknown_message error"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassName = call 'maps':'get'('__class__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'error', {{'unknown_message', OtherSelector, ClassName}}, State}}"
+        )?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
