@@ -237,6 +237,14 @@ try {
     Write-Host ""
     $deleteBranch = Read-Host "Delete local branch '$Branch'? (y/N)"
     if ($deleteBranch -eq 'y' -or $deleteBranch -eq 'Y') {
+        # Update main branch to check against latest remote state
+        Write-Host "🔄 Updating main branch..." -ForegroundColor Cyan
+        git fetch origin main:main 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            # Fallback if fast-forward fails
+            git fetch origin main 2>$null
+        }
+        
         git branch -d $Branch 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "⚠️  Branch not fully merged. Force delete? (y/N)" -ForegroundColor Yellow
