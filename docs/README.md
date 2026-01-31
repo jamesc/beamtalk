@@ -38,6 +38,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 | Document | Description |
 |----------|-------------|
 | [IDE & Live Development](beamtalk-ide.md) | Smalltalk-style browser, inspector, and debugger |
+| [REPL Internals](beamtalk-repl-internals.md) | REPL architecture, session state, and evaluation flow |
 
 ### Vision & Planning
 
@@ -61,8 +62,9 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 
 1. [Architecture](beamtalk-architecture.md) — Compiler and runtime overview
 2. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
-3. [BEAM Interop](beamtalk-interop.md) — Integration with Erlang/Elixir
-4. [Testing Strategy](beamtalk-testing-strategy.md) — How we verify correctness
+3. [REPL Internals](beamtalk-repl-internals.md) — How interactive evaluation works
+4. [BEAM Interop](beamtalk-interop.md) — Integration with Erlang/Elixir
+5. [Testing Strategy](beamtalk-testing-strategy.md) — How we verify correctness
 
 ### "I want to build AI agents"
 
