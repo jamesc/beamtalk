@@ -36,8 +36,9 @@
 //! ```
 
 use crate::ast::{
-    Block, BlockParameter, CascadeMessage, Comment, CommentKind, CompoundOperator, Expression,
-    Identifier, KeywordPart, Literal, MapPair, MessageSelector, Module,
+    Block, BlockParameter, CascadeMessage, ClassDefinition, Comment, CommentKind, CompoundOperator,
+    Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector, MethodDefinition,
+    MethodKind, Module, StateDeclaration, TypeAnnotation,
 };
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -253,6 +254,7 @@ impl Parser {
     /// Parses a complete module (top-level).
     fn parse_module(&mut self) -> Module {
         let start = self.current_token().span();
+        let mut classes = Vec::new();
         let mut expressions = Vec::new();
         let mut comments = Vec::new();
 
@@ -273,16 +275,22 @@ impl Parser {
 
         // Parse statements until EOF
         while !self.is_at_end() {
-            let expr = self.parse_expression();
-            let is_error = expr.is_error();
-            expressions.push(expr);
-
-            // If we got an error, try to recover
-            if is_error {
-                self.synchronize();
+            // Check if this looks like a class definition
+            if self.is_at_class_definition() {
+                let class = self.parse_class_definition();
+                classes.push(class);
             } else {
-                // Optional statement terminator
-                self.match_token(&TokenKind::Period);
+                let expr = self.parse_expression();
+                let is_error = expr.is_error();
+                expressions.push(expr);
+
+                // If we got an error, try to recover
+                if is_error {
+                    self.synchronize();
+                } else {
+                    // Optional statement terminator
+                    self.match_token(&TokenKind::Period);
+                }
             }
         }
 
@@ -294,7 +302,481 @@ impl Parser {
         };
         let span = start.merge(end);
 
-        Module::with_comments(expressions, span, comments)
+        Module {
+            classes,
+            expressions,
+            span,
+            leading_comments: comments,
+        }
+    }
+
+    /// Checks if the current position looks like the start of a class definition.
+    ///
+    /// Class definitions follow the pattern:
+    /// - `abstract? sealed? <Superclass> subclass: <ClassName>`
+    ///
+    /// We look ahead to detect the `subclass:` keyword.
+    fn is_at_class_definition(&self) -> bool {
+        let mut offset = 0;
+
+        // Skip optional `abstract` or `sealed` modifiers
+        while let Some(kind) = self.peek_at(offset) {
+            match kind {
+                TokenKind::Identifier(name) if name == "abstract" || name == "sealed" => {
+                    offset += 1;
+                }
+                _ => break,
+            }
+        }
+
+        // Expect superclass name (identifier)
+        if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+            return false;
+        }
+        offset += 1;
+
+        // Expect `subclass:` keyword
+        matches!(self.peek_at(offset), Some(TokenKind::Keyword(k)) if k == "subclass:")
+    }
+
+    /// Peeks at a token at the given offset from current position.
+    fn peek_at(&self, offset: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.current + offset).map(Token::kind)
+    }
+
+    // ========================================================================
+    // Class Definition Parsing
+    // ========================================================================
+
+    /// Parses a class definition.
+    ///
+    /// Syntax:
+    /// ```text
+    /// abstract? sealed? <Superclass> subclass: <ClassName>
+    ///   state: fieldName = defaultValue
+    ///   state: fieldName: TypeName = defaultValue
+    ///
+    ///   methodName => body
+    ///   before methodName => body
+    ///   after methodName => body
+    ///   around methodName => body
+    ///   sealed methodName => body
+    /// ```
+    fn parse_class_definition(&mut self) -> ClassDefinition {
+        let start = self.current_token().span();
+        let mut is_abstract = false;
+        let mut is_sealed = false;
+
+        // Parse optional modifiers: abstract, sealed
+        while let TokenKind::Identifier(name) = self.current_kind() {
+            if name == "abstract" {
+                is_abstract = true;
+                self.advance();
+            } else if name == "sealed" {
+                is_sealed = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        // Parse superclass name
+        let superclass = self.parse_identifier("Expected superclass name");
+
+        // Expect `subclass:` keyword
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "subclass:") {
+            self.error("Expected 'subclass:' keyword");
+            return ClassDefinition::new(
+                Identifier::new("Error", start),
+                superclass,
+                Vec::new(),
+                Vec::new(),
+                start,
+            );
+        }
+        self.advance(); // consume `subclass:`
+
+        // Parse class name
+        let name = self.parse_identifier("Expected class name");
+
+        // Parse class body (state declarations and methods)
+        let (state, methods) = self.parse_class_body();
+
+        let end = if !methods.is_empty() {
+            methods.last().unwrap().span
+        } else if !state.is_empty() {
+            state.last().unwrap().span
+        } else {
+            name.span
+        };
+        let span = start.merge(end);
+
+        ClassDefinition::with_modifiers(
+            name,
+            superclass,
+            is_abstract,
+            is_sealed,
+            state,
+            methods,
+            span,
+        )
+    }
+
+    /// Helper to parse an identifier, reporting an error if not found.
+    fn parse_identifier(&mut self, error_message: &str) -> Identifier {
+        if let TokenKind::Identifier(name) = self.current_kind() {
+            let span = self.current_token().span();
+            let ident = Identifier::new(name.clone(), span);
+            self.advance();
+            ident
+        } else {
+            let span = self.current_token().span();
+            self.error(error_message);
+            Identifier::new("Error", span)
+        }
+    }
+
+    /// Parses the body of a class (state declarations and methods).
+    ///
+    /// State declarations start with `state:`.
+    /// Methods are identified by having a `=>` somewhere.
+    fn parse_class_body(&mut self) -> (Vec<StateDeclaration>, Vec<MethodDefinition>) {
+        let mut state = Vec::new();
+        let mut methods = Vec::new();
+
+        // Skip any periods/statement terminators
+        while self.match_token(&TokenKind::Period) {}
+
+        while !self.is_at_end() && !self.is_at_class_definition() {
+            // Check for state declaration: `state: fieldName ...`
+            if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
+                if let Some(state_decl) = self.parse_state_declaration() {
+                    state.push(state_decl);
+                }
+            }
+            // Check for method definition (with optional modifiers)
+            else if self.is_at_method_definition() {
+                if let Some(method) = self.parse_method_definition() {
+                    methods.push(method);
+                }
+            } else {
+                // Not a state or method - end of class body
+                break;
+            }
+
+            // Skip any periods/statement terminators
+            while self.match_token(&TokenKind::Period) {}
+        }
+
+        (state, methods)
+    }
+
+    /// Checks if the current position is at the start of a method definition.
+    ///
+    /// Methods can start with:
+    /// - An identifier followed directly by `=>` (unary method)
+    /// - A binary selector followed by identifier and `=>` (binary method)
+    /// - Keywords followed by identifiers and eventually `=>` (keyword method)
+    /// - `before`, `after`, `around`, `sealed` followed by one of the above
+    fn is_at_method_definition(&self) -> bool {
+        let mut offset = 0;
+
+        // Skip optional modifiers: before, after, around, sealed
+        while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
+            if matches!(name.as_str(), "before" | "after" | "around" | "sealed") {
+                offset += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Check for method selector pattern followed by =>
+        match self.peek_at(offset) {
+            // Unary method: `identifier =>` (fat arrow must be next token)
+            Some(TokenKind::Identifier(_)) => {
+                matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
+            }
+            // Binary method: `+ other =>`
+            Some(TokenKind::BinarySelector(_)) => {
+                // Binary selector, then parameter name, then =>
+                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+                    && matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
+            }
+            // Keyword method: `at: index =>` or `at: index put: value =>`
+            Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
+            _ => false,
+        }
+    }
+
+    /// Checks if there's a keyword method definition starting at the given offset.
+    ///
+    /// Pattern: `keyword: param keyword: param ... =>`
+    fn is_keyword_method_at(&self, start_offset: usize) -> bool {
+        let mut offset = start_offset;
+
+        // Must have at least one keyword-parameter pair
+        loop {
+            // Expect keyword
+            if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
+                return false;
+            }
+            offset += 1;
+
+            // Expect parameter (identifier)
+            if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+                return false;
+            }
+            offset += 1;
+
+            // Check for => (end of method selector) or another keyword
+            match self.peek_at(offset) {
+                Some(TokenKind::FatArrow) => return true,
+                Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
+                _ => return false,
+            }
+        }
+    }
+
+    /// Parses a state declaration.
+    ///
+    /// Syntax:
+    /// - `state: fieldName`
+    /// - `state: fieldName = defaultValue`
+    /// - `state: fieldName: TypeName`
+    /// - `state: fieldName: TypeName = defaultValue`
+    fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
+        let start = self.current_token().span();
+
+        // Consume `state:`
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
+            return None;
+        }
+        self.advance();
+
+        // Parse field name and optional type annotation
+        // Two cases:
+        // 1. `state: fieldName = value` - Identifier followed by = or newline
+        // 2. `state: fieldName: Type = value` - lexed as Keyword("fieldName:") + Identifier("Type")
+        let (name, type_annotation) = match self.current_kind() {
+            // Case 2: field name with type annotation, lexed as keyword
+            TokenKind::Keyword(keyword) => {
+                // Strip the trailing colon to get the field name
+                let field_name = keyword.trim_end_matches(':');
+                let span = self.current_token().span();
+                let name_ident = Identifier::new(field_name, span);
+                self.advance();
+
+                // Parse the type name
+                let type_ann = self.parse_type_annotation();
+                (name_ident, Some(type_ann))
+            }
+            // Case 1: simple field name
+            TokenKind::Identifier(_) => {
+                let name_ident = self.parse_identifier("Expected field name after 'state:'");
+
+                // Check for optional type annotation (: TypeName)
+                let type_ann = if self.match_token(&TokenKind::Colon) {
+                    Some(self.parse_type_annotation())
+                } else {
+                    None
+                };
+                (name_ident, type_ann)
+            }
+            _ => {
+                self.error("Expected field name after 'state:'");
+                let span = self.current_token().span();
+                (Identifier::new("Error", span), None)
+            }
+        };
+
+        // Check for default value (= expression)
+        let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
+        {
+            self.advance(); // consume `=`
+            Some(self.parse_expression())
+        } else {
+            None
+        };
+
+        let end = default_value
+            .as_ref()
+            .map(Expression::span)
+            .or(type_annotation.as_ref().map(TypeAnnotation::span))
+            .unwrap_or(name.span);
+        let span = start.merge(end);
+
+        Some(StateDeclaration {
+            name,
+            type_annotation,
+            default_value,
+            span,
+        })
+    }
+
+    /// Parses a simple type annotation (identifier).
+    fn parse_type_annotation(&mut self) -> TypeAnnotation {
+        if let TokenKind::Identifier(name) = self.current_kind() {
+            let span = self.current_token().span();
+            let ident = Identifier::new(name.clone(), span);
+            self.advance();
+            TypeAnnotation::Simple(ident)
+        } else {
+            let span = self.current_token().span();
+            self.error("Expected type name");
+            TypeAnnotation::Simple(Identifier::new("Error", span))
+        }
+    }
+
+    /// Parses a method definition.
+    ///
+    /// Syntax:
+    /// - `methodName => body`
+    /// - `+ other => body`
+    /// - `at: index put: value => body`
+    /// - `before methodName => body`
+    /// - `after methodName => body`
+    /// - `around methodName => body`
+    /// - `sealed methodName => body`
+    fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
+        let start = self.current_token().span();
+        let mut method_kind = MethodKind::Primary;
+        let mut method_is_sealed = false;
+
+        // Parse optional modifiers
+        while let TokenKind::Identifier(name) = self.current_kind() {
+            match name.as_str() {
+                "before" => {
+                    method_kind = MethodKind::Before;
+                    self.advance();
+                }
+                "after" => {
+                    method_kind = MethodKind::After;
+                    self.advance();
+                }
+                "around" => {
+                    method_kind = MethodKind::Around;
+                    self.advance();
+                }
+                "sealed" => {
+                    method_is_sealed = true;
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+
+        // Parse method selector and parameters
+        let (selector, parameters) = self.parse_method_selector()?;
+
+        // Expect fat arrow
+        if !self.match_token(&TokenKind::FatArrow) {
+            self.error("Expected '=>' after method selector");
+            return None;
+        }
+
+        // Parse method body
+        let body = self.parse_method_body();
+
+        let end = body.last().map_or(start, Expression::span);
+        let span = start.merge(end);
+
+        Some(MethodDefinition::with_options(
+            selector,
+            parameters,
+            body,
+            None, // return_type - could add parsing later
+            method_is_sealed,
+            method_kind,
+            span,
+        ))
+    }
+
+    /// Parses a method selector and its parameters.
+    ///
+    /// Returns the selector and parameter names.
+    fn parse_method_selector(&mut self) -> Option<(MessageSelector, Vec<Identifier>)> {
+        match self.current_kind() {
+            // Unary method: `methodName`
+            TokenKind::Identifier(name) => {
+                let selector = MessageSelector::Unary(name.clone());
+                self.advance();
+                Some((selector, Vec::new()))
+            }
+            // Binary method: `+ other`
+            TokenKind::BinarySelector(op) => {
+                let selector = MessageSelector::Binary(op.clone());
+                self.advance();
+
+                // Parse the single parameter
+                let param = self.parse_identifier("Expected parameter name after binary selector");
+                Some((selector, vec![param]))
+            }
+            // Keyword method: `at: index put: value`
+            TokenKind::Keyword(_) => {
+                let mut keywords = Vec::new();
+                let mut parameters = Vec::new();
+
+                while let TokenKind::Keyword(keyword) = self.current_kind() {
+                    let span = self.current_token().span();
+                    keywords.push(KeywordPart::new(keyword.clone(), span));
+                    self.advance();
+
+                    // Parse parameter name
+                    let param = self.parse_identifier("Expected parameter name after keyword");
+                    parameters.push(param);
+                }
+
+                let selector = MessageSelector::Keyword(keywords);
+                Some((selector, parameters))
+            }
+            _ => {
+                self.error("Expected method selector");
+                None
+            }
+        }
+    }
+
+    /// Parses a method body (expressions until the next method or end of class).
+    ///
+    /// The body consists of expressions separated by periods.
+    fn parse_method_body(&mut self) -> Vec<Expression> {
+        let mut body = Vec::new();
+
+        // Parse expressions until we hit something that looks like a new method,
+        // state declaration, or class definition
+        while !self.is_at_end()
+            && !self.is_at_class_definition()
+            && !self.is_at_method_definition()
+            && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+        {
+            let expr = self.parse_expression();
+            let is_error = expr.is_error();
+            body.push(expr);
+
+            // If we got an error, try to recover
+            if is_error {
+                self.synchronize();
+                break;
+            }
+
+            // Period terminates the expression - check if we should continue
+            if self.match_token(&TokenKind::Period) {
+                // Check if next token starts a new method/state/class
+                if self.is_at_end()
+                    || self.is_at_class_definition()
+                    || self.is_at_method_definition()
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                {
+                    break;
+                }
+                // Otherwise continue parsing more expressions
+            } else {
+                // No period - this was the last expression in the body
+                break;
+            }
+        }
+
+        body
     }
 
     // ========================================================================
@@ -492,7 +974,10 @@ impl Parser {
         let receiver = self.parse_binary_message();
 
         // Check if this is a keyword message
-        if !matches!(self.current_kind(), TokenKind::Keyword(_)) {
+        // A newline before the keyword indicates a new statement, not a message
+        if !matches!(self.current_kind(), TokenKind::Keyword(_))
+            || self.current_token().has_leading_newline()
+        {
             return receiver;
         }
 
@@ -501,6 +986,10 @@ impl Parser {
         let mut arguments = Vec::new();
 
         while let TokenKind::Keyword(keyword) = self.current_kind() {
+            // Stop if the keyword is on a new line (start of new statement)
+            if self.current_token().has_leading_newline() && !keywords.is_empty() {
+                break;
+            }
             let span = self.current_token().span();
             keywords.push(KeywordPart::new(keyword.clone(), span));
             self.advance();
@@ -857,7 +1346,7 @@ impl Parser {
             let key = self.parse_unary_message();
 
             // Expect '=>' separator between key and value
-            if !matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "=>") {
+            if !matches!(self.current_kind(), TokenKind::FatArrow) {
                 let bad_token = self.advance();
                 let span = bad_token.span();
                 self.diagnostics
@@ -1638,5 +2127,224 @@ mod tests {
             }
             other => panic!("Expected Assignment for second expr, got {other:?}"),
         }
+    }
+
+    // ========================================================================
+    // Class Definition Parsing Tests
+    // ========================================================================
+
+    #[test]
+    fn parse_basic_class_definition() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  increment => self.value += 1
+  getValue => ^self.value",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert_eq!(class.name.name, "Counter");
+        assert_eq!(class.superclass.name, "Actor");
+        assert!(!class.is_abstract);
+        assert!(!class.is_sealed);
+        assert_eq!(class.state.len(), 1);
+        assert_eq!(class.state[0].name.name, "value");
+        assert_eq!(class.methods.len(), 2);
+        assert_eq!(class.methods[0].selector.name(), "increment");
+        assert_eq!(class.methods[1].selector.name(), "getValue");
+    }
+
+    #[test]
+    fn parse_abstract_class() {
+        let module = parse_ok(
+            "abstract Actor subclass: Collection
+  size => self subclassResponsibility",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert!(class.is_abstract);
+        assert!(!class.is_sealed);
+        assert_eq!(class.name.name, "Collection");
+        assert_eq!(class.superclass.name, "Actor");
+    }
+
+    #[test]
+    fn parse_sealed_class() {
+        let module = parse_ok(
+            "sealed Actor subclass: Point
+  state: x = 0
+  state: y = 0",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert!(!class.is_abstract);
+        assert!(class.is_sealed);
+        assert_eq!(class.name.name, "Point");
+        assert_eq!(class.state.len(), 2);
+    }
+
+    #[test]
+    fn parse_state_with_type_annotation() {
+        let module = parse_ok(
+            "Actor subclass: Person
+  state: name: String = 'unnamed'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.state.len(), 1);
+
+        let state = &class.state[0];
+        assert_eq!(state.name.name, "name");
+        assert!(state.type_annotation.is_some());
+        assert!(state.default_value.is_some());
+    }
+
+    #[test]
+    fn parse_binary_method() {
+        let module = parse_ok(
+            "Actor subclass: Number
+  + other => self.value + other",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name, "other");
+    }
+
+    #[test]
+    fn parse_keyword_method() {
+        let module = parse_ok(
+            "Actor subclass: Array
+  at: index put: value => self.storage at: index put: value",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.selector.name(), "at:put:");
+        assert_eq!(method.parameters.len(), 2);
+        assert_eq!(method.parameters[0].name, "index");
+        assert_eq!(method.parameters[1].name, "value");
+    }
+
+    #[test]
+    fn parse_sealed_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  sealed getValue => ^self.value",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert!(method.is_sealed);
+        assert_eq!(method.kind, crate::ast::MethodKind::Primary);
+    }
+
+    #[test]
+    fn parse_before_method() {
+        let module = parse_ok(
+            "Actor subclass: Agent
+  before processMessage => Telemetry log: 'processing'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.kind, crate::ast::MethodKind::Before);
+        assert_eq!(method.selector.name(), "processMessage");
+    }
+
+    #[test]
+    fn parse_after_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  after increment => self.observers notify",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.kind, crate::ast::MethodKind::After);
+    }
+
+    #[test]
+    fn parse_around_method() {
+        let module = parse_ok(
+            "Actor subclass: Cached
+  around calculate => self.cache ifNil: [self.cache := self proceed]",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.kind, crate::ast::MethodKind::Around);
+    }
+
+    #[test]
+    fn parse_class_with_mixed_content() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+  state: name: String
+
+  increment => self.value += 1
+  decrement => self.value -= 1
+
+  before increment => Telemetry log: 'incrementing'
+  after increment => self notifyObservers",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert_eq!(class.state.len(), 2);
+        assert_eq!(class.methods.len(), 4);
+
+        // Check method kinds
+        assert_eq!(class.methods[0].kind, crate::ast::MethodKind::Primary);
+        assert_eq!(class.methods[1].kind, crate::ast::MethodKind::Primary);
+        assert_eq!(class.methods[2].kind, crate::ast::MethodKind::Before);
+        assert_eq!(class.methods[3].kind, crate::ast::MethodKind::After);
+    }
+
+    #[test]
+    fn parse_multiple_classes() {
+        let module = parse_ok(
+            "Actor subclass: Point
+  state: x = 0
+  state: y = 0
+
+Actor subclass: Rectangle
+  state: origin
+  state: corner",
+        );
+
+        assert_eq!(module.classes.len(), 2);
+        assert_eq!(module.classes[0].name.name, "Point");
+        assert_eq!(module.classes[1].name.name, "Rectangle");
     }
 }

@@ -66,7 +66,10 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
-use crate::ast::{Block, Expression, Identifier, Literal, MapPair, MessageSelector, Module};
+use crate::ast::{
+    Block, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
+    MethodDefinition, MethodKind, Module,
+};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -592,7 +595,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "case Selector of")?;
         self.indent += 1;
 
-        // Generate case clause for each method in the module
+        // Generate case clause for each method in the module (legacy expression-based)
         for expr in &module.expressions {
             if let Expression::Assignment { target, value, .. } = expr {
                 if let (Expression::Identifier(id), Expression::Block(block)) =
@@ -659,6 +662,11 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Generate case clauses for methods in class definitions
+        for class in &module.classes {
+            self.generate_class_method_dispatches(class)?;
+        }
+
         // Default case for unknown messages
         self.write_indent()?;
         writeln!(self.output, "<_> when 'true' ->")?;
@@ -677,6 +685,159 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates dispatch case clauses for all methods in a class definition.
+    fn generate_class_method_dispatches(&mut self, class: &ClassDefinition) -> Result<()> {
+        for method in &class.methods {
+            // Only generate dispatch for primary methods for now
+            // TODO: Implement before/after/around method combinations
+            if method.kind != MethodKind::Primary {
+                continue;
+            }
+
+            self.generate_method_dispatch(method)?;
+        }
+        Ok(())
+    }
+
+    /// Generates a dispatch case clause for a single method definition.
+    fn generate_method_dispatch(&mut self, method: &MethodDefinition) -> Result<()> {
+        // Reset state version at the start of each method
+        self.reset_state_version();
+
+        // Push a new scope for this method's parameter bindings
+        self.push_scope();
+
+        let selector_name = method.selector.name();
+        self.write_indent()?;
+        write!(self.output, "<'{selector_name}'> when 'true' ->")?;
+        writeln!(self.output)?;
+        self.indent += 1;
+
+        // Bind method parameters from Args list
+        if !method.parameters.is_empty() {
+            self.write_indent()?;
+            write!(self.output, "case Args of")?;
+            writeln!(self.output)?;
+            self.indent += 1;
+
+            self.write_indent()?;
+            write!(self.output, "<[")?;
+            for (i, param) in method.parameters.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                let var_name = self.fresh_var(&param.name);
+                write!(self.output, "{var_name}")?;
+            }
+            write!(self.output, "]> when 'true' ->")?;
+            writeln!(self.output)?;
+            self.indent += 1;
+        }
+
+        // Generate the method body with state threading
+        self.write_indent()?;
+        self.generate_method_definition_body_with_reply(method)?;
+        writeln!(self.output)?;
+
+        if !method.parameters.is_empty() {
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+            )?;
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "end")?;
+        }
+
+        self.indent -= 1;
+
+        // Pop the scope when done with this method
+        self.pop_scope();
+
+        Ok(())
+    }
+
+    /// Generates the method body with a reply tuple for a `MethodDefinition`.
+    ///
+    /// This handles the `body: Vec<Expression>` structure of `MethodDefinition`
+    /// (as opposed to `Block` which is used for expression-based methods).
+    fn generate_method_definition_body_with_reply(
+        &mut self,
+        method: &MethodDefinition,
+    ) -> Result<()> {
+        if method.body.is_empty() {
+            // Empty method body returns nil
+            write!(
+                self.output,
+                "{{'reply', 'nil', {}}}",
+                self.current_state_var()
+            )?;
+            return Ok(());
+        }
+
+        // Generate all expressions except the last with state threading
+        for (i, expr) in method.body.iter().enumerate() {
+            let is_last = i == method.body.len() - 1;
+            let is_field_assignment = Self::is_field_assignment(expr);
+
+            // Check for early return
+            if let Expression::Return { value, .. } = expr {
+                let final_state = self.current_state_var();
+                write!(self.output, "let _ReturnValue = ")?;
+                self.generate_expression(value)?;
+                write!(self.output, " in {{'reply', _ReturnValue, {final_state}}}")?;
+                return Ok(());
+            }
+
+            if is_last {
+                // Last expression: bind to Result and generate reply tuple
+                let final_state = self.current_state_var();
+
+                // If the last expression is a field assignment, handle specially
+                if is_field_assignment {
+                    // Generate the assignment (leaves state binding open)
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            let val_var = self.fresh_temp_var("Val");
+                            let current_state = self.current_state_var();
+
+                            write!(self.output, "let {val_var} = ")?;
+                            self.generate_expression(value)?;
+
+                            let new_state = self.next_state_var();
+                            write!(
+                                self.output,
+                                " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                                field.name
+                            )?;
+
+                            // Reply tuple using the NEW state (after assignment)
+                            write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
+                        }
+                    }
+                } else {
+                    // Regular last expression: bind to Result and reply
+                    write!(self.output, "let _Result = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {{'reply', _Result, {final_state}}}")?;
+                }
+            } else if is_field_assignment {
+                // Field assignment not at end: generate WITHOUT closing the value
+                self.generate_field_assignment_open(expr)?;
+            } else {
+                // Non-field-assignment intermediate expression: wrap in let
+                let tmp_var = self.fresh_temp_var("seq");
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                write!(self.output, " in ")?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Generates the `method_table/0` function.
     fn generate_method_table(&mut self, module: &Module) -> Result<()> {
         writeln!(self.output, "'method_table'/0 = fun () ->")?;
@@ -684,7 +845,8 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         write!(self.output, "~{{")?;
 
-        let methods: Vec<_> = module
+        // Collect methods from expression-based definitions (legacy)
+        let mut methods: Vec<(String, usize)> = module
             .expressions
             .iter()
             .filter_map(|expr| {
@@ -692,12 +854,22 @@ impl CoreErlangGenerator {
                     if let (Expression::Identifier(id), Expression::Block(block)) =
                         (target.as_ref(), value.as_ref())
                     {
-                        return Some((id.name.as_str(), block.arity()));
+                        return Some((id.name.to_string(), block.arity()));
                     }
                 }
                 None
             })
             .collect();
+
+        // Collect methods from class definitions
+        for class in &module.classes {
+            for method in &class.methods {
+                // Only include primary methods in the method table for now
+                if method.kind == MethodKind::Primary {
+                    methods.push((method.selector.name().to_string(), method.selector.arity()));
+                }
+            }
+        }
 
         for (i, (name, arity)) in methods.iter().enumerate() {
             if i > 0 {
@@ -2208,6 +2380,22 @@ impl CoreErlangGenerator {
                 }
             }
         }
+
+        // Initialize fields from class state declarations
+        for class in &module.classes {
+            for state in &class.state {
+                self.write_indent()?;
+                write!(self.output, ", '{}' => ", state.name.name)?;
+                if let Some(ref default_value) = state.default_value {
+                    self.generate_expression(default_value)?;
+                } else {
+                    // No default value - initialize to nil
+                    write!(self.output, "'nil'")?;
+                }
+                writeln!(self.output)?;
+            }
+        }
+
         Ok(())
     }
 }

@@ -109,6 +109,9 @@ pub enum TokenKind {
     /// which stores the symbol name without the leading `#`.
     Hash,
 
+    /// Fat arrow for method definitions: `=>`
+    FatArrow,
+
     // === Special ===
     /// End of file
     Eof,
@@ -202,6 +205,7 @@ impl TokenKind {
             | Self::Pipe
             | Self::Colon
             | Self::Hash
+            | Self::FatArrow
             | Self::Eof => None,
         }
     }
@@ -237,6 +241,7 @@ impl std::fmt::Display for TokenKind {
             Self::Pipe => write!(f, "|"),
             Self::Colon => write!(f, ":"),
             Self::Hash => write!(f, "#"),
+            Self::FatArrow => write!(f, "=>"),
             Self::Eof => write!(f, "<eof>"),
         }
     }
