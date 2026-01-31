@@ -164,7 +164,9 @@ REPL uses the same codegen path, so operator support matches codegen.
 
 ## Recommendations
 
-### Short-term (BT-128)
+### Short-term (BT-135)
+
+**Issue Created:** [BT-135: Add parser support for missing binary operators](https://linear.app/beamtalk/issue/BT-135)
 
 1. **Add parser support for `==`** - Lexer already tokenizes it
 2. **Remove or complete `**`** - Either add lexer/parser or remove codegen
