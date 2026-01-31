@@ -225,8 +225,9 @@ Helper scripts are in `scripts/`:
 
 | Script | Purpose |
 |--------|--------|
-| `worktree-new.ps1` / `worktree-new.sh` | Create a worktree and start a devcontainer |
-| `worktree-rm.ps1` / `worktree-rm.sh` | Clean up a worktree (handles container path fixups) |
+| `worktree-new.ps1` / `linux/worktree-new.sh` | Create a worktree and start a devcontainer |
+| `worktree-rm.ps1` / `linux/worktree-rm.sh` | Clean up a worktree and stop its devcontainer |
+| `cleanup-orphaned-containers.ps1` / `linux/cleanup-orphaned-containers.sh` | Remove containers for deleted worktrees |
 
 ### Creating a Worktree
 
@@ -237,7 +238,7 @@ Helper scripts are in `scripts/`:
 
 **Linux/Mac:**
 ```bash
-./scripts/worktree-new.sh BT-99-feature-name
+./scripts/linux/worktree-new.sh BT-99-feature-name
 ```
 
 This will:
@@ -255,7 +256,31 @@ This will:
 
 **Linux/Mac:**
 ```bash
-./scripts/worktree-rm.sh BT-99-feature-name
+./scripts/linux/worktree-rm.sh BT-99-feature-name
+```
+
+This will:
+1. Stop and remove the devcontainer for the worktree
+2. Remove the associated Docker volume (target cache)
+3. Fix any container path issues in `.git` file
+4. Remove the worktree directory
+5. Optionally delete the branch
+
+### Cleaning Up Orphaned Containers
+
+If you have containers from worktrees that were deleted without using `worktree-rm`, use the cleanup script:
+
+**Windows:**
+```powershell
+.\scripts\cleanup-orphaned-containers.ps1        # Interactive
+.\scripts\cleanup-orphaned-containers.ps1 -DryRun # Preview only
+.\scripts\cleanup-orphaned-containers.ps1 -NoConfirm # Auto-confirm
+```
+
+**Linux/Mac:**
+```bash
+./scripts/linux/cleanup-orphaned-containers.sh         # Interactive
+./scripts/linux/cleanup-orphaned-containers.sh --dry-run # Preview only
 ```
 
 This handles a special case: when a worktree has been used with devcontainers, the `.git` file gets modified to point to container paths (`/workspaces/...`). The script fixes this before removal.
