@@ -388,6 +388,64 @@ runtime/test/
 └── ...
 ```
 
+### Serial Test Locks
+
+Tests that manipulate process-global state (environment variables, current working directory, shared filesystem state) must use named `serial_test` locks to prevent conflicts while allowing parallelism between non-conflicting tests.
+
+**Lock naming guidelines:**
+
+| Lock Name | Use When | Example |
+|-----------|----------|---------|
+| `erlang_runtime` | Running rebar3/erlc in runtime/ directory | Build/compile operations |
+| `e2e` | Full E2E test with escript compilation | End-to-end language tests |
+| `env_var` | Modifying environment variables | `std::env::set_var`, `std::env::remove_var` |
+| `cwd` | Changing current working directory | `std::env::set_current_dir` |
+| `daemon_lockfile` | Manipulating `~/.beamtalk/` directory | Daemon state management |
+
+**Why named locks?**
+
+Previously, all serialized tests used `#[serial_test::serial]`, which serialized *all* marked tests together. This reduced parallelism unnecessarily. For example, tests that manipulated environment variables would serialize with tests that changed the working directory, even though these operations don't conflict.
+
+Named locks (e.g., `#[serial(env_var)]`) only serialize tests that actually conflict with each other. Tests in different groups can run in parallel, reducing CI time.
+
+**Example:**
+
+```rust
+use serial_test::serial;
+
+/// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
+/// environment variable, which is process-global state.
+#[test]
+#[serial(env_var)]
+fn test_env_modification() {
+    unsafe { std::env::set_var("BEAMTALK_RUNTIME_DIR", "/tmp") };
+    // ... test code ...
+    unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
+}
+
+/// Uses `#[serial(cwd)]` because it changes the current working directory
+/// (process-global state) using `std::env::set_current_dir`.
+#[test]
+#[serial(cwd)]
+fn test_directory_change() {
+    let original = std::env::current_dir().unwrap();
+    std::env::set_current_dir("/tmp").unwrap();
+    // ... test code ...
+    std::env::set_current_dir(original).unwrap();
+}
+
+// These two tests can run in parallel because they use different locks
+```
+
+**Guidelines for adding new serial tests:**
+
+1. **Always use a named lock** - Never use unnamed `#[serial]`
+2. **Document why** - Add a doc comment explaining what global state is being manipulated
+3. **Choose the right lock** - If manipulating a new type of global state, create a new lock name
+4. **Keep locks focused** - Don't overload a lock name; create specific locks for specific conflicts
+
+See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation details of the named lock system.
+
 ### Test Fixtures
 - Erlang: `test_*.erl` in `runtime/test/` for reusable actors
 - Beamtalk: `test-package-compiler/cases/*/main.bt` for compiler test inputs

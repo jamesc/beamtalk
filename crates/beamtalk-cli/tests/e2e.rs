@@ -584,8 +584,10 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 }
 
 /// Main E2E test entry point.
+/// Uses `#[serial(e2e)]` to prevent parallel E2E test runs that compile
+/// Beamtalk files and run escript, which can conflict with shared build artifacts.
 #[test]
-#[serial]
+#[serial(e2e)]
 fn e2e_language_tests() {
     // Check if test cases directory exists
     let cases_dir = test_cases_dir();

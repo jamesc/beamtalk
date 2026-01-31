@@ -650,8 +650,10 @@ mod tests {
         assert_eq!(format_value(&value), "(1, hello)");
     }
 
+    /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
+    /// environment variable, which is process-global state.
     #[test]
-    #[serial]
+    #[serial(env_var)]
     fn find_runtime_dir_respects_env_var() {
         // Create a temp directory with the expected structure (needs rebar.config)
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime");
@@ -672,8 +674,10 @@ mod tests {
         assert_eq!(result.unwrap(), temp_dir);
     }
 
+    /// Uses `#[serial(env_var)]` because it modifies the `BEAMTALK_RUNTIME_DIR`
+    /// environment variable, which is process-global state.
     #[test]
-    #[serial]
+    #[serial(env_var)]
     fn find_runtime_dir_env_var_requires_rebar_config() {
         // Create a temp directory WITHOUT rebar.config
         let temp_dir = std::env::temp_dir().join("beamtalk_test_runtime_no_rebar");

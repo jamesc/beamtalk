@@ -115,8 +115,10 @@ mod tests {
     use serial_test::serial;
     use tempfile::TempDir;
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_directory() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project";
@@ -135,8 +137,10 @@ mod tests {
         assert!(project_path.is_dir());
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_src_directory() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_src";
@@ -154,8 +158,10 @@ mod tests {
         assert!(src_path.is_dir());
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_beamtalk_toml() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_toml";
@@ -177,8 +183,10 @@ mod tests {
         assert!(content.contains("version = \"0.1.0\""));
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_main_bt() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_main";
@@ -199,8 +207,10 @@ mod tests {
         assert!(content.contains("Transcript show:"));
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_readme() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_readme";
@@ -220,8 +230,10 @@ mod tests {
         assert!(content.contains(&format!("# {project_name}")));
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_creates_gitignore() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_gitignore";
@@ -243,8 +255,10 @@ mod tests {
         assert!(content.contains("*.core"));
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_fails_if_directory_exists() {
         let temp = TempDir::new().unwrap();
         let project_name = "test_project_exists";
@@ -263,8 +277,10 @@ mod tests {
         std::env::set_current_dir(original_dir).unwrap();
     }
 
+    /// Uses `#[serial(cwd)]` because it changes the current working directory
+    /// (process-global state) using `std::env::set_current_dir`.
     #[test]
-    #[serial]
+    #[serial(cwd)]
     fn test_new_project_with_special_characters() {
         let temp = TempDir::new().unwrap();
         let project_name = "my-cool_project123";
