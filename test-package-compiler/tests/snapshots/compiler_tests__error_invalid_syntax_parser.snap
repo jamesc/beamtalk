@@ -1,0 +1,130 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "x",
+                    span: Span {
+                        start: 179,
+                        end: 180,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Unexpected token: expected expression, found :=",
+                span: Span {
+                    start: 184,
+                    end: 186,
+                },
+            },
+            span: Span {
+                start: 179,
+                end: 186,
+            },
+        },
+        Literal(
+            Integer(
+                5,
+            ),
+            Span {
+                start: 187,
+                end: 188,
+            },
+        ),
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "y",
+                    span: Span {
+                        start: 209,
+                        end: 210,
+                    },
+                },
+            ),
+            value: Error {
+                message: "Invalid assignment target",
+                span: Span {
+                    start: 214,
+                    end: 251,
+                },
+            },
+            span: Span {
+                start: 209,
+                end: 251,
+            },
+        },
+        Identifier(
+            Identifier {
+                name: "value",
+                span: Span {
+                    start: 255,
+                    end: 260,
+                },
+            },
+        ),
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 306,
+                end: 365,
+            },
+        },
+    ],
+    span: Span {
+        start: 179,
+        end: 372,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test error recovery: invalid syntax",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Parser should create error nodes and continue",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Unexpected token",
+            span: Span {
+                start: 179,
+                end: 180,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 184, end: 186 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 214, end: 251 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 306, end: 365 } }

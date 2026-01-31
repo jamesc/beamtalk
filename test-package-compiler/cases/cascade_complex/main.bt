@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test complex cascade scenarios
+// Multiple cascaded messages with different types
+
+// Cascade with unary, binary, and keyword messages
+counter := Counter new
+counter 
+    increment;
+    increment;
+    getValue
+
+// Cascade with keyword messages
+object
+    at: 'key1' put: value1;
+    at: 'key2' put: value2;
+    at: 'key3' put: value3
+
+// Nested cascade (cascade result used in another message)
+result := (array 
+    add: 1;
+    add: 2;
+    size)
+
+// Cascade with blocks
+processor
+    with: [:x | x + 1];
+    with: [:x | x * 2];
+    execute

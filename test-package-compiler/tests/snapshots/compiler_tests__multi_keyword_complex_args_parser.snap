@@ -1,0 +1,593 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "array",
+                    span: Span {
+                        start: 189,
+                        end: 194,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "with:",
+                        span: Span {
+                            start: 195,
+                            end: 200,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "and:",
+                        span: Span {
+                            start: 214,
+                            end: 218,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "x",
+                                span: Span {
+                                    start: 203,
+                                    end: 204,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 207,
+                                            end: 208,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 211,
+                                            end: 212,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 207,
+                                    end: 212,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 201,
+                            end: 213,
+                        },
+                    },
+                ),
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "y",
+                                span: Span {
+                                    start: 221,
+                                    end: 222,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "y",
+                                        span: Span {
+                                            start: 225,
+                                            end: 226,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 229,
+                                            end: 230,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 225,
+                                    end: 230,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 219,
+                            end: 231,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 189,
+                end: 231,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "calculator",
+                    span: Span {
+                        start: 262,
+                        end: 272,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "compute:",
+                        span: Span {
+                            start: 273,
+                            end: 281,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "with:",
+                        span: Span {
+                            start: 292,
+                            end: 297,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            2,
+                        ),
+                        Span {
+                            start: 282,
+                            end: 283,
+                        },
+                    ),
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        MessageSend {
+                            receiver: Literal(
+                                Integer(
+                                    3,
+                                ),
+                                Span {
+                                    start: 286,
+                                    end: 287,
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        4,
+                                    ),
+                                    Span {
+                                        start: 290,
+                                        end: 291,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 286,
+                                end: 291,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 282,
+                        end: 291,
+                    },
+                },
+                MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 298,
+                            end: 300,
+                        },
+                    ),
+                    selector: Binary(
+                        "-",
+                    ),
+                    arguments: [
+                        MessageSend {
+                            receiver: Literal(
+                                Integer(
+                                    5,
+                                ),
+                                Span {
+                                    start: 303,
+                                    end: 304,
+                                },
+                            ),
+                            selector: Binary(
+                                "/",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 307,
+                                        end: 308,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 303,
+                                end: 308,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 298,
+                        end: 308,
+                    },
+                },
+            ],
+            span: Span {
+                start: 262,
+                end: 308,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "server",
+                    span: Span {
+                        start: 330,
+                        end: 336,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "connect:",
+                        span: Span {
+                            start: 337,
+                            end: 345,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "port:",
+                        span: Span {
+                            start: 358,
+                            end: 363,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "timeout:",
+                        span: Span {
+                            start: 378,
+                            end: 386,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Literal(
+                    String(
+                        "localhost",
+                    ),
+                    Span {
+                        start: 346,
+                        end: 357,
+                    },
+                ),
+                MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            8080,
+                        ),
+                        Span {
+                            start: 364,
+                            end: 368,
+                        },
+                    ),
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Identifier(
+                            Identifier {
+                                name: "offset",
+                                span: Span {
+                                    start: 371,
+                                    end: 377,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 364,
+                        end: 377,
+                    },
+                },
+                MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "maxTime",
+                            span: Span {
+                                start: 387,
+                                end: 394,
+                            },
+                        },
+                    ),
+                    selector: Binary(
+                        "*",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 397,
+                                end: 398,
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 387,
+                        end: 398,
+                    },
+                },
+            ],
+            span: Span {
+                start: 330,
+                end: 398,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "processor",
+                    span: Span {
+                        start: 431,
+                        end: 440,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "transform:",
+                        span: Span {
+                            start: 441,
+                            end: 451,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "range:",
+                        span: Span {
+                            start: 470,
+                            end: 476,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "to:",
+                        span: Span {
+                            start: 483,
+                            end: 486,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "step:",
+                        span: Span {
+                            start: 501,
+                            end: 506,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "x",
+                                span: Span {
+                                    start: 454,
+                                    end: 455,
+                                },
+                            },
+                        ],
+                        body: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 458,
+                                            end: 459,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "factor",
+                                            span: Span {
+                                                start: 462,
+                                                end: 468,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 458,
+                                    end: 468,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 452,
+                            end: 469,
+                        },
+                    },
+                ),
+                Identifier(
+                    Identifier {
+                        name: "start",
+                        span: Span {
+                            start: 477,
+                            end: 482,
+                        },
+                    },
+                ),
+                MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "start",
+                            span: Span {
+                                start: 487,
+                                end: 492,
+                            },
+                        },
+                    ),
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Identifier(
+                            Identifier {
+                                name: "count",
+                                span: Span {
+                                    start: 495,
+                                    end: 500,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 487,
+                        end: 500,
+                    },
+                },
+                MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "increment",
+                            span: Span {
+                                start: 507,
+                                end: 516,
+                            },
+                        },
+                    ),
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 519,
+                                end: 520,
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 507,
+                        end: 520,
+                    },
+                },
+            ],
+            span: Span {
+                start: 431,
+                end: 520,
+            },
+        },
+    ],
+    span: Span {
+        start: 189,
+        end: 520,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 189,
+                end: 194,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 189,
+                end: 194,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test multi-keyword messages with complex arguments",
+            span: Span {
+                start: 189,
+                end: 194,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Each argument can be a complex expression",
+            span: Span {
+                start: 189,
+                end: 194,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Block arguments",
+            span: Span {
+                start: 189,
+                end: 194,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test comment handling
+// Comments should be preserved as trivia
+
+// Single line comment
+x := 5 // inline comment
+
+// Multiple comments
+// Comment line 1
+// Comment line 2
+y := 10
+
+// Comment between expressions
+a := 1
+// Middle comment
+b := 2
+
+// Comment in message send
+object // comment here
+    message: value // and here
+
+// Block with comments
+block := [
+    // Inside block
+    42
+]
+
+// Commented out code (still comments)
+// x := 999
+// y := 888
