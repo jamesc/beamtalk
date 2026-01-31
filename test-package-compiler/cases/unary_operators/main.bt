@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test all unary operators/messages for compilation verification
+// Comprehensive coverage of unary operations supported in Core Erlang codegen
+
+// ===== Integer Unary Operations =====
+// Negation
+negatedNum := 5 negated  // Should generate: call 'erlang':'-'(0, 5)
+
+// Absolute value
+absValue := (-10) abs  // Should generate case expression for abs
+
+// Zero test
+isZero1 := 0 isZero
+isZero2 := 42 isZero
+
+// Even/Odd tests
+evenCheck := 4 isEven
+oddCheck := 7 isOdd
+
+// ===== Boolean Unary Operations =====
+// Logical NOT
+notTrue := true not
+notFalse := false not
+
+// ===== Complex Unary Expressions =====
+// Chained unary messages
+chained := 5 negated abs
+
+// Unary in conditional
+result := (counter isZero) ifTrue: [0] ifFalse: [counter]
+
+// Unary with block parameter
+blockUnary := [:x | x negated]

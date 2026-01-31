@@ -1,0 +1,545 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "negatedNum",
+                    span: Span {
+                        start: 268,
+                        end: 278,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        5,
+                    ),
+                    Span {
+                        start: 282,
+                        end: 283,
+                    },
+                ),
+                selector: Unary(
+                    "negated",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 282,
+                    end: 291,
+                },
+            },
+            span: Span {
+                start: 268,
+                end: 291,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "absValue",
+                    span: Span {
+                        start: 356,
+                        end: 364,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Parenthesized {
+                    expression: Literal(
+                        Integer(
+                            -10,
+                        ),
+                        Span {
+                            start: 369,
+                            end: 372,
+                        },
+                    ),
+                    span: Span {
+                        start: 368,
+                        end: 373,
+                    },
+                },
+                selector: Unary(
+                    "abs",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 368,
+                    end: 377,
+                },
+            },
+            span: Span {
+                start: 356,
+                end: 377,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isZero1",
+                    span: Span {
+                        start: 436,
+                        end: 443,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        0,
+                    ),
+                    Span {
+                        start: 447,
+                        end: 448,
+                    },
+                ),
+                selector: Unary(
+                    "isZero",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 447,
+                    end: 455,
+                },
+            },
+            span: Span {
+                start: 436,
+                end: 455,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "isZero2",
+                    span: Span {
+                        start: 456,
+                        end: 463,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        42,
+                    ),
+                    Span {
+                        start: 467,
+                        end: 469,
+                    },
+                ),
+                selector: Unary(
+                    "isZero",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 467,
+                    end: 476,
+                },
+            },
+            span: Span {
+                start: 456,
+                end: 476,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "evenCheck",
+                    span: Span {
+                        start: 496,
+                        end: 505,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        4,
+                    ),
+                    Span {
+                        start: 509,
+                        end: 510,
+                    },
+                ),
+                selector: Unary(
+                    "isEven",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 509,
+                    end: 517,
+                },
+            },
+            span: Span {
+                start: 496,
+                end: 517,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "oddCheck",
+                    span: Span {
+                        start: 518,
+                        end: 526,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        7,
+                    ),
+                    Span {
+                        start: 530,
+                        end: 531,
+                    },
+                ),
+                selector: Unary(
+                    "isOdd",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 530,
+                    end: 537,
+                },
+            },
+            span: Span {
+                start: 518,
+                end: 537,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "notTrue",
+                    span: Span {
+                        start: 594,
+                        end: 601,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "true",
+                        span: Span {
+                            start: 605,
+                            end: 609,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "not",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 605,
+                    end: 613,
+                },
+            },
+            span: Span {
+                start: 594,
+                end: 613,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "notFalse",
+                    span: Span {
+                        start: 614,
+                        end: 622,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "false",
+                        span: Span {
+                            start: 626,
+                            end: 631,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "not",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 626,
+                    end: 635,
+                },
+            },
+            span: Span {
+                start: 614,
+                end: 635,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "chained",
+                    span: Span {
+                        start: 704,
+                        end: 711,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            5,
+                        ),
+                        Span {
+                            start: 715,
+                            end: 716,
+                        },
+                    ),
+                    selector: Unary(
+                        "negated",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 715,
+                        end: 724,
+                    },
+                },
+                selector: Unary(
+                    "abs",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 715,
+                    end: 728,
+                },
+            },
+            span: Span {
+                start: 704,
+                end: 728,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result",
+                    span: Span {
+                        start: 754,
+                        end: 760,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Parenthesized {
+                    expression: MessageSend {
+                        receiver: Identifier(
+                            Identifier {
+                                name: "counter",
+                                span: Span {
+                                    start: 765,
+                                    end: 772,
+                                },
+                            },
+                        ),
+                        selector: Unary(
+                            "isZero",
+                        ),
+                        arguments: [],
+                        span: Span {
+                            start: 765,
+                            end: 779,
+                        },
+                    },
+                    span: Span {
+                        start: 764,
+                        end: 780,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "ifTrue:",
+                            span: Span {
+                                start: 781,
+                                end: 788,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "ifFalse:",
+                            span: Span {
+                                start: 793,
+                                end: 801,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 790,
+                                        end: 791,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 789,
+                                end: 792,
+                            },
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                Identifier(
+                                    Identifier {
+                                        name: "counter",
+                                        span: Span {
+                                            start: 803,
+                                            end: 810,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 802,
+                                end: 811,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 764,
+                    end: 811,
+                },
+            },
+            span: Span {
+                start: 754,
+                end: 811,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "blockUnary",
+                    span: Span {
+                        start: 843,
+                        end: 853,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [
+                        BlockParameter {
+                            name: "x",
+                            span: Span {
+                                start: 859,
+                                end: 860,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 863,
+                                        end: 864,
+                                    },
+                                },
+                            ),
+                            selector: Unary(
+                                "negated",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 863,
+                                end: 872,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 857,
+                        end: 873,
+                    },
+                },
+            ),
+            span: Span {
+                start: 843,
+                end: 873,
+            },
+        },
+    ],
+    span: Span {
+        start: 268,
+        end: 873,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test all unary operators/messages for compilation verification",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Comprehensive coverage of unary operations supported in Core Erlang codegen",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// ===== Integer Unary Operations =====",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Negation",
+            span: Span {
+                start: 268,
+                end: 278,
+            },
+            kind: Line,
+        },
+    ],
+}

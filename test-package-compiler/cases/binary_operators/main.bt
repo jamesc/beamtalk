@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test all binary operators for compilation verification
+// Comprehensive coverage of all operators supported in Core Erlang codegen
+
+// ===== Arithmetic Operators =====
+addition := 3 + 4
+subtraction := 10 - 3
+multiplication := 5 * 6
+division := 20 / 4
+modulo := 17 % 5
+exponentiation := 2 ** 8  // Should generate math:pow wrapped in trunc
+
+// ===== Comparison Operators =====
+// Standard equality (==)
+equalityCheck := 5 == 5
+
+// Standard inequality (!=)
+inequalityCheck := 3 != 7
+
+// Strict equality (=)
+strictEqualCheck := 'hello' = 'hello'
+
+// Strict inequality (~=)
+strictNotEqualCheck := 42 ~= 99
+
+// Less than
+lessThan := 3 < 10
+
+// Greater than
+greaterThan := 15 > 8
+
+// Less than or equal
+lessOrEqual := 5 <= 5
+
+// Greater than or equal
+greaterOrEqual := 10 >= 10
+
+// ===== String Concatenation =====
+stringConcat := 'Hello' ++ ' World'
+
+// ===== Complex Operator Expressions =====
+// Operator precedence (binary operators are left-to-right in Smalltalk)
+precedence1 := 2 + 3 * 4  // Should be (2 + 3) * 4 = 20
+precedence2 := 10 - 5 / 2  // Should be (10 - 5) / 2 = 2
+
+// Nested operators
+nested := (3 + 4) * (10 - 2)
+
+// Operators with blocks
+blockWithOp := [:x :y | x + y * 2]
+
+// Operators in conditionals
+condition := (x > 5) and: [y < 10]
