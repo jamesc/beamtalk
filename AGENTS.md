@@ -654,7 +654,7 @@ mod tests {
 - Add coverage badge and summary to PR comments using `irongut/CodeCoverageSummary` action
 - **Do not use external services** (Codecov, Coveralls) - keep metrics in GitHub Actions
 - For README badges, use Shields.io endpoints with Gist or gh-pages JSON artifacts
-- Generate both LCOV (for archival) and Cobertura XML (for summary actions)
+- Generate Cobertura XML format for summary actions
 
 **Example CI step:**
 ```yaml

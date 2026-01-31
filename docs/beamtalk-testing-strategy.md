@@ -47,8 +47,8 @@ cargo llvm-cov --all-targets --workspace --html --open \
      --skip commands::run::tests::test_run_calls_build \
      --skip erlang_runtime_unit_tests
 
-# LCOV format for CI integration
-cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
+# Cobertura XML format for CI integration
+cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
   -- --skip commands::build::tests::test_build_single_file \
      --skip commands::build::tests::test_build_multiple_files \
      --skip commands::run::tests::test_run_calls_build \

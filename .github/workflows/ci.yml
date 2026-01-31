@@ -128,12 +128,6 @@ jobs:
 
       - name: Generate Rust coverage
         run: |
-          # Generate LCOV format (for archival)
-          cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
-            -- --skip commands::build::tests::test_build_single_file \
-               --skip commands::build::tests::test_build_multiple_files \
-               --skip commands::run::tests::test_run_calls_build \
-               --skip erlang_runtime_unit_tests
           # Generate Cobertura format (for CodeCoverageSummary action)
           cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
             -- --skip commands::build::tests::test_build_single_file \
