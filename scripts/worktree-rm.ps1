@@ -3,12 +3,20 @@
 
 <#
 .SYNOPSIS
-    Stop and remove a git worktree, fixing any container path issues.
+    Stop and remove a git worktree and its devcontainer.
 
 .DESCRIPTION
     Removes a worktree that may have been used with devcontainers.
-    Handles the case where the .git file was modified to point to
-    container paths and restores/cleans up properly.
+    
+    This script:
+    - Stops and removes the devcontainer for the worktree
+    - Removes the associated Docker volume (target cache)
+    - Fixes any container path issues in .git file
+    - Removes the worktree directory
+    - Optionally deletes the branch
+    
+    Note: Path normalization is applied to handle git's forward slashes
+    vs Docker's backslashes on Windows.
 
 .PARAMETER Branch
     The branch name of the worktree to remove (e.g., "BT-99-feature")
@@ -17,10 +25,10 @@
     Force removal even if there are uncommitted changes
 
 .EXAMPLE
-    .\stop-worktree.ps1 BT-99-feature
+    .\worktree-rm.ps1 BT-99-feature
     
 .EXAMPLE
-    .\stop-worktree.ps1 -Branch BT-99 -Force
+    .\worktree-rm.ps1 -Branch BT-99 -Force
 #>
 
 param(
@@ -82,9 +90,12 @@ function Remove-DevContainer {
     
     $folderName = Split-Path $WorktreePath -Leaf
     
+    # Normalize path: git returns forward slashes, Docker labels have backslashes
+    $normalizedPath = $WorktreePath -replace "/", "\"
+    
     # Find containers by devcontainer.local_folder label
     # This is more reliable than matching container names
-    $containers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null | Where-Object { $_ -match [regex]::Escape($WorktreePath) }
+    $containers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null | Where-Object { $_ -match [regex]::Escape($normalizedPath) }
     
     if ($containers) {
         Write-Host "🐳 Found devcontainer(s) for $folderName" -ForegroundColor Cyan
