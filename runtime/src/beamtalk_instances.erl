@@ -18,7 +18,6 @@
 %% API
 -export([
     start_link/0,
-    init_table/0,
     register/2,
     unregister/2,
     all/1,
@@ -38,8 +37,10 @@
 
 -define(TABLE, beamtalk_instance_registry).
 
+-type class_name() :: atom().
+
 -record(state, {
-    monitors = #{} :: #{{atom(), pid()} => reference()}
+    monitors = #{} :: #{{class_name(), pid()} => reference()}
 }).
 
 %%====================================================================
@@ -51,43 +52,44 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @doc Initialize the ETS table (for manual initialization if needed).
-%% The table is normally created by the gen_server on startup.
--spec init_table() -> ok.
-init_table() ->
-    case ets:whereis(?TABLE) of
-        undefined ->
-            ?TABLE = ets:new(?TABLE, [named_table, public, bag]),
-            ok;
-        _Tid ->
-            ok
-    end.
-
 %% @doc Register an instance of a class.
 %% The instance will be automatically unregistered when the process terminates.
--spec register(Class :: atom(), Pid :: pid()) -> ok.
+-spec register(class_name(), pid()) -> ok.
 register(Class, Pid) when is_atom(Class), is_pid(Pid) ->
     gen_server:call(?MODULE, {register, Class, Pid}).
 
 %% @doc Manually unregister an instance of a class.
--spec unregister(Class :: atom(), Pid :: pid()) -> ok.
+-spec unregister(class_name(), pid()) -> ok.
 unregister(Class, Pid) when is_atom(Class), is_pid(Pid) ->
     gen_server:call(?MODULE, {unregister, Class, Pid}).
 
 %% @doc Get all live instances of a class.
 %% Filters out dead processes.
--spec all(Class :: atom()) -> [pid()].
+%%
+%% NOTE: There is a race condition where a process may die between the alive
+%% check and when the caller uses the pid. Callers must handle `noproc` errors.
+-spec all(class_name()) -> [pid()].
 all(Class) when is_atom(Class) ->
     [Pid || {_, Pid} <- ets:lookup(?TABLE, Class), erlang:is_process_alive(Pid)].
 
 %% @doc Count the live instances of a class.
--spec count(Class :: atom()) -> non_neg_integer().
+%% More efficient than `length(all(Class))` for large instance counts.
+-spec count(class_name()) -> non_neg_integer().
 count(Class) when is_atom(Class) ->
-    length(all(Class)).
+    lists:foldl(
+        fun({_, Pid}, Acc) ->
+            case erlang:is_process_alive(Pid) of
+                true -> Acc + 1;
+                false -> Acc
+            end
+        end,
+        0,
+        ets:lookup(?TABLE, Class)
+    ).
 
 %% @doc Iterate all live instances of a class with a function.
 %% The function is called as `Fun(Pid)` for each instance.
--spec each(Class :: atom(), Fun :: fun((pid()) -> any())) -> ok.
+-spec each(class_name(), fun((pid()) -> any())) -> ok.
 each(Class, Fun) when is_atom(Class), is_function(Fun, 1) ->
     lists:foreach(Fun, all(Class)).
 

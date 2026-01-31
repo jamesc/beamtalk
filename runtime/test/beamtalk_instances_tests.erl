@@ -313,3 +313,58 @@ filters_dead_processes_test_() ->
               I2 ! stop
           end)]
      end}.
+
+ets_table_ownership_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Verify that the ETS table is owned by the gen_server process
+              TableInfo = ets:info(beamtalk_instance_registry),
+              ?assertNotEqual(undefined, TableInfo),
+              
+              Owner = proplists:get_value(owner, TableInfo),
+              ?assertEqual(Pid, Owner),
+              
+              %% This confirms that when the gen_server crashes (without supervisor),
+              %% the ETS table will be automatically deleted by the VM.
+              %% In production with supervision, the supervisor would restart
+              %% the gen_server and it would recreate the table in init/1.
+              ok
+          end)]
+     end}.
+
+monitor_cleanup_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+              %% Spawn and register an instance
+              Self = self(),
+              Instance = spawn(fun() ->
+                  Self ! ready,
+                  receive stop -> ok end
+              end),
+              receive ready -> ok end,
+              
+              ok = beamtalk_instances:register('Counter', Instance),
+              
+              %% Get the state to verify monitor is registered
+              State1 = sys:get_state(Pid),
+              Monitors1 = element(2, State1),  % #state.monitors
+              ?assertEqual(1, maps:size(Monitors1)),
+              ?assert(maps:is_key({'Counter', Instance}, Monitors1)),
+              
+              %% Kill the instance
+              Instance ! stop,
+              timer:sleep(50),
+              
+              %% Verify monitor is cleaned up from state
+              State2 = sys:get_state(Pid),
+              Monitors2 = element(2, State2),
+              ?assertEqual(0, maps:size(Monitors2)),
+              ?assertNot(maps:is_key({'Counter', Instance}, Monitors2))
+          end)]
+     end}.
