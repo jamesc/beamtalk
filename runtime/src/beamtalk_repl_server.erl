@@ -20,6 +20,7 @@ handle_client(Socket, ReplPid) ->
     inet:setopts(Socket, [{active, false}, {packet, line}]),
     handle_client_loop(Socket, ReplPid).
 
+%% @private
 handle_client_loop(Socket, ReplPid) ->
     case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
         {ok, Data} ->
@@ -113,6 +114,7 @@ format_loaded(Classes) ->
 
 %%% JSON Parsing
 
+%% @private
 %% Simple JSON parser for requests.
 %% Only supports the subset of JSON needed for REPL protocol.
 -spec parse_json(binary()) -> {ok, map()} | {error, term()}.
@@ -126,6 +128,7 @@ parse_json(Data) ->
             {error, not_json}
     end.
 
+%% @private
 parse_json_object(Data) ->
     %% Extract key-value pairs from JSON object
     %% This is a simplified parser that handles our specific protocol
@@ -140,6 +143,7 @@ parse_json_object(Data) ->
             {error, invalid_json}
     end.
 
+%% @private
 parse_json_pairs(<<>>, Acc) ->
     Acc;
 parse_json_pairs(Data, Acc) ->
@@ -164,6 +168,7 @@ parse_json_pairs(Data, Acc) ->
             end
     end.
 
+%% @private
 extract_string(Data) ->
     %% Remove quotes from string
     case Data of
@@ -177,6 +182,7 @@ extract_string(Data) ->
             Data
     end.
 
+%% @private
 extract_value(Data) ->
     case Data of
         <<"\"", _/binary>> ->
@@ -204,6 +210,7 @@ extract_value(Data) ->
 
 %%% JSON Formatting
 
+%% @private
 %% Convert an Erlang term to a JSON-encodable value for jsx.
 %% Returns a term that jsx:encode/1 can handle.
 -spec term_to_json(term()) -> term().
@@ -259,6 +266,7 @@ term_to_json(Value) ->
 
 %%% Error Formatting
 
+%% @private
 %% Format an error reason as a human-readable message.
 -spec format_error_message(term()) -> binary().
 format_error_message(empty_expression) ->
@@ -288,6 +296,7 @@ format_error_message(daemon_unavailable) ->
 format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
+%% @private
 format_name(Name) when is_atom(Name) ->
     atom_to_binary(Name, utf8);
 format_name(Name) when is_binary(Name) ->

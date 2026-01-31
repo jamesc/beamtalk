@@ -8,7 +8,7 @@
 
 -module(beamtalk_repl_state).
 
--export([new/2, get_bindings/1, set_bindings/2, clear_bindings/1,
+-export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
          get_eval_counter/1, increment_eval_counter/1,
          get_loaded_modules/1, add_loaded_module/2,
          get_daemon_socket_path/1, get_listen_socket/1, get_port/1]).
@@ -26,14 +26,26 @@
 
 -opaque state() :: #state{}.
 
-%% @doc Create a new REPL state.
+%% @doc Create a new REPL state with default daemon socket path.
 -spec new(gen_tcp:socket() | undefined, inet:port_number()) -> state().
 new(ListenSocket, Port) ->
+    new(ListenSocket, Port, #{}).
+
+%% @doc Create a new REPL state with options.
+%% Options:
+%%   - daemon_socket_path: Unix socket path for compiler daemon
+%%                         (default: ~/.beamtalk/daemon.sock)
+-spec new(gen_tcp:socket() | undefined, inet:port_number(), map()) -> state().
+new(ListenSocket, Port, Options) ->
+    DaemonSocketPath = case maps:get(daemon_socket_path, Options, undefined) of
+        undefined -> default_daemon_socket_path();
+        Path -> Path
+    end,
     #state{
         listen_socket = ListenSocket,
         port = Port,
         bindings = #{},
-        daemon_socket_path = default_daemon_socket_path(),
+        daemon_socket_path = DaemonSocketPath,
         eval_counter = 0,
         loaded_modules = []
     }.
@@ -91,6 +103,16 @@ get_port(#state{port = Port}) ->
 %%% Internal functions
 
 %% @private
+%% Determine daemon socket path (default: ~/.beamtalk/daemon.sock)
+%% If HOME is unset, fail explicitly so behavior matches the daemon
+%% (which requires HOME to be set).
 default_daemon_socket_path() ->
-    Home = os:getenv("HOME", "/tmp"),
-    filename:join([Home, ".beamtalk", "daemon.sock"]).
+    case os:getenv("HOME") of
+        false ->
+            erlang:error({missing_env_var,
+                         "HOME",
+                         "Beamtalk REPL requires HOME to be set to locate the compiler daemon "
+                         "socket. Either set HOME or pass daemon_socket_path in Options."});
+        Home ->
+            filename:join([Home, ".beamtalk", "daemon.sock"])
+    end.

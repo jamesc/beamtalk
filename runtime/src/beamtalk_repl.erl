@@ -90,6 +90,7 @@ stop(Pid) ->
     gen_server:stop(Pid).
 
 %% @doc Evaluate an expression directly (for testing).
+%% Uses infinite timeout since compilation and evaluation can be slow.
 %% Returns {ok, FormattedResult} or {error, Reason}.
 -spec eval(pid(), string()) -> {ok, term()} | {error, term()}.
 eval(Pid, Expression) ->
@@ -114,7 +115,7 @@ get_port(Pid) ->
 %%% gen_server callbacks
 
 %% @private
-init({Port, _Options}) ->
+init({Port, Options}) ->
     %% Open TCP listen socket
     case gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {packet, line}]) of
         {ok, ListenSocket} ->
@@ -122,7 +123,7 @@ init({Port, _Options}) ->
             {ok, ActualPort} = inet:port(ListenSocket),
             %% Start accepting connections asynchronously
             self() ! accept,
-            State = beamtalk_repl_state:new(ListenSocket, ActualPort),
+            State = beamtalk_repl_state:new(ListenSocket, ActualPort, Options),
             {ok, State};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
