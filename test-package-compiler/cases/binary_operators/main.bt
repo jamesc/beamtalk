@@ -10,14 +10,11 @@ subtraction := 10 - 3
 multiplication := 5 * 6
 division := 20 / 4
 modulo := 17 % 5
-exponentiation := 2 ** 8  // Should generate math:pow wrapped in trunc
+// exponentiation := 2 ** 8  // TODO: Add ** operator to parser (BT-128)
 
 // ===== Comparison Operators =====
-// Standard equality (==)
-equalityCheck := 5 == 5
-
-// Standard inequality (!=)
-inequalityCheck := 3 != 7
+// equalityCheck := 5 == 5  // TODO: Add == operator to parser (BT-128)
+// inequalityCheck := 3 != 7  // TODO: Add != operator to parser (BT-128)
 
 // Strict equality (=)
 strictEqualCheck := 'hello' = 'hello'
@@ -51,5 +48,7 @@ nested := (3 + 4) * (10 - 2)
 // Operators with blocks
 blockWithOp := [:x :y | x + y * 2]
 
-// Operators in conditionals
+// Operators in conditionals with defined variables
+x := 10
+y := 3
 condition := (x > 5) and: [y < 10]

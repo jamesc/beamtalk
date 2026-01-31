@@ -28,7 +28,8 @@ notFalse := false not
 // Chained unary messages
 chained := 5 negated abs
 
-// Unary in conditional
+// Unary in conditional with defined variable
+counter := 0
 result := (counter isZero) ifTrue: [0] ifFalse: [counter]
 
 // Unary with block parameter

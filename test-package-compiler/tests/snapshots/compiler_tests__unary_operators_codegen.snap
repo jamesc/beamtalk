@@ -31,6 +31,7 @@ module 'unary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
     let DefaultState = ~{
         '__class__' => 'UnaryOperators',
         '__methods__' => call 'unary_operators':'method_table'()
+        , 'counter' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

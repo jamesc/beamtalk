@@ -31,7 +31,8 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
     let DefaultState = ~{
         '__class__' => 'BinaryOperators',
         '__methods__' => call 'binary_operators':'method_table'()
-        , 'exponentiation' => 2
+        , 'x' => 10
+        , 'y' => 3
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

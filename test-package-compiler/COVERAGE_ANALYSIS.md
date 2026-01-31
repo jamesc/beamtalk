@@ -32,27 +32,29 @@
 | MapLiteral | ✓ | map_literals |
 | Cascade | ✓ | cascades, cascade_complex |
 
-## Binary Operators Coverage (Complete)
+## Binary Operators Coverage
 
-| Operator | Erlang Mapping | Test Case |
-|----------|----------------|-----------|
-| + | erlang:'+' | actor_spawn, binary_operators |
-| - | erlang:'-' | blocks_no_args, binary_operators |
-| * | erlang:'*' | cascade_complex, binary_operators |
-| / | erlang:'/' | stdlib_integer, binary_operators |
-| % | erlang:'rem' | stdlib_integer, binary_operators |
-| ** | math:pow + trunc | binary_operators |
-| == | erlang:'==' | binary_operators |
-| != | erlang:'/=' | binary_operators |
-| = | erlang:'=:=' | stdlib_integer, binary_operators |
-| ~= | erlang:'=/=' | binary_operators |
-| < | erlang:'<' | blocks_no_args, binary_operators |
-| > | erlang:'>' | blocks_no_args, binary_operators |
-| <= | erlang:'=<' | binary_operators |
-| >= | erlang:'>=' | binary_operators |
-| ++ | iolist_to_binary | stdlib_string, binary_operators |
+| Operator | Erlang Mapping | Test Case | Parser Support |
+|----------|----------------|-----------|----------------|
+| + | erlang:'+' | actor_spawn, binary_operators | ✓ |
+| - | erlang:'-' | blocks_no_args, binary_operators | ✓ |
+| * | erlang:'*' | cascade_complex, binary_operators | ✓ |
+| / | erlang:'/' | stdlib_integer, binary_operators | ✓ |
+| % | erlang:'rem' | stdlib_integer, binary_operators | ✓ |
+| = | erlang:'=:=' | stdlib_integer, binary_operators | ✓ |
+| ~= | erlang:'=/=' | binary_operators | ✓ |
+| < | erlang:'<' | blocks_no_args, binary_operators | ✓ |
+| > | erlang:'>' | blocks_no_args, binary_operators | ✓ |
+| <= | erlang:'=<' | binary_operators | ✓ |
+| >= | erlang:'>=' | binary_operators | ✓ |
+| ++ | iolist_to_binary | stdlib_string, binary_operators | ✓ |
+| ** | math:pow + trunc | - | ⚠️ Codegen exists but parser doesn't support yet |
+| == | erlang:'==' | - | ⚠️ Lexer tokenizes but parser doesn't support yet |
+| != | erlang:'/=' | - | ⚠️ Not in lexer or parser yet |
 
-**Coverage**: 15/15 operators (100%)
+**Coverage**: 12/15 operators (80% - exact target)
+- **Parseable and tested**: 12/12 (100%)
+- **In codegen but not parseable**: 3 (`**`, `==`, `!=`) - need parser support (BT-128)
 
 ## Unary Messages/Operators Coverage
 
@@ -149,12 +151,13 @@ Based on the analysis:
 
 1. **Expression types**: 11/11 (100%)
 2. **Literal types**: 6/6 (100%)
-3. **Binary operators**: 15/15 (100%)
-4. **Unary operations**: 10+ core operations covered
-5. **Block evaluation**: 6/6 messages (100%)
-6. **Boolean control**: 6/6 operations (100%)
-7. **Gen_server callbacks**: 7/7 (100%)
-8. **Special features**: 12+ edge cases covered
+3. **Binary operators (parseable)**: 12/12 (100%)
+4. **Binary operators (with codegen)**: 12/15 (80% - 3 operators have codegen but no parser support yet)
+5. **Unary operations**: 10+ core operations covered
+6. **Block evaluation**: 6/6 messages (100%)
+7. **Boolean control**: 6/6 operations (100%)
+8. **Gen_server callbacks**: 7/7 (100%)
+9. **Special features**: 12+ edge cases covered
 
 ### Code Generation Functions
 
@@ -180,13 +183,16 @@ All core code generation paths are exercised. The few uncovered paths are likely
 ## Conclusion
 
 The test suite provides comprehensive coverage of Core Erlang code generation:
-- **All binary operators**: 15/15 tested
+- **All parseable binary operators**: 12/12 tested (100%)
+- **All binary operators with codegen**: 12/15 (80% - 3 need parser support)
 - **All unary operators**: Core set tested
 - **All gen_server callbacks**: Generated and compile-tested
 - **All expression types**: Covered
 - **All literal types**: Covered
 - **Special messages**: Block, Boolean, Dictionary, Integer - all covered
 
+**Note on operator coverage**: The codegen module has implementations for `**`, `==`, and `!=` operators, but these cannot currently be parsed (see `generate_binary_op()` in `mod.rs` lines 2469-2511). These represent dead code paths until parser support is added (tracked in BT-128).
+
 Every test case includes a compilation verification test that runs `erlc +from_core` to ensure the generated Core Erlang is syntactically valid and compiles to BEAM bytecode.
 
-**Target achieved**: >80% coverage ✓
+**Target achieved**: >80% coverage of *parseable* code generation paths ✓
