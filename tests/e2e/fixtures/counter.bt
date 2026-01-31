@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Counter actor class for E2E testing
+// A simple stateful actor that can increment, decrement, and return its value
+
+Actor subclass: Counter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
+  getValue => ^self.value

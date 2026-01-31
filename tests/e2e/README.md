@@ -55,41 +55,44 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | `or:` | ✅ | [booleans.bt](cases/booleans.bt) | `false or: [true]` → `true` |
 | `not` | ✅ | [booleans.bt](cases/booleans.bt) | `true not` → `false` |
 | **Cascades** | | | |
-| Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Codegen works, needs stateful E2E¹ |
+| Cascade syntax | 🔧 | [cascades.bt](cases/cascades.bt) | Use `// @load` + stateful tests¹ |
 | **Actors** | | | |
-| `spawn` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
-| Async messages | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
-| `await` | 📋 | [actors.bt](cases/actors.bt) | Full module compilation only |
+| `spawn` | 🔧 | [actors.bt](cases/actors.bt) | Use `// @load` to load class definitions² |
+| Async messages | 🔧 | [actors.bt](cases/actors.bt) | Use `// @load` + stateful tests |
+| `await` | 🔧 | [actors.bt](cases/actors.bt) | Use `// @load` + stateful tests |
 | **Error Handling** | | | |
 | Division by zero | ✅ | [errors.bt](cases/errors.bt) | `1 / 0` → badarith |
 
 **Legend:**
 - ✅ = Fully tested and working
 - 🔄 = Implemented but needs refinement (returns future in REPL)
-- 🔧 = Implemented but blocked by another issue
+- 🔧 = Implemented, E2E test infrastructure ready (needs real tests)
 - 📋 = Documented, implementation in progress
 - — = No separate test file (documented elsewhere)
 
 **Footnotes:**
-1. Cascades send async actor messages, so E2E testing requires spawning an actor first and maintaining state across expressions. See snapshot tests in `test-package-compiler/cases/cascades/` for codegen verification.
+1. Cascades send async actor messages. Use `// @load fixtures/counter.bt` to load an actor class, then test cascades with stateful expressions.
+2. Actor classes must be defined in files and loaded with `// @load`. See `tests/e2e/fixtures/` for example actors.
 
 ## Directory Structure
 
 ```
 tests/e2e/
 ├── README.md              # This file
-└── cases/                 # Test case files
-    ├── actors.bt          # Actor documentation (syntax examples)
-    ├── arithmetic.bt      # Arithmetic operations (+, -, *, /)
-    ├── blocks.bt          # Block/closure tests
-    ├── booleans.bt        # Boolean literals (true, false)
-    ├── cascades.bt        # Cascade documentation (syntax examples)
-    ├── control_flow.bt    # Control flow (block evaluation, variables)
-    ├── errors.bt          # Error handling tests
-    ├── keyword_messages.bt # Keyword message sends
-    ├── literals.bt        # Integer and string literals
-    ├── unary_messages.bt  # Unary message sends
-    └── variable_persistence.bt # Variable assignment and persistence
+├── cases/                 # Test case files
+│   ├── actors.bt          # Actor documentation (syntax examples)
+│   ├── arithmetic.bt      # Arithmetic operations (+, -, *, /)
+│   ├── blocks.bt          # Block/closure tests
+│   ├── booleans.bt        # Boolean literals (true, false)
+│   ├── cascades.bt        # Cascade documentation (syntax examples)
+│   ├── control_flow.bt    # Control flow (block evaluation, variables)
+│   ├── errors.bt          # Error handling tests
+│   ├── keyword_messages.bt # Keyword message sends
+│   ├── literals.bt        # Integer and string literals
+│   ├── unary_messages.bt  # Unary message sends
+│   └── variable_persistence.bt # Variable assignment and persistence
+└── fixtures/              # Actor/class definitions for stateful tests
+    └── counter.bt         # Simple counter actor class
 ```
 
 ## Running Tests
@@ -159,6 +162,50 @@ Currently, each expression must be on a single line within the test file format.
 This is a **test parser limitation**, not a language limitation - Beamtalk itself
 supports multi-line expressions. The test format reads one line at a time looking
 for `// =>` markers. Multi-line test format support may be added in the future.
+
+### Stateful Tests (Actors and Cascades)
+
+Test files support **stateful multi-expression tests** where variables persist between
+expressions within the same file. This is essential for testing actors and cascades.
+
+**Variable persistence within a file:**
+```smalltalk
+// Assign a variable
+x := 42
+// => 42
+
+// Use it in the next expression - state persists!
+x + 10
+// => 52
+```
+
+**Loading actor classes:**
+
+To test actors and cascades, first load a file containing class definitions using
+the `// @load` directive:
+
+```smalltalk
+// @load tests/e2e/fixtures/counter.bt
+
+// Now Counter class is available
+counter := Counter spawn
+// => <pid>
+
+// Send messages (state persists)
+counter increment
+// => 1
+
+// Cascades - send multiple messages to same receiver
+counter increment; increment; getValue
+// => 3
+```
+
+**Fixture files:**
+- `tests/e2e/fixtures/` - Actor class definitions for E2E tests
+- `tests/e2e/fixtures/counter.bt` - Simple counter actor example
+
+**Note:** Bindings are cleared at the start of each test file, but persist across
+all expressions within that file. Loaded modules also persist for the file's duration.
 
 ## Writing New Tests
 
