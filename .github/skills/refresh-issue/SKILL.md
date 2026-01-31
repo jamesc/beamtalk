@@ -17,7 +17,30 @@ Issues can become stale as the codebase evolves. This skill:
 
 ## Steps
 
-### 1. Fetch the Issue
+### 1. Determine Issue ID
+
+The issue ID is determined in priority order:
+
+1. **Explicit argument**: If user provides an issue ID, use that issue.
+   - `/refresh-issue BT-42` → issue BT-42
+   - `/refresh-issue 42` → issue BT-42 (BT- prefix added automatically)
+
+2. **Worktree name**: If in a git worktree with a name matching `BT-{number}`, use that issue:
+   ```bash
+   # Check if this is a worktree
+   git rev-parse --git-dir 2>/dev/null | grep -q "worktrees"
+   
+   # Extract issue ID from directory name
+   basename "$(pwd)" | grep -oE '^BT-[0-9]+'
+   ```
+   Example: `/workspaces/BT-34` → issue `BT-34`
+
+3. **Current branch name**: Extract from branch name if it starts with `BT-`:
+   ```bash
+   git branch --show-current | grep -oE '^BT-[0-9]+'
+   ```
+
+### 2. Fetch the Issue
 
 Get the full issue details from Linear:
 ```json
@@ -34,7 +57,7 @@ Note the following from the issue:
 - Referenced documentation
 - Current state and labels
 
-### 2. Review Current Documentation
+### 3. Review Current Documentation
 
 Check relevant documentation files to ensure the issue aligns with current specs:
 
@@ -51,7 +74,7 @@ Compare the issue's requirements against the documentation:
 - Has the spec changed since the issue was created?
 - Are there new requirements that should be added?
 
-### 3. Examine Relevant Code
+### 4. Examine Relevant Code
 
 For each file mentioned in "Files to Modify" or related to the issue:
 
@@ -67,7 +90,7 @@ Key directories by area:
 - **Stdlib**: `lib/`
 - **CLI**: `crates/beamtalk-cli/`
 
-### 4. Verify Issue Status
+### 5. Verify Issue Status
 
 Determine if the issue is:
 
@@ -79,7 +102,7 @@ Determine if the issue is:
 | **Obsolete** | Requirements changed, no longer needed | Mark as Canceled with explanation |
 | **Blocked** | Depends on unfinished work | Update state to Blocked, add blocking issues |
 
-### 5. Update the Issue
+### 6. Update the Issue
 
 Based on findings, update the issue appropriately:
 
