@@ -613,6 +613,37 @@ mod tests {
 }
 ```
 
+### Code Coverage Standards
+
+**Coverage Thresholds:**
+- **Minimum:** 70% overall line coverage
+- **Target:** 80% overall, 90% for unit tests
+- **Branches:** 80% minimum branch coverage
+
+**Fail CI if:**
+- Overall coverage drops below 70%
+- Branch coverage drops below 80%
+
+**CI Integration:**
+- Always append coverage metrics to `$GITHUB_STEP_SUMMARY` for visibility in Actions UI
+- Add coverage badge and summary to PR comments using `irongut/CodeCoverageSummary` action
+- **Do not use external services** (Codecov, Coveralls) - keep metrics in GitHub Actions
+- Generate both LCOV (for archival) and Cobertura XML (for summary actions)
+
+**Example CI step:**
+```yaml
+- name: Add Coverage to Job Summary
+  run: |
+    echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+    cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+    echo "**Badge:** ${{ steps.coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+```
+
+**Reviewing PRs:**
+- Check Actions summary tab for coverage metrics
+- Flag any coverage drops in code review
+- Require coverage metrics visible in PR before merge
+
 ### AI-Friendly Design
 
 Following [M-DESIGN-FOR-AI](https://microsoft.github.io/rust-guidelines/guidelines/ai/):

@@ -133,6 +133,12 @@ jobs:
                --skip commands::build::tests::test_build_multiple_files \
                --skip commands::run::tests::test_run_calls_build \
                --skip erlang_runtime_unit_tests
+          # Generate Cobertura format for CodeCoverageSummary action
+          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
+            -- --skip commands::build::tests::test_build_single_file \
+               --skip commands::build::tests::test_build_multiple_files \
+               --skip commands::run::tests::test_run_calls_build \
+               --skip erlang_runtime_unit_tests
 
       - name: Generate Erlang coverage
         run: |
@@ -141,10 +147,64 @@ jobs:
           rebar3 cover --verbose
           rebar3 covertool generate
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Rust Coverage Summary
+        id: rust_coverage
+        uses: irongut/CodeCoverageSummary@v1.3.0
         with:
-          files: ./lcov.info,./runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
-          flags: rust,erlang
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          filename: coverage.cobertura.xml
+          badge: true
+          format: markdown
+          output: both
+
+      - name: Erlang Coverage Summary
+        id: erlang_coverage
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
+          badge: true
+          format: markdown
+          output: both
+
+      - name: Add Coverage to Job Summary
+        run: |
+          echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
+          cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
+          # Extract Erlang coverage from covertool output
+          if [ -f runtime/_build/test/covertool/beamtalk_runtime.covertool.xml ]; then
+            erlang_coverage=$(grep -oP 'line-rate="\K[^"]+' runtime/_build/test/covertool/beamtalk_runtime.covertool.xml | head -1 | awk '{printf "%.2f%%", $1 * 100}')
+            echo "**Overall Line Coverage:** $erlang_coverage" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Add PR Comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          recreate: true
+          message: |
+            ## 📊 Code Coverage Report
+            
+            ### Rust Coverage
+            ${{ steps.rust_coverage.outputs.badge }}
+            
+            <details>
+            <summary>Details</summary>
+            
+            $(cat code-coverage-results.md)
+            
+            </details>
+            
+            ### Erlang Coverage
+            ${{ steps.erlang_coverage.outputs.badge }}
+            
+            <details>
+            <summary>Details</summary>
+            
+            $(cat code-coverage-results.md)
+            
+            </details>

@@ -67,7 +67,24 @@ rebar3 covertool generate
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
+- Rust Cobertura XML: `coverage.cobertura.xml`
 - Erlang Cobertura XML: `runtime/_build/test/covertool/beamtalk_runtime.covertool.xml`
+
+**CI Integration:**
+
+Coverage metrics are automatically displayed in:
+- **GitHub Actions Summary** - View in the "Summary" tab of any workflow run
+- **PR Comments** - Sticky comment with coverage badges and details on all pull requests
+
+No external services required - all coverage reporting is handled within GitHub Actions using `$GITHUB_STEP_SUMMARY` and PR comments.
+
+**Coverage Thresholds:**
+
+| Metric | Minimum | Target | Action if Below Minimum |
+|--------|---------|--------|------------------------|
+| Overall Line Coverage | 70% | 80% | Fail CI build |
+| Branch Coverage | 80% | 90% | Fail CI build |
+| Unit Test Coverage | 80% | 90% | Flag in PR review |
 
 **Current Coverage (as of BT-136):**
 
