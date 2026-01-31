@@ -280,9 +280,10 @@ impl BeamCompiler {
 ///
 /// Returns an error with installation instructions if escript is not found.
 pub fn check_escript_available() -> Result<()> {
-    // Try to run escript --version
-    let result = Command::new("escript")
-        .arg("--version")
+    // Try to find escript in PATH using 'which' (Unix) or 'where' (Windows)
+    let which_cmd = if cfg!(windows) { "where" } else { "which" };
+    let result = Command::new(which_cmd)
+        .arg("escript")
         .output()
         .into_diagnostic();
 
