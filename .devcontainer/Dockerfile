@@ -7,7 +7,7 @@ FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 # Install Erlang/OTP, git, and networking/debugging tools
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
-        erlang rebar3 git \
+        erlang rebar3 git gettext-base \
         socat netcat-openbsd lsof \
         curl wget jq htop strace \
     && apt-get clean \

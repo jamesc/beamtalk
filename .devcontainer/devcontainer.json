@@ -36,7 +36,11 @@
     }
   },
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
-  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh || true; bash .devcontainer/setup-git-auth.sh || true; mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json",
+  // postStartCommand: Set up git worktree paths, auth, and Copilot CLI config
+  // - fix-worktree-git.sh: Fix .git file paths for worktrees (see script for details)
+  // - setup-git-auth.sh: Configure git with user name/email from env vars
+  // - envsubst: Replace ${containerWorkspaceFolder} in copilot-config.json template
+  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh || true; bash .devcontainer/setup-git-auth.sh || true; mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json",
   "postAttachCommand": "bash .devcontainer/fix-worktree-git.sh || true",
   "remoteUser": "vscode",
   // Caching:
