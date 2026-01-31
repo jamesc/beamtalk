@@ -2775,6 +2775,21 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_loose_equality_operator() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let right = vec![Expression::Literal(Literal::Integer(5), Span::new(6, 7))];
+        let result = generator.generate_binary_op("==", &left, &right);
+        assert!(result.is_ok());
+        assert!(
+            generator.output.contains("call 'erlang':'=='"),
+            "Should use loose equality ==. Got: {}",
+            generator.output
+        );
+        assert_eq!(generator.output, "call 'erlang':'=='(5, 5)");
+    }
+
+    #[test]
     fn test_fresh_var_generation() {
         let mut generator = CoreErlangGenerator::new("test");
         let var1 = generator.fresh_var("temp");
