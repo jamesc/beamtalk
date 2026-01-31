@@ -1,0 +1,96 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc State management for Beamtalk REPL
+%%%
+%%% This module defines the REPL state record and provides utilities
+%%% for manipulating state during REPL sessions.
+
+-module(beamtalk_repl_state).
+
+-export([new/2, get_bindings/1, set_bindings/2, clear_bindings/1,
+         get_eval_counter/1, increment_eval_counter/1,
+         get_loaded_modules/1, add_loaded_module/2,
+         get_daemon_socket_path/1, get_listen_socket/1, get_port/1]).
+
+-export_type([state/0]).
+
+-record(state, {
+    listen_socket :: gen_tcp:socket() | undefined,
+    port :: inet:port_number(),
+    bindings :: map(),
+    daemon_socket_path :: string(),
+    eval_counter :: non_neg_integer(),
+    loaded_modules :: [atom()]
+}).
+
+-opaque state() :: #state{}.
+
+%% @doc Create a new REPL state.
+-spec new(gen_tcp:socket() | undefined, inet:port_number()) -> state().
+new(ListenSocket, Port) ->
+    #state{
+        listen_socket = ListenSocket,
+        port = Port,
+        bindings = #{},
+        daemon_socket_path = default_daemon_socket_path(),
+        eval_counter = 0,
+        loaded_modules = []
+    }.
+
+%% @doc Get current variable bindings.
+-spec get_bindings(state()) -> map().
+get_bindings(#state{bindings = Bindings}) ->
+    Bindings.
+
+%% @doc Set variable bindings.
+-spec set_bindings(map(), state()) -> state().
+set_bindings(Bindings, State) ->
+    State#state{bindings = Bindings}.
+
+%% @doc Clear all variable bindings.
+-spec clear_bindings(state()) -> state().
+clear_bindings(State) ->
+    State#state{bindings = #{}}.
+
+%% @doc Get current eval counter.
+-spec get_eval_counter(state()) -> non_neg_integer().
+get_eval_counter(#state{eval_counter = Counter}) ->
+    Counter.
+
+%% @doc Increment eval counter and return new state.
+-spec increment_eval_counter(state()) -> state().
+increment_eval_counter(State = #state{eval_counter = Counter}) ->
+    State#state{eval_counter = Counter + 1}.
+
+%% @doc Get loaded modules list.
+-spec get_loaded_modules(state()) -> [atom()].
+get_loaded_modules(#state{loaded_modules = Modules}) ->
+    Modules.
+
+%% @doc Add a loaded module to the state.
+-spec add_loaded_module(atom(), state()) -> state().
+add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
+    State#state{loaded_modules = [Module | Modules]}.
+
+%% @doc Get daemon socket path.
+-spec get_daemon_socket_path(state()) -> string().
+get_daemon_socket_path(#state{daemon_socket_path = Path}) ->
+    Path.
+
+%% @doc Get listen socket.
+-spec get_listen_socket(state()) -> gen_tcp:socket() | undefined.
+get_listen_socket(#state{listen_socket = Socket}) ->
+    Socket.
+
+%% @doc Get port number.
+-spec get_port(state()) -> inet:port_number().
+get_port(#state{port = Port}) ->
+    Port.
+
+%%% Internal functions
+
+%% @private
+default_daemon_socket_path() ->
+    Home = os:getenv("HOME", "/tmp"),
+    filename:join([Home, ".beamtalk", "daemon.sock"]).
