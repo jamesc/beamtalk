@@ -567,4 +567,40 @@ end
         let result = write_core_erlang(&module, "foo-bar", &output_path);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_escript_counter_uniqueness_parallel() {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+
+        // Test that ESCRIPT_COUNTER produces unique values even when called from multiple threads
+        let values = std::sync::Arc::new(Mutex::new(HashSet::new()));
+        let mut handles = vec![];
+
+        // Spawn 10 threads that each fetch 100 counter values
+        for _ in 0..10 {
+            let values_clone = std::sync::Arc::clone(&values);
+            let handle = std::thread::spawn(move || {
+                for _ in 0..100 {
+                    let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let mut set = values_clone.lock().unwrap();
+                    // Each counter value should be unique
+                    assert!(
+                        set.insert(counter),
+                        "Counter value {counter} was not unique"
+                    );
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify we got exactly 1000 unique values
+        let final_set = values.lock().unwrap();
+        assert_eq!(final_set.len(), 1000, "Expected 1000 unique counter values");
+    }
 }
