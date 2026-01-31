@@ -127,7 +127,7 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
         // Equality (lowest binary precedence)
         // `~=` is the Smalltalk-style not-equal operator
-        "=" | "~=" => Some(BindingPower::left_assoc(10)),
+        "=" | "==" | "~=" => Some(BindingPower::left_assoc(10)),
 
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),

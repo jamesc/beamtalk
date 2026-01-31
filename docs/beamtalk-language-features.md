@@ -160,6 +160,40 @@ Transcript show: 'Hello'; cr; show: 'World'
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
 3. Keyword messages: `array at: 1`
 
+### Binary Operators
+
+Binary operators follow standard math precedence (highest to lowest):
+
+#### Multiplicative (highest precedence)
+- `*` - Multiplication: `3 * 4` → `12`
+- `/` - Division: `10 / 2` → `5`
+- `%` - Modulo/Remainder: `17 % 5` → `2`
+
+#### Additive
+- `+` - Addition: `3 + 4` → `7`
+- `-` - Subtraction: `10 - 3` → `7`
+- `++` - String concatenation: `'Hello' ++ ' World'` → `'Hello World'`
+
+#### Comparison
+- `<` - Less than: `3 < 5` → `true`
+- `>` - Greater than: `5 > 3` → `true`
+- `<=` - Less than or equal: `3 <= 3` → `true`
+- `>=` - Greater than or equal: `5 >= 3` → `true`
+
+#### Equality (lowest precedence)
+- `=` - Strict equality (Erlang `=:=`): `5 = 5` → `true`
+- `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
+- `~=` - Strict inequality (Erlang `=/=`): `5 ~= 6` → `true`
+
+**Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
+```
+// Short-circuit AND - second block only evaluated if first is true
+result := condition and: [expensiveCheck()]
+
+// Short-circuit OR - second block only evaluated if first is false  
+result := condition or: [fallbackValue()]
+```
+
 ### Field Access and Assignment
 
 Direct field access within actors using dot notation:

@@ -2466,16 +2466,6 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Special case: exponentiation requires math:pow wrapped in trunc for integer result
-        if op == "**" {
-            write!(self.output, "call 'erlang':'trunc'(call 'math':'pow'(")?;
-            self.generate_expression(left)?;
-            write!(self.output, ", ")?;
-            self.generate_expression(&arguments[0])?;
-            write!(self.output, "))")?;
-            return Ok(());
-        }
-
         // Special case: string concatenation uses iolist_to_binary
         if op == "++" {
             write!(
@@ -2496,7 +2486,6 @@ impl CoreErlangGenerator {
             "/" => "/",
             "%" => "rem",
             "==" => "==",
-            "!=" => "/=",
             "=" => "=:=",  // Strict equality
             "~=" => "=/=", // Strict inequality
             "<" => "<",
@@ -2733,29 +2722,6 @@ mod tests {
         let result = generator.generate_binary_op("+", &left, &right);
         assert!(result.is_ok());
         assert!(generator.output.contains("call 'erlang':'+'(3, 4)"));
-    }
-
-    #[test]
-    fn test_generate_exponentiation_operator() {
-        let mut generator = CoreErlangGenerator::new("test");
-        let left = Expression::Literal(Literal::Integer(2), Span::new(0, 1));
-        let right = vec![Expression::Literal(Literal::Integer(3), Span::new(4, 5))];
-        let result = generator.generate_binary_op("**", &left, &right);
-        assert!(result.is_ok());
-        assert!(
-            generator.output.contains("call 'math':'pow'"),
-            "Should use math:pow for exponentiation. Got: {}",
-            generator.output
-        );
-        assert!(
-            generator.output.contains("call 'erlang':'trunc'"),
-            "Should wrap in trunc for integer result. Got: {}",
-            generator.output
-        );
-        assert_eq!(
-            generator.output,
-            "call 'erlang':'trunc'(call 'math':'pow'(2, 3))"
-        );
     }
 
     #[test]

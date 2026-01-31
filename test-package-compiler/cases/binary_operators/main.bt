@@ -10,11 +10,9 @@ subtraction := 10 - 3
 multiplication := 5 * 6
 division := 20 / 4
 modulo := 17 % 5
-// exponentiation := 2 ** 8  // TODO: Add ** operator to parser (BT-128)
 
 // ===== Comparison Operators =====
-// equalityCheck := 5 == 5  // TODO: Add == operator to parser (BT-128)
-// inequalityCheck := 3 != 7  // TODO: Add != operator to parser (BT-128)
+equalityCheck := 5 == 5
 
 // Strict equality (=)
 strictEqualCheck := 'hello' = 'hello'

@@ -115,12 +115,15 @@ count := 0  // inline comment
 - Requiring parentheses for basic math is hostile
 
 **Implementation:** Binary operators have precedence levels:
-1. `*`, `/`, `%` (highest)
-2. `+`, `-`
-3. `<`, `>`, `<=`, `>=`
-4. `=`, `!=`
-5. `&&`, `and`
-6. `||`, `or` (lowest)
+1. `*`, `/`, `%` (highest - multiplicative)
+2. `+`, `-`, `++` (additive and string concatenation)
+3. `<`, `>`, `<=`, `>=` (comparison)
+4. `=`, `==`, `~=` (equality - strict and loose)
+
+**Note:** `&&`, `||`, `and`, `or` are **not** binary operators - they are keyword messages that take blocks for short-circuit evaluation:
+```
+result := condition and: [expensiveCheck()]  // block only evaluated if condition is true
+```
 
 ### Statement Terminator: Required `.` → Optional (Newlines Work)
 

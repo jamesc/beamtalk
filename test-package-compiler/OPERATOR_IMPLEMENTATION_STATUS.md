@@ -4,8 +4,8 @@ Cross-reference of binary operators documented in Beamtalk specifications versus
 
 ## Source Documents
 
-- **Syntax Rationale**: `docs/beamtalk-syntax-rationale.md` (lines 117-124)
-- **Language Features**: `docs/beamtalk-language-features.md` (line 148, 160)
+- **Syntax Rationale**: `docs/beamtalk-syntax-rationale.md` (lines 117-130)
+- **Language Features**: `docs/beamtalk-language-features.md` (lines 158-198)
 
 ## Documented Operator Precedence
 
@@ -13,13 +13,13 @@ From `docs/beamtalk-syntax-rationale.md`:
 
 ```
 Binary operators have precedence levels:
-1. `*`, `/`, `%` (highest)
-2. `+`, `-`
-3. `<`, `>`, `<=`, `>=`
-4. `=`, `!=`
-5. `&&`, `and`
-6. `||`, `or` (lowest)
+1. `*`, `/`, `%` (highest - multiplicative)
+2. `+`, `-`, `++` (additive and string concatenation)
+3. `<`, `>`, `<=`, `>=` (comparison)
+4. `=`, `==`, `~=` (equality - strict and loose)
 ```
+
+**Note:** `&&`, `||`, `and`, `or` are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation.
 
 ## Implementation Status by Operator
 
@@ -31,6 +31,8 @@ Binary operators have precedence levels:
 | `%` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 40, maps to `rem` |
 | `+` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30 |
 | `-` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30 |
+| **String** |
+| `++` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 30, string concatenation |
 | **Comparison** |
 | `<` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 20 |
 | `>` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 20 |
@@ -38,16 +40,16 @@ Binary operators have precedence levels:
 | `>=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 20 |
 | **Equality** |
 | `=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict equality `=:=` |
-| `!=` | ✓ | ❌ | ❌ | ✓ | N/A | N/A | ❌ | **MISSING**: Codegen exists but no lexer/parser |
-| **Logical (Short-circuit)** |
-| `&&` | ✓ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | **MISSING**: Documented but not implemented |
-| `and` | ✓ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | **MISSING**: Documented but not implemented |
-| `\|\|` | ✓ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | **MISSING**: Documented but not implemented |
-| `or` | ✓ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | **MISSING**: Documented but not implemented |
-| **Additional** |
-| `~=` | - | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Not documented, but implemented (strict inequality `=/=`) |
-| `++` | - | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Not documented, but implemented (string concat) |
-| `**` | - | ❌ | ❌ | ✓ | N/A | N/A | ❌ | Not documented, codegen exists but no lexer/parser |
+| `==` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, loose equality `==` |
+| `~=` | ✓ | ✓ | ✓ | ✓ | N/A | N/A | ✓ | Precedence 10, strict inequality `=/=` |
+| **Logical (Not Operators - Keyword Messages)** |
+| `and:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
+| `or:` | Partial | Keyword | Keyword | Partial | N/A | N/A | ✓ | Short-circuit via keyword message with block |
+| **Removed** |
+| `!=` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - use `~=` instead |
+| `**` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Removed - not needed |
+| `&&` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `and:` keyword message |
+| `\|\|` | ❌ | ❌ | ❌ | ❌ | N/A | N/A | ❌ | Not an operator - use `or:` keyword message |
 | `==` | - | ✓ | ❌ | ✓ | N/A | N/A | ❌ | Not documented, lexer tokenizes but parser doesn't support |
 
 ## Implementation Details
@@ -56,50 +58,39 @@ Binary operators have precedence levels:
 
 **Implemented:**
 - Lines 804-811: Single-char operators: `+`, `-`, `*`, `/`, `<`, `>`, `=`, `~`
-- Lines 821-824: Multi-char operators: `<=`, `>=`, `==`, `~=`
-- String concatenation `++` is tokenized (in additive group)
+- Lines 821-824: Multi-char operators: `<=`, `>=`, `==`, `~=`, `++`
 
-**Missing:**
-- `!=` - Neither `!` nor `!=` is in the lexer
-- `**` - Not tokenized
-- `&&`, `||` - Not tokenized
-- `and`, `or` - These would be identifiers, not binary selectors
+**Not Needed:**
+- `!=` - Removed, use `~=` instead
+- `**` - Removed, not needed
+- `&&`, `||` - Not operators, use `and:` and `or:` keyword messages
+- `and`, `or` - Keyword messages, not binary operators
 
 ### Parser (crates/beamtalk-core/src/parse/parser/mod.rs)
 
 **Implemented** (lines 126-143, `binary_binding_power` function):
-- Precedence 10: `=`, `~=`
-- Precedence 20: `<`, `>`, `<=`, `>=`
-- Precedence 30: `+`, `-`, `++`
-- Precedence 40: `*`, `/`, `%`
+- Precedence 10: `=`, `==`, `~=` (equality)
+- Precedence 20: `<`, `>`, `<=`, `>=` (comparison)
+- Precedence 30: `+`, `-`, `++` (additive and concatenation)
+- Precedence 40: `*`, `/`, `%` (multiplicative)
 
-**Missing:**
-- `!=` - Not in binding power table
-- `==` - Lexer tokenizes but not in binding power table
-- `**` - Not in binding power table
-- `&&`, `||`, `and`, `or` - Not in binding power table
-
-**Note:** Parser precedence matches documented levels, except:
-- Doc says `=`, `!=` are precedence 4
-- Parser has `=` at precedence 10 (lower number = lower precedence in parser)
-- Precedence numbering is inverted but relative order is correct
+**Note:** Lower numbers = lower precedence (inverted from typical convention), but relative order is correct.
 
 ### Codegen (crates/beamtalk-core/src/codegen/core_erlang/mod.rs)
 
 **Implemented** (lines 2457-2521, `generate_binary_op` function):
 - `+`, `-`, `*`, `/`, `%` → Erlang arithmetic
-- `==`, `!=` → Erlang equality (`==`, `/=`)
+- `==` → Erlang loose equality (`==`)
 - `=`, `~=` → Erlang strict equality (`=:=`, `=/=`)
 - `<`, `>`, `<=`, `>=` → Erlang comparison (`<`, `>`, `=<`, `>=`)
-- `**` → `math:pow` wrapped in `trunc`
 - `++` → String concatenation via `iolist_to_binary`
 
-**Missing:**
-- `&&`, `||`, `and`, `or` - No codegen implementation
+**Removed:**
+- `**` → Exponentiation removed (not needed)
+- `!=` → Removed (use `~=` instead)
 
-**Dead Code:**
-- Lines 2469-2477: `**` operator code never reached (parser doesn't support)
-- Lines 2498-2499: `==`, `!=` operator code never/partially reached
+**Not Operators:**
+- `&&`, `||`, `and:`, `or:` - These are keyword messages with blocks, not binary operators
 
 ### Runtime (runtime/src/)
 
@@ -114,110 +105,24 @@ REPL uses the same codegen path, so operator support matches codegen.
 **Tested:**
 - `+`, `-`, `*`, `/`, `%` - ✓ Multiple test cases
 - `<`, `>`, `<=`, `>=` - ✓ binary_operators test
-- `=`, `~=` - ✓ binary_operators test
+- `=`, `==`, `~=` - ✓ binary_operators test
 - `++` - ✓ stdlib_string, binary_operators
+- `and:`, `or:` - ✓ Via stdlib_boolean test
 
-**Not Tested:**
-- `==`, `!=`, `**` - Commented out in binary_operators (parser doesn't support)
-- `&&`, `||`, `and`, `or` - Not implemented anywhere
+## Summary
 
-## Discrepancies Summary
+All binary operators are now consistently implemented across lexer, parser, codegen, and documentation:
 
-### 1. Documented but Not Implemented (6 operators)
+### Fully Supported (13 operators)
+- Arithmetic: `+`, `-`, `*`, `/`, `%`
+- String: `++`
+- Comparison: `<`, `>`, `<=`, `>=`
+- Equality: `=`, `==`, `~=`
 
-| Operator | Issue |
-|----------|-------|
-| `!=` | Documented as precedence 4, but no lexer/parser/test support |
-| `&&` | Documented as precedence 5, not implemented anywhere |
-| `and` | Documented as precedence 5, not implemented anywhere |
-| `\|\|` | Documented as precedence 6, not implemented anywhere |
-| `or` | Documented as precedence 6, not implemented anywhere |
+### Not Operators (Keyword Messages)
+- `and:`, `or:` - Short-circuit evaluation via keyword messages with blocks
 
-**Note on `and`/`or`:** These are documented as binary operators but would conflict with Smalltalk-style keyword messages. The Boolean class implements `and:` and `or:` as keyword messages with blocks (for short-circuit evaluation). This is likely the intended implementation, not binary operators.
-
-**Recommendation:** Update documentation to clarify:
-- Remove `&&`, `||` from binary operator list (not needed - use `and:` and `or:` messages)
-- Change `and`, `or` from binary operators to keyword messages
-- Keep or remove `!=` (add parser support or remove from docs)
-
-### 2. Implemented but Not Documented (2 operators)
-
-| Operator | Implementation |
-|----------|----------------|
-| `~=` | Fully implemented, tested, works correctly |
-| `++` | Fully implemented, tested, works correctly |
-
-**Recommendation:** Add to documentation:
-- `~=` as strict inequality (precedence 4, same as `=`)
-- `++` as string concatenation (precedence 2, with `+` and `-`)
-
-### 3. Partial Implementation (2 operators)
-
-| Operator | Status |
-|----------|--------|
-| `==` | Lexer tokenizes, codegen exists, but parser doesn't support |
-| `**` | Codegen exists but no lexer/parser support |
-
-**Recommendation:** Either:
-- Complete implementation (add parser support), OR
-- Remove from codegen (dead code)
-
-## Recommendations
-
-### Short-term (BT-135)
-
-**Issue Created:** [BT-135: Add parser support for missing binary operators](https://linear.app/beamtalk/issue/BT-135)
-
-1. **Add parser support for `==`** - Lexer already tokenizes it
-2. **Remove or complete `**`** - Either add lexer/parser or remove codegen
-3. **Remove `!=`** - Or decide if we want it and implement fully
-
-### Medium-term Documentation Updates
-
-1. **Update syntax rationale** to show actual precedence:
-   ```
-   1. `*`, `/`, `%` (highest)
-   2. `+`, `-`, `++`
-   3. `<`, `>`, `<=`, `>=`
-   4. `=`, `~=` (strict equality/inequality)
-   5-6. Remove `&&`, `||`, `and`, `or` from binary operators
-   ```
-
-2. **Add section on Boolean control flow**:
-   ```
-   true and: [expensiveCheck]    // short-circuit with block
-   false or: [alternative]        // short-circuit with block
-   ```
-
-3. **Document implemented but undocumented operators**:
-   - `~=` as strict inequality
-   - `++` as string concatenation
-
-### Long-term
-
-Consider if we want both:
-- `==` (standard equality) and `=` (strict equality)
-- Standard practice: one equality operator is clearer
-- Erlang has both because of history (lists vs binaries)
-- Beamtalk could simplify to just `=` (strict) and `~=` (strict inequality)
-
-## File References
-
-| Component | File | Lines |
-|-----------|------|-------|
-| Documentation | docs/beamtalk-syntax-rationale.md | 117-124 |
-| Lexer | crates/beamtalk-core/src/parse/lexer.rs | 804-824 |
-| Parser | crates/beamtalk-core/src/parse/parser/mod.rs | 126-143 |
-| Codegen | crates/beamtalk-core/src/codegen/core_erlang/mod.rs | 2457-2521 |
-| Tests | test-package-compiler/cases/binary_operators/main.bt | Full file |
-| Coverage | test-package-compiler/COVERAGE_ANALYSIS.md | 37-57 |
-
-## Conclusion
-
-**Documented operators:** 16 (`*`, `/`, `%`, `+`, `-`, `<`, `>`, `<=`, `>=`, `=`, `!=`, `&&`, `and`, `||`, `or`)  
-**Actually parseable:** 12 (`*`, `/`, `%`, `+`, `-`, `<`, `>`, `<=`, `>=`, `=`, `~=`, `++`)  
-**Overlap:** 10 operators work as documented  
-**Documentation gaps:** 6 operators documented but not implemented  
-**Implementation extras:** 2 operators implemented but not documented  
-
-The test suite accurately reflects the 12 parseable operators and correctly identifies the 3 operators with codegen but no parser support.
+### Removed
+- `!=` - Use `~=` for strict inequality
+- `**` - Exponentiation not needed
+- `&&`, `||` - Use `and:` and `or:` keyword messages
