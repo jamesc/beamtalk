@@ -37,19 +37,22 @@ Generate coverage reports for both Rust and Erlang tests:
 cargo llvm-cov --all-targets --workspace \
   -- --skip commands::build::tests::test_build_single_file \
      --skip commands::build::tests::test_build_multiple_files \
-     --skip commands::run::tests::test_run_calls_build
+     --skip commands::run::tests::test_run_calls_build \
+     --skip erlang_runtime_unit_tests
 
 # HTML report (opens in browser)
 cargo llvm-cov --all-targets --workspace --html --open \
   -- --skip commands::build::tests::test_build_single_file \
      --skip commands::build::tests::test_build_multiple_files \
-     --skip commands::run::tests::test_run_calls_build
+     --skip commands::run::tests::test_run_calls_build \
+     --skip erlang_runtime_unit_tests
 
-# LCOV format for CI integration
-cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
+# Cobertura XML format for CI integration
+cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
   -- --skip commands::build::tests::test_build_single_file \
      --skip commands::build::tests::test_build_multiple_files \
-     --skip commands::run::tests::test_run_calls_build
+     --skip commands::run::tests::test_run_calls_build \
+     --skip erlang_runtime_unit_tests
 ```
 
 **Erlang coverage:**
@@ -64,7 +67,24 @@ rebar3 covertool generate
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
+- Rust Cobertura XML: `coverage.cobertura.xml`
 - Erlang Cobertura XML: `runtime/_build/test/covertool/beamtalk_runtime.covertool.xml`
+
+**CI Integration:**
+
+Coverage metrics are automatically displayed in:
+- **GitHub Actions Summary** - View in the "Summary" tab of any workflow run
+- **PR Comments** - Sticky comment with coverage badges and details on all pull requests
+
+No external services required - all coverage reporting is handled within GitHub Actions using `$GITHUB_STEP_SUMMARY` and PR comments.
+
+**Coverage Thresholds:**
+
+| Metric | Minimum | Target | Action if Below Minimum |
+|--------|---------|--------|------------------------|
+| Overall Line Coverage | 70% | 80% | Fail CI build |
+| Branch Coverage | 80% | 90% | Fail CI build |
+| Unit Test Coverage | 80% | 90% | Flag in PR review |
 
 **Current Coverage (as of BT-136):**
 

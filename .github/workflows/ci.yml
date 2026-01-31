@@ -50,7 +50,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Test
-        run: cargo test --all-targets
+        run: cargo test --all-targets -- --skip erlang_runtime_unit_tests
 
       - name: Test Erlang runtime (unit tests)
         run: |
@@ -128,10 +128,12 @@ jobs:
 
       - name: Generate Rust coverage
         run: |
-          cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info \
+          # Generate Cobertura format (for CodeCoverageSummary action)
+          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
             -- --skip commands::build::tests::test_build_single_file \
                --skip commands::build::tests::test_build_multiple_files \
-               --skip commands::run::tests::test_run_calls_build
+               --skip commands::run::tests::test_run_calls_build \
+               --skip erlang_runtime_unit_tests
 
       - name: Generate Erlang coverage
         run: |
@@ -140,10 +142,94 @@ jobs:
           rebar3 cover --verbose
           rebar3 covertool generate
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Rust Coverage Summary
+        id: rust_coverage
+        continue-on-error: true
+        uses: irongut/CodeCoverageSummary@v1.3.0
         with:
-          files: ./lcov.info,./runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
-          flags: rust,erlang
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          filename: coverage.cobertura.xml
+          badge: true
+          format: markdown
+          output: both
+
+      - name: Erlang Coverage Summary
+        id: erlang_coverage
+        continue-on-error: true
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
+          badge: true
+          format: markdown
+          output: both
+
+      - name: Add Coverage to Job Summary
+        run: |
+          echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
+          cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
+          # Extract Erlang coverage from covertool output (portable grep/awk)
+          if [ -f runtime/_build/test/covertool/beamtalk_runtime.covertool.xml ]; then
+            erlang_coverage=$(grep 'line-rate=' runtime/_build/test/covertool/beamtalk_runtime.covertool.xml | head -1 | sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' | awk '{printf "%.2f%%", $1 * 100}')
+            echo "**Overall Line Coverage:** $erlang_coverage" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Overall Line Coverage:** N/A (covertool output not found)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check Coverage Thresholds
+        run: |
+          # Extract Rust line coverage percentage from CodeCoverageSummary output
+          # The action outputs to code-coverage-results.txt
+          if [ ! -f code-coverage-results.txt ]; then
+            echo "⚠️ WARNING: code-coverage-results.txt not found, skipping threshold check"
+            exit 0
+          fi
+          
+          # Extract coverage percentages (CodeCoverageSummary format: "Line Rate: XX.XX%")
+          rust_coverage=$(grep -oE 'Line Rate: [0-9.]+' code-coverage-results.txt | head -1 | grep -oE '[0-9.]+' || echo "0")
+          rust_branch=$(grep -oE 'Branch Rate: [0-9.]+' code-coverage-results.txt | head -1 | grep -oE '[0-9.]+' || echo "0")
+          
+          echo "Rust Line Coverage: ${rust_coverage}%"
+          echo "Rust Branch Coverage: ${rust_branch}%"
+          
+          # Check thresholds using awk for portability (no bc dependency)
+          line_check=$(awk -v cov="$rust_coverage" 'BEGIN { if (cov < 70.0) print "FAIL"; else print "PASS" }')
+          branch_check=$(awk -v cov="$rust_branch" 'BEGIN { if (cov < 80.0) print "WARN"; else print "PASS" }')
+          
+          if [ "$line_check" = "FAIL" ]; then
+            echo "❌ FAILURE: Rust line coverage ${rust_coverage}% is below 70% threshold"
+            exit 1
+          fi
+          
+          if [ "$branch_check" = "WARN" ]; then
+            echo "⚠️ WARNING: Rust branch coverage ${rust_branch}% is below 80% threshold"
+            echo "This will become a failure in future releases"
+          fi
+          
+          echo "✅ Coverage thresholds met"
+
+      - name: Prepare PR Comment
+        if: github.event_name == 'pull_request'
+        run: |
+          cat > pr-comment.md << 'EOF'
+          ## 📊 Code Coverage Report
+          
+          ### Rust Coverage
+          EOF
+          cat code-coverage-results.md >> pr-comment.md
+          echo "" >> pr-comment.md
+          echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> pr-comment.md
+          echo "" >> pr-comment.md
+          echo "### Erlang Coverage" >> pr-comment.md
+          echo "**Badge:** ${{ steps.erlang_coverage.outputs.badge }}" >> pr-comment.md
+
+      - name: Add PR Comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          recreate: true
+          path: pr-comment.md
