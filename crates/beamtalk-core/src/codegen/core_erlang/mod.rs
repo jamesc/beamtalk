@@ -1532,6 +1532,12 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // Special case: String methods - synchronous Erlang string operations
+        // Check BEFORE Dictionary because both use at: but string handles literal strings
+        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: Dictionary/Map methods - direct calls to Erlang maps module
         // These are synchronous operations, not async actor messages
         if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
@@ -1547,12 +1553,6 @@ impl CoreErlangGenerator {
         // Special case: Integer methods - synchronous Erlang operations
         // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
         if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: String methods - synchronous Erlang string operations
-        // length, isEmpty generate direct calls to Erlang string functions
-        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
             return Ok(result);
         }
 
@@ -2466,6 +2466,29 @@ impl CoreErlangGenerator {
             ));
         }
 
+        // Special case: exponentiation requires math:pow wrapped in trunc for integer result
+        if op == "**" {
+            write!(self.output, "call 'erlang':'trunc'(call 'math':'pow'(")?;
+            self.generate_expression(left)?;
+            write!(self.output, ", ")?;
+            self.generate_expression(&arguments[0])?;
+            write!(self.output, "))")?;
+            return Ok(());
+        }
+
+        // Special case: string concatenation uses iolist_to_binary
+        if op == "++" {
+            write!(
+                self.output,
+                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'("
+            )?;
+            self.generate_expression(left)?;
+            write!(self.output, "), call 'erlang':'binary_to_list'(")?;
+            self.generate_expression(&arguments[0])?;
+            write!(self.output, ")])")?;
+            return Ok(());
+        }
+
         let erlang_op = match op {
             "+" => "+",
             "-" => "-",
@@ -2474,6 +2497,8 @@ impl CoreErlangGenerator {
             "%" => "rem",
             "==" => "==",
             "!=" => "/=",
+            "=" => "=:=",   // Strict equality
+            "~=" => "=/=",  // Strict inequality
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
