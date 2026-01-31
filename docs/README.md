@@ -30,6 +30,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 | Document | Description |
 |----------|-------------|
 | [Architecture](beamtalk-architecture.md) | Compiler pipeline, runtime, and hot code loading |
+| [Network Protocols](beamtalk-protocols.md) | CLI ↔ REPL, compiler daemon JSON-RPC, actor messages |
 | [BEAM Interop](beamtalk-interop.md) | Calling Erlang/Elixir from Beamtalk and vice versa |
 | [Testing Strategy](beamtalk-testing-strategy.md) | How we test the compiler and runtime |
 
@@ -61,10 +62,11 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 ### "I want to understand how it works"
 
 1. [Architecture](beamtalk-architecture.md) — Compiler and runtime overview
-2. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
-3. [REPL Internals](beamtalk-repl-internals.md) — How interactive evaluation works
-4. [BEAM Interop](beamtalk-interop.md) — Integration with Erlang/Elixir
-5. [Testing Strategy](beamtalk-testing-strategy.md) — How we verify correctness
+2. [Network Protocols](beamtalk-protocols.md) — IPC between components
+3. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
+4. [REPL Internals](beamtalk-repl-internals.md) — How interactive evaluation works
+5. [BEAM Interop](beamtalk-interop.md) — Integration with Erlang/Elixir
+6. [Testing Strategy](beamtalk-testing-strategy.md) — How we verify correctness
 
 ### "I want to build AI agents"
 
