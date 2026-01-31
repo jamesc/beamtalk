@@ -221,6 +221,13 @@ fi
 echo ""
 read -p "Delete local branch '$BRANCH'? (y/N) " DELETE_BRANCH
 if [ "$DELETE_BRANCH" = "y" ] || [ "$DELETE_BRANCH" = "Y" ]; then
+    # Update main branch to check against latest remote state
+    log_info "🔄 Updating main branch..."
+    if ! git fetch origin main:main 2>/dev/null; then
+        # Fallback if fast-forward fails
+        git fetch origin main 2>/dev/null
+    fi
+    
     if git branch -d "$BRANCH" 2>/dev/null; then
         log_success "✅ Branch deleted"
     else

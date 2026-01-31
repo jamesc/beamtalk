@@ -5,9 +5,9 @@ description: Review current branch changes vs main. Use when user types /code-re
 
 # Code Review Workflow
 
-Perform a **deep, thorough code review** focused on quality. Take time to understand the code's intent and context. Prioritize catching issues missed during implementation: bugs, edge cases, security vulnerabilities, performance bottlenecks, and maintainability problems.
+Perform a **deep, thorough code review** focused on **shipping high-quality code**. Take time to understand the code's intent and context. Prioritize catching issues missed during implementation: bugs, edge cases, security vulnerabilities, performance bottlenecks, and maintainability problems.
 
-This is not a surface-level review—dig into the logic, trace data flows, and consider how the code behaves under failure conditions.
+**Key Philosophy:** Complete improvements during review rather than deferring to future PRs. If something can be done well in <2 hours, implement it now. The goal is to ship excellent code the first time, not to create a backlog of technical debt.
 
 ## Steps
 
@@ -37,16 +37,64 @@ This is not a surface-level review—dig into the logic, trace data flows, and c
    cd runtime && rebar3 eunit
    ```
 
-6. **Provide feedback** using the output format below.
+6. **Implement recommended suggestions**: For anything that can be done well in <2 hours, implement it directly. This includes:
+   - Fixing bugs and edge cases
+   - Adding missing tests
+   - Improving documentation
+   - Refactoring for clarity
+   - Adding error handling
+   - Improving naming and structure
+   - **Philosophy:** Ship high quality the first time. Don't defer easy work to future PRs.
 
-7. **Summary**: End with an overall assessment:
+7. **Create issues ONLY for substantial changes**: Only create Linear issues for work that:
+   - Requires architectural design decisions
+   - Affects multiple components significantly
+   - Needs cross-team coordination or breaking changes
+   - Would fundamentally change the PR's scope
+   - **Remember:** The bar for "separate PR" is HIGH. When in doubt, implement it now.
+
+8. **Summary**: End with an overall assessment:
    - Is the code ready to merge?
    - What are the main strengths of the changes?
-   - What are the key areas to address?
+   - What changes were implemented during review
+   - What issues were created for follow-up work
 
 ---
 
 ## Review Guidelines
+
+### Action Philosophy
+
+**Quality First: Complete work now, don't defer easy fixes.**
+
+The goal is to ship high-quality code the first time. If something can be fixed or improved during review without significant architectural changes, do it immediately. Don't create technical debt by deferring straightforward work.
+
+### Action Decision Matrix
+
+**Implement immediately (fix in place):**
+- Bugs, logic errors, security vulnerabilities
+- Missing error handling or edge cases
+- Formatting/style violations
+- Unclear names or missing documentation
+- Simple to moderate refactoring (extract function, reduce nesting, improve clarity)
+- Missing unit tests for new code
+- Incomplete error messages or logging
+- Additional test cases for better coverage
+- Type annotations, doc comments, examples
+- Performance improvements with clear solutions
+- **Rule of thumb:** If it can be done well in <2 hours, do it now. Don't create future work.
+
+**Create Linear issue ONLY for:**
+- Architectural refactoring affecting many files/components
+- New features genuinely beyond PR scope
+- Performance optimizations requiring extensive benchmarking/profiling/research
+- Security improvements requiring design discussions with stakeholders
+- Breaking API changes requiring coordination
+- Changes that would 2-3x the PR size
+- Work requiring significant new dependencies or infrastructure
+- **Rule of thumb:** Only defer if it requires design decisions, cross-team coordination, or would fundamentally change the PR's purpose
+
+**When in doubt, implement it.** Bias toward completing work rather than creating follow-up issues. The bar for "this needs a separate PR" should be high.
 
 ### General
 - Flag unused variables, imports, or dead code.
@@ -99,15 +147,57 @@ This is not a surface-level review—dig into the logic, trace data flows, and c
 
 ## Output Format
 
-Structure comments by severity:
+### During Review
 
-**🔴 Critical:** [Description] [File:Line]  
-**Fix:** ```code```  
-**Why:** [Rationale]
+**Take action on issues found:**
 
-**🟡 Suggestion:** [Improvement] [File:Line]  
-**Alternative:** ```code```
+1. **🔴 Critical Issues** - Fix immediately:
+   - Bugs that would cause crashes or incorrect behavior
+   - Security vulnerabilities
+   - Logic errors or edge cases not handled
+   - **Action:** Implement the fix, explain what was changed
 
-**✅ Good:** [Strength observed in the code]
+2. **🟡 Recommended Improvements** - Implement if straightforward:
+   - Missing tests for new functionality
+   - Unclear variable names
+   - Missing documentation
+   - Simple refactoring (extract function, reduce nesting)
+   - Formatting/style issues
+   - **Action:** Implement the improvement, note what was changed
+
+3. **🔵 Larger Improvements** - Create Linear issues:
+   - Architectural changes that affect multiple components
+   - New features beyond current PR scope
+   - Performance optimizations requiring benchmarking
+   - Security hardening requiring design decisions
+   - Tech debt that would expand PR significantly
+   - **Action:** Create Linear issue with context, acceptance criteria, labels
+
+4. **✅ Strengths** - Note what's done well:
+   - Good test coverage
+   - Clear, maintainable code
+   - Proper error handling
+   - Good documentation
+
+### Summary Format
+
+```markdown
+## Code Review Summary
+
+### Changes Implemented
+- [x] Fixed critical bug in X (file:line)
+- [x] Added missing tests for Y
+- [x] Improved documentation for Z
+- [x] Refactored W for clarity
+
+### Issues Created for Follow-up
+- BT-XXX: Architectural improvement for [feature]
+- BT-YYY: Performance optimization for [component]
+
+### Assessment
+- **Ready to merge:** Yes/No
+- **Strengths:** [Key positive aspects]
+- **Remaining concerns:** [Any blocking issues]
+```
 
 Apply repo standards from CONTRIBUTING.md, AGENTS.md, or security checklists when available.

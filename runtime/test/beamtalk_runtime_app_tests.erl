@@ -1,0 +1,57 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc Unit tests for beamtalk_runtime_app module
+%%%
+%%% Tests application behavior callbacks (start/stop).
+
+-module(beamtalk_runtime_app_tests).
+-include_lib("eunit/include/eunit.hrl").
+
+%%====================================================================
+%% Tests
+%%====================================================================
+
+%%% Application start tests
+
+start_returns_supervisor_pid_test() ->
+    %% The start function should return the supervisor's PID
+    {ok, Pid} = beamtalk_runtime_app:start(normal, []),
+    ?assert(is_pid(Pid)),
+    ?assert(is_process_alive(Pid)),
+    
+    %% Verify we can query it as a supervisor
+    Children = supervisor:which_children(Pid),
+    ?assert(is_list(Children)),
+    
+    %% Clean up using monitor for reliable termination
+    unlink(Pid),
+    Ref = monitor(process, Pid),
+    exit(Pid, shutdown),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 ->
+        error(supervisor_cleanup_timeout)
+    end.
+
+%%% Application stop tests
+
+stop_test() ->
+    %% Stop should always return ok
+    ?assertEqual(ok, beamtalk_runtime_app:stop([])),
+    ?assertEqual(ok, beamtalk_runtime_app:stop(some_state)),
+    ?assertEqual(ok, beamtalk_runtime_app:stop(#{})),
+    ?assertEqual(ok, beamtalk_runtime_app:stop(undefined)).
+
+%%% Behavioral tests
+
+behaviour_implementation_test() ->
+    %% Verify the module implements the application behaviour
+    Behaviors = proplists:get_value(behaviour, beamtalk_runtime_app:module_info(attributes), []),
+    ?assert(lists:member(application, Behaviors)).
+
+exports_required_callbacks_test() ->
+    %% Verify required callbacks are exported
+    Exports = beamtalk_runtime_app:module_info(exports),
+    ?assert(lists:member({start, 2}, Exports)),
+    ?assert(lists:member({stop, 1}, Exports)).
