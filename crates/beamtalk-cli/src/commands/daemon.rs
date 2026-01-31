@@ -30,6 +30,28 @@
 //! beamtalk daemon stop            # Stop the daemon
 //! beamtalk daemon status          # Check if running
 //! ```
+//!
+//! # JSON-RPC Error Codes
+//!
+//! The daemon uses standard JSON-RPC 2.0 error codes plus custom codes for
+//! Beamtalk-specific errors. Custom codes are in the -32000 to -32099 range,
+//! reserved for implementation-defined server errors per the JSON-RPC 2.0 spec.
+//!
+//! ## Standard Codes
+//!
+//! | Code | Name | Description |
+//! |------|------|-------------|
+//! | -32700 | Parse error | Invalid JSON |
+//! | -32600 | Invalid request | Invalid JSON-RPC request |
+//! | -32601 | Method not found | Unknown method |
+//! | -32602 | Invalid params | Invalid method parameters |
+//! | -32603 | Internal error | Unexpected server error |
+//!
+//! ## Custom Codes
+//!
+//! | Code | Name | Description |
+//! |------|------|-------------|
+//! | -32001 | File read error | Cannot read source file from disk |
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -359,6 +381,10 @@ const METHOD_NOT_FOUND: i32 = -32601;
 const INVALID_PARAMS: i32 = -32602;
 const INTERNAL_ERROR: i32 = -32603;
 
+// Custom error codes (per JSON-RPC 2.0, -32000 to -32099 are reserved for implementation-defined server errors)
+/// File read error - returned when the daemon cannot read a source file from disk.
+const FILE_READ_ERROR: i32 = -32001;
+
 impl JsonRpcResponse {
     fn success(id: Option<serde_json::Value>, result: serde_json::Value) -> Self {
         Self {
@@ -535,7 +561,7 @@ fn handle_compile(
     let source = match read_source_from_params_or_file(params.source, &params.path) {
         Ok(s) => s,
         Err(e) => {
-            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+            return JsonRpcResponse::error(id, FILE_READ_ERROR, e);
         }
     };
 
@@ -626,7 +652,7 @@ fn handle_diagnostics(
     let source = match read_source_from_params_or_file(params.source, &params.path) {
         Ok(s) => s,
         Err(e) => {
-            return JsonRpcResponse::error(id, INTERNAL_ERROR, e);
+            return JsonRpcResponse::error(id, FILE_READ_ERROR, e);
         }
     };
 
@@ -953,5 +979,35 @@ mod tests {
         assert!(response.contains("error"));
         assert!(response.contains("Path cannot be root directory"));
         assert!(response.contains(&INVALID_PARAMS.to_string()));
+    }
+
+    #[test]
+    fn test_compile_file_read_error_uses_custom_code() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        // Request compile without source param for a nonexistent file
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"compile","params":{"path":"/nonexistent/file.bt"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Failed to read file"));
+        assert!(response.contains(&FILE_READ_ERROR.to_string()));
+    }
+
+    #[test]
+    fn test_diagnostics_file_read_error_uses_custom_code() {
+        let mut service = SimpleLanguageService::new();
+        let running = make_running();
+        // Request diagnostics without source param for a nonexistent file
+        let response = handle_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"diagnostics","params":{"path":"/nonexistent/file.bt"}}"#,
+            &mut service,
+            &running,
+        );
+        assert!(response.contains("error"));
+        assert!(response.contains("Failed to read file"));
+        assert!(response.contains(&FILE_READ_ERROR.to_string()));
     }
 }
