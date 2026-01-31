@@ -198,9 +198,9 @@ jobs:
           fi
           
           # Extract coverage percentage from markdown table
-          # Format: **Summary** | **83%** (6635 / 8035) | **69%** (262 / 378) | 682 | ✔
-          rust_coverage=$(grep -E '^\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | head -1 | grep -oE '[0-9]+' || echo "0")
-          rust_branch=$(grep -E '^\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | sed -n '2p' | grep -oE '[0-9]+' || echo "0")
+          # Format: | **Summary** | **83%** (6635 / 8035) | **69%** (262 / 378) | 682 | ✔
+          rust_coverage=$(grep -E '\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | head -1 | grep -oE '[0-9]+' || echo "0")
+          rust_branch=$(grep -E '\*\*Summary\*\*' code-coverage-results.md | grep -oE '\*\*[0-9]+%\*\*' | sed -n '2p' | grep -oE '[0-9]+' || echo "0")
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
