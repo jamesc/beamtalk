@@ -1,5 +1,6 @@
 # Build outputs
 /target/
+/crates/*/target
 /build/
 *.beam
 *.core
@@ -20,6 +21,7 @@ erl_crash.dump
 _build/
 .rebar3/
 rebar.lock
+*.profraw
 
 # Backup files
 *.backup
