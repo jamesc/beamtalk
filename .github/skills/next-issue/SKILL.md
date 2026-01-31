@@ -92,3 +92,16 @@ type: description BT-{number}
 ### 10. Push Regularly
 
 Push after each commit to keep the remote updated.
+
+### 11. Check for Existing PR
+
+After completing implementation:
+```bash
+gh pr list --head $(git branch --show-current) --json number,state --jq '.[0]'
+```
+
+If a PR exists and has unresolved review comments, automatically chain to `pr-resolve` skill:
+- Inform the user that PR review comments need to be addressed
+- Activate the `pr-resolve` skill without waiting for user confirmation
+
+If no PR exists or PR has no review comments, inform the user that implementation is complete and ready for `/done`.
