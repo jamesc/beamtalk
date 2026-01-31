@@ -205,3 +205,120 @@ parse_json_not_json_test() ->
     %% Non-JSON should be treated as raw expression
     NotJson = <<"not json at all">>,
     ?assertEqual({eval, "not json at all"}, beamtalk_repl_server:parse_request(NotJson)).
+
+%%% term_to_json is internal - tested indirectly via format_response
+
+%%% Response formatting edge cases
+
+format_response_nil_test() ->
+    Response = beamtalk_repl_server:format_response(nil),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"nil">>, maps:get(<<"value">>, Decoded)).
+
+format_response_large_number_test() ->
+    Response = beamtalk_repl_server:format_response(999999999999999),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(999999999999999, maps:get(<<"value">>, Decoded)).
+
+format_response_complex_pid_test() ->
+    %% Test that PID formatting includes #Actor< prefix
+    Pid = spawn(fun() -> timer:sleep(100) end),
+    Response = beamtalk_repl_server:format_response(Pid),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assert(binary:match(Value, <<"#Actor<">>) =/= nomatch),
+    ?assert(binary:match(Value, <<">">>) =/= nomatch).
+
+format_response_multi_arity_function_test() ->
+    %% Test function with different arity
+    Fun0 = fun() -> ok end,
+    Fun3 = fun(A, B, C) -> {A, B, C} end,
+    
+    Response0 = beamtalk_repl_server:format_response(Fun0),
+    Response3 = beamtalk_repl_server:format_response(Fun3),
+    
+    Decoded0 = jsx:decode(Response0, [return_maps]),
+    Decoded3 = jsx:decode(Response3, [return_maps]),
+    
+    Value0 = maps:get(<<"value">>, Decoded0),
+    Value3 = maps:get(<<"value">>, Decoded3),
+    
+    ?assert(binary:match(Value0, <<"a Block/0">>) =/= nomatch),
+    ?assert(binary:match(Value3, <<"a Block/3">>) =/= nomatch).
+
+%%% Error formatting edge cases
+
+format_error_load_error_test() ->
+    Response = beamtalk_repl_server:format_error({load_error, badfile}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Failed to load bytecode">>) =/= nomatch).
+
+format_error_file_not_found_test() ->
+    Response = beamtalk_repl_server:format_error({file_not_found, "/path/to/file.bt"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"File not found">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"/path/to/file.bt">>) =/= nomatch).
+
+format_error_read_error_test() ->
+    Response = beamtalk_repl_server:format_error({read_error, eacces}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Failed to read file">>) =/= nomatch).
+
+format_error_generic_tuple_test() ->
+    Response = beamtalk_repl_server:format_error({unknown_error_type, "details"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(is_binary(Message)).
+
+format_error_generic_atom_test() ->
+    Response = beamtalk_repl_server:format_error(some_unknown_error),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Message = maps:get(<<"message">>, Decoded),
+    %% Generic errors are formatted with ~p, so should contain the atom name
+    ?assert(is_binary(Message)),
+    ?assert(byte_size(Message) > 0).
+
+%%% Bindings and loaded formatting edge cases
+
+format_bindings_with_special_characters_test() ->
+    %% Test bindings with special characters in keys
+    Response = beamtalk_repl_server:format_bindings(#{'_privateVar' => 42, 'CamelCase' => "test"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, Decoded),
+    ?assertEqual(42, maps:get(<<"_privateVar">>, Bindings)),
+    ?assertEqual(<<"test">>, maps:get(<<"CamelCase">>, Bindings)).
+
+format_loaded_preserves_order_test() ->
+    %% Verify that loaded classes are returned in the same order
+    Classes = ["Zebra", "Alpha", "Middle"],
+    Response = beamtalk_repl_server:format_loaded(Classes),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Result = maps:get(<<"classes">>, Decoded),
+    ?assertEqual([<<"Zebra">>, <<"Alpha">>, <<"Middle">>], Result).
+
+%%% Request parsing edge cases
+
+parse_request_whitespace_only_test() ->
+    Request = <<"   \n\t  ">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    %% Whitespace-only is treated as empty after stripping
+    ?assertMatch({error, empty_expression}, Result).
+
+parse_request_json_with_extra_fields_test() ->
+    %% JSON with extra fields should be ignored
+    Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 1\", \"extra\": \"ignored\"}">>,
+    ?assertEqual({eval, "1 + 1"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_load_with_spaces_in_path_test() ->
+    Request = <<"{\"type\": \"load\", \"path\": \"/path/with spaces/file.bt\"}">>,
+    ?assertEqual({load_file, "/path/with spaces/file.bt"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_unicode_test() ->
+    %% Test with unicode characters
+    Request = <<"{\"type\": \"eval\", \"expression\": \"greeting := \\\"你好\\\"\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({eval, _}, Result).
