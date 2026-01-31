@@ -1,6 +1,8 @@
 # Beamtalk Network Protocols
 
-This document describes the network protocols used for communication between Beamtalk components. It is intended for contributors, debugging, and potential client implementations in other languages.
+This document describes the network protocols used for communication between Beamtalk components. It covers the CLI ↔ REPL backend protocol, the compiler daemon JSON-RPC API, and the actor message protocol.
+
+For architecture context, see [beamtalk-architecture.md](beamtalk-architecture.md). For the actor runtime model, see [beamtalk-object-model.md](beamtalk-object-model.md).
 
 ---
 
