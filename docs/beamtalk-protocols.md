@@ -315,13 +315,23 @@ Each message is a single JSON object on one line, terminated by newline (`\n`).
 
 ### Error Codes
 
+#### Standard Codes
+
 | Code | Name | Description |
 |------|------|-------------|
 | -32700 | Parse Error | Invalid JSON |
 | -32600 | Invalid Request | Not a valid JSON-RPC request |
 | -32601 | Method Not Found | Unknown method name |
 | -32602 | Invalid Params | Invalid method parameters |
-| -32603 | Internal Error | Server-side error |
+| -32603 | Internal Error | Unexpected server-side error |
+
+#### Custom Codes
+
+Custom error codes are in the -32000 to -32099 range, reserved for implementation-defined server errors per JSON-RPC 2.0.
+
+| Code | Name | Description |
+|------|------|-------------|
+| -32001 | File Read Error | Cannot read source file from disk |
 
 ### Methods
 
