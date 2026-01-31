@@ -18,8 +18,13 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | Math precedence | ✅ | [arithmetic.bt](cases/arithmetic.bt) | `2 + 3 * 4` → 14 |
 | **Unary Messages** | | | |
 | Block `value` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `[42] value` |
-| Integer methods | 📋 | — | `negated`, `abs`, `isZero` planned |
-| String methods | 📋 | — | `length`, `isEmpty` planned |
+| Integer `negated` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `5 negated` → `-5` |
+| Integer `abs` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `-5 abs` → `5` |
+| Integer `isZero` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `0 isZero` → `true` |
+| Integer `isEven` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `4 isEven` → `true` |
+| Integer `isOdd` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `5 isOdd` → `true` |
+| String `length` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `'hello' length` → `5` |
+| String `isEmpty` | ✅ | [unary_messages.bt](cases/unary_messages.bt) | `'' isEmpty` → `true` |
 | **Keyword Messages** | | | |
 | `value:` | ✅ | [keyword_messages.bt](cases/keyword_messages.bt) | `[:x | x] value: 5` |
 | `value:value:` | ✅ | [keyword_messages.bt](cases/keyword_messages.bt) | `[:x :y | x + y] value: 1 value: 2` |
@@ -43,9 +48,12 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | `timesRepeat:` | 📋 | — | Not yet implemented |
 | `to:do:` | 📋 | — | Not yet implemented |
 | **Boolean Operations** | | | |
-| `ifTrue:ifFalse:` | 🔄 | — | Returns future (needs await) |
-| `and:` / `or:` | 🔄 | — | Returns future (needs await) |
-| `not` | 🔄 | — | Returns future (needs await) |
+| `ifTrue:ifFalse:` | ✅ | [booleans.bt](cases/booleans.bt) | `true ifTrue: [1] ifFalse: [2]` → `1` |
+| `ifTrue:` | ✅ | [booleans.bt](cases/booleans.bt) | `true ifTrue: [42]` → `42` |
+| `ifFalse:` | ✅ | [booleans.bt](cases/booleans.bt) | `false ifFalse: [42]` → `42` |
+| `and:` | ✅ | [booleans.bt](cases/booleans.bt) | `true and: [false]` → `false` |
+| `or:` | ✅ | [booleans.bt](cases/booleans.bt) | `false or: [true]` → `true` |
+| `not` | ✅ | [booleans.bt](cases/booleans.bt) | `true not` → `false` |
 | **Cascades** | | | |
 | Cascade syntax | 📋 | [cascades.bt](cases/cascades.bt) | Codegen works, needs stateful E2E¹ |
 | **Actors** | | | |
