@@ -148,21 +148,23 @@ jobs:
 
       - name: Rust Coverage Summary
         id: rust_coverage
+        continue-on-error: true
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
           filename: coverage.cobertura.xml
           badge: true
           format: markdown
-          output: both
+          output: file
 
       - name: Erlang Coverage Summary
         id: erlang_coverage
+        continue-on-error: true
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
           filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
           badge: true
           format: markdown
-          output: both
+          output: file
 
       - name: Add Coverage to Job Summary
         run: |
