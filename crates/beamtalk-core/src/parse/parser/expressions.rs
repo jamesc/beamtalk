@@ -20,7 +20,7 @@ use crate::ast::{
     Block, BlockParameter, CascadeMessage, CompoundOperator, Expression, Identifier, KeywordPart,
     Literal, MapPair, MessageSelector,
 };
-use crate::parse::TokenKind;
+use crate::parse::{Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser, binary_binding_power};
@@ -264,6 +264,7 @@ impl Parser {
             arguments.push(self.parse_binary_message());
         }
 
+        // Safety: arguments is guaranteed non-empty by the while loop above
         let span = receiver.span().merge(arguments.last().unwrap().span());
 
         Expression::MessageSend {
@@ -495,7 +496,7 @@ impl Parser {
             && self.current_token().trailing_trivia().is_empty()
             && self
                 .peek()
-                .is_some_and(|t: &crate::parse::Token| t.leading_trivia().is_empty())
+                .is_some_and(|t: &Token| t.leading_trivia().is_empty())
         {
             self.advance(); // consume the period
 
@@ -556,7 +557,7 @@ impl Parser {
 
         let end = self
             .expect(&TokenKind::RightBracket, "Expected ']' to close block")
-            .map_or(start, |t: crate::parse::Token| t.span());
+            .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
         let block = Block::new(parameters, body, span);
@@ -570,10 +571,7 @@ impl Parser {
     /// simple expressions as keys/values while avoiding ambiguity with the map syntax.
     fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
-        let start = start_token.map_or_else(
-            || self.current_token().span(),
-            |t: crate::parse::Token| t.span(),
-        );
+        let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut pairs = Vec::new();
 
@@ -679,7 +677,7 @@ impl Parser {
 
         let end = self
             .expect(&TokenKind::RightParen, "Expected ')' to close parentheses")
-            .map_or(start, |t: crate::parse::Token| t.span());
+            .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
 

@@ -75,13 +75,12 @@ impl Parser {
         // Parse class body (state declarations and methods)
         let (state, methods) = self.parse_class_body();
 
-        let end = if !methods.is_empty() {
-            methods.last().unwrap().span
-        } else if !state.is_empty() {
-            state.last().unwrap().span
-        } else {
-            name.span
-        };
+        // Determine end span: prefer methods, fallback to state, then to name
+        let end = methods
+            .last()
+            .map(|m| m.span)
+            .or_else(|| state.last().map(|s| s.span))
+            .unwrap_or(name.span);
         let span = start.merge(end);
 
         ClassDefinition::with_modifiers(
