@@ -104,20 +104,45 @@ struct TestCase {
     line: usize,
 }
 
+/// Parsed test file with metadata.
+#[derive(Debug)]
+struct ParsedTestFile {
+    /// Files to load before running tests (from `// @load` directives).
+    load_files: Vec<String>,
+    /// Test cases to run.
+    cases: Vec<TestCase>,
+}
+
 /// Parse test cases from a `.bt` file.
 ///
 /// Test format:
 /// ```text
+/// // @load path/to/file.bt
+///
 /// expression
 /// // => expected_result
 /// ```
-fn parse_test_file(content: &str) -> Vec<TestCase> {
+///
+/// Directives:
+/// - `// @load <path>` - Load a file before running tests (relative to workspace root)
+fn parse_test_file(content: &str) -> ParsedTestFile {
     let mut cases = Vec::new();
+    let mut load_files = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
 
     while i < lines.len() {
         let line = lines[i].trim();
+
+        // Check for @load directive
+        if let Some(path) = line.strip_prefix("// @load") {
+            let path = path.trim();
+            if !path.is_empty() {
+                load_files.push(path.to_string());
+            }
+            i += 1;
+            continue;
+        }
 
         // Skip empty lines and standalone comments
         if line.is_empty() || (line.starts_with("//") && !line.starts_with("// =>")) {
@@ -150,7 +175,7 @@ fn parse_test_file(content: &str) -> Vec<TestCase> {
         i += 1;
     }
 
-    cases
+    ParsedTestFile { load_files, cases }
 }
 
 /// Manages the daemon and BEAM processes for tests.
@@ -418,21 +443,76 @@ impl ReplClient {
 
         Ok(())
     }
+
+    /// Load a Beamtalk file (for actor/class definitions).
+    ///
+    /// This compiles the file and loads its classes into the REPL session,
+    /// making them available for spawning and messaging.
+    fn load_file(&mut self, path: &str) -> Result<Vec<String>, String> {
+        let request = serde_json::json!({
+            "type": "load",
+            "path": path
+        });
+
+        writeln!(self.stream, "{request}")
+            .map_err(|e| format!("Failed to send load request: {e}"))?;
+
+        self.stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))?;
+
+        // Read response
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Failed to read load response: {e}"))?;
+
+        // Parse JSON response
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| format!("Failed to parse load response: {e}"))?;
+
+        match response.get("type").and_then(|t| t.as_str()) {
+            Some("loaded") => {
+                // Extract loaded class names
+                let classes = response
+                    .get("classes")
+                    .and_then(|c| c.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(classes)
+            }
+            Some("error") => {
+                let message = response
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                Err(message.to_string())
+            }
+            _ => Err(format!("Unexpected load response: {response_line}")),
+        }
+    }
 }
 
 /// Run a single test file.
 ///
 /// Note: Bindings are cleared at the start of each file, but NOT between
 /// individual test cases within the same file. This allows testing variable
-/// persistence across expressions. If you need isolated tests, put them in
-/// separate files.
+/// persistence across expressions (stateful tests). If you need isolated tests,
+/// put them in separate files.
+///
+/// If the file contains `// @load <path>` directives, those files are loaded
+/// before any test cases run, making their classes available for spawning.
 fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
-    let cases = parse_test_file(&content);
+    let test_file = parse_test_file(&content);
 
     let file_name = path.file_name().unwrap().to_string_lossy();
     let mut failures = Vec::new();
-    let mut passed = 0;
+    let mut pass_count = 0;
 
     // Clear bindings before running file
     if let Err(e) = client.clear_bindings() {
@@ -440,11 +520,31 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         return (0, failures);
     }
 
-    for case in &cases {
+    // Load any required files (relative to workspace root)
+    let root = workspace_root();
+    for load_path in &test_file.load_files {
+        let full_path = root.join(load_path);
+        let full_path_str = full_path.to_string_lossy();
+        match client.load_file(&full_path_str) {
+            Ok(classes) => {
+                eprintln!(
+                    "E2E: Loaded {} (classes: {})",
+                    load_path,
+                    classes.join(", ")
+                );
+            }
+            Err(e) => {
+                failures.push(format!("{file_name}: Failed to load {load_path}: {e}"));
+                return (0, failures);
+            }
+        }
+    }
+
+    for case in &test_file.cases {
         match client.eval(&case.expression) {
             Ok(result) => {
                 if result == case.expected {
-                    passed += 1;
+                    pass_count += 1;
                 } else {
                     failures.push(format!(
                         "{file_name}:{}: `{}` expected `{}`, got `{}`",
@@ -457,7 +557,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 if case.expected.starts_with("ERROR:") {
                     let expected_error = case.expected.strip_prefix("ERROR:").unwrap().trim();
                     if e.contains(expected_error) {
-                        passed += 1;
+                        pass_count += 1;
                     } else {
                         failures.push(format!(
                             "{file_name}:{}: `{}` expected error containing `{}`, got error `{}`",
@@ -474,7 +574,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         }
     }
 
-    (passed, failures)
+    (pass_count, failures)
 }
 
 /// Main E2E test entry point.
@@ -568,12 +668,13 @@ mod tests {
 5 * 2
 // => 10
 ";
-        let cases = parse_test_file(content);
-        assert_eq!(cases.len(), 2);
-        assert_eq!(cases[0].expression, "3 + 4");
-        assert_eq!(cases[0].expected, "7");
-        assert_eq!(cases[1].expression, "5 * 2");
-        assert_eq!(cases[1].expected, "10");
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_files.is_empty());
+        assert_eq!(parsed.cases.len(), 2);
+        assert_eq!(parsed.cases[0].expression, "3 + 4");
+        assert_eq!(parsed.cases[0].expected, "7");
+        assert_eq!(parsed.cases[1].expression, "5 * 2");
+        assert_eq!(parsed.cases[1].expected, "10");
     }
 
     #[test]
@@ -587,10 +688,11 @@ mod tests {
 [:x | x + 1] value: 5
 // => 6
 ";
-        let cases = parse_test_file(content);
-        assert_eq!(cases.len(), 2);
-        assert_eq!(cases[0].expression, "3 + 4");
-        assert_eq!(cases[1].expression, "[:x | x + 1] value: 5");
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_files.is_empty());
+        assert_eq!(parsed.cases.len(), 2);
+        assert_eq!(parsed.cases[0].expression, "3 + 4");
+        assert_eq!(parsed.cases[1].expression, "[:x | x + 1] value: 5");
     }
 
     #[test]
@@ -599,8 +701,27 @@ mod tests {
 undefined_var
 // => ERROR: Undefined variable
 ";
-        let cases = parse_test_file(content);
-        assert_eq!(cases.len(), 1);
-        assert_eq!(cases[0].expected, "ERROR: Undefined variable");
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_files.is_empty());
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expected, "ERROR: Undefined variable");
+    }
+
+    #[test]
+    fn test_parse_test_file_with_load_directive() {
+        let content = r"
+// @load tests/e2e/fixtures/counter.bt
+// @load lib/stdlib.bt
+
+// Test with loaded classes
+Counter spawn
+// => <pid>
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.load_files.len(), 2);
+        assert_eq!(parsed.load_files[0], "tests/e2e/fixtures/counter.bt");
+        assert_eq!(parsed.load_files[1], "lib/stdlib.bt");
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "Counter spawn");
     }
 }

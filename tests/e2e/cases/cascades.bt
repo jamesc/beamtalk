@@ -12,10 +12,32 @@
 // and all cascade messages are sent to that same actor. The final message's
 // result is returned.
 //
-// Limitations:
+// ===========================================================================
+// STATEFUL E2E TESTS
+// ===========================================================================
+//
+// To test cascades end-to-end, use the @load directive to load an actor class:
+//
+//   // @load tests/e2e/fixtures/counter.bt
+//   counter := Counter spawn
+//   // => <pid>
+//   counter increment; increment; getValue
+//   // => 2
+//
+// The test harness maintains state between expressions within a file, so
+// you can spawn an actor and then send cascades to it.
+//
+// ===========================================================================
+// LIMITATIONS
+// ===========================================================================
+//
 // - Binary selectors (like +, -, etc.) are not yet supported in cascades
 // - REPL evaluation of cascades may have limitations due to how the REPL
 //   compiles expressions
+//
+// ===========================================================================
+// SYNTAX EXAMPLES
+// ===========================================================================
 //
 // Example in compiled modules:
 //   runCascade := [ counter increment; increment; getValue ]

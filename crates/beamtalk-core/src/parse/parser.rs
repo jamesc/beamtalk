@@ -23,6 +23,21 @@
 //!    - NOT strictly left-to-right like traditional Smalltalk!
 //! 3. **Keyword messages**: `array at: 1 put: 'x'` (lowest precedence)
 //!
+//! # Binary Operator Precedence (Pratt Parsing)
+//!
+//! Binary operator precedence is handled using Pratt parsing (top-down operator
+//! precedence parsing). This approach uses a binding power table to determine
+//! precedence declaratively, making it easy to add new operators.
+//!
+//! | Level | Operators | Associativity |
+//! |-------|-----------|---------------|
+//! | 10 | `=` `~=` | Left |
+//! | 20 | `<` `>` `<=` `>=` | Left |
+//! | 30 | `+` `-` | Left |
+//! | 40 | `*` `/` `%` | Left |
+//!
+//! To add a new operator, simply add an entry to [`binary_binding_power`].
+//!
 //! # Usage
 //!
 //! ```
@@ -42,6 +57,85 @@ use crate::ast::{
 };
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
+
+// ============================================================================
+// Pratt Parsing for Binary Operator Precedence
+// ============================================================================
+
+/// Binding power for binary operators (Pratt parsing).
+///
+/// Higher values bind tighter. Left and right binding powers differ
+/// for associativity:
+/// - Left-associative: `left_bp == right_bp - 1` (e.g., `+`, `-`)
+/// - Right-associative: `left_bp == right_bp + 1` (e.g., `**`)
+#[derive(Debug, Clone, Copy)]
+struct BindingPower {
+    /// Left binding power (how tightly this operator binds to its left operand).
+    left: u8,
+    /// Right binding power (how tightly this operator binds to its right operand).
+    right: u8,
+}
+
+impl BindingPower {
+    /// Creates a left-associative binding power.
+    const fn left_assoc(precedence: u8) -> Self {
+        Self {
+            left: precedence,
+            right: precedence + 1,
+        }
+    }
+
+    /// Creates a right-associative binding power.
+    #[allow(dead_code)] // Reserved for future operators like `**`
+    const fn right_assoc(precedence: u8) -> Self {
+        Self {
+            left: precedence + 1,
+            right: precedence,
+        }
+    }
+}
+
+/// Gets the binding power for a binary operator.
+///
+/// Returns `None` for unknown operators, allowing the parser to treat
+/// them as end of expression (useful for error recovery).
+///
+/// # Precedence Levels (from lowest to highest)
+///
+/// | Level | Operators | Associativity |
+/// |-------|-----------|---------------|
+/// | 10 | `=` `~=` | Left |
+/// | 20 | `<` `>` `<=` `>=` | Left |
+/// | 30 | `+` `-` | Left |
+/// | 40 | `*` `/` `%` | Left |
+///
+/// To add a new operator, just add an entry here. For example:
+/// ```ignore
+/// // Bitwise OR (between comparison and additive)
+/// "|" => Some(BindingPower::left_assoc(25)),
+///
+/// // Exponentiation (right-associative, higher than multiplication)
+/// "**" => Some(BindingPower::right_assoc(50)),
+/// ```
+fn binary_binding_power(op: &str) -> Option<BindingPower> {
+    match op {
+        // Equality (lowest binary precedence)
+        // `~=` is the Smalltalk-style not-equal operator
+        "=" | "~=" => Some(BindingPower::left_assoc(10)),
+
+        // Comparison
+        "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
+
+        // Additive
+        "+" | "-" => Some(BindingPower::left_assoc(30)),
+
+        // Multiplicative (highest binary precedence)
+        "*" | "/" | "%" => Some(BindingPower::left_assoc(40)),
+
+        // Unknown operator - return None to stop binary expression parsing
+        _ => None,
+    }
+}
 
 /// Parse a sequence of tokens into a module.
 ///
@@ -1008,84 +1102,59 @@ impl Parser {
         }
     }
 
-    /// Parses a binary message with standard math precedence.
+    /// Parses a binary message with standard math precedence using Pratt parsing.
     ///
     /// Unlike traditional Smalltalk (which is strictly left-to-right),
     /// Beamtalk binary messages follow standard operator precedence:
     /// - Multiplicative: `* / %` (higher precedence)
     /// - Additive: `+ -` (lower precedence)
-    /// - Comparison: `< > <= >= = !=` (lowest precedence)
+    /// - Comparison: `< > <= >= = ~=` (lowest precedence)
+    ///
+    /// This implementation uses Pratt parsing (top-down operator precedence)
+    /// which makes adding new operators a single-line change in the
+    /// [`binary_binding_power`] function.
     fn parse_binary_message(&mut self) -> Expression {
-        self.parse_comparison()
+        self.parse_binary_with_pratt(0)
     }
 
-    /// Parses comparison operators (lowest binary precedence).
-    fn parse_comparison(&mut self) -> Expression {
-        let mut left = self.parse_additive();
-
-        while let TokenKind::BinarySelector(op) = self.current_kind() {
-            if !matches!(op.as_str(), "<" | ">" | "<=" | ">=" | "=" | "!=") {
-                break;
-            }
-
-            let selector = MessageSelector::Binary(op.clone());
-            self.advance();
-            let right = self.parse_additive();
-            let span = left.span().merge(right.span());
-
-            left = Expression::MessageSend {
-                receiver: Box::new(left),
-                selector,
-                arguments: vec![right],
-                span,
-            };
-        }
-
-        left
-    }
-
-    /// Parses additive operators (+ and -).
-    fn parse_additive(&mut self) -> Expression {
-        let mut left = self.parse_multiplicative();
-
-        while let TokenKind::BinarySelector(op) = self.current_kind() {
-            if !matches!(op.as_str(), "+" | "-") {
-                break;
-            }
-
-            let selector = MessageSelector::Binary(op.clone());
-            self.advance();
-            let right = self.parse_multiplicative();
-            let span = left.span().merge(right.span());
-
-            left = Expression::MessageSend {
-                receiver: Box::new(left),
-                selector,
-                arguments: vec![right],
-                span,
-            };
-        }
-
-        left
-    }
-
-    /// Parses multiplicative operators (*, /, %).
-    fn parse_multiplicative(&mut self) -> Expression {
+    /// Pratt parsing for binary expressions.
+    ///
+    /// This function implements the core Pratt parsing algorithm using binding
+    /// powers from [`binary_binding_power`]. The `min_bp` parameter controls the
+    /// minimum binding power required to continue parsing, enabling correct
+    /// precedence handling through recursion.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_bp` - Minimum binding power to continue parsing (0 for top-level)
+    fn parse_binary_with_pratt(&mut self, min_bp: u8) -> Expression {
+        // Parse the left-hand side (unary expression)
         let mut left = self.parse_unary_message();
 
         while let TokenKind::BinarySelector(op) = self.current_kind() {
-            if !matches!(op.as_str(), "*" | "/" | "%") {
+            let op = op.clone();
+
+            // Get binding power; unknown operators end the expression
+            let Some(bp) = binary_binding_power(&op) else {
+                break;
+            };
+
+            // Stop if this operator binds less tightly than our minimum
+            if bp.left < min_bp {
                 break;
             }
 
-            let selector = MessageSelector::Binary(op.clone());
+            // Consume the operator
             self.advance();
-            let right = self.parse_unary_message();
-            let span = left.span().merge(right.span());
 
+            // Parse the right-hand side with the operator's right binding power
+            let right = self.parse_binary_with_pratt(bp.right);
+
+            // Build the message send expression
+            let span = left.span().merge(right.span());
             left = Expression::MessageSend {
                 receiver: Box::new(left),
-                selector,
+                selector: MessageSelector::Binary(op),
                 arguments: vec![right],
                 span,
             };
@@ -2346,5 +2415,191 @@ Actor subclass: Rectangle
         assert_eq!(module.classes.len(), 2);
         assert_eq!(module.classes[0].name.name, "Point");
         assert_eq!(module.classes[1].name.name, "Rectangle");
+    }
+
+    // ========================================================================
+    // Pratt Parsing Tests
+    // ========================================================================
+
+    #[test]
+    fn pratt_single_operand_expression() {
+        // Single operand without any operators should return just the literal
+        let module = parse_ok("42");
+        assert_eq!(module.expressions.len(), 1);
+        assert!(matches!(
+            &module.expressions[0],
+            Expression::Literal(Literal::Integer(42), _)
+        ));
+    }
+
+    #[test]
+    fn pratt_unknown_operator_stops_parsing() {
+        // Unknown operators like `++` should stop binary parsing
+        // This parses as: 1 (then `++` is unknown, stops) `++` `2`
+        // The `++` gets parsed as two unary `+` messages on `2`, but since
+        // there's no identifier after 1, we just get `1` and then a new expression
+        // Actually, `++` is a single BinarySelector token, so this tests that
+        // unknown operators don't cause errors
+        let (module, diagnostics) = {
+            let tokens = crate::parse::lex_with_eof("1 ++ 2");
+            crate::parse::parse(tokens)
+        };
+        // The parser should handle this gracefully
+        // It may produce diagnostics but shouldn't panic
+        assert!(!module.expressions.is_empty());
+        // The behavior is that `++` is an unknown operator, so parsing stops at 1
+        // Then `++` and `2` might produce errors or be parsed separately
+        // The key is that the parser doesn't crash
+        let _ = diagnostics; // We don't assert specific diagnostics
+    }
+
+    #[test]
+    fn pratt_precedence_mul_over_add() {
+        // 1 + 2 * 3 should parse as 1 + (2 * 3)
+        let module = parse_ok("1 + 2 * 3");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Binary(op),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            // Top level should be `+`
+            assert_eq!(op.as_str(), "+");
+            assert!(matches!(
+                **receiver,
+                Expression::Literal(Literal::Integer(1), _)
+            ));
+
+            // Right side should be 2 * 3
+            if let Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Binary(inner_op),
+                arguments: inner_args,
+                ..
+            } = &arguments[0]
+            {
+                assert_eq!(inner_op.as_str(), "*");
+                assert!(matches!(
+                    **inner_recv,
+                    Expression::Literal(Literal::Integer(2), _)
+                ));
+                assert!(matches!(
+                    inner_args[0],
+                    Expression::Literal(Literal::Integer(3), _)
+                ));
+            } else {
+                panic!("Expected nested MessageSend for 2 * 3");
+            }
+        } else {
+            panic!("Expected MessageSend for 1 + ...");
+        }
+    }
+
+    #[test]
+    fn pratt_left_associativity() {
+        // 1 - 2 - 3 should parse as (1 - 2) - 3
+        let module = parse_ok("1 - 2 - 3");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Binary(op),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            // Top level should be `-` with `3` on right
+            assert_eq!(op.as_str(), "-");
+            assert!(matches!(
+                arguments[0],
+                Expression::Literal(Literal::Integer(3), _)
+            ));
+
+            // Left side should be 1 - 2
+            if let Expression::MessageSend {
+                receiver: inner_recv,
+                selector: MessageSelector::Binary(inner_op),
+                arguments: inner_args,
+                ..
+            } = &**receiver
+            {
+                assert_eq!(inner_op.as_str(), "-");
+                assert!(matches!(
+                    **inner_recv,
+                    Expression::Literal(Literal::Integer(1), _)
+                ));
+                assert!(matches!(
+                    inner_args[0],
+                    Expression::Literal(Literal::Integer(2), _)
+                ));
+            } else {
+                panic!("Expected nested MessageSend for 1 - 2");
+            }
+        } else {
+            panic!("Expected MessageSend");
+        }
+    }
+
+    #[test]
+    fn pratt_comparison_lowest_precedence() {
+        // 1 + 2 < 3 * 4 should parse as (1 + 2) < (3 * 4)
+        let module = parse_ok("1 + 2 < 3 * 4");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Binary(op),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            assert_eq!(op.as_str(), "<");
+
+            // Left side: 1 + 2
+            if let Expression::MessageSend {
+                selector: MessageSelector::Binary(left_op),
+                ..
+            } = &**receiver
+            {
+                assert_eq!(left_op.as_str(), "+");
+            } else {
+                panic!("Expected 1 + 2 on left");
+            }
+
+            // Right side: 3 * 4
+            if let Expression::MessageSend {
+                selector: MessageSelector::Binary(right_op),
+                ..
+            } = &arguments[0]
+            {
+                assert_eq!(right_op.as_str(), "*");
+            } else {
+                panic!("Expected 3 * 4 on right");
+            }
+        } else {
+            panic!("Expected comparison at top level");
+        }
+    }
+
+    #[test]
+    fn pratt_all_operators() {
+        // Test all supported operators parse correctly
+        // Using `~=` as the not-equal operator (Smalltalk tradition)
+        let expressions = vec![
+            "1 = 2", "1 ~= 2", // Smalltalk-style not-equal
+            "1 < 2", "1 > 2", "1 <= 2", "1 >= 2", "1 + 2", "1 - 2", "1 * 2", "1 / 2", "1 % 2",
+        ];
+
+        for expr in expressions {
+            let module = parse_ok(expr);
+            assert_eq!(module.expressions.len(), 1, "Failed for: {expr}");
+            assert!(
+                matches!(&module.expressions[0], Expression::MessageSend { .. }),
+                "Expected MessageSend for: {expr}"
+            );
+        }
     }
 }
