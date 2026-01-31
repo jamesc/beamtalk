@@ -20,3 +20,6 @@ erl_crash.dump
 _build/
 .rebar3/
 rebar.lock
+
+# Backup files
+*.backup
