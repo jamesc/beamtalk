@@ -322,3 +322,181 @@ stress_test_many_futures_test() ->
     
     %% Verify results
     ?assertEqual(lists:seq(1, NumFutures), Results).
+
+%%% Additional edge case tests
+
+multiple_awaiters_on_same_future_test() ->
+    %% Test multiple processes awaiting the same future
+    Future = beamtalk_future:new(),
+    Parent = self(),
+    NumWaiters = 10,
+    
+    %% Spawn multiple processes that wait on the same future
+    Pids = [spawn(fun() ->
+        Result = beamtalk_future:await(Future),
+        Parent ! {waiter_done, self(), Result}
+    end) || _ <- lists:seq(1, NumWaiters)],
+    
+    %% Give them time to register as waiters
+    timer:sleep(50),
+    
+    %% Now resolve the future
+    beamtalk_future:resolve(Future, shared_value),
+    
+    %% All waiters should receive the same value
+    Results = [receive 
+        {waiter_done, Pid, R} -> R 
+    after 2000 -> timeout end || Pid <- Pids],
+    
+    ?assertEqual(lists:duplicate(NumWaiters, shared_value), Results).
+
+concurrent_resolve_await_race_test() ->
+    %% Test race condition: resolve and await happening concurrently
+    NumIterations = 50,
+    
+    Results = [begin
+        Future = beamtalk_future:new(),
+        Parent = self(),
+        
+        %% Spawn resolver
+        spawn(fun() -> beamtalk_future:resolve(Future, iteration_value) end),
+        
+        %% Spawn awaiter
+        spawn(fun() ->
+            Result = beamtalk_future:await(Future, 1000),
+            Parent ! {result, Result}
+        end),
+        
+        %% Collect result
+        receive
+            {result, R} -> R
+        after 2000 ->
+            timeout
+        end
+    end || _ <- lists:seq(1, NumIterations)],
+    
+    %% All should have resolved successfully (no timeouts)
+    ?assertEqual(lists:duplicate(NumIterations, {ok, iteration_value}), Results).
+
+future_chaining_with_callbacks_test() ->
+    %% Test chaining futures via callbacks
+    Future1 = beamtalk_future:new(),
+    Future2 = beamtalk_future:new(),
+    
+    %% Chain: when Future1 resolves, resolve Future2 with transformed value
+    beamtalk_future:when_resolved(Future1, fun(Value) ->
+        beamtalk_future:resolve(Future2, Value * 2)
+    end),
+    
+    %% Resolve first future
+    beamtalk_future:resolve(Future1, 21),
+    
+    %% Wait for chained future
+    timer:sleep(50),
+    Result = beamtalk_future:await(Future2),
+    ?assertEqual(42, Result).
+
+error_propagation_through_callbacks_test() ->
+    %% Test error propagation from one future to another
+    Future1 = beamtalk_future:new(),
+    Future2 = beamtalk_future:new(),
+    
+    %% Chain errors: when Future1 rejects, reject Future2
+    beamtalk_future:when_rejected(Future1, fun(Reason) ->
+        beamtalk_future:reject(Future2, {propagated, Reason})
+    end),
+    
+    %% Reject first future
+    beamtalk_future:reject(Future1, original_error),
+    
+    %% Wait for chained future to be rejected
+    timer:sleep(50),
+    Result = beamtalk_future:await(Future2, 1000),
+    ?assertEqual({error, {propagated, original_error}}, Result).
+
+process_cleanup_when_future_abandoned_test() ->
+    %% Test that future process stays alive even if creator crashes
+    Parent = self(),
+    
+    %% Create future in a separate process that will die
+    _CreatorPid = spawn(fun() ->
+        F = beamtalk_future:new(),
+        Parent ! {future, F},
+        %% Process exits, but future should remain
+        exit(normal)
+    end),
+    
+    %% Receive the future reference
+    FutureRef = receive {future, F} -> F after 1000 -> error(timeout) end,
+    
+    %% Give creator time to exit
+    timer:sleep(50),
+    
+    %% Future process should still be alive
+    ?assert(is_process_alive(FutureRef)),
+    
+    %% Should still be usable
+    beamtalk_future:resolve(FutureRef, still_alive),
+    Result = beamtalk_future:await(FutureRef),
+    ?assertEqual(still_alive, Result).
+
+await_on_already_resolved_future_multiple_times_test() ->
+    %% Test that already resolved future can be awaited multiple times
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, persistent_value),
+    
+    %% Await multiple times
+    ?assertEqual(persistent_value, beamtalk_future:await(Future)),
+    ?assertEqual(persistent_value, beamtalk_future:await(Future)),
+    ?assertEqual(persistent_value, beamtalk_future:await(Future)),
+    
+    %% With timeout too
+    ?assertEqual({ok, persistent_value}, beamtalk_future:await(Future, 100)).
+
+future_with_large_value_test() ->
+    %% Test future with large data value
+    LargeValue = lists:duplicate(10000, {complex, data, structure, with, many, elements}),
+    
+    Future = beamtalk_future:new(),
+    beamtalk_future:resolve(Future, LargeValue),
+    
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(LargeValue, Result).
+
+concurrent_callback_registration_test() ->
+    %% Test concurrent registration of callbacks
+    Future = beamtalk_future:new(),
+    Parent = self(),
+    NumCallbacks = 10,
+    
+    %% Register multiple callbacks concurrently
+    [spawn(fun() ->
+        beamtalk_future:when_resolved(Future, fun(Value) ->
+            Parent ! {callback_fired, Value}
+        end)
+    end) || _ <- lists:seq(1, NumCallbacks)],
+    
+    %% Give time for callbacks to register
+    timer:sleep(50),
+    
+    %% Resolve the future
+    beamtalk_future:resolve(Future, callback_value),
+    
+    %% All callbacks should fire
+    Notifications = [receive 
+        {callback_fired, V} -> V 
+    after 1000 -> timeout end || _ <- lists:seq(1, NumCallbacks)],
+    
+    ?assertEqual(lists:duplicate(NumCallbacks, callback_value), Notifications).
+
+reject_without_await_no_crash_test() ->
+    %% Test that rejecting a future without anyone waiting doesn't crash
+    Future = beamtalk_future:new(),
+    beamtalk_future:reject(Future, unhandled_error),
+    
+    %% Future process should still be alive
+    ?assert(is_process_alive(Future)),
+    
+    %% Later await should get the rejection
+    Result = beamtalk_future:await(Future, 100),
+    ?assertEqual({error, unhandled_error}, Result).

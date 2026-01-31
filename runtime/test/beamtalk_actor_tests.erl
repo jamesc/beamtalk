@@ -367,3 +367,217 @@ stress_many_messages_test() ->
     ?assertEqual(NumMessages, Result),
     
     gen_server:stop(Counter).
+
+%%% Edge case tests - concurrent behavior
+
+concurrent_message_sends_test() ->
+    %% Test multiple processes sending messages to same actor concurrently
+    {ok, Counter} = test_counter:start_link(0),
+    Parent = self(),
+    NumProcesses = 10,
+    IncrementsPerProcess = 10,
+    
+    %% Spawn multiple processes that increment concurrently
+    Pids = [spawn(fun() ->
+        [gen_server:call(Counter, {increment, []}) || _ <- lists:seq(1, IncrementsPerProcess)],
+        Parent ! {done, self()}
+    end) || _ <- lists:seq(1, NumProcesses)],
+    
+    %% Wait for all processes to complete
+    [receive {done, Pid} -> ok after 5000 -> ?assert(false) end || Pid <- Pids],
+    
+    %% Verify final value is correct
+    Expected = NumProcesses * IncrementsPerProcess,
+    Result = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(Expected, Result),
+    
+    gen_server:stop(Counter).
+
+actor_crash_during_processing_test() ->
+    %% Test that throwing actor handles errors without crashing the process
+    {ok, Actor} = test_throwing_actor:start_link(),
+    
+    %% Actor should handle exception without crashing
+    Result = gen_server:call(Actor, {throwError, []}),
+    ?assertMatch({error, {method_error, throwError, _}}, Result),
+    
+    %% Verify actor is still alive
+    ?assert(is_process_alive(Actor)),
+    
+    %% Verify it still processes messages normally
+    NormalResult = gen_server:call(Actor, {normalMethod, []}),
+    ?assertEqual(ok, NormalResult),
+    
+    gen_server:stop(Actor).
+
+large_state_handling_test() ->
+    %% Test actor with large state (simulating memory pressure)
+    LargeData = lists:duplicate(10000, {data, lists:seq(1, 100)}),
+    
+    {ok, Pid} = beamtalk_actor:start_link(test_counter, 0),
+    
+    %% Set large state via sys:replace_state
+    sys:replace_state(Pid, fun(State) ->
+        State#{large_data => LargeData}
+    end),
+    
+    %% Verify actor still works with large state
+    Result = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(0, Result),
+    
+    %% Verify can still modify state
+    gen_server:call(Pid, {'setValue:', [42]}),
+    ?assertEqual(42, gen_server:call(Pid, {getValue, []})),
+    
+    gen_server:stop(Pid).
+
+message_queue_overflow_test() ->
+    %% Test actor behavior when message queue grows large
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Send many async messages rapidly
+    Futures = [begin
+        F = beamtalk_future:new(),
+        gen_server:cast(Counter, {increment, [], F}),
+        F
+    end || _ <- lists:seq(1, 1000)],
+    
+    %% Wait for all to complete
+    [beamtalk_future:await(F, 5000) || F <- Futures],
+    
+    %% Verify all messages were processed
+    Result = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(1000, Result),
+    
+    %% Verify actor is still responsive
+    ?assert(is_process_alive(Counter)),
+    
+    gen_server:stop(Counter).
+
+dnu_with_invalid_signatures_test() ->
+    %% Test doesNotUnderstand with various invalid method signatures
+    {ok, Target} = test_counter:start_link(100),
+    {ok, Proxy} = test_proxy:start_link(Target),
+    
+    %% Test with empty selector - should be unknown
+    Result1 = gen_server:call(Proxy, {'', []}),
+    ?assertMatch({error, {unknown_message, ''}}, Result1),
+    
+    %% Test with atom selector containing special characters
+    Result2 = gen_server:call(Proxy, {'method:with:colons:', [1, 2, 3]}),
+    ?assertMatch({error, {unknown_message, 'method:with:colons:'}}, Result2),
+    
+    %% Test with very long selector name (will be unknown)
+    LongSelector = list_to_atom(lists:duplicate(100, $a)),
+    Result3 = gen_server:call(Proxy, {LongSelector, []}),
+    ?assertMatch({error, {unknown_message, LongSelector}}, Result3),
+    
+    %% Test that proxy still works after invalid selectors
+    ValidResult = gen_server:call(Proxy, {getValue, []}),
+    ?assertEqual(100, ValidResult),
+    
+    gen_server:stop(Proxy),
+    gen_server:stop(Target).
+
+state_rollback_on_error_test() ->
+    %% Verify state is not modified if method throws exception
+    {ok, Counter} = test_counter:start_link(10),
+    
+    %% Get initial state
+    InitialValue = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(10, InitialValue),
+    
+    %% Try to call a non-existent method (will fail)
+    _ErrorResult = gen_server:call(Counter, {nonExistent, []}),
+    
+    %% Verify state is unchanged
+    FinalValue = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(10, FinalValue),
+    
+    gen_server:stop(Counter).
+
+rapid_message_sending_performance_test() ->
+    %% Performance test: send many messages rapidly and measure time
+    {ok, Counter} = test_counter:start_link(0),
+    NumMessages = 1000,
+    
+    StartTime = erlang:monotonic_time(microsecond),
+    
+    %% Send messages synchronously for accuracy
+    [gen_server:call(Counter, {increment, []}) || _ <- lists:seq(1, NumMessages)],
+    
+    EndTime = erlang:monotonic_time(microsecond),
+    ElapsedUs = EndTime - StartTime,
+    
+    %% Verify all messages processed
+    Result = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(NumMessages, Result),
+    
+    %% Sanity check: should complete in under 5 seconds
+    ?assert(ElapsedUs < 5000000),
+    
+    gen_server:stop(Counter).
+
+gen_server_callback_edge_cases_test() ->
+    %% Test edge cases in gen_server callbacks
+    {ok, Counter} = test_counter:start_link(5),
+    
+    %% Test handle_call with timeout
+    Result = gen_server:call(Counter, {getValue, []}, 5000),
+    ?assertEqual(5, Result),
+    
+    %% Test sys messages (get_state, replace_state)
+    State = sys:get_state(Counter),
+    ?assertMatch(#{value := 5}, State),
+    
+    NewState = sys:replace_state(Counter, fun(S) -> S#{value => 99} end),
+    ?assertMatch(#{value := 99}, NewState),
+    
+    UpdatedValue = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(99, UpdatedValue),
+    
+    gen_server:stop(Counter).
+
+memory_cleanup_after_termination_test() ->
+    %% Test that actor memory is cleaned up after termination
+    InitialMemory = erlang:memory(processes),
+    
+    %% Create and destroy multiple actors
+    Actors = [beamtalk_actor:spawn_actor(test_counter, N) || N <- lists:seq(1, 100)],
+    
+    %% Stop all actors
+    [gen_server:stop(A) || A <- Actors],
+    
+    %% Give GC time to clean up
+    timer:sleep(100),
+    erlang:garbage_collect(),
+    timer:sleep(100),
+    
+    FinalMemory = erlang:memory(processes),
+    
+    %% Memory should not have grown significantly (allow 10% margin)
+    MemoryGrowth = FinalMemory - InitialMemory,
+    ?assert(MemoryGrowth < InitialMemory * 0.1).
+
+concurrent_doesNotUnderstand_test() ->
+    %% Test concurrent calls to doesNotUnderstand
+    {ok, Target} = test_counter:start_link(42),
+    {ok, Proxy} = test_proxy:start_link(Target),
+    Parent = self(),
+    NumProcesses = 10,
+    
+    %% Spawn processes that call unknown methods concurrently
+    Pids = [spawn(fun() ->
+        %% Call unknown method which will trigger doesNotUnderstand
+        Result = gen_server:call(Proxy, {list_to_atom("unknown" ++ integer_to_list(N)), [N]}),
+        Parent ! {result, self(), Result}
+    end) || N <- lists:seq(1, NumProcesses)],
+    
+    %% Collect results
+    Results = [receive {result, Pid, R} -> R after 5000 -> timeout end || Pid <- Pids],
+    
+    %% All should have returned errors (target doesn't have these methods)
+    ?assertEqual(NumProcesses, length([R || {error, _} = R <- Results])),
+    
+    gen_server:stop(Proxy),
+    gen_server:stop(Target).
