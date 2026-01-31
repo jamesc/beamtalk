@@ -199,11 +199,6 @@ jobs:
             exit 0
           fi
           
-          # Debug: show the file content
-          echo "=== code-coverage-results.txt content ==="
-          cat code-coverage-results.txt
-          echo "=== end of file ==="
-          
           # Extract coverage percentages from text format
           # Text format: "Summary: Line Rate = 83% (6635 / 8035), Branch Rate = 69% (262 / 378)"
           rust_coverage=$(grep -E 'Summary.*Line Rate' code-coverage-results.txt | grep -oE 'Line Rate = [0-9]+%' | grep -oE '[0-9]+' || echo "0")
