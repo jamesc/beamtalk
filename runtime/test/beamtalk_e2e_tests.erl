@@ -1014,9 +1014,11 @@ string_parameter_test() ->
 %%% Complex Message Send Patterns
 %%% ===========================================================================
 
-%% Test: Cascade-like pattern - multiple operations on same data
-cascade_pattern_simulation_test() ->
-    %% Simulate: value increment; increment; getValue
+%% Test: Sequential operations pattern (not true cascades)
+%% Note: This simulates the effect of cascades but doesn't test actual
+%% cascade message sends, which require actor infrastructure
+sequential_operations_pattern_test() ->
+    %% Simulate effect of: value increment; increment; getValue
     InitialValue = 0,
     Value1 = InitialValue + 1,
     Value2 = Value1 + 1,

@@ -28,6 +28,9 @@ undefinedVar + 5
 // ===========================================================================
 // SYNTAX ERRORS
 // ===========================================================================
+// Note: Error message formats are implementation-specific and may change
+// as the parser evolves. Tests validate that errors are caught, not the
+// exact wording of error messages.
 
 // Unmatched closing bracket
 ]

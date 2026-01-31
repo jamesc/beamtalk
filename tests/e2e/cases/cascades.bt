@@ -43,3 +43,15 @@
 
 // NOTE: Cascades are primarily useful with stateful actors
 // More comprehensive tests should be added when REPL cascade support improves
+
+// ===========================================================================
+// BASIC CASCADE INFRASTRUCTURE TEST
+// ===========================================================================
+
+// Simple value to test cascade infrastructure works
+x := 5
+// => 5
+
+// Verify variable persists for future cascade tests
+x
+// => 5

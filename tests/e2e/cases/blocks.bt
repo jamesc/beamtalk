@@ -69,7 +69,7 @@
 // => nil
 
 // ===========================================================================
-// CLOSURES - Blocks capturing outer variables
+// CLOSURES - Basic examples (see closures_advanced.bt for comprehensive tests)
 // ===========================================================================
 
 // Simple closure capturing outer variable
@@ -78,16 +78,6 @@ outerVar := 10
 
 [:x | x + outerVar] value: 5
 // => 15
-
-// Closure with multiple captures
-a := 5
-// => 5
-
-b := 10
-// => 10
-
-[:x | x + a + b] value: 3
-// => 18
 
 // Nested closure with capture
 makeAdder := [:n | [:x | x + n]]
@@ -98,26 +88,3 @@ addFive := makeAdder value: 5
 
 addFive value: 10
 // => 15
-
-// Closure that captures and uses variable multiple times
-multiplier := 3
-// => 3
-
-[:x | x * multiplier + multiplier] value: 4
-// => 15
-
-// Multiple closures sharing same captured variable
-shared := 100
-// => 100
-
-closure1 := [:x | x + shared]
-// => a Block/1
-
-closure2 := [:x | x - shared]
-// => a Block/1
-
-closure1 value: 50
-// => 150
-
-closure2 value: 150
-// => 50
