@@ -17,7 +17,7 @@
 //!
 //! ```ignore
 //! // To add a new operator (e.g., `**` for exponentiation):
-//! // 1. Add to PRECEDENCE_TABLE: ("**", 50, 51) // right-associative: right > left
+//! // 1. Add a match arm to binary_binding_power: "**" => Some(BindingPower::right_assoc(50))
 //! // That's it! No structural changes needed.
 //! ```
 //!

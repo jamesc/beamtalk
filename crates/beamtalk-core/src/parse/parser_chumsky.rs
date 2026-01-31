@@ -15,7 +15,7 @@
 //!
 //! # Evaluation Summary
 //!
-//! After evaluating chumsky 1.0.0-alpha.8, key observations:
+//! After evaluating chumsky 1.0.0-alpha, key observations:
 //!
 //! ## Chumsky's Approach to Precedence
 //!
