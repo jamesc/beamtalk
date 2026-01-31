@@ -1,0 +1,21 @@
+{
+  "banner": "never",
+  "render_markdown": true,
+  "theme": "auto",
+  "model": "claude-sonnet-4.5",
+  "trusted_folders": ["${containerWorkspaceFolder}"],
+  "allowed_urls": [
+    "https://api.github.com",
+    "https://docs.rs",
+    "https://crates.io",
+    "https://erlang.org",
+    "https://www.erlang.org"
+  ],
+  "experimental": true,
+  "log_level": "info",
+  "default_permissions": {
+    "tools": "prompt",
+    "paths": "prompt",
+    "urls": "prompt"
+  }
+}
