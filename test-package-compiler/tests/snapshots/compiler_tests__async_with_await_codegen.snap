@@ -71,7 +71,7 @@ module 'async_with_await' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
     %% Call terminate method if defined (Flavors pattern)
     case call 'async_with_await':'dispatch'('terminate', [Reason], State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-        <{'error', _TermError}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
     end
 
@@ -79,7 +79,7 @@ module 'async_with_await' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     try call 'async_with_await':'dispatch'(Selector, Args, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/3 = fun (Selector, Args, State) ->

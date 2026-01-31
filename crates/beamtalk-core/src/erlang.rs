@@ -231,8 +231,11 @@ impl CoreErlangGenerator {
     /// Per BT-29 design doc, each class generates a `gen_server` module with:
     /// - Error isolation via `safe_dispatch/3`
     /// - `doesNotUnderstand:args:` fallback dispatch
-    /// - `#beamtalk_object{}` record for object references
     /// - `terminate/2` with method call support
+    ///
+    /// NOTE: The `#beamtalk_object{}` record is defined in `runtime/include/beamtalk.hrl`
+    /// but not yet used in generated code. Currently `spawn/0` and `spawn/1` return raw
+    /// pids. Record-based object wrappers are deferred work (requires BT-95).
     fn generate_module(&mut self, module: &Module) -> Result<()> {
         // Module header with expanded exports per BT-29
         writeln!(
@@ -699,7 +702,11 @@ impl CoreErlangGenerator {
             "<{{'reply', _TermResult, _TermState}}> when 'true' -> 'ok'"
         )?;
         self.write_indent()?;
-        writeln!(self.output, "<{{'error', _TermError}}> when 'true' -> 'ok'")?;
+        // dispatch returns 3-tuple {'error', Error, State}, not 2-tuple
+        writeln!(
+            self.output,
+            "<{{'error', _TermError, _TermState2}}> when 'true' -> 'ok'"
+        )?;
         self.write_indent()?;
         writeln!(self.output, "<_TermOther> when 'true' -> 'ok'")?;
         self.indent -= 1;
@@ -718,6 +725,7 @@ impl CoreErlangGenerator {
     /// the actor instance.
     ///
     /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
+    /// Stacktrace is captured but not returned to caller to prevent information leakage.
     ///
     /// # Generated Code
     ///
@@ -725,8 +733,8 @@ impl CoreErlangGenerator {
     /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     ///     try call 'module':'dispatch'(Selector, Args, State)
     ///     of Result -> Result
-    ///     catch <Type, Error, Stacktrace> ->
-    ///         {'error', {Type, Error, Stacktrace}, State}
+    ///     catch <Type, Error, _Stacktrace> ->
+    ///         {'error', {Type, Error}, State}
     /// ```
     fn generate_safe_dispatch(&mut self) -> Result<()> {
         writeln!(
@@ -744,9 +752,10 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "of Result -> Result")?;
         self.write_indent()?;
+        // Capture but don't return stacktrace to prevent information leakage to callers
         writeln!(
             self.output,
-            "catch <Type, Error, Stacktrace> -> {{'error', {{Type, Error, Stacktrace}}, State}}"
+            "catch <Type, Error, _Stacktrace> -> {{'error', {{Type, Error}}, State}}"
         )?;
         self.indent -= 1;
         writeln!(self.output)?;

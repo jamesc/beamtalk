@@ -74,7 +74,7 @@ module 'stdlib_integer' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
     %% Call terminate method if defined (Flavors pattern)
     case call 'stdlib_integer':'dispatch'('terminate', [Reason], State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-        <{'error', _TermError}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
     end
 
@@ -82,7 +82,7 @@ module 'stdlib_integer' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     try call 'stdlib_integer':'dispatch'(Selector, Args, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/3 = fun (Selector, Args, State) ->

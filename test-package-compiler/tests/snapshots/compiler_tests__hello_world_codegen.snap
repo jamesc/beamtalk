@@ -71,7 +71,7 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
     %% Call terminate method if defined (Flavors pattern)
     case call 'hello_world':'dispatch'('terminate', [Reason], State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-        <{'error', _TermError}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
     end
 
@@ -79,7 +79,7 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     try call 'hello_world':'dispatch'(Selector, Args, State)
     of Result -> Result
-    catch <Type, Error, Stacktrace> -> {'error', {Type, Error, Stacktrace}, State}
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/3 = fun (Selector, Args, State) ->
