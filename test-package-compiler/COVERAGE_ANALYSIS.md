@@ -42,19 +42,18 @@
 | / | erlang:'/' | stdlib_integer, binary_operators | ✓ |
 | % | erlang:'rem' | stdlib_integer, binary_operators | ✓ |
 | = | erlang:'=:=' | stdlib_integer, binary_operators | ✓ |
+| == | erlang:'==' | binary_operators | ✓ |
 | ~= | erlang:'=/=' | binary_operators | ✓ |
 | < | erlang:'<' | blocks_no_args, binary_operators | ✓ |
 | > | erlang:'>' | blocks_no_args, binary_operators | ✓ |
 | <= | erlang:'=<' | binary_operators | ✓ |
 | >= | erlang:'>=' | binary_operators | ✓ |
 | ++ | iolist_to_binary | stdlib_string, binary_operators | ✓ |
-| ** | math:pow + trunc | - | ⚠️ Codegen exists but parser doesn't support yet |
-| == | erlang:'==' | - | ⚠️ Lexer tokenizes but parser doesn't support yet |
-| != | erlang:'/=' | - | ⚠️ Not in lexer or parser yet |
 
-**Coverage**: 12/15 operators (80% - exact target)
-- **Parseable and tested**: 12/12 (100%)
-- **In codegen but not parseable**: 3 (`**`, `==`, `!=`) - need parser support (BT-128)
+**Coverage**: 13/13 operators (100%)
+- All documented operators are fully implemented and tested
+- Removed: `**` (exponentiation), `!=` (use `~=` instead)
+- Note: `and:` and `or:` are keyword messages, not binary operators
 
 ## Unary Messages/Operators Coverage
 
