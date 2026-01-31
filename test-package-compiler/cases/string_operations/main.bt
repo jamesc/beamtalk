@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test string operations - comprehensive coverage of string messages
+
+// ===== String Concatenation =====
+greeting := 'Hello'
+name := 'World'
+message := greeting ++ ', ' ++ name ++ '!'
+
+// ===== String Length =====
+len := greeting length
+
+// ===== String Comparison =====
+isEqual := 'hello' = 'hello'
+notEqual := 'hello' ~= 'world'
+isLess := 'apple' < 'banana'
+isGreater := 'zebra' > 'apple'
+
+// ===== String Case Transformation =====
+upper := greeting uppercase
+lower := upper lowercase
+
+// ===== String Trimming =====
+padded := '  hello  '
+trimmed := padded trim
+
+// ===== String Empty/Non-Empty Checks =====
+empty := ''
+isEmpty := empty isEmpty
+isNotEmpty := message isNotEmpty
+
+// ===== String Character Access (1-based indexing) =====
+firstChar := 'hello' at: 1
+thirdChar := 'hello' at: 3
+
+// ===== String Search Operations =====
+found := message includes: 'World'
+notFound := message includes: 'xyz'
+
+// ===== String Prefix/Suffix Checks =====
+starts := message startsWith: 'Hello'
+ends := message endsWith: '!'
+
+// ===== String Splitting =====
+csv := 'a,b,c,d'
+parts := csv split: ','
+
+// ===== String Reverse =====
+reversed := 'hello' reverse
