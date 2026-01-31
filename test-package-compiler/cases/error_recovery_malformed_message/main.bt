@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test error recovery: malformed message sends
+// Parser should handle incomplete messages
+
+// Incomplete keyword message
+dict at: key
+
+// Missing keyword part
+array at: index put
+
+// Extra keyword without argument
+object foo: 1 bar:
+
+// Message with no receiver
+at: 42
+
+// Valid code after error
+result := 5 + 5

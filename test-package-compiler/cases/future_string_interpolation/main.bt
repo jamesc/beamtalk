@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test future feature: string interpolation
+// Double-quoted strings with embedded expressions using {expr} syntax
+// NOTE: This feature is not yet implemented - test documents expected behavior
+
+// Simple variable interpolation
+name := 'Alice'
+greeting := "Hello, {name}!"
+
+// Expression interpolation
+age := 25
+message := "You are {age + 5} years old in 5 years"
+
+// Multiple interpolations in one string
+firstName := 'Bob'
+lastName := 'Smith'
+fullName := "Name: {firstName} {lastName}"
+
+// Nested interpolation with message sends
+user := User new
+profile := "User: {user getName}, Email: {user getEmail}"
+
+// Interpolation with operators and blocks
+count := 10
+summary := "Total: {count * 2}, Double: {[:x | x * 2] value: count}"
+
+// Escape sequences in interpolated strings
+escaped := "Literal braces: \{ and \}, variable: {name}"
+
+// Multi-line interpolated string
+multiLine := "First line: {firstName}
+Second line: {lastName}
+Third line: {age}"
+
+// Unicode in interpolated strings
+emojiVar := '🎉'
+withEmoji := "Celebration: {emojiVar} {name}!"
+
+// Empty interpolation (edge case)
+emptyInterp := "Before {} After"
+
+// Nested braces (complex case)
+nested := "Outer {inner at: {key get}}"

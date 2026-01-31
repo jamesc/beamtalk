@@ -1,0 +1,288 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "counter",
+                    span: Span {
+                        start: 208,
+                        end: 215,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "Counter",
+                        span: Span {
+                            start: 219,
+                            end: 226,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "new",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 219,
+                    end: 230,
+                },
+            },
+            span: Span {
+                start: 208,
+                end: 230,
+            },
+        },
+        Identifier(
+            Identifier {
+                name: "counter",
+                span: Span {
+                    start: 231,
+                    end: 238,
+                },
+            },
+        ),
+        Cascade {
+            receiver: Identifier(
+                Identifier {
+                    name: "increment",
+                    span: Span {
+                        start: 244,
+                        end: 253,
+                    },
+                },
+            ),
+            messages: [
+                CascadeMessage {
+                    selector: Unary(
+                        "increment",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 259,
+                        end: 268,
+                    },
+                },
+                CascadeMessage {
+                    selector: Unary(
+                        "getValue",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 274,
+                        end: 282,
+                    },
+                },
+            ],
+            span: Span {
+                start: 244,
+                end: 282,
+            },
+        },
+        Identifier(
+            Identifier {
+                name: "object",
+                span: Span {
+                    start: 317,
+                    end: 323,
+                },
+            },
+        ),
+        Error {
+            message: "Unexpected token: expected expression, found at:",
+            span: Span {
+                start: 328,
+                end: 331,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ;",
+            span: Span {
+                start: 350,
+                end: 351,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ;",
+            span: Span {
+                start: 378,
+                end: 379,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ;",
+            span: Span {
+                start: 495,
+                end: 496,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ;",
+            span: Span {
+                start: 507,
+                end: 508,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found )",
+            span: Span {
+                start: 517,
+                end: 518,
+            },
+        },
+        Cascade {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 574,
+                    end: 575,
+                },
+            },
+            messages: [
+                CascadeMessage {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "with:",
+                                span: Span {
+                                    start: 581,
+                                    end: 586,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Block(
+                            Block {
+                                parameters: [
+                                    BlockParameter {
+                                        name: "x",
+                                        span: Span {
+                                            start: 589,
+                                            end: 590,
+                                        },
+                                    },
+                                ],
+                                body: [
+                                    MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "x",
+                                                span: Span {
+                                                    start: 593,
+                                                    end: 594,
+                                                },
+                                            },
+                                        ),
+                                        selector: Binary(
+                                            "*",
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Integer(
+                                                    2,
+                                                ),
+                                                Span {
+                                                    start: 597,
+                                                    end: 598,
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 593,
+                                            end: 598,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 587,
+                                    end: 599,
+                                },
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 581,
+                        end: 599,
+                    },
+                },
+                CascadeMessage {
+                    selector: Unary(
+                        "execute",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 605,
+                        end: 612,
+                    },
+                },
+            ],
+            span: Span {
+                start: 574,
+                end: 612,
+            },
+        },
+    ],
+    span: Span {
+        start: 208,
+        end: 612,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 208,
+                end: 215,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 208,
+                end: 215,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test complex cascade scenarios",
+            span: Span {
+                start: 208,
+                end: 215,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Multiple cascaded messages with different types",
+            span: Span {
+                start: 208,
+                end: 215,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Cascade with unary, binary, and keyword messages",
+            span: Span {
+                start: 208,
+                end: 215,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 328, end: 331 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 350, end: 351 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 378, end: 379 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 495, end: 496 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 507, end: 508 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 517, end: 518 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 574, end: 575 } }

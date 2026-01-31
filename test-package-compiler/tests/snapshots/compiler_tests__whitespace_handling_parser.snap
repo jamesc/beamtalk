@@ -1,0 +1,289 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "x",
+                    span: Span {
+                        start: 155,
+                        end: 156,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        5,
+                    ),
+                    Span {
+                        start: 166,
+                        end: 167,
+                    },
+                ),
+                selector: Binary(
+                    "+",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 174,
+                            end: 175,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 166,
+                    end: 175,
+                },
+            },
+            span: Span {
+                start: 155,
+                end: 175,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "y",
+                    span: Span {
+                        start: 202,
+                        end: 203,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        10,
+                    ),
+                    Span {
+                        start: 207,
+                        end: 209,
+                    },
+                ),
+                selector: Binary(
+                    "*",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            2,
+                        ),
+                        Span {
+                            start: 212,
+                            end: 213,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 207,
+                    end: 213,
+                },
+            },
+            span: Span {
+                start: 202,
+                end: 213,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "result",
+                    span: Span {
+                        start: 238,
+                        end: 244,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 248,
+                            end: 249,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "+",
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "y",
+                            span: Span {
+                                start: 252,
+                                end: 253,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 248,
+                    end: 253,
+                },
+            },
+            span: Span {
+                start: 238,
+                end: 253,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "z",
+                    span: Span {
+                        start: 291,
+                        end: 292,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    100,
+                ),
+                Span {
+                    start: 296,
+                    end: 299,
+                },
+            ),
+            span: Span {
+                start: 291,
+                end: 299,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "leadingSpace",
+                    span: Span {
+                        start: 330,
+                        end: 342,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 346,
+                    end: 348,
+                },
+            ),
+            span: Span {
+                start: 330,
+                end: 348,
+            },
+        },
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "object",
+                    span: Span {
+                        start: 381,
+                        end: 387,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "message:",
+                        span: Span {
+                            start: 391,
+                            end: 399,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "with:",
+                        span: Span {
+                            start: 414,
+                            end: 419,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Identifier(
+                    Identifier {
+                        name: "argument",
+                        span: Span {
+                            start: 402,
+                            end: 410,
+                        },
+                    },
+                ),
+                Identifier(
+                    Identifier {
+                        name: "another",
+                        span: Span {
+                            start: 421,
+                            end: 428,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 381,
+                end: 428,
+            },
+        },
+    ],
+    span: Span {
+        start: 155,
+        end: 428,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 155,
+                end: 156,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 155,
+                end: 156,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test whitespace handling",
+            span: Span {
+                start: 155,
+                end: 156,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Whitespace should not affect parsing",
+            span: Span {
+                start: 155,
+                end: 156,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Extra spaces",
+            span: Span {
+                start: 155,
+                end: 156,
+            },
+            kind: Line,
+        },
+    ],
+}

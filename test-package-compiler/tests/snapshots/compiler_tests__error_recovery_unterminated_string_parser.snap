@@ -1,0 +1,144 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "str1",
+                    span: Span {
+                        start: 188,
+                        end: 192,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: MessageSend {
+                    receiver: Literal(
+                        String(
+                            "unterminated string\n\n// Code after error should still parse\nx := 42\n\n// Another unterminated string\nstr2 := ",
+                        ),
+                        Span {
+                            start: 196,
+                            end: 306,
+                        },
+                    ),
+                    selector: Unary(
+                        "another",
+                    ),
+                    arguments: [],
+                    span: Span {
+                        start: 196,
+                        end: 313,
+                    },
+                },
+                selector: Unary(
+                    "unclosed",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 196,
+                    end: 322,
+                },
+            },
+            span: Span {
+                start: 188,
+                end: 322,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "y",
+                    span: Span {
+                        start: 337,
+                        end: 338,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 342,
+                            end: 343,
+                        },
+                    },
+                ),
+                selector: Binary(
+                    "+",
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            1,
+                        ),
+                        Span {
+                            start: 346,
+                            end: 347,
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 342,
+                    end: 347,
+                },
+            },
+            span: Span {
+                start: 337,
+                end: 347,
+            },
+        },
+    ],
+    span: Span {
+        start: 188,
+        end: 347,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 188,
+                end: 192,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 188,
+                end: 192,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test error recovery: unterminated string",
+            span: Span {
+                start: 188,
+                end: 192,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Lexer should recover and continue",
+            span: Span {
+                start: 188,
+                end: 192,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Unterminated single quote string",
+            span: Span {
+                start: 188,
+                end: 192,
+            },
+            kind: Line,
+        },
+    ],
+}

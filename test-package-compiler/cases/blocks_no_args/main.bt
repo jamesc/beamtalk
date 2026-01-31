@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test blocks with no arguments
+// Empty parameter list is valid
+
+// Simple block with no arguments
+noArgs := [42]
+result1 := noArgs value
+
+// Block with no args that accesses outer scope
+outer := 10
+captureBlock := [outer + 5]
+result2 := captureBlock value
+
+// Block with no args as control structure condition
+condition := [counter > 0]
+condition whileTrue: [counter := counter - 1]
+
+// Multiple blocks with no args
+block1 := [1]
+block2 := [2]
+block3 := [3]
