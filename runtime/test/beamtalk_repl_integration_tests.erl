@@ -37,6 +37,12 @@
 -module(beamtalk_repl_integration_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+%% Timeout configuration
+-define(EVAL_TIMEOUT, 5000).
+-define(CONCURRENT_TEST_TIMEOUT, 10000).
+-define(PROCESS_CLEANUP_MAX_WAIT, 500).
+-define(PROCESS_CLEANUP_RETRY_INTERVAL, 50).
+
 %% Fixture that wraps all tests - checks daemon availability
 repl_integration_test_() ->
     {setup,
@@ -121,56 +127,121 @@ setup_daemon() ->
 cleanup_daemon(_DaemonAvailable) ->
     ok.
 
+%%% Helper Functions
+
+%% @doc Wait for concurrent results from spawned processes.
+%% More robust than individual receives with timeouts.
+-spec wait_for_results(pos_integer(), timeout()) -> [{pos_integer(), term()}].
+wait_for_results(N, Timeout) ->
+    wait_for_results(N, Timeout, []).
+
+-spec wait_for_results(non_neg_integer(), timeout(), [{pos_integer(), term()}]) ->
+    [{pos_integer(), term()}].
+wait_for_results(0, _Timeout, Acc) ->
+    lists:reverse(Acc);
+wait_for_results(N, Timeout, Acc) ->
+    receive
+        {result, Id, Result} ->
+            wait_for_results(N-1, Timeout, [{Id, Result}|Acc])
+    after Timeout ->
+        error({timeout_waiting_for_results, {remaining, N}, {received, Acc}})
+    end.
+
+%% @doc Wait for concurrent completion messages from spawned processes.
+-spec wait_for_done(pos_integer(), timeout()) -> ok.
+wait_for_done(N, Timeout) ->
+    wait_for_done(N, Timeout, []).
+
+-spec wait_for_done(non_neg_integer(), timeout(), [pos_integer()]) -> ok.
+wait_for_done(0, _Timeout, _Acc) ->
+    ok;
+wait_for_done(N, Timeout, Acc) ->
+    receive
+        {done, Id} ->
+            wait_for_done(N-1, Timeout, [Id|Acc])
+    after Timeout ->
+        error({timeout_waiting_for_done, {remaining, N}, {received, Acc}})
+    end.
+
+%% @doc Poll for process cleanup with retries instead of fixed sleep.
+%% More reliable and faster than timer:sleep.
+-spec wait_for_cleanup(pid()) -> ok.
+wait_for_cleanup(Pid) ->
+    wait_for_cleanup(Pid, ?PROCESS_CLEANUP_MAX_WAIT div ?PROCESS_CLEANUP_RETRY_INTERVAL).
+
+-spec wait_for_cleanup(pid(), non_neg_integer()) -> ok.
+wait_for_cleanup(Pid, 0) ->
+    case is_process_alive(Pid) of
+        false -> ok;
+        true -> error({process_still_alive, Pid})
+    end;
+wait_for_cleanup(Pid, RetriesLeft) ->
+    case is_process_alive(Pid) of
+        false -> ok;
+        true ->
+            timer:sleep(?PROCESS_CLEANUP_RETRY_INTERVAL),
+            wait_for_cleanup(Pid, RetriesLeft - 1)
+    end.
+
 %%% Integration Tests
 
+-spec eval_integer_literal() -> ok.
 eval_integer_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "42"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, 42}, Result).
 
+-spec eval_negative_integer() -> ok.
 eval_negative_integer() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "-123"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, -123}, Result).
 
+-spec eval_float_literal() -> ok.
 eval_float_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, Result} = beamtalk_repl:eval(Pid, "3.14"),
     beamtalk_repl:stop(Pid),
     ?assert(abs(Result - 3.14) < 0.001).
 
+-spec eval_string_literal() -> ok.
 eval_string_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "'hello'"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, <<"hello">>}, Result).
 
+-spec eval_symbol_literal() -> ok.
 eval_symbol_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "#ok"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, ok}, Result).
 
+-spec eval_true_literal() -> ok.
 eval_true_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "true"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, true}, Result).
 
+-spec eval_false_literal() -> ok.
 eval_false_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "false"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, false}, Result).
 
+-spec eval_nil_literal() -> ok.
 eval_nil_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "nil"),
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, nil}, Result).
 
+-spec eval_assignment() -> ok.
 eval_assignment() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, "x := 42"),
@@ -179,6 +250,7 @@ eval_assignment() ->
     ?assertMatch({ok, 42}, Result),
     ?assertEqual(42, maps:get(x, Bindings)).
 
+-spec eval_variable_reference() -> ok.
 eval_variable_reference() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 100} = beamtalk_repl:eval(Pid, "myVar := 100"),
@@ -186,6 +258,7 @@ eval_variable_reference() ->
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, 100}, Result).
 
+-spec eval_multiple_assignments() -> ok.
 eval_multiple_assignments() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 1} = beamtalk_repl:eval(Pid, "a := 1"),
@@ -198,6 +271,7 @@ eval_multiple_assignments() ->
     ?assertEqual(2, maps:get(b, Bindings)),
     ?assertEqual(3, maps:get(c, Bindings)).
 
+-spec eval_reassignment() -> ok.
 eval_reassignment() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 10} = beamtalk_repl:eval(Pid, "x := 10"),
@@ -206,6 +280,7 @@ eval_reassignment() ->
     beamtalk_repl:stop(Pid),
     ?assertMatch({ok, 20}, Result).
 
+-spec clear_bindings() -> ok.
 clear_bindings() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 42} = beamtalk_repl:eval(Pid, "x := 42"),
@@ -216,6 +291,7 @@ clear_bindings() ->
 
 %% BT-57: Variable references in arithmetic expressions
 %% Tests that variable lookup works correctly via State alias
+-spec eval_variable_arithmetic() -> ok.
 eval_variable_arithmetic() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 10} = beamtalk_repl:eval(Pid, "x := 10"),
@@ -225,6 +301,7 @@ eval_variable_arithmetic() ->
 
 %% BT-57: Multiple variables in expression
 %% Tests that all variable lookups correctly resolve from bindings
+-spec eval_multi_variable_arithmetic() -> ok.
 eval_multi_variable_arithmetic() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 3} = beamtalk_repl:eval(Pid, "a := 3"),
@@ -236,6 +313,7 @@ eval_multi_variable_arithmetic() ->
 %%% Hot Code Reloading Tests
 
 %% Test that hot reloading preserves REPL state and bindings
+-spec hot_reload_preserves_bindings() -> ok.
 hot_reload_preserves_bindings() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Set up initial bindings
@@ -253,6 +331,7 @@ hot_reload_preserves_bindings() ->
     ?assertEqual(100, maps:get(y, Bindings)).
 
 %% Test that recompiling the same expression works correctly
+-spec hot_reload_recompiles() -> ok.
 hot_reload_recompiles() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Compile same expression multiple times
@@ -263,6 +342,7 @@ hot_reload_recompiles() ->
     ok.
 
 %% Test that changes to evaluated code take effect
+-spec hot_reload_changes_effect() -> ok.
 hot_reload_changes_effect() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Evaluate initial value
@@ -277,6 +357,7 @@ hot_reload_changes_effect() ->
 %%% Concurrent Compilation Tests
 
 %% Test multiple REPL processes compiling simultaneously
+-spec concurrent_repl_processes() -> ok.
 concurrent_repl_processes() ->
     %% Start 3 independent REPL processes
     {ok, Pid1} = beamtalk_repl:start_link(0, #{}),
@@ -298,10 +379,8 @@ concurrent_repl_processes() ->
         Parent ! {done, 3}
     end),
     
-    %% Wait for all to complete
-    receive {done, 1} -> ok after 5000 -> error(timeout) end,
-    receive {done, 2} -> ok after 5000 -> error(timeout) end,
-    receive {done, 3} -> ok after 5000 -> error(timeout) end,
+    %% Wait for all to complete using helper
+    wait_for_done(3, ?CONCURRENT_TEST_TIMEOUT),
     
     %% Cleanup
     beamtalk_repl:stop(Pid1),
@@ -310,6 +389,7 @@ concurrent_repl_processes() ->
     ok.
 
 %% Test concurrent compilation of the same expression
+-spec concurrent_same_expression() -> ok.
 concurrent_same_expression() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Parent = self(),
@@ -328,10 +408,9 @@ concurrent_same_expression() ->
         Parent ! {result, 3, Result}
     end),
     
-    %% Collect results
-    R1 = receive {result, 1, Res1} -> Res1 after 5000 -> error(timeout) end,
-    R2 = receive {result, 2, Res2} -> Res2 after 5000 -> error(timeout) end,
-    R3 = receive {result, 3, Res3} -> Res3 after 5000 -> error(timeout) end,
+    %% Collect results using helper
+    Results = wait_for_results(3, ?CONCURRENT_TEST_TIMEOUT),
+    [{1, R1}, {2, R2}, {3, R3}] = lists:sort(Results),
     
     beamtalk_repl:stop(Pid),
     
@@ -341,6 +420,7 @@ concurrent_same_expression() ->
     ?assertMatch({ok, 42}, R3).
 
 %% Test concurrent compilation of different expressions
+-spec concurrent_different_expressions() -> ok.
 concurrent_different_expressions() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Parent = self(),
@@ -358,9 +438,9 @@ concurrent_different_expressions() ->
         Parent ! {result, 3, Result}
     end),
     
-    R1 = receive {result, 1, Res1} -> Res1 after 5000 -> error(timeout) end,
-    R2 = receive {result, 2, Res2} -> Res2 after 5000 -> error(timeout) end,
-    R3 = receive {result, 3, Res3} -> Res3 after 5000 -> error(timeout) end,
+    %% Collect results using helper
+    Results = wait_for_results(3, ?CONCURRENT_TEST_TIMEOUT),
+    [{1, R1}, {2, R2}, {3, R3}] = lists:sort(Results),
     
     beamtalk_repl:stop(Pid),
     
@@ -371,6 +451,7 @@ concurrent_different_expressions() ->
 %%% Error Propagation Tests
 
 %% Test that parse errors propagate correctly from Rust to Erlang
+-spec parse_error_handling() -> ok.
 parse_error_handling() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Invalid syntax should return error tuple
@@ -379,6 +460,7 @@ parse_error_handling() ->
     ?assertMatch({error, _}, Result).
 
 %% Test that undefined variable errors are caught
+-spec undefined_variable_error() -> ok.
 undefined_variable_error() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Reference undefined variable
@@ -387,6 +469,7 @@ undefined_variable_error() ->
     ?assertMatch({error, _}, Result).
 
 %% Test various invalid syntax patterns
+-spec invalid_syntax_error() -> ok.
 invalid_syntax_error() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Various syntax errors
@@ -401,6 +484,7 @@ invalid_syntax_error() ->
 %%% Large/Complex Expression Tests
 
 %% Test compilation of large nested expressions
+-spec large_nested_expression() -> ok.
 large_nested_expression() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Deeply nested arithmetic
@@ -411,6 +495,7 @@ large_nested_expression() ->
     ?assertMatch({ok, 71}, Result).
 
 %% Test complex multi-statement expressions
+-spec complex_multi_statement() -> ok.
 complex_multi_statement() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Multiple operations
@@ -425,6 +510,7 @@ complex_multi_statement() ->
 %%% Connection Management Tests
 
 %% Test multiple sequential connections to REPL
+-spec multiple_sequential_connections() -> ok.
 multiple_sequential_connections() ->
     %% Start and stop REPL multiple times
     {ok, Pid1} = beamtalk_repl:start_link(0, #{}),
@@ -441,6 +527,7 @@ multiple_sequential_connections() ->
     ok.
 
 %% Test rapid creation and destruction of REPL connections
+-spec rapid_connection_cycling() -> ok.
 rapid_connection_cycling() ->
     lists:foreach(fun(N) ->
         {ok, Pid} = beamtalk_repl:start_link(0, #{}),
@@ -450,6 +537,7 @@ rapid_connection_cycling() ->
     ok.
 
 %% Test that connection works after error
+-spec connection_after_error() -> ok.
 connection_after_error() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Cause an error
@@ -462,23 +550,24 @@ connection_after_error() ->
 %%% Resource Cleanup Tests
 
 %% Test that resources are cleaned up after normal stop
+-spec cleanup_after_stop() -> ok.
 cleanup_after_stop() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {ok, 100} = beamtalk_repl:eval(Pid, "x := 100"),
     beamtalk_repl:stop(Pid),
-    %% Verify process is gone
-    timer:sleep(100),
-    ?assertNot(is_process_alive(Pid)).
+    %% Verify process is gone using polling helper
+    wait_for_cleanup(Pid).
 
 %% Test that resources are cleaned up after error
+-spec cleanup_after_error() -> ok.
 cleanup_after_error() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     {error, _} = beamtalk_repl:eval(Pid, "1 + + 1"),
     beamtalk_repl:stop(Pid),
-    timer:sleep(100),
-    ?assertNot(is_process_alive(Pid)).
+    wait_for_cleanup(Pid).
 
 %% Test cleanup with many evaluations
+-spec cleanup_many_evaluations() -> ok.
 cleanup_many_evaluations() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Run evaluations (reduced from 50 to 20 to avoid daemon overload)
@@ -486,12 +575,12 @@ cleanup_many_evaluations() ->
         {ok, N} = beamtalk_repl:eval(Pid, integer_to_list(N))
     end, lists:seq(1, 20)),
     beamtalk_repl:stop(Pid),
-    timer:sleep(100),
-    ?assertNot(is_process_alive(Pid)).
+    wait_for_cleanup(Pid).
 
 %%% Edge Case Tests
 
 %% Test handling of empty expressions (should error)
+-spec empty_expression_handling() -> ok.
 empty_expression_handling() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     Result = beamtalk_repl:eval(Pid, ""),
@@ -499,10 +588,11 @@ empty_expression_handling() ->
     ?assertMatch({error, _}, Result).
 
 %% Test very long string literals
+-spec very_long_string_literal() -> ok.
 very_long_string_literal() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    %% Create a string with 1000 characters
-    LongString = lists:duplicate(100, "0123456789"),
+    %% Create a string with 1000 characters using string:copies
+    LongString = string:copies("0123456789", 100),
     Expr = "'" ++ LongString ++ "'",
     Result = beamtalk_repl:eval(Pid, Expr),
     beamtalk_repl:stop(Pid),
@@ -511,6 +601,7 @@ very_long_string_literal() ->
     ?assertEqual(1000, byte_size(ResultStr)).
 
 %% Test deeply nested arithmetic expressions
+-spec deeply_nested_arithmetic() -> ok.
 deeply_nested_arithmetic() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Build nested expression: 1 + (1 + (1 + (1 + 1)))
@@ -524,6 +615,7 @@ deeply_nested_arithmetic() ->
     ?assertMatch({ok, 21}, Result).
 
 %% Test that REPL can recover after multiple sequential errors
+-spec sequential_error_recovery() -> ok.
 sequential_error_recovery() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     %% Multiple errors in sequence
