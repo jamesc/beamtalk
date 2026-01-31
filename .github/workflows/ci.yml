@@ -167,9 +167,13 @@ jobs:
           echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
-          cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f code-coverage-results.txt ]; then
+            cat code-coverage-results.txt >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ WARNING: Rust coverage report not generated" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
           # Extract Erlang coverage from covertool output (portable grep/awk)
@@ -220,9 +224,13 @@ jobs:
           
           ### Rust Coverage
           EOF
-          cat code-coverage-results.md >> pr-comment.md
-          echo "" >> pr-comment.md
-          echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> pr-comment.md
+          if [ -f code-coverage-results.md ]; then
+            cat code-coverage-results.md >> pr-comment.md
+            echo "" >> pr-comment.md
+            echo "**Badge:** ${{ steps.rust_coverage.outputs.badge }}" >> pr-comment.md
+          else
+            echo "⚠️ WARNING: Rust coverage report not generated" >> pr-comment.md
+          fi
           echo "" >> pr-comment.md
           echo "### Erlang Coverage" >> pr-comment.md
           echo "**Badge:** ${{ steps.erlang_coverage.outputs.badge }}" >> pr-comment.md
