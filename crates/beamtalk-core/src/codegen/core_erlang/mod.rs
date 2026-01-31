@@ -2497,8 +2497,8 @@ impl CoreErlangGenerator {
             "%" => "rem",
             "==" => "==",
             "!=" => "/=",
-            "=" => "=:=",   // Strict equality
-            "~=" => "=/=",  // Strict inequality
+            "=" => "=:=",  // Strict equality
+            "~=" => "=/=", // Strict inequality
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
