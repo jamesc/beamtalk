@@ -27,7 +27,6 @@ module 'stdlib_integer' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_chang
     let DefaultState = ~{
         '__class__' => 'StdlibInteger',
         '__methods__' => call 'stdlib_integer':'method_table'()
-        , 'intDiv' => 17
         , 'counter' => 0
         , 'sum' => 0
     }~

@@ -21,14 +21,17 @@
 // - `-` - Subtraction
 // - `*` - Multiplication
 // - `/` - Division (float result)
-// - `//` - Integer division (truncated)
-// - `%` or `mod:` - Modulo (remainder)
+// - `%` - Modulo (remainder)
 // - `**` - Exponentiation
+//
+// Keyword messages:
+// - `div:` - Integer division (truncated)
+// - `mod:` - Modulo (alias for %)
 //
 // ## Comparison Messages
 //
-// - `=` - Equality
-// - `~=` - Inequality
+// - `=` - Equality (strict)
+// - `~=` - Inequality (~ means "not")
 // - `<` - Less than
 // - `<=` - Less than or equal
 // - `>` - Greater than
@@ -51,12 +54,13 @@
 //
 // ```beamtalk
 // // Arithmetic
-// result := 5 + 3 * 2  // => 11 (standard precedence)
-// quotient := 17 // 5   // => 3 (integer division)
+// result := 5 + 3 * 2   // => 11 (standard precedence)
+// quotient := 17 div: 5 // => 3 (integer division)
 // remainder := 17 % 5   // => 2
 //
 // // Comparison
 // (x > 10) ifTrue: [self process: x]
+// (x ~= y) ifTrue: [self handleDifferent]  // ~= means "not equal"
 //
 // // Iteration
 // 10 timesRepeat: [Transcript show: 'Hello']
@@ -71,8 +75,8 @@
 // ```erlang
 // X + Y    % addition
 // X * Y    % multiplication
-// X div Y  % integer division (// in Beamtalk)
-// X rem Y  % modulo (% in Beamtalk)
+// X div Y  % integer division (div: in Beamtalk)
+// X rem Y  % modulo (% or mod: in Beamtalk)
 // ```
 
 Integer
@@ -81,14 +85,12 @@ Integer
   - other => // implemented by compiler - erlang:'-'
   * other => // implemented by compiler - erlang:'*'
   / other => // implemented by compiler - erlang:'/'
-  
-  // Integer division - TODO: syntax conflict with line comments
-  // The '//' operator is defined here but conflicts with comment syntax.
-  // The compiler must recognize this as a binary operator, not a comment.
-  // other => // implemented by compiler - erlang:'div'
-  
   % other => // implemented by compiler - erlang:'rem'
   ** other => // implemented by compiler - math:pow
+
+  // Integer division and modulo (keyword messages)
+  div: other => // implemented by compiler - erlang:'div'
+  mod: other => // implemented by compiler - erlang:'rem'
 
   // Unary minus
   negated => 0 - self

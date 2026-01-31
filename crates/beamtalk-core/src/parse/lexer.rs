@@ -827,6 +827,19 @@ mod tests {
     }
 
     #[test]
+    fn lex_exponentiation() {
+        // ** is exponentiation
+        assert_eq!(
+            lex_kinds("2 ** 10"),
+            vec![
+                TokenKind::Integer("2".into()),
+                TokenKind::BinarySelector("**".into()),
+                TokenKind::Integer("10".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn lex_negative_numbers() {
         assert_eq!(
             lex_kinds("-42 -3.14"),

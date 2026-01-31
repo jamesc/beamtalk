@@ -9,14 +9,16 @@ difference := 10 - 4
 product := 6 * 7
 quotient := 20 / 4
 
-// Integer division and modulo
-intDiv := 17 // 5
+// Integer division and modulo (keyword messages)
+intDiv := 17 div: 5
 remainder := 17 % 5
+modResult := 17 mod: 5
 
 // Comparison
 isLess := 3 < 5
 isGreater := 10 > 5
 isEqual := 7 = 7
+isNotEqual := 3 ~= 5
 
 // Iteration - times repeat
 counter := 0
