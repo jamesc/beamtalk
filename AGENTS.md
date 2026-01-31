@@ -666,8 +666,8 @@ mod tests {
 
 - name: Fail if coverage below threshold
   run: |
-    COVERAGE=$(grep -oP 'Line coverage: \K[0-9.]+' code-coverage-results.txt)
-    if (( $(echo "$COVERAGE < 70.0" | bc -l) )); then
+    COVERAGE=$(grep -oE 'Line Rate: [0-9.]+' code-coverage-results.txt | grep -oE '[0-9.]+' || echo "0")
+    if awk -v cov="$COVERAGE" 'BEGIN { exit (cov < 70.0) ? 0 : 1 }'; then
       echo "Coverage $COVERAGE% is below 70% threshold"
       exit 1
     fi
