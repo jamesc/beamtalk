@@ -31,11 +31,18 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 
 /// Embedded compile.escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
+
+/// Atomic counter for generating unique escript filenames.
+///
+/// This ensures each temporary escript file has a unique name, preventing
+/// collisions when multiple compilation processes run in parallel.
+static ESCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Escapes a string for use in an Erlang term.
 ///
@@ -139,12 +146,13 @@ impl BeamCompiler {
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
         // Write compile.escript to a temporary file with unique name
-        // Use both process ID and thread ID to ensure uniqueness when tests run in parallel
+        // Use both process ID and atomic counter to ensure uniqueness when tests run in parallel
         let temp_dir = std::env::temp_dir();
+        let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let escript_path = temp_dir.join(format!(
-            "beamtalk_compile_{}_{:?}.escript",
+            "beamtalk_compile_{}_{}.escript",
             std::process::id(),
-            std::thread::current().id()
+            counter
         ));
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
