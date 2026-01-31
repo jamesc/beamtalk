@@ -239,7 +239,7 @@ mod tests {
     //! - Atomic lockfile creation and conflict detection
     //! - Platform-specific behavior (Unix vs non-Unix)
     //!
-    //! Note: Tests that manipulate shared state (~/.beamtalk/) use `#[serial]`
+    //! Note: Tests that manipulate shared state (~/.beamtalk/) use `#[serial(daemon_lockfile)]`
     //! to prevent race conditions between concurrent test executions.
 
     use super::*;
@@ -259,9 +259,11 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Uses `#[serial(daemon_lockfile)]` because it manipulates the shared
+    /// ~/.beamtalk/ directory and lockfile state.
     #[cfg(unix)]
     #[test]
-    #[serial]
+    #[serial(daemon_lockfile)]
     fn write_lockfile_atomic_creates_file() {
         use std::fs;
 
@@ -285,9 +287,11 @@ mod tests {
         }
     }
 
+    /// Uses `#[serial(daemon_lockfile)]` because it manipulates the shared
+    /// ~/.beamtalk/ directory and lockfile state.
     #[cfg(unix)]
     #[test]
-    #[serial]
+    #[serial(daemon_lockfile)]
     fn write_lockfile_atomic_fails_if_exists() {
         use std::fs;
         use std::io::Write;

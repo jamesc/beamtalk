@@ -29,8 +29,10 @@ fn find_runtime_dir() -> PathBuf {
 const UNIT_TEST_MODULES: &str =
     "beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests";
 
+/// Uses `#[serial(erlang_runtime)]` to prevent parallel rebar3 eunit runs
+/// in the same runtime/ directory, which can cause build conflicts.
 #[test]
-#[serial]
+#[serial(erlang_runtime)]
 fn erlang_runtime_unit_tests() {
     let runtime_dir = find_runtime_dir();
 
