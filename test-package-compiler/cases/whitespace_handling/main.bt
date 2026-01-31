@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test whitespace handling
+// Whitespace should not affect parsing
+
+// Extra spaces
+x    :=    5   +   3
+
+// Tabs and spaces mixed
+y	:=	10	*	2
+
+// Multiple newlines
+
+
+result := x + y
+
+
+// Trailing whitespace (simulated)
+z := 100   
+
+// Leading whitespace
+    leadingSpace := 42
+
+// Whitespace in message sends
+object    message:   argument    with:  another

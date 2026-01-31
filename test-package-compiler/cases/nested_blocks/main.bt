@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test nested block closures
+// Blocks inside other blocks
+
+// Block returning a block
+outerBlock := [[:x | x + 1]]
+innerBlock := outerBlock value
+result := innerBlock value: 5
+
+// Deeply nested blocks
+deeplyNested := [[[42]]]
+
+// Block with nested block in body
+blockWithNested := [:x | 
+    inner := [:y | y * 2]
+    inner value: x
+]
+
+// Multiple nested blocks in arguments
+processor forEach: items with: [:item |
+    mapper := [:val | val + 1]
+    mapper value: item
+]

@@ -1,0 +1,48 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("caf"), span: Span { start: 323, end: 326 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test boundary condition: Unicode in identifiers and strings"), Whitespace("\n"), LineComment("// Validate proper UTF-8 handling in lexer and parser"), Whitespace("\n\n"), LineComment("// Unicode characters in identifiers (if supported)"), Whitespace("\n"), LineComment("// Note: This tests whether the lexer/parser gracefully handles or rejects Unicode"), Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 326, end: 328 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 329, end: 331 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 332, end: 334 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("r"), span: Span { start: 335, end: 336 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 336, end: 338 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("sum"), span: Span { start: 338, end: 341 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 341, end: 343 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 344, end: 346 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("document"), span: Span { start: 347, end: 357 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("日"), span: Span { start: 358, end: 361 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Error("本"), span: Span { start: 361, end: 364 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("語"), span: Span { start: 364, end: 367 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 368, end: 370 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Japanese"), span: Span { start: 371, end: 381 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greeting"), span: Span { start: 434, end: 442 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Unicode in string literals (should always work)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 443, end: 445 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello, 世界! 🌍"), span: Span { start: 446, end: 467 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("emoji"), span: Span { start: 468, end: 473 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 474, end: 476 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("🚀 Beamtalk to the moon! 🌙"), span: Span { start: 477, end: 510 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("mathematical"), span: Span { start: 511, end: 523 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 524, end: 526 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("π ≈ 3.14159, √2 ≈ 1.414"), span: Span { start: 527, end: 559 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("message"), span: Span { start: 588, end: 595 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Mixed ASCII and Unicode"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 596, end: 598 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Beamtalk supports émojis 😀 and 中文"), span: Span { start: 599, end: 642 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("object"), span: Span { start: 702, end: 708 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Unicode in keyword message (if identifiers support it)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("caf"), span: Span { start: 709, end: 712 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 712, end: 714 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 714, end: 715 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 716, end: 721 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("r"), span: Span { start: 722, end: 723 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 723, end: 725 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("sum"), span: Span { start: 725, end: 728 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Error("é"), span: Span { start: 728, end: 730 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 730, end: 731 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("data"), span: Span { start: 732, end: 736 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("validCode"), span: Span { start: 778, end: 787 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Valid ASCII code after Unicode tests"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 788, end: 790 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("100"), span: Span { start: 791, end: 794 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 795, end: 796 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("200"), span: Span { start: 797, end: 800 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 801, end: 801 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

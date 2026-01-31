@@ -1,0 +1,482 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "name",
+                    span: Span {
+                        start: 300,
+                        end: 304,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Alice",
+                ),
+                Span {
+                    start: 308,
+                    end: 315,
+                },
+            ),
+            span: Span {
+                start: 300,
+                end: 315,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "greeting",
+                    span: Span {
+                        start: 316,
+                        end: 324,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Hello, {name}!",
+                ),
+                Span {
+                    start: 328,
+                    end: 344,
+                },
+            ),
+            span: Span {
+                start: 316,
+                end: 344,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "age",
+                    span: Span {
+                        start: 374,
+                        end: 377,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    25,
+                ),
+                Span {
+                    start: 381,
+                    end: 383,
+                },
+            ),
+            span: Span {
+                start: 374,
+                end: 383,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "message",
+                    span: Span {
+                        start: 384,
+                        end: 391,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "You are {age + 5} years old in 5 years",
+                ),
+                Span {
+                    start: 395,
+                    end: 435,
+                },
+            ),
+            span: Span {
+                start: 384,
+                end: 435,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "firstName",
+                    span: Span {
+                        start: 478,
+                        end: 487,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Bob",
+                ),
+                Span {
+                    start: 491,
+                    end: 496,
+                },
+            ),
+            span: Span {
+                start: 478,
+                end: 496,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "lastName",
+                    span: Span {
+                        start: 497,
+                        end: 505,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Smith",
+                ),
+                Span {
+                    start: 509,
+                    end: 516,
+                },
+            ),
+            span: Span {
+                start: 497,
+                end: 516,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "fullName",
+                    span: Span {
+                        start: 517,
+                        end: 525,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Name: {firstName} {lastName}",
+                ),
+                Span {
+                    start: 529,
+                    end: 559,
+                },
+            ),
+            span: Span {
+                start: 517,
+                end: 559,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "user",
+                    span: Span {
+                        start: 604,
+                        end: 608,
+                    },
+                },
+            ),
+            value: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "User",
+                        span: Span {
+                            start: 612,
+                            end: 616,
+                        },
+                    },
+                ),
+                selector: Unary(
+                    "new",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 612,
+                    end: 620,
+                },
+            },
+            span: Span {
+                start: 604,
+                end: 620,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "profile",
+                    span: Span {
+                        start: 621,
+                        end: 628,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "User: {user getName}, Email: {user getEmail}",
+                ),
+                Span {
+                    start: 632,
+                    end: 678,
+                },
+            ),
+            span: Span {
+                start: 621,
+                end: 678,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "count",
+                    span: Span {
+                        start: 723,
+                        end: 728,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 732,
+                    end: 734,
+                },
+            ),
+            span: Span {
+                start: 723,
+                end: 734,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "summary",
+                    span: Span {
+                        start: 735,
+                        end: 742,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Total: {count * 2}, Double: {[:x | x * 2] value: count}",
+                ),
+                Span {
+                    start: 746,
+                    end: 803,
+                },
+            ),
+            span: Span {
+                start: 735,
+                end: 803,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "escaped",
+                    span: Span {
+                        start: 849,
+                        end: 856,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Literal braces: \\{ and \\}, variable: {name}",
+                ),
+                Span {
+                    start: 860,
+                    end: 905,
+                },
+            ),
+            span: Span {
+                start: 849,
+                end: 905,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "multiLine",
+                    span: Span {
+                        start: 941,
+                        end: 950,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "First line: {firstName}\nSecond line: {lastName}\nThird line: {age}",
+                ),
+                Span {
+                    start: 954,
+                    end: 1021,
+                },
+            ),
+            span: Span {
+                start: 941,
+                end: 1021,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "emojiVar",
+                    span: Span {
+                        start: 1058,
+                        end: 1066,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "🎉",
+                ),
+                Span {
+                    start: 1070,
+                    end: 1076,
+                },
+            ),
+            span: Span {
+                start: 1058,
+                end: 1076,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "withEmoji",
+                    span: Span {
+                        start: 1077,
+                        end: 1086,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Celebration: {emojiVar} {name}!",
+                ),
+                Span {
+                    start: 1090,
+                    end: 1123,
+                },
+            ),
+            span: Span {
+                start: 1077,
+                end: 1123,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "emptyInterp",
+                    span: Span {
+                        start: 1160,
+                        end: 1171,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Before {} After",
+                ),
+                Span {
+                    start: 1175,
+                    end: 1192,
+                },
+            ),
+            span: Span {
+                start: 1160,
+                end: 1192,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "nested",
+                    span: Span {
+                        start: 1226,
+                        end: 1232,
+                    },
+                },
+            ),
+            value: Literal(
+                String(
+                    "Outer {inner at: {key get}}",
+                ),
+                Span {
+                    start: 1236,
+                    end: 1265,
+                },
+            ),
+            span: Span {
+                start: 1226,
+                end: 1265,
+            },
+        },
+    ],
+    span: Span {
+        start: 300,
+        end: 1265,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test future feature: string interpolation",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Double-quoted strings with embedded expressions using {expr} syntax",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// NOTE: This feature is not yet implemented - test documents expected behavior",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Simple variable interpolation",
+            span: Span {
+                start: 300,
+                end: 304,
+            },
+            kind: Line,
+        },
+    ],
+}

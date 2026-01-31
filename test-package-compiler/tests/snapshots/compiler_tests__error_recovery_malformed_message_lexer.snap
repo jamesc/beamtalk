@@ -1,0 +1,23 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("dict"), span: Span { start: 193, end: 197 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test error recovery: malformed message sends"), Whitespace("\n"), LineComment("// Parser should handle incomplete messages"), Whitespace("\n\n"), LineComment("// Incomplete keyword message"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("at:"), span: Span { start: 198, end: 201 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("key"), span: Span { start: 202, end: 205 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("array"), span: Span { start: 231, end: 236 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Missing keyword part"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("at:"), span: Span { start: 237, end: 240 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("index"), span: Span { start: 241, end: 246 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("put"), span: Span { start: 247, end: 250 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("object"), span: Span { start: 286, end: 292 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Extra keyword without argument"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("foo:"), span: Span { start: 293, end: 297 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 298, end: 299 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("bar:"), span: Span { start: 300, end: 304 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("at:"), span: Span { start: 334, end: 337 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Message with no receiver"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 338, end: 340 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("result"), span: Span { start: 368, end: 374 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Valid code after error"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 375, end: 377 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("5"), span: Span { start: 378, end: 379 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 380, end: 381 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("5"), span: Span { start: 382, end: 383 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 384, end: 384 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

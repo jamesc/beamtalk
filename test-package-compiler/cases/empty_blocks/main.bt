@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test empty block edge case
+// Blocks with no body or only whitespace
+
+// Empty block - no expressions
+empty := []
+
+// Empty block with single space
+emptyWithSpace := [ ]
+
+// Empty block with newlines
+emptyWithNewlines := [
+
+]
+
+// Empty block used as argument
+collection do: []

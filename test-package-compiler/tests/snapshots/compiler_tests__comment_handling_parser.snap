@@ -1,0 +1,216 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "x",
+                    span: Span {
+                        start: 161,
+                        end: 162,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    5,
+                ),
+                Span {
+                    start: 166,
+                    end: 167,
+                },
+            ),
+            span: Span {
+                start: 161,
+                end: 167,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "y",
+                    span: Span {
+                        start: 244,
+                        end: 245,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 249,
+                    end: 251,
+                },
+            ),
+            span: Span {
+                start: 244,
+                end: 251,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "a",
+                    span: Span {
+                        start: 284,
+                        end: 285,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    1,
+                ),
+                Span {
+                    start: 289,
+                    end: 290,
+                },
+            ),
+            span: Span {
+                start: 284,
+                end: 290,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "b",
+                    span: Span {
+                        start: 309,
+                        end: 310,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    2,
+                ),
+                Span {
+                    start: 314,
+                    end: 315,
+                },
+            ),
+            span: Span {
+                start: 309,
+                end: 315,
+            },
+        },
+        Identifier(
+            Identifier {
+                name: "object",
+                span: Span {
+                    start: 344,
+                    end: 350,
+                },
+            },
+        ),
+        MessageSend {
+            receiver: Error {
+                message: "Unexpected token: expected expression, found message:",
+                span: Span {
+                    start: 371,
+                    end: 379,
+                },
+            },
+            selector: Unary(
+                "value",
+            ),
+            arguments: [],
+            span: Span {
+                start: 371,
+                end: 385,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "block",
+                    span: Span {
+                        start: 422,
+                        end: 427,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Literal(
+                            Integer(
+                                42,
+                            ),
+                            Span {
+                                start: 457,
+                                end: 459,
+                            },
+                        ),
+                    ],
+                    span: Span {
+                        start: 431,
+                        end: 461,
+                    },
+                },
+            ),
+            span: Span {
+                start: 422,
+                end: 461,
+            },
+        },
+    ],
+    span: Span {
+        start: 161,
+        end: 461,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 161,
+                end: 162,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 161,
+                end: 162,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test comment handling",
+            span: Span {
+                start: 161,
+                end: 162,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Comments should be preserved as trivia",
+            span: Span {
+                start: 161,
+                end: 162,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Single line comment",
+            span: Span {
+                start: 161,
+                end: 162,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found message:", span: Span { start: 371, end: 379 } }

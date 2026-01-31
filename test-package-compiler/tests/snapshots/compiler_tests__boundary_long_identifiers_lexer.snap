@@ -1,0 +1,27 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("thisIsAVeryLongIdentifierNameThatTestsTheParserAbilityToHandleExtremelyLongVariableNamesWithoutIssues"), span: Span { start: 218, end: 319 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test boundary condition: long identifiers and strings"), Whitespace("\n"), LineComment("// Validate parser handles extremely long tokens"), Whitespace("\n\n"), LineComment("// Very long identifier (100 characters)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 320, end: 322 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 323, end: 325 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("longString"), span: Span { start: 373, end: 383 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Very long string literal (200+ characters)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 384, end: 386 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation"), span: Span { start: 387, end: 602 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("result"), span: Span { start: 662, end: 668 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Long keyword message selector (multiple long keywords)"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 669, end: 671 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("veryLongObjectWithManyMethods"), span: Span { start: 672, end: 701 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("thisIsAVeryLongKeywordPart:"), span: Span { start: 707, end: 734 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value1"), span: Span { start: 735, end: 741 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("andAnotherVeryLongKeywordPart:"), span: Span { start: 747, end: 777 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value2"), span: Span { start: 778, end: 784 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("andYetAnotherExtremelyLongKeywordPart:"), span: Span { start: 789, end: 827 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value3"), span: Span { start: 828, end: 834 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("anotherVeryLongIdentifierForTestingPurposes"), span: Span { start: 873, end: 916 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Long identifier in nested context"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 917, end: 919 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftParen, span: Span { start: 920, end: 921 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("yetAnotherLongIdentifierName"), span: Span { start: 926, end: 954 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("at:"), span: Span { start: 955, end: 958 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("evenMoreLongIdentifierNames"), span: Span { start: 968, end: 995 }, leading_trivia: [Whitespace("\n        ")], trailing_trivia: [] }
+Token { kind: RightParen, span: Span { start: 996, end: 997 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 998, end: 998 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
