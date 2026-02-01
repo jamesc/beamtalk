@@ -24,7 +24,7 @@
 -ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
-         ensure_dir_with_mode/2]).
+         ensure_dir_with_mode/2, maybe_await_future/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -34,6 +34,7 @@
 
 %% @doc Evaluate a Beamtalk expression.
 %% This is the core of the REPL - compile, load, and execute.
+%% If the result is a Future PID, automatically awaits it before returning.
 -spec do_eval(string(), beamtalk_repl_state:state()) -> 
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
@@ -52,7 +53,9 @@ do_eval(Expression, State) ->
                 {module, ModuleName} ->
                     %% Execute the eval function
                     try
-                        Result = apply(ModuleName, eval, [Bindings]),
+                        RawResult = apply(ModuleName, eval, [Bindings]),
+                        %% Auto-await futures for synchronous REPL experience
+                        Result = maybe_await_future(RawResult),
                         %% Check if this was an assignment
                         case extract_assignment(Expression) of
                             {ok, VarName} ->
@@ -528,3 +531,57 @@ register_classes(ClassNames, ModuleName) ->
         end,
         ClassNames
     ).
+
+%% Auto-await a Future if the result is a Future PID.
+%% This provides a synchronous REPL experience for async message sends.
+%% Returns the awaited value, or the original value if not a Future.
+-spec maybe_await_future(term()) -> term().
+maybe_await_future(Value) when is_pid(Value) ->
+    %% For REPL purposes, we attempt to await any PID result.
+    %% If it's a Future, it will respond with the future protocol.
+    %% If it's an actor or other process, it will ignore the message and
+    %% we'll timeout waiting for a response.
+    %% We use a short timeout (100ms) to detect non-futures quickly.
+    TestTimeout = 100,
+    Value ! {await, self(), TestTimeout},
+    receive
+        {future_resolved, Value, AwaitedValue} ->
+            %% It was a resolved future
+            AwaitedValue;
+        {future_rejected, Value, Reason} ->
+            %% It was a rejected future - return error tuple for REPL inspection.
+            %% We use tuples instead of throwing (like beamtalk_future:await/1 does)
+            %% because REPL should be forgiving and allow users to inspect errors.
+            {future_rejected, Reason};
+        {future_timeout, Value} ->
+            %% Future explicitly timed out waiting for resolution.
+            %% This confirms it IS a future. Try a longer await.
+            case beamtalk_future:await(Value, 5000) of
+                {ok, AwaitedValue} ->
+                    AwaitedValue;
+                {error, timeout} ->
+                    {future_timeout, Value};
+                {error, Reason} ->
+                    {future_rejected, Reason}
+            end
+    after TestTimeout + 50 ->
+        %% Not a future process - it didn't respond to the protocol.
+        %% Use TestTimeout + 50 to give the future time to send {future_timeout, Value}.
+        %% Flush any late responses to avoid mailbox pollution.
+        receive
+            {future_resolved, Value, _} -> ok;
+            {future_rejected, Value, _} -> ok;
+            {future_timeout, Value} -> ok
+        after 20 ->
+            ok
+        end,
+        %% Return the PID as-is (likely an actor or other process)
+        Value
+    end;
+maybe_await_future({beamtalk_object, _, _, _} = Object) ->
+    %% Beamtalk objects (actors) are not futures themselves
+    %% Return as-is
+    Object;
+maybe_await_future(Value) ->
+    %% Not a PID or special type, return as-is
+    Value.

@@ -229,11 +229,37 @@ term_to_json(Value) when is_list(Value) ->
             [term_to_json(E) || E <- Value]
     end;
 term_to_json(Value) when is_pid(Value) ->
-    %% Format pid as Actor (class lookup not yet implemented)
-    %% pid_to_list/1 returns "<0.123.0>", so strip the outer angle brackets
-    PidStr = pid_to_list(Value),
-    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-    iolist_to_binary([<<"#Actor<">>, Inner, <<">">>]);
+    %% Check if this is a Future process
+    %% Futures are running beamtalk_future:pending/resolved/rejected functions
+    case is_process_alive(Value) of
+        true ->
+            %% Handle race condition: process could die between alive check and process_info
+            case process_info(Value, current_function) of
+                {current_function, {beamtalk_future, pending, _}} ->
+                    iolist_to_binary(<<"#Future<pending>">>);
+                {current_function, {beamtalk_future, resolved, _}} ->
+                    %% Future has been resolved; we only know its state here
+                    iolist_to_binary(<<"#Future<resolved>">>);
+                {current_function, {beamtalk_future, rejected, _}} ->
+                    %% Future has been rejected; we only know its state here
+                    iolist_to_binary(<<"#Future<rejected>">>);
+                undefined ->
+                    %% Process died between alive check and process_info
+                    PidStr = pid_to_list(Value),
+                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+                    iolist_to_binary([<<"#Dead<">>, Inner, <<">">>]);
+                _ ->
+                    %% Regular process/actor
+                    PidStr = pid_to_list(Value),
+                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+                    iolist_to_binary([<<"#Actor<">>, Inner, <<">">>])
+            end;
+        false ->
+            %% Dead process
+            PidStr = pid_to_list(Value),
+            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+            iolist_to_binary([<<"#Dead<">>, Inner, <<">">>])
+    end;
 term_to_json(Value) when is_function(Value) ->
     %% Format function with arity as "a Block/N"
     {arity, Arity} = erlang:fun_info(Value, arity),
@@ -258,8 +284,25 @@ term_to_json(Value) when is_map(Value) ->
         Value
     );
 term_to_json(Value) when is_tuple(Value) ->
-    %% Format tuple with marker
-    #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]};
+    %% Special handling for known tuple types
+    case Value of
+        {beamtalk_object, Class, _Module, Pid} ->
+            %% Format actor object as #Actor<Class, Pid>
+            PidStr = pid_to_list(Pid),
+            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+            iolist_to_binary([<<"#Actor<">>, atom_to_binary(Class, utf8), <<",">>, Inner, <<">">>]);
+        {future_timeout, Pid} when is_pid(Pid) ->
+            %% Future that timed out
+            PidStr = pid_to_list(Pid),
+            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+            iolist_to_binary([<<"#Future<timeout,">>, Inner, <<">">>]);
+        {future_rejected, Reason} ->
+            %% Future that was rejected
+            iolist_to_binary([<<"#Future<rejected: ">>, term_to_json(Reason), <<">">>]);
+        _ ->
+            %% Format generic tuple with marker
+            #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]}
+    end;
 term_to_json(Value) ->
     %% Fallback: format using io_lib
     iolist_to_binary(io_lib:format("~p", [Value])).
