@@ -1367,6 +1367,7 @@ impl CoreErlangGenerator {
         for (i, expr) in block.body.iter().enumerate() {
             let is_last = i == block.body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
+            let is_local_assignment = Self::is_local_var_assignment(expr);
 
             if is_last {
                 // Last expression: bind to Result and generate reply tuple
@@ -1403,8 +1404,23 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
+            } else if is_local_assignment {
+                // Local variable assignment: generate with proper binding
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        // Create a Core Erlang variable name (capitalize first letter for Core Erlang convention)
+                        let core_var = Self::to_core_erlang_var(var_name);
+                        // Register the variable in scope
+                        self.bind_var(var_name, &core_var);
+                        // Generate: let VarName = <value> in ...
+                        write!(self.output, "let {core_var} = ")?;
+                        self.generate_expression(value)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
             } else {
-                // Non-field-assignment intermediate expression: wrap in let
+                // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
                 write!(self.output, "let {tmp_var} = ")?;
                 self.generate_expression(expr)?;
@@ -1432,10 +1448,17 @@ impl CoreErlangGenerator {
         //   let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>
         //
         // The difference is crucial: in the first form, State1 is visible in <return expression>.
+        //
+        // Similarly, for local variable assignments like: [count := 0. count + 1]
+        // We need:
+        //   let Count = 0 in Count + 1
+        // NOT:
+        //   let _seq1 = 0 in <expression that can't see Count>
 
         for (i, expr) in block.body.iter().enumerate() {
             let is_last = i == block.body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
+            let is_local_assignment = Self::is_local_var_assignment(expr);
 
             if is_last {
                 // Last expression: generate directly (its value is the block's result)
@@ -1444,8 +1467,23 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
                 self.generate_field_assignment_open(expr)?;
+            } else if is_local_assignment {
+                // Local variable assignment: generate with proper binding
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        // Create a Core Erlang variable name (capitalize first letter for Core Erlang convention)
+                        let core_var = Self::to_core_erlang_var(var_name);
+                        // Register the variable in scope
+                        self.bind_var(var_name, &core_var);
+                        // Generate: let VarName = <value> in ...
+                        write!(self.output, "let {core_var} = ")?;
+                        self.generate_expression(value)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
             } else {
-                // Non-field-assignment intermediate expression: wrap in let
+                // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
                 write!(self.output, "let {tmp_var} = ")?;
                 self.generate_expression(expr)?;
@@ -1465,6 +1503,15 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// Check if an expression is a local variable assignment (identifier := value)
+    fn is_local_var_assignment(expr: &Expression) -> bool {
+        if let Expression::Assignment { target, .. } = expr {
+            matches!(target.as_ref(), Expression::Identifier(_))
+        } else {
+            false
+        }
     }
 
     /// Generate a field assignment WITHOUT the closing value.
@@ -2880,6 +2927,20 @@ impl CoreErlangGenerator {
     fn fresh_temp_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         format!("_{}{}", base.replace('_', ""), self.var_counter)
+    }
+
+    /// Converts a Beamtalk identifier to a valid Core Erlang variable name.
+    ///
+    /// Core Erlang variables must start with an uppercase letter or underscore.
+    /// This function capitalizes the first letter of the identifier.
+    fn to_core_erlang_var(name: &str) -> String {
+        if name.is_empty() {
+            return "_Empty".to_string();
+        }
+        let mut chars = name.chars();
+        let first = chars.next().unwrap();
+        let rest: String = chars.collect();
+        format!("{}{}", first.to_uppercase(), rest)
     }
 
     /// Returns the current state variable name for state threading.

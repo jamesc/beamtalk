@@ -85,9 +85,9 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'test'> when 'true' ->
-            let _seq1 = 0 in let _seq2 = let _Cond4 = fun () -> call 'erlang':'<'(call 'maps':'get'('count', State), 3) in let _Body5 = fun () -> call 'erlang':'+'(call 'maps':'get'('count', State), 1) in letrec '_Loop3'/0 = fun () -> case apply _Cond4 () of <'true'> when 'true' -> do apply _Body5 () apply '_Loop3'/0 () <'false'> when 'true' -> 'nil' end in apply '_Loop3'/0 () in let _Result = call 'maps':'get'('count', State) in {'reply', _Result, State}
+            let Count = 0 in let _seq1 = let _Cond3 = fun () -> call 'erlang':'<'(Count, 3) in let _Body4 = fun () -> call 'erlang':'+'(Count, 1) in letrec '_Loop2'/0 = fun () -> case apply _Cond3 () of <'true'> when 'true' -> do apply _Body4 () apply '_Loop2'/0 () <'false'> when 'true' -> 'nil' end in apply '_Loop2'/0 () in let _Result = Count in {'reply', _Result, State}
         <'testLocal'> when 'true' ->
-            let _seq6 = 0 in let _seq7 = let _Cond9 = fun () -> call 'erlang':'<'(call 'maps':'get'('x', State), 5) in let _Body10 = fun () -> call 'erlang':'+'(call 'maps':'get'('x', State), 1) in letrec '_Loop8'/0 = fun () -> case apply _Cond9 () of <'true'> when 'true' -> do apply _Body10 () apply '_Loop8'/0 () <'false'> when 'true' -> 'nil' end in apply '_Loop8'/0 () in let _Result = call 'maps':'get'('x', State) in {'reply', _Result, State}
+            let X = 0 in let _seq5 = let _Cond7 = fun () -> call 'erlang':'<'(X, 5) in let _Body8 = fun () -> call 'erlang':'+'(X, 1) in letrec '_Loop6'/0 = fun () -> case apply _Cond7 () of <'true'> when 'true' -> do apply _Body8 () apply '_Loop6'/0 () <'false'> when 'true' -> 'nil' end in apply '_Loop6'/0 () in let _Result = X in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
