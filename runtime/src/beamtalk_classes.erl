@@ -307,7 +307,7 @@ find_and_invoke_super_method(ServerRef, ClassName, Selector, Args, State) ->
             case maps:find(Selector, Methods) of
                 {ok, MethodInfo} ->
                     %% Found the method - invoke it
-                    invoke_super_method(ClassName, Selector, MethodInfo, Args, State);
+                    invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State);
                 error ->
                     %% Method not found in this class, try superclass
                     case maps:get(superclass, ClassInfo) of
@@ -325,22 +325,23 @@ find_and_invoke_super_method(ServerRef, ClassName, Selector, Args, State) ->
 
 %% @private
 %% Invoke a method found in the superclass.
--spec invoke_super_method(class_name(), selector(), method_info(), list(), map()) ->
+-spec invoke_super_method(class_info(), selector(), method_info(), list(), map()) ->
     {term(), map()}.
-invoke_super_method(ClassName, Selector, MethodInfo, Args, State) ->
+invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State) ->
     case maps:find(block, MethodInfo) of
         {ok, Block} ->
             %% Runtime block available (from live development) - call it
             apply(Block, Args);
         error ->
             %% No runtime block, must call the compiled module
-            Module = maps:get(module, maps:get(methods, MethodInfo, #{}), ClassName),
+            Module = maps:get(module, ClassInfo),
             %% Call the module's dispatch function with the selector
             %% This maintains the actor protocol
             case erlang:function_exported(Module, dispatch, 3) of
                 true ->
                     Module:dispatch(Selector, Args, State);
                 false ->
+                    ClassName = maps:get('__class__', State, unknown),
                     {error, {method_not_callable, ClassName, Selector}}
             end
     end.
