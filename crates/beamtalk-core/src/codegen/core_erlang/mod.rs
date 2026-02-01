@@ -1171,6 +1171,14 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
+            Expression::Super(_) => {
+                // Super by itself is not a valid expression - it must be used
+                // as a message receiver (e.g., `super increment`)
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "'super' must be used with a message send".to_string(),
+                    location: format!("{:?}", expr.span()),
+                })
+            }
             Expression::Block(block) => self.generate_block(block),
             Expression::MessageSend {
                 receiver,
@@ -1565,6 +1573,12 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
+        // Special case: super message send
+        // Super calls invoke the superclass implementation
+        if matches!(receiver, Expression::Super(_)) {
+            return self.generate_super_send(selector, arguments);
+        }
+
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             return self.generate_binary_op(op, receiver, arguments);
@@ -1721,6 +1735,54 @@ impl CoreErlangGenerator {
         write!(self.output, "call 'beamtalk_future':'await'(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates code for a super message send.
+    ///
+    /// Super calls invoke the superclass implementation of a method.
+    /// This generates a call to the runtime's super dispatch mechanism:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_classes':'super_dispatch'(
+    ///   State,           % Current actor state (contains __class__)
+    ///   'selector',      % Method selector
+    ///   [Arg1, Arg2]     % Arguments
+    /// )
+    /// ```
+    ///
+    /// The runtime looks up the superclass from State's __class__ field,
+    /// then searches for the method in the superclass's method table.
+    fn generate_super_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        // Build the selector atom
+        let selector_atom = match selector {
+            MessageSelector::Unary(name) => name.to_string(),
+            MessageSelector::Binary(op) => op.to_string(),
+            MessageSelector::Keyword(parts) => {
+                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+            }
+        };
+
+        // Generate: call 'beamtalk_classes':'super_dispatch'(State, 'selector', [Args])
+        write!(
+            self.output,
+            "call 'beamtalk_classes':'super_dispatch'({}, '{selector_atom}', [",
+            self.current_state_var()
+        )?;
+
+        // Generate arguments
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "])")?;
         Ok(())
     }
 

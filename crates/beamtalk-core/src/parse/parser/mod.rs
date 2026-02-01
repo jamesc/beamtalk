@@ -1501,4 +1501,75 @@ Actor subclass: Rectangle
             );
         }
     }
+
+    #[test]
+    fn parse_super_unary_message() {
+        let module = parse_ok("super increment");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Unary(name),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            assert!(matches!(&**receiver, Expression::Super(_)));
+            assert_eq!(name.as_str(), "increment");
+            assert_eq!(arguments.len(), 0);
+        } else {
+            panic!("Expected super message send");
+        }
+    }
+
+    #[test]
+    fn parse_super_keyword_message() {
+        let module = parse_ok("super at: 1 put: value");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            assert!(matches!(&**receiver, Expression::Super(_)));
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[0].keyword.as_str(), "at:");
+            assert_eq!(parts[1].keyword.as_str(), "put:");
+            assert_eq!(arguments.len(), 2);
+        } else {
+            panic!("Expected super keyword message send");
+        }
+    }
+
+    #[test]
+    fn parse_super_in_method_body() {
+        // Test super in a method body
+        let module = parse_ok(
+            "Actor subclass: Counter
+  increment => super increment",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+
+        let method = &class.methods[0];
+        assert_eq!(method.body.len(), 1, "Method should have 1 statement");
+
+        // Statement should be super increment
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Unary(name),
+            ..
+        } = &method.body[0]
+        {
+            assert!(matches!(&**receiver, Expression::Super(_)));
+            assert_eq!(name.as_str(), "increment");
+        } else {
+            panic!("Expected super message send in method body");
+        }
+    }
 }

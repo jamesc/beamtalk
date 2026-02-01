@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Example demonstrating super keyword for superclass method dispatch
+
+Actor subclass: Counter
+  state: value = 0
+  
+  increment => self.value += 1
+  
+  getValue => self.value
+
+Actor subclass: LoggingCounter
+  // Inherits from Counter
+  
+  increment =>
+    super increment
+    // TODO: Add logging once we have IO

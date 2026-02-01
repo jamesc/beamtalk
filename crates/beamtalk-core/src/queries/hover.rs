@@ -85,6 +85,16 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 None
             }
         }
+        Expression::Super(span) => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    "Keyword: `super` (superclass method dispatch)".to_string(),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Literal(lit, span) => {
             if offset >= span.start() && offset < span.end() {
                 let info = match lit {
