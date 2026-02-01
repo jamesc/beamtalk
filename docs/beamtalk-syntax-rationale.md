@@ -1,5 +1,7 @@
 # Beamtalk Syntax Rationale
 
+**Status:** Complete - Syntax design decisions finalized
+
 This document explains the syntax choices for Beamtalk: why we keep certain Smalltalk conventions and why we diverge from others.
 
 See [beamtalk-language-features.md](beamtalk-language-features.md) for the complete syntax specification.

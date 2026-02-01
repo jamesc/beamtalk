@@ -1,8 +1,10 @@
 # REPL Architecture and State Management
 
+**Status:** Complete - Implementation documented
+
 This document describes the internal architecture of Beamtalk's interactive REPL (Read-Eval-Print Loop), including how expressions are compiled, evaluated, and how state persists across evaluations.
 
-For the overall system architecture, see [beamtalk-architecture.md](beamtalk-architecture.md).
+For the overall system architecture, see [beamtalk-architecture.md](../beamtalk-architecture.md).
 
 ---
 
@@ -608,5 +610,5 @@ If a spawned actor doesn't respond:
 
 ## See Also
 
-- [beamtalk-architecture.md](beamtalk-architecture.md) — Overall system architecture
-- [beamtalk-ide.md](beamtalk-ide.md) — IDE and live development environment
+- [beamtalk-architecture.md](../beamtalk-architecture.md) — Overall system architecture
+- [beamtalk-ide.md](../beamtalk-ide.md) — IDE and live development environment

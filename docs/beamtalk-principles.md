@@ -1,5 +1,7 @@
 # Beamtalk Design Principles
 
+**Status:** Complete - Core design philosophy
+
 Core philosophy guiding beamtalk design. These inform all implementation decisions.
 
 For detailed syntax and features, see [beamtalk-language-features.md](beamtalk-language-features.md). For syntax design rationale, see [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md).
