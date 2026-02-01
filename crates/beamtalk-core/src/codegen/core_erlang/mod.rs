@@ -1424,8 +1424,8 @@ impl CoreErlangGenerator {
                         write!(self.output, " in ")?;
                     }
                 }
-            } else if let Some(threaded_vars) = Self::get_while_threaded_vars(expr) {
-                // whileTrue:/whileFalse: with mutations - need to rebind threaded vars after loop
+            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+                // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
                 if threaded_vars.len() == 1 {
                     let var = &threaded_vars[0];
                     let core_var = self
@@ -1510,8 +1510,8 @@ impl CoreErlangGenerator {
                         write!(self.output, " in ")?;
                     }
                 }
-            } else if let Some(threaded_vars) = Self::get_while_threaded_vars(expr) {
-                // whileTrue:/whileFalse: with mutations - need to rebind threaded vars after loop
+            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+                // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
                 // For single var, the loop returns its final value directly
                 // For multiple vars, we'd need a tuple (not yet supported)
                 if threaded_vars.len() == 1 {
@@ -1566,9 +1566,10 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Check if an expression is a whileTrue: or whileFalse: with literal blocks
-    /// that has threaded mutations. Returns the threaded variable names if so.
-    fn get_while_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
+    /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
+    /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
+    #[allow(clippy::too_many_lines)]
+    fn get_control_flow_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
         let Expression::MessageSend {
@@ -1620,6 +1621,125 @@ impl CoreErlangGenerator {
                 return Some(threaded);
             }
         }
+
+        // Check for timesRepeat: with literal block
+        if selector_name == "timesRepeat:"
+            && arguments
+                .first()
+                .is_some_and(|a| matches!(a, Expression::Block(_)))
+        {
+            let Some(Expression::Block(body_block)) = arguments.first() else {
+                return None;
+            };
+
+            let body_analysis = analyze_block(body_block);
+
+            // Threaded vars are those that are both read AND written
+            let threaded: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .cloned()
+                .collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+
+        // Check for to:do: with literal block
+        if selector_name == "to:do:"
+            && arguments.len() == 2
+            && matches!(&arguments[1], Expression::Block(_))
+        {
+            let Expression::Block(body_block) = &arguments[1] else {
+                return None;
+            };
+
+            let body_analysis = analyze_block(body_block);
+
+            // The block parameter (e.g., `n` in `[:n | ...]`) is NOT a threaded variable
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Threaded vars are those that are both read AND written, but NOT block params
+            let threaded: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+
+        // Check for do: (list iteration) with literal block
+        if selector_name == "do:"
+            && arguments
+                .first()
+                .is_some_and(|a| matches!(a, Expression::Block(_)))
+        {
+            let Some(Expression::Block(body_block)) = arguments.first() else {
+                return None;
+            };
+
+            let body_analysis = analyze_block(body_block);
+
+            // The block parameter (e.g., `item` in `[:item | ...]`) is NOT a threaded variable
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Threaded vars are those that are both read AND written, but NOT block params
+            let threaded: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+
+        // Check for inject:into: with literal block
+        if selector_name == "inject:into:"
+            && arguments.len() == 2
+            && matches!(&arguments[1], Expression::Block(_))
+        {
+            let Expression::Block(body_block) = &arguments[1] else {
+                return None;
+            };
+
+            let body_analysis = analyze_block(body_block);
+
+            // The block parameters (acc, item) are NOT threaded variables
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Threaded vars are those that are both read AND written, but NOT block params
+            let threaded: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+
         None
     }
 
@@ -1710,6 +1830,12 @@ impl CoreErlangGenerator {
         // Special case: Integer methods - synchronous Erlang operations
         // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
         if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: List/Array methods - synchronous Erlang list operations
+        // do:, collect:, select:, inject:into: generate direct iteration
+        if let Some(result) = self.try_generate_list_message(receiver, selector, arguments)? {
             return Ok(result);
         }
 
@@ -2073,6 +2199,12 @@ impl CoreErlangGenerator {
                         Ok(Some(()))
                     }
 
+                    // `timesRepeat:` - repeat body N times
+                    "timesRepeat:" => {
+                        self.generate_times_repeat(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
                     // Not a block evaluation message
                     _ => Ok(None),
                 }
@@ -2370,6 +2502,7 @@ impl CoreErlangGenerator {
     /// - `isZero` (0 args) → `Receiver =:= 0`
     /// - `isEven` (0 args) → `Receiver rem 2 =:= 0`
     /// - `isOdd` (0 args) → `Receiver rem 2 =/= 0`
+    /// - `to:do:` (2 args) → range iteration with body block
     fn try_generate_integer_message(
         &mut self,
         receiver: &Expression,
@@ -2420,9 +2553,665 @@ impl CoreErlangGenerator {
                 _ => Ok(None),
             },
 
-            // No keyword or binary Integer methods handled here
-            _ => Ok(None),
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "to:do:" if arguments.len() == 2 => {
+                        // 1 to: 10 do: [:n | body]
+                        // receiver = start, arguments[0] = end, arguments[1] = body block
+                        self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            // No binary Integer methods handled here
+            MessageSelector::Binary(_) => Ok(None),
         }
+    }
+
+    /// Tries to generate code for List/Array methods.
+    ///
+    /// List methods are synchronous operations that generate direct Erlang list calls.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # List Methods
+    ///
+    /// - `do:` (1 arg block) → iterate over elements with side effects
+    /// - `collect:` (1 arg block) → map to new list
+    /// - `select:` (1 arg block) → filter elements
+    /// - `reject:` (1 arg block) → filter out elements
+    /// - `inject:into:` (2 args) → fold with accumulator
+    /// - `first` (0 args) → `hd(List)`
+    /// - `rest` (0 args) → `tl(List)`
+    /// - `size` (0 args) → `length(List)`
+    /// - `isEmpty` (0 args) → `List =:= []`
+    fn try_generate_list_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "first" if arguments.is_empty() => {
+                    // call 'erlang':'hd'(Receiver)
+                    write!(self.output, "call 'erlang':'hd'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "rest" if arguments.is_empty() => {
+                    // call 'erlang':'tl'(Receiver)
+                    write!(self.output, "call 'erlang':'tl'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "size" if arguments.is_empty() => {
+                    // call 'erlang':'length'(Receiver)
+                    write!(self.output, "call 'erlang':'length'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "isEmpty" if arguments.is_empty() => {
+                    // call 'erlang':'=:='(Receiver, [])
+                    write!(self.output, "call 'erlang':'=:='(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ", [])")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "do:" if arguments.len() == 1 => {
+                        // list do: [:item | body]
+                        self.generate_list_do(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "collect:" if arguments.len() == 1 => {
+                        // list collect: [:item | transform]
+                        self.generate_list_collect(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "select:" if arguments.len() == 1 => {
+                        // list select: [:item | predicate]
+                        self.generate_list_select(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "reject:" if arguments.len() == 1 => {
+                        // list reject: [:item | predicate]
+                        self.generate_list_reject(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "inject:into:" if arguments.len() == 2 => {
+                        // list inject: 0 into: [:acc :item | acc + item]
+                        self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
+
+    /// Generates a `do:` iteration over a list.
+    ///
+    /// Beamtalk: `list do: [:item | body]`
+    ///
+    /// Core Erlang (simple, no mutations):
+    /// ```erlang
+    /// let _List = <list> in let _Body = <body> in
+    /// call 'lists':'foreach'(_Body, _List)
+    /// ```
+    fn generate_list_do(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
+        // Check if body is a literal block (enables mutation analysis)
+        if let Expression::Block(body_block) = body {
+            // Analyze block for mutations
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // The block parameter (e.g., `item` in `[:item | ...]`) is NOT a threaded variable
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Variables that need threading: read AND written, but NOT block params
+            let threaded_vars: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_list_do_with_mutations(receiver, body_block, &threaded_vars);
+            }
+        }
+
+        // Fall back to simple lists:foreach (no mutations)
+        let list_var = self.fresh_temp_var("List");
+        let body_var = self.fresh_temp_var("Body");
+
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(
+            self.output,
+            " in call 'lists':'foreach'({body_var}, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Generates a `do:` iteration over a list with mutation support.
+    fn generate_list_do_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        body_block: &Block,
+        threaded_vars: &[String],
+    ) -> Result<()> {
+        let loop_fn = self.fresh_temp_var("Loop");
+        let list_var = self.fresh_temp_var("List");
+        let head_var = self.fresh_temp_var("H");
+        let tail_var = self.fresh_temp_var("T");
+        // Arity: 1 for list, plus one for each threaded variable
+        let arity = 1 + threaded_vars.len();
+
+        // Convert variable names to Core Erlang format
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
+        // Get the block parameter name for item variable (if any)
+        let item_param = body_block.parameters.first().map(|p| p.name.as_str());
+
+        // let _List = <list> in
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in ")?;
+
+        // Generate letrec with List and threaded vars as parameters
+        write!(self.output, "letrec '{loop_fn}'/{arity} = fun ({list_var}")?;
+        for core_var in &core_vars {
+            write!(self.output, ", {core_var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+
+        // case List of
+        //   <[]> when 'true' -> ThreadedVars
+        //   <[H|T]> when 'true' -> <body> apply Loop (T, UpdatedVars)
+        write!(self.output, "case {list_var} of ")?;
+
+        // Empty list case: return final values
+        write!(self.output, "<[]> when 'true' -> ")?;
+        if core_vars.len() == 1 {
+            write!(self.output, "{}", &core_vars[0])?;
+        } else {
+            write!(self.output, "{{")?;
+            for (i, core_var) in core_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{core_var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+
+        // Non-empty list case: [H|T]
+        write!(self.output, " <[{head_var}|{tail_var}]> when 'true' -> ")?;
+
+        // Bind item parameter if it exists
+        if let Some(param) = item_param {
+            self.bind_var(param, &head_var);
+        }
+
+        // Generate body and extract new variable values
+        self.generate_list_do_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+            &tail_var,
+        )?;
+
+        write!(self.output, " end ")?;
+
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call: apply '_Loop'/N (List, Var1, Var2, ...)
+        write!(self.output, "in apply '{loop_fn}'/{arity} ({list_var}")?;
+        for var in threaded_vars {
+            write!(self.output, ", ")?;
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates the body of a list do: loop that threads mutated variables.
+    fn generate_list_do_body_with_threading(
+        &mut self,
+        body_block: &Block,
+        threaded_vars: &[String],
+        core_vars: &[String],
+        loop_fn: &str,
+        arity: usize,
+        tail_var: &str,
+    ) -> Result<()> {
+        if body_block.body.is_empty() {
+            // Empty body - just recurse with tail and same values
+            write!(self.output, "apply '{loop_fn}'/{arity} ({tail_var}")?;
+            for core_var in core_vars {
+                write!(self.output, ", {core_var}")?;
+            }
+            write!(self.output, ")")?;
+            return Ok(());
+        }
+
+        // Track which variables have been assigned new values
+        let mut assigned_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Process each expression in the body
+        for (i, expr) in body_block.body.iter().enumerate() {
+            let is_last = i == body_block.body.len() - 1;
+
+            match expr {
+                Expression::Assignment { target, value, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = id.name.as_str();
+                        if threaded_vars.contains(&var_name.to_string()) {
+                            let core_var = Self::to_core_erlang_var(var_name);
+                            let new_var = format!("{core_var}1");
+                            write!(self.output, "let {new_var} = ")?;
+                            self.generate_expression(value)?;
+                            write!(self.output, " in ")?;
+                            assigned_vars.insert(var_name.to_string());
+                            continue;
+                        }
+                    }
+                    // Not a threaded variable
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+                _ => {
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+            }
+        }
+
+        // Recurse with tail and updated values
+        write!(self.output, " apply '{loop_fn}'/{arity} ({tail_var}")?;
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            write!(self.output, ", ")?;
+            if assigned_vars.contains(var) {
+                write!(self.output, "{core_var}1")?;
+            } else {
+                write!(self.output, "{core_var}")?;
+            }
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates a `collect:` map over a list.
+    fn generate_list_collect(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
+        let list_var = self.fresh_temp_var("List");
+        let body_var = self.fresh_temp_var("Body");
+
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(
+            self.output,
+            " in call 'lists':'map'({body_var}, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Generates a `select:` filter over a list.
+    fn generate_list_select(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
+        let list_var = self.fresh_temp_var("List");
+        let body_var = self.fresh_temp_var("Body");
+
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(
+            self.output,
+            " in call 'lists':'filter'({body_var}, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Generates a `reject:` filter over a list (inverse of select:).
+    fn generate_list_reject(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
+        let list_var = self.fresh_temp_var("List");
+        let body_var = self.fresh_temp_var("Body");
+
+        // Use lists:filter with a predicate that inverts the result of the body function
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(
+            self.output,
+            " in call 'lists':'filter'(fun (X) -> call 'erlang':'not'(apply {body_var} (X)) end, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Generates an `inject:into:` fold over a list.
+    fn generate_list_inject(
+        &mut self,
+        receiver: &Expression,
+        initial: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        // Check if body is a literal block (enables mutation analysis)
+        if let Expression::Block(body_block) = body {
+            // Analyze block for mutations
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // The block parameters (e.g., `acc` and `item` in `[:acc :item | ...]`) are NOT threaded
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Variables that need threading: read AND written, but NOT block params
+            let threaded_vars: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_list_inject_with_mutations(
+                    receiver,
+                    initial,
+                    body_block,
+                    &threaded_vars,
+                );
+            }
+        }
+
+        // Fall back to simple lists:foldl (no mutations)
+        let list_var = self.fresh_temp_var("List");
+        let init_var = self.fresh_temp_var("Init");
+        let body_var = self.fresh_temp_var("Body");
+
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {init_var} = ")?;
+        self.generate_expression(initial)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        // lists:foldl(Fun, Acc0, List) - Fun(Elem, Acc) -> Acc1
+        // Beamtalk uses [:acc :item | ...] so we need to swap the arguments
+        write!(
+            self.output,
+            " in call 'lists':'foldl'(fun (Item, Acc) -> apply {body_var} (Acc, Item) end, {init_var}, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Generates an `inject:into:` fold with mutation support.
+    fn generate_list_inject_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        initial: &Expression,
+        body_block: &Block,
+        threaded_vars: &[String],
+    ) -> Result<()> {
+        let loop_fn = self.fresh_temp_var("Loop");
+        let list_var = self.fresh_temp_var("List");
+        let acc_var = self.fresh_temp_var("Acc");
+        let head_var = self.fresh_temp_var("H");
+        let tail_var = self.fresh_temp_var("T");
+        // Arity: 2 for list + acc, plus one for each threaded variable
+        let arity = 2 + threaded_vars.len();
+
+        // Convert variable names to Core Erlang format
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
+        // Get the block parameter names
+        let acc_param = body_block.parameters.first().map(|p| p.name.as_str());
+        let item_param = body_block.parameters.get(1).map(|p| p.name.as_str());
+
+        // let _List = <list> in let _Acc = <initial> in
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {acc_var} = ")?;
+        self.generate_expression(initial)?;
+        write!(self.output, " in ")?;
+
+        // Generate letrec with List, Acc, and threaded vars as parameters
+        write!(
+            self.output,
+            "letrec '{loop_fn}'/{arity} = fun ({list_var}, {acc_var}"
+        )?;
+        for core_var in &core_vars {
+            write!(self.output, ", {core_var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+        // Bind acc parameter if it exists
+        if let Some(param) = acc_param {
+            self.bind_var(param, &acc_var);
+        }
+
+        // case List of
+        //   <[]> when 'true' -> {Acc, ThreadedVars}
+        //   <[H|T]> when 'true' -> <body> apply Loop (T, NewAcc, UpdatedVars)
+        write!(self.output, "case {list_var} of ")?;
+
+        // Empty list case: return acc and final threaded values
+        write!(self.output, "<[]> when 'true' -> ")?;
+        // Return tuple of (acc, threaded_vars...)
+        if core_vars.is_empty() {
+            write!(self.output, "{acc_var}")?;
+        } else {
+            write!(self.output, "{{{acc_var}")?;
+            for core_var in &core_vars {
+                write!(self.output, ", {core_var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+
+        // Non-empty list case: [H|T]
+        write!(self.output, " <[{head_var}|{tail_var}]> when 'true' -> ")?;
+
+        // Bind item parameter if it exists
+        if let Some(param) = item_param {
+            self.bind_var(param, &head_var);
+        }
+
+        // Generate body and extract new variable values
+        self.generate_list_inject_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+            &tail_var,
+            &acc_var,
+        )?;
+
+        write!(self.output, " end ")?;
+
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call: apply '_Loop'/N (List, Init, Var1, Var2, ...)
+        write!(
+            self.output,
+            "in apply '{loop_fn}'/{arity} ({list_var}, {acc_var}"
+        )?;
+        for var in threaded_vars {
+            write!(self.output, ", ")?;
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates the body of a list inject:into: loop that threads mutated variables.
+    #[allow(clippy::too_many_arguments)]
+    fn generate_list_inject_body_with_threading(
+        &mut self,
+        body_block: &Block,
+        threaded_vars: &[String],
+        core_vars: &[String],
+        loop_fn: &str,
+        arity: usize,
+        tail_var: &str,
+        acc_var: &str,
+    ) -> Result<()> {
+        if body_block.body.is_empty() {
+            // Empty body - just recurse with tail, same acc, and same values
+            write!(
+                self.output,
+                "apply '{loop_fn}'/{arity} ({tail_var}, {acc_var}"
+            )?;
+            for core_var in core_vars {
+                write!(self.output, ", {core_var}")?;
+            }
+            write!(self.output, ")")?;
+            return Ok(());
+        }
+
+        // Track which variables have been assigned new values
+        let mut assigned_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Track the result of the body (new accumulator value)
+        let body_result = self.fresh_temp_var("Result");
+
+        // Process each expression in the body
+        for (i, expr) in body_block.body.iter().enumerate() {
+            let is_last = i == body_block.body.len() - 1;
+
+            match expr {
+                Expression::Assignment { target, value, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = id.name.as_str();
+                        if threaded_vars.contains(&var_name.to_string()) {
+                            let core_var = Self::to_core_erlang_var(var_name);
+                            let new_var = format!("{core_var}1");
+                            write!(self.output, "let {new_var} = ")?;
+                            self.generate_expression(value)?;
+                            write!(self.output, " in ")?;
+                            assigned_vars.insert(var_name.to_string());
+                            continue;
+                        }
+                    }
+                    // Not a threaded variable
+                    if is_last {
+                        write!(self.output, "let {body_result} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+                _ => {
+                    if is_last {
+                        write!(self.output, "let {body_result} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+            }
+        }
+
+        // Recurse with tail, new acc (body result), and updated values
+        write!(
+            self.output,
+            "apply '{loop_fn}'/{arity} ({tail_var}, {body_result}"
+        )?;
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            write!(self.output, ", ")?;
+            if assigned_vars.contains(var) {
+                write!(self.output, "{core_var}1")?;
+            } else {
+                write!(self.output, "{core_var}")?;
+            }
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
     }
 
     /// Tries to generate code for String methods.
@@ -3008,6 +3797,587 @@ impl CoreErlangGenerator {
         write!(self.output, "do apply {body_var} () ")?;
         write!(self.output, "apply '{loop_fn}'/0 () ")?;
         write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+
+        Ok(())
+    }
+
+    /// Generates a `timesRepeat:` loop.
+    ///
+    /// Beamtalk: `5 timesRepeat: [body]`
+    ///
+    /// Core Erlang (simple, no mutations):
+    /// ```erlang
+    /// letrec '_Loop'/1 = fun (N) ->
+    ///     case N > 0 of
+    ///       'true' -> do apply BodyFun () apply '_Loop'/1 (N - 1)
+    ///       'false' -> 'nil'
+    ///     end
+    /// in apply '_Loop'/1 (5)
+    /// ```
+    fn generate_times_repeat(
+        &mut self,
+        count: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        if arguments.len() != 1 {
+            return Err(CodeGenError::Internal(
+                "timesRepeat: requires exactly one argument (body block)".to_string(),
+            ));
+        }
+        let body = &arguments[0];
+
+        // Check if body is a literal block (enables mutation analysis)
+        if let Expression::Block(body_block) = body {
+            // Analyze block for mutations
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // Variables that need threading: read AND written
+            let threaded_vars: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .cloned()
+                .collect();
+
+            // Fields that need threading: read AND written
+            let threaded_fields: Vec<String> = body_analysis
+                .field_reads
+                .intersection(&body_analysis.field_writes)
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() || !threaded_fields.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_times_repeat_with_mutations(
+                    count,
+                    body_block,
+                    &threaded_vars,
+                    &threaded_fields,
+                );
+            }
+        }
+
+        // Fall back to simple loop (no mutations)
+        self.generate_times_repeat_simple(count, body)
+    }
+
+    /// Generates a simple `timesRepeat:` loop without mutation support.
+    fn generate_times_repeat_simple(
+        &mut self,
+        count: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        let loop_fn = self.fresh_temp_var("Loop");
+        let body_var = self.fresh_temp_var("Body");
+        let count_var = self.fresh_temp_var("N");
+
+        // let _Body = <body> in let _N = <count> in
+        write!(self.output, "let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(self.output, " in let {count_var} = ")?;
+        self.generate_expression(count)?;
+        write!(self.output, " in ")?;
+
+        // letrec '_Loop'/1 = fun (N) ->
+        //     case call 'erlang':'>'(N, 0) of
+        //       <'true'> when 'true' ->
+        //         do apply _Body () apply '_Loop'/1 (call 'erlang':'-'(N, 1))
+        //       <'false'> when 'true' -> 'nil'
+        //     end
+        // in apply '_Loop'/1 (_N)
+        write!(self.output, "letrec '{loop_fn}'/1 = fun (N) -> ")?;
+        write!(
+            self.output,
+            "case call 'erlang':'>'(N, 0) of <'true'> when 'true' -> "
+        )?;
+        write!(self.output, "do apply {body_var} () ")?;
+        write!(
+            self.output,
+            "apply '{loop_fn}'/1 (call 'erlang':'-'(N, 1)) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> 'nil' end ")?;
+        write!(self.output, "in apply '{loop_fn}'/1 ({count_var})")?;
+
+        Ok(())
+    }
+
+    /// Generates a `timesRepeat:` loop with mutation support.
+    ///
+    /// Generates a tail-recursive loop that threads mutated variables.
+    fn generate_times_repeat_with_mutations(
+        &mut self,
+        count: &Expression,
+        body_block: &Block,
+        threaded_vars: &[String],
+        threaded_fields: &[String],
+    ) -> Result<()> {
+        // For now, only implement local variable threading
+        // Field threading will be added in a follow-up
+        if !threaded_fields.is_empty() {
+            // Fall back to simple implementation for field mutations
+            return self
+                .generate_times_repeat_simple(count, &Expression::Block(body_block.clone()));
+        }
+
+        let loop_fn = self.fresh_temp_var("Loop");
+        let counter_var = self.fresh_temp_var("N"); // Use fresh var to avoid collision with user variables
+        // Arity: 1 for counter, plus one for each threaded variable
+        let arity = 1 + threaded_vars.len();
+
+        // Convert variable names to Core Erlang format
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
+        // Generate letrec with counter and threaded vars as parameters
+        write!(
+            self.output,
+            "letrec '{loop_fn}'/{arity} = fun ({counter_var}"
+        )?;
+        for core_var in &core_vars {
+            write!(self.output, ", {core_var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+
+        // case call 'erlang':'>'(CounterVar, 0) of
+        write!(self.output, "case call 'erlang':'>'({counter_var}, 0) of ")?;
+
+        // True case: execute body and recurse with counter-1
+        write!(self.output, "<'true'> when 'true' -> ")?;
+
+        // Generate body and extract new variable values
+        self.generate_times_repeat_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+            &counter_var,
+        )?;
+
+        // False case: return final values
+        write!(self.output, " <'false'> when 'true' -> ")?;
+        if core_vars.len() == 1 {
+            write!(self.output, "{}", &core_vars[0])?;
+        } else {
+            write!(self.output, "{{")?;
+            for (i, core_var) in core_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{core_var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+        write!(self.output, " end ")?;
+
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call: apply '_Loop'/N (Count, Var1, Var2, ...)
+        write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
+        self.generate_expression(count)?;
+        for var in threaded_vars {
+            write!(self.output, ", ")?;
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates the body of a timesRepeat: loop that threads mutated variables.
+    fn generate_times_repeat_body_with_threading(
+        &mut self,
+        body_block: &Block,
+        threaded_vars: &[String],
+        core_vars: &[String],
+        loop_fn: &str,
+        arity: usize,
+        counter_var: &str,
+    ) -> Result<()> {
+        if body_block.body.is_empty() {
+            // Empty body - just recurse with counter-1 and same values
+            write!(
+                self.output,
+                "apply '{loop_fn}'/{arity} (call 'erlang':'-'({counter_var}, 1)"
+            )?;
+            for core_var in core_vars {
+                write!(self.output, ", {core_var}")?;
+            }
+            write!(self.output, ")")?;
+            return Ok(());
+        }
+
+        // Track which variables have been assigned new values
+        let mut assigned_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Process each expression in the body
+        for (i, expr) in body_block.body.iter().enumerate() {
+            let is_last = i == body_block.body.len() - 1;
+
+            match expr {
+                Expression::Assignment { target, value, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = id.name.as_str();
+                        if threaded_vars.contains(&var_name.to_string()) {
+                            let core_var = Self::to_core_erlang_var(var_name);
+                            let new_var = format!("{core_var}1");
+                            write!(self.output, "let {new_var} = ")?;
+                            self.generate_expression(value)?;
+                            write!(self.output, " in ")?;
+                            assigned_vars.insert(var_name.to_string());
+                            continue;
+                        }
+                    }
+                    // Not a threaded variable
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+                _ => {
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+            }
+        }
+
+        // Recurse with counter-1 and updated values
+        write!(
+            self.output,
+            " apply '{loop_fn}'/{arity} (call 'erlang':'-'({counter_var}, 1)"
+        )?;
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            write!(self.output, ", ")?;
+            if assigned_vars.contains(var) {
+                write!(self.output, "{core_var}1")?;
+            } else {
+                write!(self.output, "{core_var}")?;
+            }
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates a `to:do:` range iteration loop.
+    ///
+    /// Beamtalk: `1 to: 10 do: [:n | body]`
+    ///
+    /// Core Erlang (simple, no mutations):
+    /// ```erlang
+    /// let _Start = 1, _End = 10, _Body = fun(...) in
+    /// letrec '_Loop'/1 = fun (I) ->
+    ///     case I > End of
+    ///       'true' -> 'nil'
+    ///       'false' -> do apply _Body (I) apply '_Loop'/1 (I + 1)
+    ///     end
+    /// in apply '_Loop'/1 (_Start)
+    /// ```
+    fn generate_to_do(
+        &mut self,
+        start: &Expression,
+        end: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        // Check if body is a literal block (enables mutation analysis)
+        if let Expression::Block(body_block) = body {
+            // Analyze block for mutations
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // The block parameter (e.g., `n` in `[:n | ...]`) is the loop index
+            // It should NOT be considered a threaded variable since it's passed as arg
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // Variables that need threading: read AND written, but NOT block params
+            let threaded_vars: Vec<String> = body_analysis
+                .local_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            // Fields that need threading: read AND written
+            let threaded_fields: Vec<String> = body_analysis
+                .field_reads
+                .intersection(&body_analysis.field_writes)
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() || !threaded_fields.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_to_do_with_mutations(
+                    start,
+                    end,
+                    body_block,
+                    &threaded_vars,
+                    &threaded_fields,
+                );
+            }
+        }
+
+        // Fall back to simple loop (no mutations)
+        self.generate_to_do_simple(start, end, body)
+    }
+
+    /// Generates a simple `to:do:` loop without mutation support.
+    fn generate_to_do_simple(
+        &mut self,
+        start: &Expression,
+        end: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        let loop_fn = self.fresh_temp_var("Loop");
+        let start_var = self.fresh_temp_var("Start");
+        let end_var = self.fresh_temp_var("End");
+        let body_var = self.fresh_temp_var("Body");
+        let i_var = self.fresh_temp_var("I");
+
+        // let _Start = <start> in let _End = <end> in let _Body = <body> in
+        write!(self.output, "let {start_var} = ")?;
+        self.generate_expression(start)?;
+        write!(self.output, " in let {end_var} = ")?;
+        self.generate_expression(end)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(self.output, " in ")?;
+
+        // letrec '_Loop'/1 = fun (I) ->
+        //     case call 'erlang':'>'(I, _End) of
+        //       <'true'> when 'true' -> 'nil'
+        //       <'false'> when 'true' -> do apply _Body (I) apply '_Loop'/1 (call 'erlang':'+'(I, 1))
+        //     end
+        // in apply '_Loop'/1 (_Start)
+        write!(self.output, "letrec '{loop_fn}'/1 = fun ({i_var}) -> ")?;
+        write!(
+            self.output,
+            "case call 'erlang':'>'({i_var}, {end_var}) of <'true'> when 'true' -> 'nil' "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> ")?;
+        write!(self.output, "do apply {body_var} ({i_var}) ")?;
+        write!(
+            self.output,
+            "apply '{loop_fn}'/1 (call 'erlang':'+'({i_var}, 1)) end "
+        )?;
+        write!(self.output, "in apply '{loop_fn}'/1 ({start_var})")?;
+
+        Ok(())
+    }
+
+    /// Generates a `to:do:` loop with mutation support.
+    ///
+    /// Generates a tail-recursive loop that threads mutated variables.
+    fn generate_to_do_with_mutations(
+        &mut self,
+        start: &Expression,
+        end: &Expression,
+        body_block: &Block,
+        threaded_vars: &[String],
+        threaded_fields: &[String],
+    ) -> Result<()> {
+        // For now, only implement local variable threading
+        // Field threading will be added in a follow-up
+        if !threaded_fields.is_empty() {
+            // Fall back to simple implementation for field mutations
+            return self.generate_to_do_simple(start, end, &Expression::Block(body_block.clone()));
+        }
+
+        let loop_fn = self.fresh_temp_var("Loop");
+        let end_var = self.fresh_temp_var("End");
+        let i_var = self.fresh_temp_var("I");
+        // Arity: 1 for loop index I, plus one for each threaded variable
+        let arity = 1 + threaded_vars.len();
+
+        // Convert variable names to Core Erlang format
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
+        // Get the block parameter name for index variable (if any)
+        let index_param = body_block.parameters.first().map(|p| p.name.as_str());
+
+        // let _End = <end> in
+        write!(self.output, "let {end_var} = ")?;
+        self.generate_expression(end)?;
+        write!(self.output, " in ")?;
+
+        // Generate letrec with I and threaded vars as parameters
+        write!(self.output, "letrec '{loop_fn}'/{arity} = fun ({i_var}")?;
+        for core_var in &core_vars {
+            write!(self.output, ", {core_var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+        // Also bind the index parameter if it exists
+        if let Some(param) = index_param {
+            self.bind_var(param, &i_var);
+        }
+
+        // case call 'erlang':'>'(I, _End) of
+        write!(
+            self.output,
+            "case call 'erlang':'>'({i_var}, {end_var}) of "
+        )?;
+
+        // True case (past end): return final values
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        if core_vars.len() == 1 {
+            write!(self.output, "{}", &core_vars[0])?;
+        } else {
+            write!(self.output, "{{")?;
+            for (i, core_var) in core_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{core_var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+
+        // False case: execute body and recurse with I+1
+        write!(self.output, " <'false'> when 'true' -> ")?;
+
+        // Generate body and extract new variable values
+        self.generate_to_do_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+            &i_var,
+        )?;
+
+        write!(self.output, " end ")?;
+
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call: apply '_Loop'/N (Start, Var1, Var2, ...)
+        write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
+        self.generate_expression(start)?;
+        for var in threaded_vars {
+            write!(self.output, ", ")?;
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates the body of a to:do: loop that threads mutated variables.
+    fn generate_to_do_body_with_threading(
+        &mut self,
+        body_block: &Block,
+        threaded_vars: &[String],
+        core_vars: &[String],
+        loop_fn: &str,
+        arity: usize,
+        i_var: &str,
+    ) -> Result<()> {
+        if body_block.body.is_empty() {
+            // Empty body - just recurse with I+1 and same values
+            write!(
+                self.output,
+                "apply '{loop_fn}'/{arity} (call 'erlang':'+'({i_var}, 1)"
+            )?;
+            for core_var in core_vars {
+                write!(self.output, ", {core_var}")?;
+            }
+            write!(self.output, ")")?;
+            return Ok(());
+        }
+
+        // Track which variables have been assigned new values
+        let mut assigned_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Process each expression in the body
+        for (i, expr) in body_block.body.iter().enumerate() {
+            let is_last = i == body_block.body.len() - 1;
+
+            match expr {
+                Expression::Assignment { target, value, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = id.name.as_str();
+                        if threaded_vars.contains(&var_name.to_string()) {
+                            let core_var = Self::to_core_erlang_var(var_name);
+                            let new_var = format!("{core_var}1");
+                            write!(self.output, "let {new_var} = ")?;
+                            self.generate_expression(value)?;
+                            write!(self.output, " in ")?;
+                            assigned_vars.insert(var_name.to_string());
+                            continue;
+                        }
+                    }
+                    // Not a threaded variable
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+                _ => {
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+            }
+        }
+
+        // Recurse with I+1 and updated values
+        write!(
+            self.output,
+            " apply '{loop_fn}'/{arity} (call 'erlang':'+'({i_var}, 1)"
+        )?;
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            write!(self.output, ", ")?;
+            if assigned_vars.contains(var) {
+                write!(self.output, "{core_var}1")?;
+            } else {
+                write!(self.output, "{core_var}")?;
+            }
+        }
+        write!(self.output, ")")?;
 
         Ok(())
     }

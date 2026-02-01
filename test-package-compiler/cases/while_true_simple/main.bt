@@ -33,3 +33,36 @@ testBlockParamWhileFalse := [
     ] value: 5.
     ^result
 ].
+
+// Test timesRepeat: with mutation (BT-143)
+testTimesRepeat := [
+    counter := 0.
+    5 timesRepeat: [counter := counter + 1].
+    ^counter
+].
+
+// Test timesRepeat: with block parameter mutation (BT-143)
+testTimesRepeatBlockParam := [
+    result := [:n |
+        3 timesRepeat: [n := n + 10].
+        n
+    ] value: 5.
+    ^result
+].
+
+// Test to:do: with mutation (BT-143)
+testToDo := [
+    total := 0.
+    1 to: 10 do: [:n | total := total + n].
+    ^total
+].
+
+// Test to:do: with block parameter mutation (BT-143)
+testToDoBlockParam := [
+    result := [:x |
+        sum := 0.
+        x to: 5 do: [:i | sum := sum + i].
+        sum
+    ] value: 1.
+    ^result
+].
