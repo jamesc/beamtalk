@@ -166,6 +166,8 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
         self.write_indent()?;
+        writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
+        self.write_indent()?;
         writeln!(
             self.output,
             "'__methods__' => call '{}':'method_table'()",
@@ -330,7 +332,8 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'terminate'/2 = fun (Reason, State) ->
     ///     %% Call terminate method if defined
-    ///     case call 'module':'dispatch'('terminate', [Reason], State) of
+    ///     let Self = call 'beamtalk_actor':'make_self'(State) in
+    ///     case call 'module':'dispatch'('terminate', [Reason], Self, State) of
     ///         <{'reply', _Result, _State}> when 'true' -> 'ok'
     ///         <_Other> when 'true' -> 'ok'
     ///     end
@@ -346,7 +349,12 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call '{}':'dispatch'('terminate', [Reason], State) of",
+            "let Self = call 'beamtalk_actor':'make_self'(State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call '{}':'dispatch'('terminate', [Reason], Self, State) of",
             self.module_name
         )?;
         self.indent += 1;
@@ -443,7 +451,8 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    ///     try call 'module':'dispatch'(Selector, Args, State)
+    ///     let Self = call 'beamtalk_actor':'make_self'(State) in
+    ///     try call 'module':'dispatch'(Selector, Args, Self, State)
     ///     of Result -> Result
     ///     catch <Type, Error, _Stacktrace> ->
     ///         {'error', {Type, Error}, State}
@@ -455,10 +464,16 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
+        // Construct Self object reference using beamtalk_actor:make_self/1 (BT-161)
+        writeln!(
+            self.output,
+            "let Self = call 'beamtalk_actor':'make_self'(State) in"
+        )?;
+        self.write_indent()?;
         // Core Erlang try uses simple variable patterns in of/catch, not case-style <Pattern> when Guard
         writeln!(
             self.output,
-            "try call '{}':'dispatch'(Selector, Args, State)",
+            "try call '{}':'dispatch'(Selector, Args, Self, State)",
             self.module_name
         )?;
         self.write_indent()?;
@@ -484,7 +499,10 @@ impl CoreErlangGenerator {
         reason = "dispatch codegen is inherently complex"
     )]
     pub(super) fn generate_dispatch(&mut self, module: &Module) -> Result<()> {
-        writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, State) ->")?;
+        writeln!(
+            self.output,
+            "'dispatch'/4 = fun (Selector, Args, Self, State) ->"
+        )?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Selector of")?;
@@ -598,7 +616,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "call '{}':'dispatch'(DnuSelector, [OtherSelector, Args], State)",
+            "call '{}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)",
             self.module_name
         )?;
         self.indent -= 1;
