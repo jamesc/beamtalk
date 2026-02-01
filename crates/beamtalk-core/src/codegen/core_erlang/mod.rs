@@ -82,11 +82,12 @@ mod control_flow;
 mod expressions;
 mod gen_server;
 mod util;
+mod variable_context;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
-use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
+use variable_context::VariableContext;
 
 /// Errors that can occur during code generation.
 #[derive(Debug, Error)]
@@ -227,11 +228,8 @@ pub(super) struct CoreErlangGenerator {
     output: String,
     /// Current indentation level.
     indent: usize,
-    /// Counter for generating unique variable names.
-    var_counter: usize,
-    /// Stack of variable binding scopes. Each scope is a map of identifiers
-    /// to Core Erlang variable names. Inner scopes shadow outer scopes.
-    var_scopes: Vec<HashMap<String, String>>,
+    /// Variable binding and scope management.
+    var_context: VariableContext,
     /// Current state version for state threading in method bodies.
     /// Version 0 = "State", 1 = "State1", 2 = "State2", etc.
     /// This is used to thread state through field assignments.
@@ -245,40 +243,29 @@ impl CoreErlangGenerator {
             module_name: module_name.to_string(),
             output: String::new(),
             indent: 0,
-            var_counter: 0,
-            var_scopes: vec![HashMap::new()],
+            var_context: VariableContext::new(),
             state_version: 0,
         }
     }
 
     /// Pushes a new scope for variable bindings.
     fn push_scope(&mut self) {
-        self.var_scopes.push(HashMap::new());
+        self.var_context.push_scope();
     }
 
     /// Pops the current scope, discarding its bindings.
     fn pop_scope(&mut self) {
-        if self.var_scopes.len() > 1 {
-            self.var_scopes.pop();
-        }
+        self.var_context.pop_scope();
     }
 
     /// Looks up a variable binding in the current scope stack.
     fn lookup_var(&self, name: &str) -> Option<&String> {
-        // Search from innermost to outermost scope
-        for scope in self.var_scopes.iter().rev() {
-            if let Some(var_name) = scope.get(name) {
-                return Some(var_name);
-            }
-        }
-        None
+        self.var_context.lookup(name)
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.
     fn bind_var(&mut self, name: &str, core_var: &str) {
-        if let Some(current_scope) = self.var_scopes.last_mut() {
-            current_scope.insert(name.to_string(), core_var.to_string());
-        }
+        self.var_context.bind(name, core_var);
     }
 
     /// Generates a full module with `gen_server` behaviour.

@@ -26,7 +26,7 @@
 //! ...
 //! ```
 
-use super::{block_analysis, CoreErlangGenerator, Result};
+use super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use std::fmt::Write;
 

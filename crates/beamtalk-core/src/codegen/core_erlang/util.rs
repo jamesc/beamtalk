@@ -28,12 +28,9 @@ impl CoreErlangGenerator {
     /// Use this for user-visible bindings (block parameters, assignments, etc.)
     /// where the name should be looked up later via `lookup_var`.
     pub(super) fn fresh_var(&mut self, base: &str) -> String {
-        self.var_counter += 1;
-        let var_name = format!("_{}{}", base.replace('_', ""), self.var_counter);
-        // Insert into the current (innermost) scope
-        if let Some(current_scope) = self.var_scopes.last_mut() {
-            current_scope.insert(base.to_string(), var_name.clone());
-        }
+        let var_name = self.var_context.fresh_var(base);
+        // Bind it in the current scope
+        self.var_context.bind(base, &var_name);
         var_name
     }
 
@@ -42,8 +39,7 @@ impl CoreErlangGenerator {
     /// Use this for internal codegen temporaries (loop variables, function bindings,
     /// etc.) that should never shadow or be confused with user identifiers.
     pub(super) fn fresh_temp_var(&mut self, base: &str) -> String {
-        self.var_counter += 1;
-        format!("_{}{}", base.replace('_', ""), self.var_counter)
+        self.var_context.fresh_var(base)
     }
 
     /// Converts a Beamtalk identifier to a valid Core Erlang variable name.
@@ -51,13 +47,7 @@ impl CoreErlangGenerator {
     /// Core Erlang variables must start with an uppercase letter or underscore.
     /// This function capitalizes the first letter of the identifier.
     pub(super) fn to_core_erlang_var(name: &str) -> String {
-        if name.is_empty() {
-            return "_Empty".to_string();
-        }
-        let mut chars = name.chars();
-        let first = chars.next().unwrap();
-        let rest: String = chars.collect();
-        format!("{}{}", first.to_uppercase(), rest)
+        super::variable_context::VariableContext::to_core_var(name)
     }
 
     /// Returns the current state variable name for state threading.
