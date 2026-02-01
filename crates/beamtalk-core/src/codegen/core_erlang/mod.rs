@@ -1474,9 +1474,14 @@ impl CoreErlangGenerator {
                 let super_result_var = self.fresh_temp_var("SuperReply");
                 let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
-                
+
                 // Manually generate super_dispatch call with current state (not via generate_expression)
-                if let Expression::MessageSend { selector, arguments, .. } = expr {
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                {
                     let selector_atom = match selector {
                         MessageSelector::Unary(name) => name.to_string(),
                         MessageSelector::Binary(op) => op.to_string(),
@@ -1484,7 +1489,10 @@ impl CoreErlangGenerator {
                             parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
                         }
                     };
-                    write!(self.output, "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', [")?;
+                    write!(
+                        self.output,
+                        "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', ["
+                    )?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
                             write!(self.output, ", ")?;
@@ -1493,9 +1501,12 @@ impl CoreErlangGenerator {
                     }
                     write!(self.output, "])")?;
                 }
-                
+
                 // Extract state from the {reply, Result, NewState} tuple using element/2
-                write!(self.output, " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in ")?;
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
+                )?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1542,9 +1553,14 @@ impl CoreErlangGenerator {
                 let super_result_var = self.fresh_temp_var("SuperReply");
                 let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
-                
+
                 // Manually generate super_dispatch call with current state
-                if let Expression::MessageSend { selector, arguments, .. } = expr {
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                {
                     let selector_atom = match selector {
                         MessageSelector::Unary(name) => name.to_string(),
                         MessageSelector::Binary(op) => op.to_string(),
@@ -1552,7 +1568,10 @@ impl CoreErlangGenerator {
                             parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
                         }
                     };
-                    write!(self.output, "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', [")?;
+                    write!(
+                        self.output,
+                        "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', ["
+                    )?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
                             write!(self.output, ", ")?;
@@ -1561,9 +1580,12 @@ impl CoreErlangGenerator {
                     }
                     write!(self.output, "])")?;
                 }
-                
+
                 // Extract state from the {reply, Result, NewState} tuple using element/2
-                write!(self.output, " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in ")?;
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
+                )?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");

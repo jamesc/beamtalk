@@ -25,3 +25,4 @@ rebar.lock
 
 # Backup files
 *.backup
+*.crashdump

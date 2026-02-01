@@ -158,13 +158,14 @@ remove_method(Class, Selector) ->
 %% @param State The current actor state (must contain __class__ field)
 %% @param Selector The method selector atom (e.g., 'increment', 'at:put:')
 %% @param Args List of arguments for the method
-%% @returns {Result, NewState} tuple after invoking superclass method
--spec super_dispatch(map(), selector(), list()) -> {term(), map()} | {error, term()}.
+%% @returns For compiled modules: {reply, Result, NewState} (actor protocol).
+%%          For runtime blocks: varies based on block implementation.
+-spec super_dispatch(map(), selector(), list()) -> {term(), term()} | {term(), term(), term()} | {error, term()}.
 super_dispatch(State, Selector, Args) ->
     super_dispatch(?MODULE, State, Selector, Args).
 
 %% @doc Super dispatch with explicit server reference (for testing).
--spec super_dispatch(pid() | atom(), map(), selector(), list()) -> {term(), map()} | {error, term()}.
+-spec super_dispatch(pid() | atom(), map(), selector(), list()) -> {term(), term()} | {term(), term(), term()} | {error, term()}.
 super_dispatch(ServerRef, State, Selector, Args) ->
     %% Extract the current class from state
     case maps:find('__class__', State) of
