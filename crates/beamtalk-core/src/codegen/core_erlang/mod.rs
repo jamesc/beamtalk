@@ -61,6 +61,16 @@
 //! - **Tuples**: `{'tuple', 'elements'}`
 //! - **Lists**: `[1, 2, 3]` or `[Head | Tail]`
 //!
+//! # Module Organization
+//!
+//! The code generator is split across several focused submodules:
+//!
+//! - [`util`] - Utility functions (indentation, variable generation, name conversions)
+//! - [`expressions`] - Expression code generation (literals, identifiers, maps)
+//! - [`gen_server`] - OTP gen_server scaffolding (spawn, init, callbacks)
+//! - [`builtins`] - Built-in operations (blocks, dictionaries, booleans, arithmetic)
+//! - [`block_analysis`] - Block mutation analysis for control flow
+//!
 //! # References
 //!
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
