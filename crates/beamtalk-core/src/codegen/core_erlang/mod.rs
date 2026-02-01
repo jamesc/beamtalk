@@ -1100,58 +1100,6 @@ impl CoreErlangGenerator {
         self.generate_expression(expr)
     }
 
-    /// Generates code for a super message send.
-    ///
-    /// Super calls use `beamtalk_classes:super_dispatch/3` to invoke the superclass implementation.
-    ///
-    /// # Example
-    ///
-    /// ```beamtalk
-    /// super increment
-    /// super getValue
-    /// super at: 1 put: value
-    /// ```
-    ///
-    /// Generates:
-    ///
-    /// ```erlang
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'increment', [])
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'getValue', [])
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'at:put:', [1, Value])
-    /// ```
-    fn generate_super_send(
-        &mut self,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) -> Result<()> {
-        // Build the selector atom
-        let selector_atom = match selector {
-            MessageSelector::Unary(name) => name.to_string(),
-            MessageSelector::Binary(op) => op.to_string(),
-            MessageSelector::Keyword(parts) => {
-                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-            }
-        };
-
-        // Generate: call 'beamtalk_classes':'super_dispatch'(State, 'selector', [Args])
-        write!(
-            self.output,
-            "call 'beamtalk_classes':'super_dispatch'({}, '{selector_atom}', [",
-            self.current_state_var()
-        )?;
-
-        // Generate arguments
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
-
-        write!(self.output, "])")?;
-        Ok(())
-    }
-
     /// Generates code for a message send.
     ///
     /// Message sends are **asynchronous by default** and return futures.
