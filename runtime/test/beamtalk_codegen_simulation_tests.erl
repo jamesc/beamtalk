@@ -1576,7 +1576,7 @@ super_calls_parent_method_test() ->
     
     %% Create logging counter with initial state
     Object = logging_counter:spawn(),
-    ?assertMatch({beamtalk_object, 'Logging_counter', logging_counter, _Pid}, Object),
+    ?assertMatch({beamtalk_object, 'LoggingCounter', logging_counter, _Pid}, Object),
     
     Pid = element(4, Object),
     
