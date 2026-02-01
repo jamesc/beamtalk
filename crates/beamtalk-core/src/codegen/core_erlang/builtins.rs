@@ -654,4 +654,33 @@ impl CoreErlangGenerator {
             MessageSelector::Binary(_) => Ok(None),
         }
     }
+
+    /// Generates a block value call: `let _Fun = <receiver> in apply _Fun (Args...)`.
+    ///
+    /// In Core Erlang, we bind the receiver to a variable first to ensure proper
+    /// evaluation order and handle complex receiver expressions correctly.
+    ///
+    /// ```erlang
+    /// let _Fun1 = <receiver-expr> in apply _Fun1 (Arg1, Arg2, ...)
+    /// ```
+    pub(super) fn generate_block_value_call(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        // Bind receiver to a variable first for proper evaluation
+        // Use fresh_temp_var to avoid shadowing user identifiers named "Fun"
+        let fun_var = self.fresh_temp_var("Fun");
+        write!(self.output, "let {fun_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in apply {fun_var} (")?;
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        write!(self.output, ")")?;
+        Ok(())
+    }
 }
