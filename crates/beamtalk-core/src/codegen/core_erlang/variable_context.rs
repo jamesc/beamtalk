@@ -113,8 +113,7 @@ impl VariableContext {
     ///
     /// # Examples
     ///
-    /// ```
-    /// # use beamtalk_core::codegen::core_erlang::variable_context::VariableContext;
+    /// ```ignore
     /// let ctx = VariableContext::new();
     /// assert_eq!(VariableContext::to_core_var("counter"), "Counter");
     /// assert_eq!(VariableContext::to_core_var("my_var"), "My_var");

@@ -170,7 +170,7 @@ impl CoreErlangGenerator {
         write!(self.output, " in call 'lists':'filter'(")?;
         write!(
             self.output,
-            "fun (X) -> call 'erlang':'not'(apply {body_var}/1 (X)) end"
+            "fun (X) -> call 'erlang':'not'(apply {body_var} (X)) end"
         )?;
         write!(self.output, ", {list_var})")?;
 
@@ -353,13 +353,15 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            // Only use mutations version if there are FIELD writes (actor state)
+            // Local variable mutations are handled by the simple version
+            let analysis = block_analysis::analyze_block(body_block);
+            if !analysis.field_writes.is_empty() {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
         }
 
-        // Simple case: no mutations
+        // Simple case: no field mutations
         self.generate_while_true_simple(condition, body)
     }
 
@@ -418,7 +420,8 @@ impl CoreErlangGenerator {
             .collect::<Vec<_>>();
 
         // Generate: letrec 'while'/N = fun (Var1, Var2, ..., StateAcc) ->
-        //     case <condition> of
+        //     let _CondFun = <condition> in
+        //     case apply _CondFun () of
         //       'true' -> <body with state threading>
         //                 apply 'while'/N (Var1, Var2, ..., NewState)
         //       'false' -> StateAcc
@@ -443,10 +446,11 @@ impl CoreErlangGenerator {
         }
         write!(self.output, "StateAcc) -> ")?;
 
-        // Generate condition check
-        write!(self.output, "case ")?;
+        // Generate condition check - bind block to variable and apply it
+        let cond_var = self.fresh_temp_var("CondFun");
+        write!(self.output, "let {cond_var} = ")?;
         self.generate_expression(condition)?;
-        write!(self.output, " of ")?;
+        write!(self.output, " in case apply {cond_var} () of ")?;
 
         // True case: execute body and recurse
         write!(self.output, "<'true'> when 'true' -> ")?;
@@ -467,7 +471,8 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call
+        // Initial call - capture current state BEFORE incrementing
+        let prev_state = self.current_state_var();
         write!(self.output, "in let ")?;
         let new_state = self.next_state_var();
         write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
@@ -477,14 +482,13 @@ impl CoreErlangGenerator {
             }
             write!(
                 self.output,
-                "call 'maps':'get'('{var}', {})",
-                self.current_state_var()
+                "call 'maps':'get'('{var}', {prev_state})",
             )?;
         }
         if !mutated_vars.is_empty() {
             write!(self.output, ", ")?;
         }
-        write!(self.output, "{})", self.current_state_var())?;
+        write!(self.output, "{prev_state})")?;
 
         Ok(())
     }
@@ -500,7 +504,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " in ")?;
+                write!(self.output, " ")?;
             }
 
             if Self::is_field_assignment(expr) {
@@ -512,6 +516,7 @@ impl CoreErlangGenerator {
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
+                write!(self.output, " in")?;
             }
         }
 
@@ -526,13 +531,14 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            // Only use mutations version if there are FIELD writes (actor state)
+            let analysis = block_analysis::analyze_block(body_block);
+            if !analysis.field_writes.is_empty() {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
         }
 
-        // Simple case: no mutations
+        // Simple case: no field mutations
         self.generate_while_false_simple(condition, body)
     }
 
@@ -596,9 +602,11 @@ impl CoreErlangGenerator {
         }
         write!(self.output, "StateAcc) -> ")?;
 
-        write!(self.output, "case ")?;
+        // Generate condition check - bind block to variable and apply it
+        let cond_var = self.fresh_temp_var("CondFun");
+        write!(self.output, "let {cond_var} = ")?;
         self.generate_expression(condition)?;
-        write!(self.output, " of ")?;
+        write!(self.output, " in case apply {cond_var} () of ")?;
 
         // FALSE case: execute body and recurse
         write!(self.output, "<'false'> when 'true' -> ")?;
@@ -619,6 +627,8 @@ impl CoreErlangGenerator {
         write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
+        // Initial call - capture current state BEFORE incrementing
+        let prev_state = self.current_state_var();
         write!(self.output, "in let ")?;
         let new_state = self.next_state_var();
         write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
@@ -628,14 +638,13 @@ impl CoreErlangGenerator {
             }
             write!(
                 self.output,
-                "call 'maps':'get'('{var}', {})",
-                self.current_state_var()
+                "call 'maps':'get'('{var}', {prev_state})",
             )?;
         }
         if !mutated_vars.is_empty() {
             write!(self.output, ", ")?;
         }
-        write!(self.output, "{})", self.current_state_var())?;
+        write!(self.output, "{prev_state})")?;
 
         Ok(())
     }
@@ -670,13 +679,14 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            // Only use mutations version if there are FIELD writes (actor state)
+            let analysis = block_analysis::analyze_block(body_block);
+            if !analysis.field_writes.is_empty() {
                 return self.generate_times_repeat_with_mutations(receiver, body_block);
             }
         }
 
-        // Simple case: no mutations
+        // Simple case: no field mutations
         self.generate_times_repeat_simple(receiver, body)
     }
 
@@ -767,17 +777,18 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
+        // Initial call - capture current state BEFORE incrementing
+        let prev_state = self.current_state_var();
         write!(self.output, "in let ")?;
         let new_state = self.next_state_var();
         write!(self.output, "{new_state} = apply 'repeat'/{arity} (1")?;
         for var in &mutated_vars {
             write!(
                 self.output,
-                ", call 'maps':'get'('{var}', {})",
-                self.current_state_var()
+                ", call 'maps':'get'('{var}', {prev_state})",
             )?;
         }
-        write!(self.output, ", {})", self.current_state_var())?;
+        write!(self.output, ", {prev_state})")?;
 
         Ok(())
     }
@@ -792,7 +803,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " in ")?;
+                write!(self.output, " ")?;
             }
 
             if Self::is_field_assignment(expr) {
@@ -804,6 +815,7 @@ impl CoreErlangGenerator {
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
+                write!(self.output, " in")?;
             }
         }
 
@@ -819,13 +831,14 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            // Only use mutations version if there are FIELD writes (actor state)
+            let analysis = block_analysis::analyze_block(body_block);
+            if !analysis.field_writes.is_empty() {
                 return self.generate_to_do_with_mutations(receiver, limit, body_block);
             }
         }
 
-        // Simple case: no mutations
+        // Simple case: no field mutations
         self.generate_to_do_simple(receiver, limit, body)
     }
 
@@ -862,7 +875,7 @@ impl CoreErlangGenerator {
         write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
         write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
         write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = apply {body_var}/1 (I) in ")?;
+        write!(self.output, "let _ = apply {body_var} (I) in ")?;
         write!(self.output, "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ")?;
         write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
         write!(self.output, "end ")?;
@@ -930,6 +943,8 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
+        // Initial call - capture current state BEFORE incrementing
+        let prev_state = self.current_state_var();
         write!(self.output, " in let ")?;
         let new_state = self.next_state_var();
         write!(
@@ -939,11 +954,10 @@ impl CoreErlangGenerator {
         for var in &mutated_vars {
             write!(
                 self.output,
-                ", call 'maps':'get'('{var}', {})",
-                self.current_state_var()
+                ", call 'maps':'get'('{var}', {prev_state})",
             )?;
         }
-        write!(self.output, ", {})", self.current_state_var())?;
+        write!(self.output, ", {prev_state})")?;
 
         Ok(())
     }
