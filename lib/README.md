@@ -57,28 +57,46 @@ Control flow via message sends to boolean objects.
 valid := enabled not
 ```
 
-### Nil (`Nil.bt`)
+### Nil Testing Protocol (`Nil.bt`, `Actor.bt`)
 
-Represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
+All objects respond to nil-testing messages, enabling nil-safe control flow. Nil represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
 
-**Key messages:**
-- `isNil` - Returns true (only Nil returns true)
-- `notNil` - Returns false (only Nil returns false)
-- `ifNil:` - Evaluate block if nil
-- `ifNotNil:` - Returns self without evaluating block (on non-nil objects, evaluates block with receiver as argument - see BT-99)
-- `ifNil: ifNotNil:` - Conditional based on nil status
+**Testing messages (all objects):**
+- `isNil` - Returns true for nil, false for all other objects
+- `notNil` - Returns false for nil, true for all other objects
+
+**Control flow messages:**
+- `ifNil: nilBlock` - Nil: evaluates block; other objects: returns self
+- `ifNotNil: notNilBlock` - Nil: returns self; other objects: evaluates block with receiver as argument
+- `ifNil: nilBlock ifNotNil: notNilBlock` - Conditional based on nil status
+- `ifNotNil: notNilBlock ifNil: nilBlock` - Same as above, reversed order
 
 **Usage:**
 ```beamtalk
 // Testing for nil
 value isNil ifTrue: [self useDefault]
+42 isNil       // => false
+nil isNil      // => true
 
 // Nil-safe access with default
 name := user name ifNil: ['Anonymous']
 
-// Conditional on nil
+// Safe transformation with ifNotNil:
+result := value ifNotNil: [:v | v * 2]
+42 ifNotNil: [:v | v + 1]    // => 43
+nil ifNotNil: [:v | v + 1]   // => nil
+
+// Conditional on nil status
 result ifNil: [0] ifNotNil: [:val | val * 2]
+
+// Real-world pattern
+userName ifNil: ['Guest'] ifNotNil: [:name | 'Hello, ' + name + '!']
 ```
+
+**Implementation:**
+- Nil defines `isNil => ^true` and overrides the default behavior
+- All other objects inherit `isNil => ^false` and `notNil => ^true` from Actor
+- `ifNotNil:` passes the receiver to the block: `notNilBlock value: self`
 
 ### Block (`Block.bt`)
 
