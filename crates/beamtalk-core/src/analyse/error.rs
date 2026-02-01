@@ -22,7 +22,7 @@ pub enum SemanticErrorKind {
     /// Variable assigned to but never read.
     UnusedVariable { name: EcoString },
 
-    /// Captured variable mutated in block (requires `RefCell`).
+    /// Captured variable mutated in block.
     MutatedCapture { name: EcoString },
 
     /// Block escapes but has unknown context.

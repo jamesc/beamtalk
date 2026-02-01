@@ -7,7 +7,7 @@
 //! - Variable scope and lifetime analysis
 //! - Block context determination (control flow, stored, passed)
 //! - Capture analysis for blocks
-//! - Mutation tracking for `RefCell` generation
+//! - Mutation tracking for captured variables in blocks
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
@@ -105,7 +105,7 @@ pub enum MutationKind {
     /// Assignment to a local variable.
     LocalVariable { name: EcoString },
 
-    /// Assignment to a captured variable (requires `RefCell`).
+    /// Assignment to a captured variable.
     CapturedVariable { name: EcoString },
 
     /// Assignment to an object field.
@@ -178,5 +178,61 @@ mod tests {
             error.kind,
             SemanticErrorKind::UndefinedVariable { .. }
         ));
+    }
+
+    #[test]
+    fn test_block_info_construction() {
+        let block_info = BlockInfo {
+            context: BlockContext::ControlFlow,
+            captures: vec![CapturedVar {
+                name: "count".into(),
+                defined_at: Span::default(),
+            }],
+            mutations: vec![Mutation {
+                kind: MutationKind::LocalVariable { name: "x".into() },
+                span: Span::default(),
+            }],
+        };
+
+        assert_eq!(block_info.context, BlockContext::ControlFlow);
+        assert_eq!(block_info.captures.len(), 1);
+        assert_eq!(block_info.mutations.len(), 1);
+    }
+
+    #[test]
+    fn test_captured_var_construction() {
+        let captured = CapturedVar {
+            name: "myVar".into(),
+            defined_at: Span::default(),
+        };
+
+        assert_eq!(captured.name, "myVar");
+    }
+
+    #[test]
+    fn test_mutation_kinds() {
+        let local = Mutation {
+            kind: MutationKind::LocalVariable { name: "x".into() },
+            span: Span::default(),
+        };
+
+        let captured = Mutation {
+            kind: MutationKind::CapturedVariable {
+                name: "count".into(),
+            },
+            span: Span::default(),
+        };
+
+        let field = Mutation {
+            kind: MutationKind::Field { name: "sum".into() },
+            span: Span::default(),
+        };
+
+        assert!(matches!(local.kind, MutationKind::LocalVariable { .. }));
+        assert!(matches!(
+            captured.kind,
+            MutationKind::CapturedVariable { .. }
+        ));
+        assert!(matches!(field.kind, MutationKind::Field { .. }));
     }
 }
