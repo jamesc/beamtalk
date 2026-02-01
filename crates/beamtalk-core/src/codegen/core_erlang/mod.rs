@@ -1847,6 +1847,20 @@ impl CoreErlangGenerator {
             ..
         } = receiver
         {
+            // Special case: super cascade (super msg1; msg2; msg3)
+            // Super cannot be evaluated into a variable, so we handle each message specially
+            if matches!(&**underlying_receiver, Expression::Super(_)) {
+                // For super cascades, send each message as a super_dispatch call
+                // Note: Cascade semantics with super are questionable - each call goes
+                // to superclass, not to the result of the previous call. For now, we
+                // treat this as an error since the semantics are unclear.
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "cascades with super (e.g., 'super msg1; msg2') - semantics unclear"
+                        .to_string(),
+                    location: format!("{:?}", receiver.span()),
+                });
+            }
+
             // Bind the underlying receiver once
             let receiver_var = self.fresh_temp_var("Receiver");
             write!(self.output, "let {receiver_var} = ")?;
@@ -4279,6 +4293,161 @@ end
             );
         } else {
             panic!("Expected UnsupportedFeature error, got: {err:?}");
+        }
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_unary_send() {
+        // Test that super unary message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Unary("increment".into()),
+            arguments: vec![],
+            span: Span::new(0, 15),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(
+            result.is_ok(),
+            "super increment should generate successfully"
+        );
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'increment'"),
+            "Should include selector, got: {output}"
+        );
+        assert!(
+            output.contains("[]"),
+            "Should have empty args list, got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_keyword_send() {
+        // Test that super keyword message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("at:", Span::new(6, 9)),
+                KeywordPart::new("put:", Span::new(12, 16)),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Integer(1), Span::new(10, 11)),
+                Expression::Literal(Literal::Integer(42), Span::new(17, 19)),
+            ],
+            span: Span::new(0, 19),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(result.is_ok(), "super at:put: should generate successfully");
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'at:put:'"),
+            "Should include keyword selector, got: {output}"
+        );
+        assert!(
+            output.contains("[1, 42]"),
+            "Should have args [1, 42], got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_binary_send() {
+        // Test that super binary message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(10), Span::new(8, 10))],
+            span: Span::new(0, 10),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(result.is_ok(), "super + 10 should generate successfully");
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'+'"),
+            "Should include binary selector, got: {output}"
+        );
+        assert!(
+            output.contains("[10]"),
+            "Should have args [10], got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_cascade() {
+        // Test that super with cascade works: super increment; getValue
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        // First message: super increment
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Unary("increment".into()),
+            arguments: vec![],
+            span: Span::new(0, 15),
+        };
+
+        // Cascade: super increment; getValue
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Unary("getValue".into()),
+                vec![],
+                Span::new(17, 25),
+            )],
+            span: Span::new(0, 25),
+        };
+
+        let result = generator.generate_expression(&cascade);
+        assert!(
+            result.is_err(),
+            "super cascade should produce error (unclear semantics)"
+        );
+
+        if let Err(CodeGenError::UnsupportedFeature { feature, .. }) = result {
+            assert!(
+                feature.contains("cascades with super"),
+                "Error should mention cascades with super, got: {feature}"
+            );
+        } else {
+            panic!("Expected UnsupportedFeature error for super cascade");
         }
 
         generator.pop_scope();

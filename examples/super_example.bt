@@ -6,13 +6,10 @@
 Actor subclass: Counter
   state: value = 0
   
-  increment => self.value += 1
+  increment => self.value := self.value + 1
   
   getValue => self.value
 
-Actor subclass: LoggingCounter
-  // Inherits from Counter
+Counter subclass: LoggingCounter
   
-  increment =>
-    super increment
-    // TODO: Add logging once we have IO
+  increment => super increment

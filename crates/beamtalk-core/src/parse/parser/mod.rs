@@ -1594,7 +1594,8 @@ Actor subclass: Rectangle
 
     #[test]
     fn parse_super_with_cascade() {
-        // Test super with cascade: super increment; getValue
+        // Test that super with cascade parses correctly
+        // Note: Codegen currently rejects this (unclear semantics), but parser allows it
         let module = parse_ok("super increment; getValue");
         assert_eq!(module.expressions.len(), 1);
 
