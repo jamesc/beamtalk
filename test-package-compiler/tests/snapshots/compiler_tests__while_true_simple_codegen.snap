@@ -1,17 +1,16 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 75
 expression: core_erlang
 ---
-module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'start_link'/1 = fun (InitArgs) ->
-    call 'gen_server':'start_link'('control_flow_mutations_errors', InitArgs, [])
+    call 'gen_server':'start_link'('while_true_simple', InitArgs, [])
 
 
 'spawn'/0 = fun () ->
-    case call 'gen_server':'start_link'('control_flow_mutations_errors', ~{}~, []) of
+    case call 'gen_server':'start_link'('while_true_simple', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -20,7 +19,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 
 'spawn'/1 = fun (InitArgs) ->
-    case call 'gen_server':'start_link'('control_flow_mutations_errors', InitArgs, []) of
+    case call 'gen_server':'start_link'('while_true_simple', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
             Pid
         <{'error', Reason}> when 'true' ->
@@ -30,8 +29,8 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'ControlFlowMutationsErrors',
-        '__methods__' => call 'control_flow_mutations_errors':'method_table'()
+        '__class__' => 'WhileTrueSimple',
+        '__methods__' => call 'while_true_simple':'method_table'()
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}
@@ -40,7 +39,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'control_flow_mutations_errors':'safe_dispatch'(Selector, Args, State) of
+            case call 'while_true_simple':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
                     in {'noreply', NewState}
@@ -54,7 +53,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 'handle_call'/3 = fun (Msg, _From, State) ->
     case Msg of
         <{Selector, Args}> when 'true' ->
-            case call 'control_flow_mutations_errors':'safe_dispatch'(Selector, Args, State) of
+            case call 'while_true_simple':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, NewState}> when 'true' ->
@@ -70,7 +69,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 'terminate'/2 = fun (Reason, State) ->
     %% Call terminate method if defined (Flavors pattern)
-    case call 'control_flow_mutations_errors':'dispatch'('terminate', [Reason], State) of
+    case call 'while_true_simple':'dispatch'('terminate', [Reason], State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
         <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
@@ -78,13 +77,21 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    try call 'control_flow_mutations_errors':'dispatch'(Selector, Args, State)
+    try call 'while_true_simple':'dispatch'(Selector, Args, State)
     of Result -> Result
     catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
+        <'test'> when 'true' ->
+            let Count = 0 in let Count = letrec '_Loop1'/1 = fun (Count) -> case call 'erlang':'<'(Count, 3) of <'true'> when 'true' -> let Count1 = call 'erlang':'+'(Count, 1) in  apply '_Loop1'/1 (Count1) <'false'> when 'true' -> Count end in apply '_Loop1'/1 (Count) in let _Result = Count in {'reply', _Result, State}
+        <'testLocal'> when 'true' ->
+            let X = 0 in let X = letrec '_Loop2'/1 = fun (X) -> case call 'erlang':'<'(X, 5) of <'true'> when 'true' -> let X1 = call 'erlang':'+'(X, 1) in  apply '_Loop2'/1 (X1) <'false'> when 'true' -> X end in apply '_Loop2'/1 (X) in let _Result = X in {'reply', _Result, State}
+        <'testBlockParam'> when 'true' ->
+            let Result = let _Fun3 = fun (_x4) -> let _x4 = letrec '_Loop5'/1 = fun (X) -> case call 'erlang':'<'(X, 5) of <'true'> when 'true' -> let X1 = call 'erlang':'+'(X, 1) in  apply '_Loop5'/1 (X1) <'false'> when 'true' -> X end in apply '_Loop5'/1 (_x4) in _x4 in apply _Fun3 (0) in let _Result = Result in {'reply', _Result, State}
+        <'testBlockParamWhileFalse'> when 'true' ->
+            let Result = let _Fun6 = fun (_n7) -> let _n7 = letrec '_Loop8'/1 = fun (N) -> case call 'erlang':'=:='(N, 0) of <'false'> when 'true' -> let N1 = call 'erlang':'-'(N, 1) in  apply '_Loop8'/1 (N1) <'true'> when 'true' -> N end in apply '_Loop8'/1 (_n7) in _n7 in apply _Fun6 (5) in let _Result = Result in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
@@ -92,7 +99,7 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
             case call 'maps':'is_key'(DnuSelector, Methods) of
                 <'true'> when 'true' ->
                     %% Call doesNotUnderstand:args: with [Selector, Args]
-                    call 'control_flow_mutations_errors':'dispatch'(DnuSelector, [OtherSelector, Args], State)
+                    call 'while_true_simple':'dispatch'(DnuSelector, [OtherSelector, Args], State)
                 <'false'> when 'true' ->
                     %% No DNU handler - return unknown_message error
                     let ClassName = call 'maps':'get'('__class__', State) in
@@ -102,6 +109,6 @@ module 'control_flow_mutations_errors' ['start_link'/1, 'init'/1, 'handle_cast'/
 
 
 'method_table'/0 = fun () ->
-    ~{}~
+    ~{'test' => 0, 'testLocal' => 0, 'testBlockParam' => 0, 'testBlockParamWhileFalse' => 0}~
 
 end
