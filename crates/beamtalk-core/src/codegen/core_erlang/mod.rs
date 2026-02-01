@@ -1171,6 +1171,14 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
+            Expression::Super(_) => {
+                // Super by itself is not a valid expression - it must be used
+                // as a message receiver (e.g., `super increment`)
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "'super' must be used with a message send".to_string(),
+                    location: format!("{:?}", expr.span()),
+                })
+            }
             Expression::Block(block) => self.generate_block(block),
             Expression::MessageSend {
                 receiver,
@@ -1312,6 +1320,14 @@ impl CoreErlangGenerator {
 
     /// Generates code for field access (e.g., self.value).
     fn generate_field_access(&mut self, receiver: &Expression, field: &Identifier) -> Result<()> {
+        // Check for invalid super.field usage
+        if matches!(receiver, Expression::Super(_)) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "super.field - use 'super message' for method calls instead".to_string(),
+                location: format!("{:?}", receiver.span()),
+            });
+        }
+
         // For now, assume receiver is 'self' and access from State
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
@@ -1437,6 +1453,13 @@ impl CoreErlangGenerator {
                             write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
                         }
                     }
+                } else if Self::is_super_message_send(expr) {
+                    // Super call as last expression: unpack the {reply, Result, NewState} tuple
+                    // Extract both result and state to return them properly
+                    let super_result_var = self.fresh_temp_var("SuperReply");
+                    write!(self.output, "let {super_result_var} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {super_result_var}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -1446,6 +1469,44 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
+            } else if Self::is_super_message_send(expr) {
+                // Super message send: must thread state from {reply, Result, NewState} tuple
+                let super_result_var = self.fresh_temp_var("SuperReply");
+                let current_state = self.current_state_var();
+                let new_state = self.next_state_var();
+
+                // Manually generate super_dispatch call with current state (not via generate_expression)
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                {
+                    let selector_atom = match selector {
+                        MessageSelector::Unary(name) => name.to_string(),
+                        MessageSelector::Binary(op) => op.to_string(),
+                        MessageSelector::Keyword(parts) => {
+                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                        }
+                    };
+                    write!(
+                        self.output,
+                        "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', ["
+                    )?;
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(self.output, ", ")?;
+                        }
+                        self.generate_expression(arg)?;
+                    }
+                    write!(self.output, "])")?;
+                }
+
+                // Extract state from the {reply, Result, NewState} tuple using element/2
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
+                )?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1487,6 +1548,44 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
                 self.generate_field_assignment_open(expr)?;
+            } else if Self::is_super_message_send(expr) {
+                // Super message send in block: thread state from {reply, Result, NewState}
+                let super_result_var = self.fresh_temp_var("SuperReply");
+                let current_state = self.current_state_var();
+                let new_state = self.next_state_var();
+
+                // Manually generate super_dispatch call with current state
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                {
+                    let selector_atom = match selector {
+                        MessageSelector::Unary(name) => name.to_string(),
+                        MessageSelector::Binary(op) => op.to_string(),
+                        MessageSelector::Keyword(parts) => {
+                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                        }
+                    };
+                    write!(
+                        self.output,
+                        "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', ["
+                    )?;
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(self.output, ", ")?;
+                        }
+                        self.generate_expression(arg)?;
+                    }
+                    write!(self.output, "])")?;
+                }
+
+                // Extract state from the {reply, Result, NewState} tuple using element/2
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
+                )?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1508,6 +1607,15 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// Check if an expression is a super message send (super method call)
+    fn is_super_message_send(expr: &Expression) -> bool {
+        if let Expression::MessageSend { receiver, .. } = expr {
+            matches!(receiver.as_ref(), Expression::Super(_))
+        } else {
+            false
+        }
     }
 
     /// Generate a field assignment WITHOUT the closing value.
@@ -1565,6 +1673,12 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
+        // Special case: super message send
+        // Super calls invoke the superclass implementation
+        if matches!(receiver, Expression::Super(_)) {
+            return self.generate_super_send(selector, arguments);
+        }
+
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             return self.generate_binary_op(op, receiver, arguments);
@@ -1724,6 +1838,54 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates code for a super message send.
+    ///
+    /// Super calls invoke the superclass implementation of a method.
+    /// This generates a call to the runtime's super dispatch mechanism:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_classes':'super_dispatch'(
+    ///   State,           % Current actor state (contains __class__)
+    ///   'selector',      % Method selector
+    ///   [Arg1, Arg2]     % Arguments
+    /// )
+    /// ```
+    ///
+    /// The runtime looks up the superclass from State's __class__ field,
+    /// then searches for the method in the superclass's method table.
+    fn generate_super_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        // Build the selector atom
+        let selector_atom = match selector {
+            MessageSelector::Unary(name) => name.to_string(),
+            MessageSelector::Binary(op) => op.to_string(),
+            MessageSelector::Keyword(parts) => {
+                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+            }
+        };
+
+        // Generate: call 'beamtalk_classes':'super_dispatch'(State, 'selector', [Args])
+        write!(
+            self.output,
+            "call 'beamtalk_classes':'super_dispatch'({}, '{selector_atom}', [",
+            self.current_state_var()
+        )?;
+
+        // Generate arguments
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "])")?;
+        Ok(())
+    }
+
     /// Generates code for cascade expressions.
     ///
     /// Cascades send multiple messages to the same receiver using semicolon separators.
@@ -1777,6 +1939,20 @@ impl CoreErlangGenerator {
             ..
         } = receiver
         {
+            // Special case: super cascade (super msg1; msg2; msg3)
+            // Super cannot be evaluated into a variable, so we handle each message specially
+            if matches!(&**underlying_receiver, Expression::Super(_)) {
+                // For super cascades, send each message as a super_dispatch call
+                // Note: Cascade semantics with super are questionable - each call goes
+                // to superclass, not to the result of the previous call. For now, we
+                // treat this as an error since the semantics are unclear.
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "cascades with super (e.g., 'super msg1; msg2') - semantics unclear"
+                        .to_string(),
+                    location: format!("{:?}", receiver.span()),
+                });
+            }
+
             // Bind the underlying receiver once
             let receiver_var = self.fresh_temp_var("Receiver");
             write!(self.output, "let {receiver_var} = ")?;
@@ -4178,5 +4354,194 @@ end
             code.contains("'abs'"),
             "Should have second message abs. Got:\n{code}"
         );
+    }
+
+    #[test]
+    fn test_super_field_access_error() {
+        // super.field should produce a clear error message
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let field_access = Expression::FieldAccess {
+            receiver: Box::new(super_expr),
+            field: Identifier::new("value", Span::new(6, 11)),
+            span: Span::new(0, 11),
+        };
+
+        let result = generator.generate_expression(&field_access);
+
+        assert!(result.is_err(), "super.field should be an error");
+        let err = result.unwrap_err();
+
+        if let CodeGenError::UnsupportedFeature { feature, .. } = err {
+            assert!(
+                feature.contains("super.field"),
+                "Error should mention super.field, got: {feature}"
+            );
+            assert!(
+                feature.contains("super message"),
+                "Error should suggest using super message, got: {feature}"
+            );
+        } else {
+            panic!("Expected UnsupportedFeature error, got: {err:?}");
+        }
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_unary_send() {
+        // Test that super unary message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Unary("increment".into()),
+            arguments: vec![],
+            span: Span::new(0, 15),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(
+            result.is_ok(),
+            "super increment should generate successfully"
+        );
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'increment'"),
+            "Should include selector, got: {output}"
+        );
+        assert!(
+            output.contains("[]"),
+            "Should have empty args list, got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_keyword_send() {
+        // Test that super keyword message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("at:", Span::new(6, 9)),
+                KeywordPart::new("put:", Span::new(12, 16)),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Integer(1), Span::new(10, 11)),
+                Expression::Literal(Literal::Integer(42), Span::new(17, 19)),
+            ],
+            span: Span::new(0, 19),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(result.is_ok(), "super at:put: should generate successfully");
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'at:put:'"),
+            "Should include keyword selector, got: {output}"
+        );
+        assert!(
+            output.contains("[1, 42]"),
+            "Should have args [1, 42], got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_binary_send() {
+        // Test that super binary message generates correct super_dispatch call
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(10), Span::new(8, 10))],
+            span: Span::new(0, 10),
+        };
+
+        let result = generator.generate_expression(&message_send);
+        assert!(result.is_ok(), "super + 10 should generate successfully");
+
+        let output = &generator.output;
+        assert!(
+            output.contains("call 'beamtalk_classes':'super_dispatch'"),
+            "Should generate super_dispatch call, got: {output}"
+        );
+        assert!(
+            output.contains("'+'"),
+            "Should include binary selector, got: {output}"
+        );
+        assert!(
+            output.contains("[10]"),
+            "Should have args [10], got: {output}"
+        );
+
+        generator.pop_scope();
+    }
+
+    #[test]
+    fn test_generate_super_cascade() {
+        // Test that super with cascade works: super increment; getValue
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        // First message: super increment
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let first_msg = Expression::MessageSend {
+            receiver: Box::new(super_expr),
+            selector: MessageSelector::Unary("increment".into()),
+            arguments: vec![],
+            span: Span::new(0, 15),
+        };
+
+        // Cascade: super increment; getValue
+        let cascade = Expression::Cascade {
+            receiver: Box::new(first_msg),
+            messages: vec![CascadeMessage::new(
+                MessageSelector::Unary("getValue".into()),
+                vec![],
+                Span::new(17, 25),
+            )],
+            span: Span::new(0, 25),
+        };
+
+        let result = generator.generate_expression(&cascade);
+        assert!(
+            result.is_err(),
+            "super cascade should produce error (unclear semantics)"
+        );
+
+        if let Err(CodeGenError::UnsupportedFeature { feature, .. }) = result {
+            assert!(
+                feature.contains("cascades with super"),
+                "Error should mention cascades with super, got: {feature}"
+            );
+        } else {
+            panic!("Expected UnsupportedFeature error for super cascade");
+        }
+
+        generator.pop_scope();
     }
 }

@@ -33,3 +33,25 @@ including `spawn/0` and `spawn/1` that return `#beamtalk_object{}` records.
 
 **Syntax Note:** The fixture uses the current parser syntax (`:=` for assignment, blocks for methods)
 which differs from the planned `=>` method syntax documented in design docs.
+
+### logging_counter.bt (BT-108)
+
+Demonstrates super keyword for superclass method dispatch in inheritance hierarchy.
+
+Inheritance: `Actor -> Counter -> LoggingCounter`
+
+Methods:
+- `increment` - increments logCount, calls `super increment`, returns value
+- `getValue` - calls `super getValue` (tests super with different method)
+- `getLogCount` - returns current logCount (new method added by subclass)
+- `set:` - calls `super set:` with argument (tests super with keyword messages)
+
+State variables:
+- `value` - inherited from Counter
+- `logCount` - tracks number of increment calls (new in LoggingCounter)
+
+Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
+- Super dispatch calls parent class methods
+- State is maintained correctly across super calls
+- Child can add new methods alongside overridden ones
+- Super works with unary, keyword, and property access

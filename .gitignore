@@ -103,3 +103,4 @@ _rel/
 # Build outputs
 /build/
 *.backup
+*.crashdump
