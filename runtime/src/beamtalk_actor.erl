@@ -104,7 +104,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3, spawn_actor/2, spawn_actor/3]).
+-export([start_link/2, start_link/3]).
 
 %% gen_server callbacks (for generated actors to delegate to)
 -export([init/1, handle_cast/2, handle_call/3, handle_info/2,
@@ -127,27 +127,6 @@ start_link(Module, Args) ->
 -spec start_link(term(), module(), term()) -> {ok, pid()} | {error, term()}.
 start_link(Name, Module, Args) ->
     gen_server:start_link(Name, Module, Args, []).
-
-%% @doc Spawn an actor outside of a supervision tree.
-%% Returns the pid directly on success, crashes on failure.
-%% Useful for ad-hoc actor creation in the REPL.
-%% For production use with error handling, use start_link/2 instead.
--spec spawn_actor(module(), term()) -> pid().
-spawn_actor(Module, Args) ->
-    case gen_server:start(Module, Args, []) of
-        {ok, Pid} -> Pid;
-        {error, Reason} -> error({spawn_failed, Reason})
-    end.
-
-%% @doc Spawn a registered actor outside of a supervision tree.
-%% Returns the pid directly on success, crashes on failure.
-%% For production use with error handling, use start_link/3 instead.
--spec spawn_actor(term(), module(), term()) -> pid().
-spawn_actor(Name, Module, Args) ->
-    case gen_server:start(Name, Module, Args, []) of
-        {ok, Pid} -> Pid;
-        {error, Reason} -> error({spawn_failed, Reason})
-    end.
 
 %%% gen_server callbacks
 

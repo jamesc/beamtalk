@@ -18,7 +18,7 @@ Key features:
 - **doesNotUnderstand**: Fallback handler for unknown messages (metaprogramming)
 - **Sync and async**: Supports both `gen_server:call` (blocking) and `gen_server:cast` (with futures)
 - **Hot reload**: Implements `code_change/3` for state migration during code updates
-- **Helper functions**: `start_link/2`, `spawn_actor/2` for creating actors
+- **Helper functions**: `start_link/2` and `start_link/3` for creating supervised actors
 
 See module documentation in `beamtalk_actor.erl` for the complete protocol and API.
 
