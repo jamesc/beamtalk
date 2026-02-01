@@ -2370,6 +2370,60 @@ impl CoreErlangGenerator {
         }
         let body = &arguments[0];
 
+        // Check if both condition and body are literal blocks (enables mutation analysis)
+        if let (Expression::Block(condition_block), Expression::Block(body_block)) =
+            (condition, body)
+        {
+            // Analyze both blocks for mutations
+            let condition_analysis = block_analysis::analyze_block(condition_block);
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // Combine mutations from both blocks
+            let mut all_local_writes = condition_analysis.local_writes.clone();
+            all_local_writes.extend(body_analysis.local_writes.iter().cloned());
+
+            let mut all_local_reads = condition_analysis.local_reads.clone();
+            all_local_reads.extend(body_analysis.local_reads.iter().cloned());
+
+            let mut all_field_writes = condition_analysis.field_writes.clone();
+            all_field_writes.extend(body_analysis.field_writes.iter().cloned());
+
+            let mut all_field_reads = condition_analysis.field_reads.clone();
+            all_field_reads.extend(body_analysis.field_reads.iter().cloned());
+
+            // Variables that need threading: read AND written
+            let threaded_vars: Vec<String> = all_local_reads
+                .intersection(&all_local_writes)
+                .cloned()
+                .collect();
+
+            // Fields that need threading: read AND written
+            let threaded_fields: Vec<String> = all_field_reads
+                .intersection(&all_field_writes)
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() || !threaded_fields.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_while_true_with_mutations(
+                    condition_block,
+                    body_block,
+                    &threaded_vars,
+                    &threaded_fields,
+                );
+            }
+        }
+
+        // Fall back to simple loop (no mutations)
+        self.generate_while_true_simple(condition, body)
+    }
+
+    /// Generates a simple `whileTrue:` loop without mutation support.
+    fn generate_while_true_simple(
+        &mut self,
+        condition: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
         // Use fresh_temp_var to avoid shadowing user identifiers
         let loop_fn = self.fresh_temp_var("Loop");
         let condition_var = self.fresh_temp_var("Cond");
@@ -2391,6 +2445,164 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates a `whileTrue:` loop with mutation support.
+    ///
+    /// Generates a tail-recursive loop that threads mutated variables and fields.
+    /// Variables are passed as loop parameters, fields are threaded through a state map.
+    fn generate_while_true_with_mutations(
+        &mut self,
+        condition_block: &Block,
+        body_block: &Block,
+        threaded_vars: &[String],
+        threaded_fields: &[String],
+    ) -> Result<()> {
+        // For now, only implement local variable threading
+        // Field threading will be added in a follow-up
+        if !threaded_fields.is_empty() {
+            // Fall back to simple implementation for field mutations
+            return self.generate_while_true_simple(
+                &Expression::Block(condition_block.clone()),
+                &Expression::Block(body_block.clone()),
+            );
+        }
+
+        let loop_fn = self.fresh_temp_var("Loop");
+        let arity = threaded_vars.len();
+
+        // Generate letrec
+        write!(self.output, "letrec '{loop_fn}'/{arity} = fun (")?;
+
+        // Parameters: one for each threaded variable
+        for (i, var) in threaded_vars.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "{var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Evaluate condition inline
+        write!(self.output, "case ")?;
+        self.generate_block_body(condition_block)?;
+        write!(self.output, " of ")?;
+
+        // True case: execute body and recurse
+        write!(self.output, "<'true'> when 'true' -> ")?;
+
+        // Generate body and extract new variable values
+        self.generate_while_body_with_threading(body_block, threaded_vars, &loop_fn, arity)?;
+
+        // False case: return final values
+        write!(self.output, " <'false'> when 'true' -> ")?;
+        if threaded_vars.len() == 1 {
+            // Single variable: return it directly
+            write!(self.output, "{}", &threaded_vars[0])?;
+        } else {
+            // Multiple values: return tuple
+            write!(self.output, "{{")?;
+            for (i, var) in threaded_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+        write!(self.output, " end ")?;
+
+        // Initial call to loop function
+        write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
+        for (i, var) in threaded_vars.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "{var}")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates a while loop body that threads mutated variables.
+    fn generate_while_body_with_threading(
+        &mut self,
+        body_block: &Block,
+        threaded_vars: &[String],
+        loop_fn: &str,
+        arity: usize,
+    ) -> Result<()> {
+        // For each expression in the body, we need to track assignments
+        // and generate new variable bindings
+
+        if body_block.body.is_empty() {
+            // Empty body - just recurse with same values
+            write!(self.output, "apply '{loop_fn}'/{arity} (")?;
+            for (i, var) in threaded_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{var}")?;
+            }
+            write!(self.output, ")")?;
+            return Ok(());
+        }
+
+        // Process each expression in the body
+        for (i, expr) in body_block.body.iter().enumerate() {
+            let is_last = i == body_block.body.len() - 1;
+
+            match expr {
+                Expression::Assignment { target, value, .. } => {
+                    // Check if this is a threaded variable assignment
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = id.name.as_str();
+                        if threaded_vars.contains(&var_name.to_string()) {
+                            // Generate: let Var1 = <value> in ...
+                            let new_var = format!("{var_name}1");
+                            write!(self.output, "let {new_var} = ")?;
+                            self.generate_expression(value)?;
+                            write!(self.output, " in ")?;
+                            continue;
+                        }
+                    }
+                    // Not a threaded variable - treat as normal expression
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+                _ => {
+                    // Non-assignment expression
+                    if is_last {
+                        self.generate_expression(expr)?;
+                    } else {
+                        let tmp_var = self.fresh_temp_var("seq");
+                        write!(self.output, "let {tmp_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in ")?;
+                    }
+                }
+            }
+        }
+
+        // After processing all expressions, recurse with updated values
+        write!(self.output, " apply '{loop_fn}'/{arity} (")?;
+        for (i, var) in threaded_vars.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            // Use the new variable name (Var1) if it was assigned in the body
+            write!(self.output, "{var}1")?;
+        }
+        write!(self.output, ")")?;
+
+        Ok(())
+    }
+
     /// Generates a `whileFalse:` loop.
     ///
     /// Beamtalk: `[condition] whileFalse: [body]`
@@ -2408,6 +2620,60 @@ impl CoreErlangGenerator {
         }
         let body = &arguments[0];
 
+        // Check if both condition and body are literal blocks (enables mutation analysis)
+        if let (Expression::Block(condition_block), Expression::Block(body_block)) =
+            (condition, body)
+        {
+            // Analyze both blocks for mutations
+            let condition_analysis = block_analysis::analyze_block(condition_block);
+            let body_analysis = block_analysis::analyze_block(body_block);
+
+            // Combine mutations from both blocks
+            let mut all_local_writes = condition_analysis.local_writes.clone();
+            all_local_writes.extend(body_analysis.local_writes.iter().cloned());
+
+            let mut all_local_reads = condition_analysis.local_reads.clone();
+            all_local_reads.extend(body_analysis.local_reads.iter().cloned());
+
+            let mut all_field_writes = condition_analysis.field_writes.clone();
+            all_field_writes.extend(body_analysis.field_writes.iter().cloned());
+
+            let mut all_field_reads = condition_analysis.field_reads.clone();
+            all_field_reads.extend(body_analysis.field_reads.iter().cloned());
+
+            // Variables that need threading: read AND written
+            let threaded_vars: Vec<String> = all_local_reads
+                .intersection(&all_local_writes)
+                .cloned()
+                .collect();
+
+            // Fields that need threading: read AND written
+            let threaded_fields: Vec<String> = all_field_reads
+                .intersection(&all_field_writes)
+                .cloned()
+                .collect();
+
+            if !threaded_vars.is_empty() || !threaded_fields.is_empty() {
+                // Generate tail-recursive loop with mutation support
+                return self.generate_while_false_with_mutations(
+                    condition_block,
+                    body_block,
+                    &threaded_vars,
+                    &threaded_fields,
+                );
+            }
+        }
+
+        // Fall back to simple loop (no mutations)
+        self.generate_while_false_simple(condition, body)
+    }
+
+    /// Generates a simple `whileFalse:` loop without mutation support.
+    fn generate_while_false_simple(
+        &mut self,
+        condition: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
         // Use fresh_temp_var to avoid shadowing user identifiers
         let loop_fn = self.fresh_temp_var("Loop");
         let condition_var = self.fresh_temp_var("Cond");
@@ -2424,6 +2690,81 @@ impl CoreErlangGenerator {
         write!(self.output, "apply '{loop_fn}'/0 () ")?;
         write!(self.output, "<'true'> when 'true' -> 'nil' end ")?;
         write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+
+        Ok(())
+    }
+
+    /// Generates a `whileFalse:` loop with mutation support.
+    fn generate_while_false_with_mutations(
+        &mut self,
+        condition_block: &Block,
+        body_block: &Block,
+        threaded_vars: &[String],
+        threaded_fields: &[String],
+    ) -> Result<()> {
+        // For now, only implement local variable threading
+        // Field threading will be added in a follow-up
+        if !threaded_fields.is_empty() {
+            // Fall back to simple implementation for field mutations
+            return self.generate_while_false_simple(
+                &Expression::Block(condition_block.clone()),
+                &Expression::Block(body_block.clone()),
+            );
+        }
+
+        let loop_fn = self.fresh_temp_var("Loop");
+        let arity = threaded_vars.len();
+
+        // Generate letrec
+        write!(self.output, "letrec '{loop_fn}'/{arity} = fun (")?;
+
+        // Parameters: one for each threaded variable
+        for (i, var) in threaded_vars.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "{var}")?;
+        }
+        write!(self.output, ") -> ")?;
+
+        // Evaluate condition inline
+        write!(self.output, "case ")?;
+        self.generate_block_body(condition_block)?;
+        write!(self.output, " of ")?;
+
+        // False case: execute body and recurse (note: inverted from whileTrue)
+        write!(self.output, "<'false'> when 'true' -> ")?;
+
+        // Generate body and extract new variable values
+        self.generate_while_body_with_threading(body_block, threaded_vars, &loop_fn, arity)?;
+
+        // True case: return final values
+        write!(self.output, " <'true'> when 'true' -> ")?;
+        if threaded_vars.len() == 1 {
+            // Single variable: return it directly
+            write!(self.output, "{}", &threaded_vars[0])?;
+        } else {
+            // Multiple values: return tuple
+            write!(self.output, "{{")?;
+            for (i, var) in threaded_vars.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "{var}")?;
+            }
+            write!(self.output, "}}")?;
+        }
+        write!(self.output, " end ")?;
+
+        // Initial call to loop function
+        write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
+        for (i, var) in threaded_vars.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "{var}")?;
+        }
+        write!(self.output, ")")?;
 
         Ok(())
     }

@@ -1,0 +1,398 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "test",
+                    span: Span {
+                        start: 125,
+                        end: 129,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: Identifier(
+                                Identifier {
+                                    name: "count",
+                                    span: Span {
+                                        start: 139,
+                                        end: 144,
+                                    },
+                                },
+                            ),
+                            value: Literal(
+                                Integer(
+                                    0,
+                                ),
+                                Span {
+                                    start: 148,
+                                    end: 149,
+                                },
+                            ),
+                            span: Span {
+                                start: 139,
+                                end: 149,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Block(
+                                Block {
+                                    parameters: [],
+                                    body: [
+                                        MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "count",
+                                                    span: Span {
+                                                        start: 156,
+                                                        end: 161,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "<",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        3,
+                                                    ),
+                                                    Span {
+                                                        start: 164,
+                                                        end: 165,
+                                                    },
+                                                ),
+                                            ],
+                                            span: Span {
+                                                start: 156,
+                                                end: 165,
+                                            },
+                                        },
+                                    ],
+                                    span: Span {
+                                        start: 155,
+                                        end: 166,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "whileTrue:",
+                                        span: Span {
+                                            start: 167,
+                                            end: 177,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Block(
+                                    Block {
+                                        parameters: [],
+                                        body: [
+                                            Assignment {
+                                                target: Identifier(
+                                                    Identifier {
+                                                        name: "count",
+                                                        span: Span {
+                                                            start: 179,
+                                                            end: 184,
+                                                        },
+                                                    },
+                                                ),
+                                                value: MessageSend {
+                                                    receiver: Identifier(
+                                                        Identifier {
+                                                            name: "count",
+                                                            span: Span {
+                                                                start: 188,
+                                                                end: 193,
+                                                            },
+                                                        },
+                                                    ),
+                                                    selector: Binary(
+                                                        "+",
+                                                    ),
+                                                    arguments: [
+                                                        Literal(
+                                                            Integer(
+                                                                1,
+                                                            ),
+                                                            Span {
+                                                                start: 196,
+                                                                end: 197,
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 188,
+                                                        end: 197,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 179,
+                                                    end: 197,
+                                                },
+                                            },
+                                        ],
+                                        span: Span {
+                                            start: 178,
+                                            end: 198,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 155,
+                                end: 198,
+                            },
+                        },
+                        Return {
+                            value: Identifier(
+                                Identifier {
+                                    name: "count",
+                                    span: Span {
+                                        start: 205,
+                                        end: 210,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 204,
+                                end: 210,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 133,
+                        end: 212,
+                    },
+                },
+            ),
+            span: Span {
+                start: 125,
+                end: 212,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "testLocal",
+                    span: Span {
+                        start: 250,
+                        end: 259,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 269,
+                                        end: 270,
+                                    },
+                                },
+                            ),
+                            value: Literal(
+                                Integer(
+                                    0,
+                                ),
+                                Span {
+                                    start: 274,
+                                    end: 275,
+                                },
+                            ),
+                            span: Span {
+                                start: 269,
+                                end: 275,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Block(
+                                Block {
+                                    parameters: [],
+                                    body: [
+                                        MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "x",
+                                                    span: Span {
+                                                        start: 282,
+                                                        end: 283,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "<",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        5,
+                                                    ),
+                                                    Span {
+                                                        start: 286,
+                                                        end: 287,
+                                                    },
+                                                ),
+                                            ],
+                                            span: Span {
+                                                start: 282,
+                                                end: 287,
+                                            },
+                                        },
+                                    ],
+                                    span: Span {
+                                        start: 281,
+                                        end: 288,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "whileTrue:",
+                                        span: Span {
+                                            start: 289,
+                                            end: 299,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Block(
+                                    Block {
+                                        parameters: [],
+                                        body: [
+                                            Assignment {
+                                                target: Identifier(
+                                                    Identifier {
+                                                        name: "x",
+                                                        span: Span {
+                                                            start: 301,
+                                                            end: 302,
+                                                        },
+                                                    },
+                                                ),
+                                                value: MessageSend {
+                                                    receiver: Identifier(
+                                                        Identifier {
+                                                            name: "x",
+                                                            span: Span {
+                                                                start: 306,
+                                                                end: 307,
+                                                            },
+                                                        },
+                                                    ),
+                                                    selector: Binary(
+                                                        "+",
+                                                    ),
+                                                    arguments: [
+                                                        Literal(
+                                                            Integer(
+                                                                1,
+                                                            ),
+                                                            Span {
+                                                                start: 310,
+                                                                end: 311,
+                                                            },
+                                                        ),
+                                                    ],
+                                                    span: Span {
+                                                        start: 306,
+                                                        end: 311,
+                                                    },
+                                                },
+                                                span: Span {
+                                                    start: 301,
+                                                    end: 311,
+                                                },
+                                            },
+                                        ],
+                                        span: Span {
+                                            start: 300,
+                                            end: 312,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 281,
+                                end: 312,
+                            },
+                        },
+                        Return {
+                            value: Identifier(
+                                Identifier {
+                                    name: "x",
+                                    span: Span {
+                                        start: 319,
+                                        end: 320,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 318,
+                                end: 320,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 263,
+                        end: 322,
+                    },
+                },
+            ),
+            span: Span {
+                start: 250,
+                end: 322,
+            },
+        },
+    ],
+    span: Span {
+        start: 125,
+        end: 323,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 125,
+                end: 129,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 125,
+                end: 129,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Simple whileTrue test with local variable mutation",
+            span: Span {
+                start: 125,
+                end: 129,
+            },
+            kind: Line,
+        },
+    ],
+}
