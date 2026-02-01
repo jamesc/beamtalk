@@ -1453,6 +1453,11 @@ impl CoreErlangGenerator {
                             write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
                         }
                     }
+                } else if Self::is_super_message_send(expr) {
+                    // Super call as last expression: unpack the {reply, Result, NewState} tuple
+                    write!(self.output, "let {{'reply', _Result, _FinalState}} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {{'reply', _Result, _FinalState}}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -1462,6 +1467,17 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
+            } else if Self::is_super_message_send(expr) {
+                // Super message send: must thread state from {reply, Result, NewState} tuple
+                // Generate the super_dispatch call with current state
+                let new_state = self.next_state_var();
+                
+                write!(self.output, "let {{'reply', _SuperResult, {new_state}}} = ")?;
+                // Temporarily reset state version to use current state in the call
+                self.state_version -= 1;
+                self.generate_expression(expr)?;
+                self.state_version += 1;
+                write!(self.output, " in ")?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1503,6 +1519,16 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
                 self.generate_field_assignment_open(expr)?;
+            } else if Self::is_super_message_send(expr) {
+                // Super message send in block: thread state from {reply, Result, NewState}
+                let new_state = self.next_state_var();
+                
+                write!(self.output, "let {{'reply', _SuperResult, {new_state}}} = ")?;
+                // Temporarily reset state version to use current state in the call
+                self.state_version -= 1;
+                self.generate_expression(expr)?;
+                self.state_version += 1;
+                write!(self.output, " in ")?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1524,6 +1550,15 @@ impl CoreErlangGenerator {
             }
         }
         false
+    }
+
+    /// Check if an expression is a super message send (super method call)
+    fn is_super_message_send(expr: &Expression) -> bool {
+        if let Expression::MessageSend { receiver, .. } = expr {
+            matches!(receiver.as_ref(), Expression::Super(_))
+        } else {
+            false
+        }
     }
 
     /// Generate a field assignment WITHOUT the closing value.
