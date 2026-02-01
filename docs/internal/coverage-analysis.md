@@ -1,5 +1,7 @@
 # Core Erlang Compilation Verification Coverage Analysis
 
+**Status:** Current as of 39 test cases - Updated regularly
+
 ## Test Case Count
 - **Total test cases**: 39
 - **Total tests**: 156 (39 cases × 4 tests each: lexer, parser, codegen, compiles)

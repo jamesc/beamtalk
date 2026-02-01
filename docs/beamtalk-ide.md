@@ -6,6 +6,22 @@ This document describes the integrated development environment vision. The IDE i
 
 ---
 
+## Table of Contents
+
+- [The Smalltalk Philosophy](#the-smalltalk-philosophy)
+- [IDE Overview](#ide-overview)
+- [Core Components](#core-components)
+- [Message Timeline](#message-timeline)
+- [Live Queries](#live-queries)
+- [File Synchronization](#file-synchronization)
+- [Implementation Architecture](#implementation-architecture)
+- [VS Code vs Web IDE](#vs-code-vs-web-ide)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Future Enhancements](#future-enhancements)
+- [References](#references)
+
+---
+
 ## The Smalltalk Philosophy
 
 In traditional Smalltalk (Pharo/Squeak):

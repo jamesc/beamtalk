@@ -6,6 +6,26 @@ For the Smalltalk-style IDE experience (browser, inspector, debugger), see [beam
 
 ---
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Why Rust for the Compiler?](#why-rust-for-the-compiler)
+- [Component Responsibilities](#component-responsibilities)
+- [Compilation Pipeline](#compilation-pipeline)
+- [Live Development Flow](#live-development-flow)
+- [Compiler Daemon](#compiler-daemon)
+- [BEAM Node Integration](#beam-node-integration)
+- [Directory Structure](#directory-structure)
+- [Performance Targets](#performance-targets)
+- [Actor Runtime Model](#actor-runtime-model)
+- [Code Generation Details](#code-generation-details)
+- [State Migration During Hot Reload](#state-migration-during-hot-reload)
+- [Future/Promise Implementation](#futurepromise-implementation)
+- [Architecture: Next Steps](#architecture-next-steps)
+- [References](#references)
+
+---
+
 ## Overview
 
 The Beamtalk compiler is written in **Rust** and runs as a daemon on the developer's machine. It compiles `.bt` source files to BEAM bytecode, which is then hot-loaded into a running BEAM node. The Rust compiler is **not** part of the runtime — it's build infrastructure.

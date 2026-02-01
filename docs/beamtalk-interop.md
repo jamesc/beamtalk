@@ -6,6 +6,22 @@ Beamtalk is designed for seamless integration with the BEAM ecosystem. This docu
 
 ---
 
+## Table of Contents
+
+- [1. Calling Erlang from Beamtalk](#1-calling-erlang-from-beamtalk)
+- [2. Calling Elixir from Beamtalk](#2-calling-elixir-from-beamtalk)
+- [3. Calling Beamtalk from Erlang/Elixir](#3-calling-beamtalk-from-erlangelixir)
+- [4. Data Type Mapping](#4-data-type-mapping)
+- [5. OTP Integration](#5-otp-integration)
+- [6. Using Hex.pm Packages](#6-using-hexpm-packages)
+- [7. Import and Aliasing](#7-import-and-aliasing)
+- [8. Foreign Function Interface (FFI)](#8-foreign-function-interface-ffi)
+- [9. Build System Integration](#9-build-system-integration)
+- [10. Example: Using Phoenix from Beamtalk](#10-example-using-phoenix-from-beamtalk)
+- [References](#references)
+
+---
+
 ## 1. Calling Erlang from Beamtalk
 
 ### Basic Syntax

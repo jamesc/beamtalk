@@ -8,6 +8,29 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ---
 
+## Table of Contents
+
+- [String Encoding and UTF-8](#string-encoding-and-utf-8)
+- [Core Syntax](#core-syntax)
+- [Async Message Passing](#async-message-passing)
+- [Pattern Matching (Erlang-inspired)](#pattern-matching-erlang-inspired)
+- [Pipe Operator (Elixir-inspired)](#pipe-operator-elixir-inspired)
+- [With Blocks (Elixir/Gleam-inspired)](#with-blocks-elixirgleam-inspired)
+- [Result Type (Gleam-inspired)](#result-type-gleam-inspired)
+- [Comprehensions (Elixir-inspired)](#comprehensions-elixir-inspired)
+- [Supervision (OTP-inspired)](#supervision-otp-inspired)
+- [Live Patching](#live-patching)
+- [Protocols (Elixir-inspired)](#protocols-elixir-inspired)
+- [Optional Type Annotations (Dylan-inspired)](#optional-type-annotations-dylan-inspired)
+- [Conditions and Restarts (Dylan-inspired)](#conditions-and-restarts-dylan-inspired)
+- [Method Combinations (Dylan/CLOS-inspired)](#method-combinations-dylanclos-inspired)
+- [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
+- [Tooling](#tooling)
+- [Inspiration Sources](#inspiration-sources)
+- [References](#references)
+
+---
+
 ## String Encoding and UTF-8
 
 **Beamtalk strings are UTF-8 by default.** This follows modern BEAM conventions and matches Elixir's approach.
@@ -116,16 +139,32 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
 
 | Feature | Status |
 |---------|--------|
-| UTF-8 string literals | ✅ Lexer supports |
-| String interpolation | 🚧 Planned |
-| Grapheme-aware length | 🚧 Via Erlang `:string` |
-| Unicode normalization | 🚧 Via Erlang `:unicode` |
-| Case folding | 🚧 Via Erlang `:string` |
-| Binary pattern UTF-8 | ✅ AST supports |
+| UTF-8 string literals | ✅ Implemented - Lexer and parser support |
+| String interpolation | ❌ Not yet implemented - See `test-package-compiler/cases/future_string_interpolation/` for planned behavior |
+| Grapheme-aware length | ✅ Available via Erlang `:string` module |
+| Unicode normalization | ✅ Available via Erlang `:unicode` module |
+| Case folding | ✅ Available via Erlang `:string` module |
+| Binary pattern UTF-8 | ✅ Implemented - AST and codegen support |
 
 ---
 
 ## Core Syntax
+
+### Implementation Status
+
+| Feature | Status | Test Coverage |
+|---------|--------|---------------|
+| Actor definition & spawning | ✅ Implemented | `actor_spawn`, `actor_spawn_with_args` |
+| Unary messages | ✅ Implemented | `async_unary_message`, `unary_operators` |
+| Binary messages/operators | ✅ Implemented | `binary_operators` |
+| Keyword messages | ✅ Implemented | `async_keyword_message`, `multi_keyword_complex_args` |
+| Cascades | ✅ Implemented | `cascades`, `cascade_complex` |
+| Blocks/closures | ✅ Implemented | `blocks_no_args`, `empty_blocks`, `nested_blocks` |
+| Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
+| Class definitions | ✅ Implemented | `class_definition` |
+| Map literals | ✅ Implemented | `map_literals` |
+| Comments | ✅ Implemented | `comment_handling` |
+| Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
 
 ### Actor Definition
 
@@ -651,6 +690,27 @@ around (enter) → before → primary → after → around (exit)
 
 ---
 
+## Standard Library
+
+Core classes implemented and tested:
+
+| Class | Status | Description | Test Coverage |
+|-------|--------|-------------|---------------|
+| **Actor** | ✅ Implemented | Base class for all actors (BEAM processes) | `actor_spawn`, `actor_state_mutation` |
+| **Block** | ✅ Implemented | First-class closures | `stdlib_block`, `blocks_no_args` |
+| **Boolean** | ✅ Implemented | `True` and `False` with control flow | `stdlib_boolean` |
+| **Integer** | ✅ Implemented | Arbitrary precision arithmetic | `stdlib_integer` |
+| **String** | ✅ Implemented | UTF-8 text with operations | `stdlib_string`, `string_operations` |
+| **Array** | ✅ Implemented | Fixed-size indexed collection (tuple) | `stdlib_array` |
+| **List** | ✅ Implemented | Linked list with fast prepend | `stdlib_list` |
+| **Dictionary** | ✅ Implemented | Key-value map | `stdlib_dictionary`, `map_literals` |
+| **Set** | ✅ Implemented | Unordered unique elements | `stdlib_set` |
+| **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
+
+For detailed API documentation, see [`lib/README.md`](../lib/README.md).
+
+---
+
 ## Tooling
 
 Tooling is part of the language, not an afterthought. Beamtalk is designed to be used interactively.
@@ -685,21 +745,22 @@ Tooling is part of the language, not an afterthought. Beamtalk is designed to be
 ### CLI Tools
 
 ```bash
-# Project management
-beamtalk new myapp          # Create new project
-beamtalk build              # Compile to BEAM
-beamtalk run                # Compile and start
-beamtalk test               # Run tests
+# Project management (implemented)
+beamtalk new myapp          # ✅ Create new project
+beamtalk build              # ✅ Compile to BEAM
+beamtalk run                # ✅ Compile and start
+beamtalk check              # ✅ Check for errors without compiling
+beamtalk daemon start/stop  # ✅ Manage compiler daemon
 
 # Development
-beamtalk repl               # Interactive REPL
-beamtalk attach node@host   # Attach to running node
-beamtalk inspect pid        # Inspect process state
+beamtalk repl               # ✅ Interactive REPL (basic implementation)
+beamtalk attach node@host   # ❌ Not yet implemented
+beamtalk inspect pid        # ❌ Not yet implemented
 
-# Debugging
-beamtalk trace actor        # Trace message flow
-beamtalk profile            # Performance profiling
-beamtalk observer           # Launch observer GUI
+# Debugging (planned)
+beamtalk trace actor        # ❌ Not yet implemented
+beamtalk profile            # ❌ Not yet implemented  
+beamtalk observer           # ❌ Not yet implemented
 ```
 
 ### REPL Features
