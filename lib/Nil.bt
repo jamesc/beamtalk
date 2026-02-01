@@ -48,16 +48,16 @@
 
 Nil
   // Testing - only Nil returns true for isNil
-  isNil => ^true
+  isNil => true
 
   // Testing - only Nil returns false for notNil
-  notNil => ^false
+  notNil => false
 
   // Evaluate the nilBlock when receiver is nil
   ifNil: nilBlock => nilBlock value
 
   // Do nothing when receiver is nil
-  ifNotNil: notNilBlock => ^self
+  ifNotNil: notNilBlock => self
 
   // Evaluate nilBlock when receiver is nil
   ifNil: nilBlock ifNotNil: notNilBlock => nilBlock value
@@ -66,9 +66,9 @@ Nil
   ifNotNil: notNilBlock ifNil: nilBlock => nilBlock value
 
   // Copy operations - Nil is a singleton, always return self
-  copy => ^self
-  deepCopy => ^self
-  shallowCopy => ^self
+  copy => self
+  deepCopy => self
+  shallowCopy => self
 
   // String representation
   describe => 'nil'
