@@ -336,7 +336,9 @@ invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State) ->
         error ->
             %% No runtime block, must call the compiled module
             Module = maps:get(module, ClassInfo),
+            %% Construct Self object reference for dispatch/4 (BT-161)
+            Self = beamtalk_actor:make_self(State),
             %% Call the module's dispatch function with the selector
             %% This maintains the actor protocol (returns {reply, Result, NewState})
-            Module:dispatch(Selector, Args, State)
+            Module:dispatch(Selector, Args, Self, State)
     end.

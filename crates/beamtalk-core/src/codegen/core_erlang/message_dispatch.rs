@@ -1,0 +1,343 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Message sending and dispatch compilation.
+//!
+//! This module handles the **core domain operation** of Beamtalk: message sending.
+//! In Smalltalk and Beamtalk, message sending is THE fundamental operation, not
+//! method calls or function invocation.
+//!
+//! # Message Send Protocol
+//!
+//! By default, messages are **asynchronous** and return futures:
+//!
+//! ```erlang
+//! let Receiver = <receiver expression> in
+//! let Pid = call 'erlang':'element'(4, Receiver) in  % Extract pid from object
+//! let Future = call 'beamtalk_future':'new'() in
+//! let _ = call 'gen_server':'cast'(Pid, {Selector, Args, Future}) in
+//! Future
+//! ```
+//!
+//! # Special Cases
+//!
+//! Several message patterns are compiled to **synchronous** operations:
+//!
+//! - **Binary operators**: `+`, `-`, `*`, `/` → Direct Erlang arithmetic
+//! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Direct function calls
+//! - **Built-in types**: String, Dictionary, Boolean, Integer, List operations
+//! - **Spawn messages**: `Class spawn`, `Class spawnWith: args` → `gen_server:start_link`
+//! - **Await messages**: `future await` → Blocking future resolution
+//! - **Super sends**: `super methodName:` → Parent class dispatch
+//!
+//! # Domain Concepts
+//!
+//! - **Receiver**: The target object receiving the message
+//! - **Selector**: The message name (unary, binary, or keyword)
+//! - **Arguments**: Parameters for keyword messages
+//! - **Future**: Asynchronous result container
+
+use super::{CodeGenError, CoreErlangGenerator, Result};
+use crate::ast::{Expression, MessageSelector};
+use std::fmt::Write;
+
+impl CoreErlangGenerator {
+    /// Generates code for a message send.
+    ///
+    /// This is the **main entry point** for message compilation. It dispatches
+    /// to specialized handlers for different message patterns, and falls back
+    /// to the async protocol for user-defined messages.
+    ///
+    /// # Message Dispatch Strategy
+    ///
+    /// 1. **Super sends** → `generate_super_send`
+    /// 2. **Binary operators** → `generate_binary_op` (synchronous)
+    /// 3. **Block messages** → `try_generate_block_message` (synchronous)
+    /// 4. **String messages** → `try_generate_string_message` (synchronous)
+    /// 5. **Dictionary messages** → `try_generate_dictionary_message` (synchronous)
+    /// 6. **Boolean messages** → `try_generate_boolean_message` (synchronous)
+    /// 7. **Integer messages** → `try_generate_integer_message` (synchronous)
+    /// 8. **List messages** → `try_generate_list_message` (synchronous)
+    /// 9. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
+    /// 10. **Await messages** → Blocking future resolution
+    /// 11. **Default** → Async actor message with future
+    pub(super) fn generate_message_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        // Special case: super message send
+        // Super calls invoke the superclass implementation
+        if matches!(receiver, Expression::Super(_)) {
+            return self.generate_super_send(selector, arguments);
+        }
+
+        // For binary operators, use Erlang's built-in operators (these are synchronous)
+        if let MessageSelector::Binary(op) = selector {
+            return self.generate_binary_op(op, receiver, arguments);
+        }
+
+        // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
+        // These are synchronous function calls, not async actor messages
+        if let Some(result) = self.try_generate_block_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: String methods - synchronous Erlang string operations
+        // Check BEFORE Dictionary because both use at: but string handles literal strings
+        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: Dictionary/Map methods - direct calls to Erlang maps module
+        // These are synchronous operations, not async actor messages
+        if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: Boolean methods - synchronous case expressions
+        // ifTrue:ifFalse:, and:, or:, not generate direct Erlang case expressions
+        if let Some(result) = self.try_generate_boolean_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: Integer methods - synchronous Erlang operations
+        // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
+        if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: List/Array methods - synchronous Erlang list operations
+        // do:, collect:, select:, inject:into: generate direct iteration
+        if let Some(result) = self.try_generate_list_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
+        // Special case: unary "spawn" message on a class/identifier
+        // This creates a new actor instance via gen_server:start_link
+        if let MessageSelector::Unary(name) = selector {
+            if name == "spawn" && arguments.is_empty() {
+                if let Expression::Identifier(id) = receiver {
+                    // Generate: call 'module':'spawn'()
+                    // Convert class name to module name (CamelCase -> snake_case)
+                    let module_name = Self::to_module_name(&id.name);
+                    write!(self.output, "call '{module_name}':'spawn'()")?;
+                    return Ok(());
+                }
+            }
+
+            // Special case: "await" is a blocking operation on a future
+            if name == "await" && arguments.is_empty() {
+                return self.generate_await(receiver);
+            }
+        }
+
+        // Special case: "spawnWith:" keyword message on a class/identifier
+        // This creates a new actor instance with initialization arguments
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
+                if let Expression::Identifier(id) = receiver {
+                    // Generate: call 'module':'spawn'(InitArgs)
+                    let module_name = Self::to_module_name(&id.name);
+                    write!(self.output, "call '{module_name}':'spawn'(")?;
+                    self.generate_expression(&arguments[0])?;
+                    write!(self.output, ")")?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // Generate the async message send protocol:
+        // let Receiver1 = <receiver expression>
+        // in let Pid1 = call 'erlang':'element'(4, Receiver1)  % Extract pid from #beamtalk_object{}
+        // in let Future1 = call 'beamtalk_future':'new'()
+        // in let _ = call 'gen_server':'cast'(Pid1, {Selector, Args, Future1})
+        //    in Future1
+        //
+        // Use fresh_var to avoid shadowing in nested message sends
+
+        let receiver_var = self.fresh_var("Receiver");
+        let pid_var = self.fresh_var("Pid");
+        let future_var = self.fresh_var("Future");
+
+        // Bind receiver to a variable
+        write!(self.output, "let {receiver_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in ")?;
+
+        // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+        // Record tuple is: {'beamtalk_object', Class, ClassMod, Pid}
+        write!(
+            self.output,
+            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+        )?;
+
+        // Create future
+        write!(
+            self.output,
+            "let {future_var} = call 'beamtalk_future':'new'() in "
+        )?;
+
+        // Build the message tuple: {Selector, Args, Future}
+        write!(
+            self.output,
+            "let _ = call 'gen_server':'cast'({pid_var}, {{"
+        )?;
+
+        // First element: the selector name as an atom
+        write!(self.output, "'")?;
+        match selector {
+            MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+            MessageSelector::Keyword(parts) => {
+                let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                write!(self.output, "{name}")?;
+            }
+            // Binary selectors are handled above and should not reach here.
+            MessageSelector::Binary(op) => {
+                return Err(CodeGenError::Internal(format!(
+                    "unexpected binary selector in generate_message_send: {op}"
+                )));
+            }
+        }
+        write!(self.output, "', [")?;
+
+        // Second element: list of message arguments
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        // Third element: the future variable
+        write!(self.output, "], {future_var}}}) in {future_var}")?;
+
+        Ok(())
+    }
+
+    /// Checks if an expression is a field assignment (`self.field := value`).
+    ///
+    /// This is used to detect state mutations that require threading through
+    /// control flow constructs.
+    pub(super) fn is_field_assignment(expr: &Expression) -> bool {
+        if let Expression::Assignment { target, .. } = expr {
+            if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    return recv_id.name == "self";
+                }
+            }
+        }
+        false
+    }
+
+    /// Checks if an expression is a local variable assignment (`identifier := value`).
+    pub(super) fn is_local_var_assignment(expr: &Expression) -> bool {
+        if let Expression::Assignment { target, .. } = expr {
+            matches!(target.as_ref(), Expression::Identifier(_))
+        } else {
+            false
+        }
+    }
+
+    /// Checks if an expression is a super message send (`super methodName:`).
+    pub(super) fn is_super_message_send(expr: &Expression) -> bool {
+        if let Expression::MessageSend { receiver, .. } = expr {
+            matches!(receiver.as_ref(), Expression::Super(_))
+        } else {
+            false
+        }
+    }
+
+    /// Generates the opening part of a field assignment with state threading.
+    ///
+    /// For `self.field := value`, generates:
+    /// ```erlang
+    /// let _Val = <value> in
+    /// let StateN = call 'maps':'put'('field', _Val, StateN-1) in
+    /// ```
+    ///
+    /// The caller is responsible for closing the expression (generating the body
+    /// that uses the new state).
+    pub(super) fn generate_field_assignment_open(&mut self, expr: &Expression) -> Result<()> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                let val_var = self.fresh_temp_var("Val");
+                let current_state = self.current_state_var();
+
+                // let _Val = <value> in
+                write!(self.output, "let {val_var} = ")?;
+                self.generate_expression(value)?;
+
+                // Increment state version for the new state after assignment
+                let new_state = self.next_state_var();
+
+                // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
+                // Note: we do NOT close with the value - subsequent expressions are the body
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                    field.name
+                )?;
+
+                return Ok(());
+            }
+        }
+        // Fallback: should not reach here if is_field_assignment check was correct
+        self.generate_expression(expr)
+    }
+
+    /// Generates code for a super message send.
+    ///
+    /// Super calls use `beamtalk_classes:super_dispatch/3` to invoke the superclass
+    /// implementation. This is case #1 in the message dispatch strategy - super sends
+    /// are handled before any other message type.
+    ///
+    /// # Example
+    ///
+    /// ```beamtalk
+    /// super increment
+    /// super getValue
+    /// super at: 1 put: value
+    /// ```
+    ///
+    /// Generates:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_classes':'super_dispatch'(State, 'increment', [])
+    /// call 'beamtalk_classes':'super_dispatch'(State, 'getValue', [])
+    /// call 'beamtalk_classes':'super_dispatch'(State, 'at:put:', [1, Value])
+    /// ```
+    pub(super) fn generate_super_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        // Build the selector atom
+        let selector_atom = match selector {
+            MessageSelector::Unary(name) => name.to_string(),
+            MessageSelector::Binary(op) => op.to_string(),
+            MessageSelector::Keyword(parts) => {
+                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+            }
+        };
+
+        // Generate: call 'beamtalk_classes':'super_dispatch'(State, 'selector', [Args])
+        write!(
+            self.output,
+            "call 'beamtalk_classes':'super_dispatch'({}, '{selector_atom}', [",
+            self.current_state_var()
+        )?;
+
+        // Generate arguments
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "])")?;
+        Ok(())
+    }
+}
