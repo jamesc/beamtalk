@@ -10,6 +10,12 @@ cd "$(dirname "$0")/.."
 
 echo "Compiling test fixtures..."
 
+# Check if beamtalk binary exists
+if [ ! -f ./target/debug/beamtalk ]; then
+    echo "  ⚠️  beamtalk binary not found, building..."
+    cargo build --bin beamtalk
+fi
+
 # Build counter fixture
 echo "  Building counter.bt..."
 ./target/debug/beamtalk build tests/fixtures/counter.bt || true  # May report error even on success
