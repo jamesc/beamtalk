@@ -298,8 +298,9 @@ dispatch(Selector, Args, State) ->
 handle_dnu(Selector, Args, Self, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find('doesNotUnderstand:args:', Methods) of
-        {ok, DnuFun} when is_function(DnuFun, 4) ->
+        {ok, DnuFun} when is_function(DnuFun, 3) ->
             %% New-style DNU handler with Self parameter
+            %% DNU handlers receive ([Selector, Args], Self, State) - 3 args
             try
                 DnuFun([Selector, Args], Self, State)
             catch

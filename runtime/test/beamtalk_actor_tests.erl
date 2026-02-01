@@ -663,3 +663,15 @@ dispatch4_mixed_methods_test() ->
     ?assertMatch({beamtalk_object, 'MixedActor', _, _}, Self),
     
     gen_server:stop(Actor).
+
+dispatch4_dnu_with_self_test() ->
+    %% Test new-style DNU handler (Fun/3) with Self parameter
+    {ok, Actor} = test_self_aware_proxy:start_link(),
+    
+    %% Call unknown method - should trigger DNU handler which returns Self
+    Result = gen_server:call(Actor, {unknownMethod, [arg1, arg2]}),
+    
+    %% DNU handler should return Self
+    ?assertMatch({beamtalk_object, 'SelfAwareProxy', 'test_self_aware_proxy', _}, Result),
+    
+    gen_server:stop(Actor).
