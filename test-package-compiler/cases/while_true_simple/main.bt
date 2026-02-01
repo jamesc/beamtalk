@@ -24,3 +24,12 @@ testBlockParam := [
     ] value: 0.
     ^result
 ].
+
+// Test whileFalse with block parameter mutation (BT-142 PR review fix)
+testBlockParamWhileFalse := [
+    result := [:n |
+        [n = 0] whileFalse: [n := n - 1].
+        n
+    ] value: 5.
+    ^result
+].

@@ -90,6 +90,8 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
             let X = 0 in let X = letrec '_Loop2'/1 = fun (X) -> case call 'erlang':'<'(X, 5) of <'true'> when 'true' -> let X1 = call 'erlang':'+'(X, 1) in  apply '_Loop2'/1 (X1) <'false'> when 'true' -> X end in apply '_Loop2'/1 (X) in let _Result = X in {'reply', _Result, State}
         <'testBlockParam'> when 'true' ->
             let Result = let _Fun3 = fun (_x4) -> let _x4 = letrec '_Loop5'/1 = fun (X) -> case call 'erlang':'<'(X, 5) of <'true'> when 'true' -> let X1 = call 'erlang':'+'(X, 1) in  apply '_Loop5'/1 (X1) <'false'> when 'true' -> X end in apply '_Loop5'/1 (_x4) in _x4 in apply _Fun3 (0) in let _Result = Result in {'reply', _Result, State}
+        <'testBlockParamWhileFalse'> when 'true' ->
+            let Result = let _Fun6 = fun (_n7) -> let _n7 = letrec '_Loop8'/1 = fun (N) -> case call 'erlang':'=:='(N, 0) of <'false'> when 'true' -> let N1 = call 'erlang':'-'(N, 1) in  apply '_Loop8'/1 (N1) <'true'> when 'true' -> N end in apply '_Loop8'/1 (_n7) in _n7 in apply _Fun6 (5) in let _Result = Result in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
@@ -107,6 +109,6 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
 
 
 'method_table'/0 = fun () ->
-    ~{'test' => 0, 'testLocal' => 0, 'testBlockParam' => 0}~
+    ~{'test' => 0, 'testLocal' => 0, 'testBlockParam' => 0, 'testBlockParamWhileFalse' => 0}~
 
 end
