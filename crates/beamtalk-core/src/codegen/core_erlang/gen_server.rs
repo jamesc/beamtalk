@@ -14,7 +14,7 @@
 //! - Method table generation
 
 use super::{CoreErlangGenerator, Result};
-use crate::ast::{Expression, MethodKind, Module};
+use crate::ast::{ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -424,6 +424,279 @@ impl CoreErlangGenerator {
         writeln!(self.output, "}}~")?;
         self.indent -= 1;
         writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `safe_dispatch/3` function with error isolation.
+    ///
+    /// Per BT-29 design doc (following LFE Flavors pattern), errors in method
+    /// dispatch are caught and returned to the caller rather than crashing
+    /// the actor instance.
+    ///
+    /// Note: Core Erlang try expression uses simple variable patterns (not case-style).
+    /// Stacktrace is captured but not returned to caller to prevent information leakage.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
+    ///     try call 'module':'dispatch'(Selector, Args, State)
+    ///     of Result -> Result
+    ///     catch <Type, Error, _Stacktrace> ->
+    ///         {'error', {Type, Error}, State}
+    /// ```
+    pub(super) fn generate_safe_dispatch(&mut self) -> Result<()> {
+        writeln!(
+            self.output,
+            "'safe_dispatch'/3 = fun (Selector, Args, State) ->"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        // Core Erlang try uses simple variable patterns in of/catch, not case-style <Pattern> when Guard
+        writeln!(
+            self.output,
+            "try call '{}':'dispatch'(Selector, Args, State)",
+            self.module_name
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "of Result -> Result")?;
+        self.write_indent()?;
+        // Capture but don't return stacktrace to prevent information leakage to callers
+        writeln!(
+            self.output,
+            "catch <Type, Error, _Stacktrace> -> {{'error', {{Type, Error}}, State}}"
+        )?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the dispatch/3 function for message routing.
+    ///
+    /// This function is complex because it handles both legacy expression-based modules
+    /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "dispatch codegen is inherently complex"
+    )]
+    pub(super) fn generate_dispatch(&mut self, module: &Module) -> Result<()> {
+        writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, State) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Selector of")?;
+        self.indent += 1;
+
+        // Generate case clause for each method in the module (legacy expression-based)
+        for expr in &module.expressions {
+            if let Expression::Assignment { target, value, .. } = expr {
+                if let (Expression::Identifier(id), Expression::Block(block)) =
+                    (target.as_ref(), value.as_ref())
+                {
+                    // Reset state version at the start of each method
+                    self.reset_state_version();
+
+                    // Push a new scope for this method's parameter bindings
+                    self.push_scope();
+
+                    self.write_indent()?;
+                    write!(self.output, "<'{}'> when 'true' ->", id.name)?;
+                    writeln!(self.output)?;
+                    self.indent += 1;
+
+                    // Bind block parameters from Args list
+                    if !block.parameters.is_empty() {
+                        self.write_indent()?;
+                        write!(self.output, "case Args of")?;
+                        writeln!(self.output)?;
+                        self.indent += 1;
+
+                        self.write_indent()?;
+                        write!(self.output, "<[")?;
+                        for (i, param) in block.parameters.iter().enumerate() {
+                            if i > 0 {
+                                write!(self.output, ", ")?;
+                            }
+                            let var_name = self.fresh_var(&param.name);
+                            write!(self.output, "{var_name}")?;
+                        }
+                        write!(self.output, "]> when 'true' ->")?;
+                        writeln!(self.output)?;
+                        self.indent += 1;
+                    }
+
+                    // Generate the method body with state threading
+                    // For state threading to work, we can't wrap in "let Result = ... in"
+                    // because that would put State{n} bindings out of scope for the reply.
+                    // Instead, we generate the state threading let bindings directly,
+                    // and then generate the reply tuple inline.
+                    self.write_indent()?;
+                    self.generate_method_body_with_reply(block)?;
+                    writeln!(self.output)?;
+
+                    if !block.parameters.is_empty() {
+                        self.indent -= 1;
+                        self.write_indent()?;
+                        writeln!(
+                            self.output,
+                            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+                        )?;
+                        self.indent -= 1;
+                        self.write_indent()?;
+                        writeln!(self.output, "end")?;
+                    }
+
+                    self.indent -= 1;
+
+                    // Pop the scope when done with this method
+                    self.pop_scope();
+                }
+            }
+        }
+
+        // Generate case clauses for methods in class definitions
+        for class in &module.classes {
+            self.generate_class_method_dispatches(class)?;
+        }
+
+        // Default case for unknown messages - try doesNotUnderstand:args: first (per BT-29)
+        self.write_indent()?;
+        writeln!(self.output, "<OtherSelector> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Try doesNotUnderstand:args: fallback (BT-29)"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let DnuSelector = 'doesNotUnderstand:args:' in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Methods = call 'maps':'get'('__methods__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'maps':'is_key'(DnuSelector, Methods) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Call doesNotUnderstand:args: with [Selector, Args]"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{}':'dispatch'(DnuSelector, [OtherSelector, Args], State)",
+            self.module_name
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% No DNU handler - return unknown_message error"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassName = call 'maps':'get'('__class__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'error', {{'unknown_message', OtherSelector, ClassName}}, State}}"
+        )?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates dispatch case clauses for all methods in a class definition.
+    pub(super) fn generate_class_method_dispatches(&mut self, class: &ClassDefinition) -> Result<()> {
+        for method in &class.methods {
+            // Only generate dispatch for primary methods for now
+            if method.kind == MethodKind::Primary {
+                self.generate_method_dispatch(method)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Generates a single method dispatch case clause.
+    pub(super) fn generate_method_dispatch(&mut self, method: &MethodDefinition) -> Result<()> {
+        // Reset state version at the start of each method
+        self.reset_state_version();
+
+        // Push a new scope for this method's parameter bindings
+        self.push_scope();
+
+        let selector_name = method.selector.name();
+        self.write_indent()?;
+        write!(self.output, "<'{selector_name}'> when 'true' ->")?;
+        writeln!(self.output)?;
+        self.indent += 1;
+
+        // Bind method parameters from Args list
+        if !method.parameters.is_empty() {
+            self.write_indent()?;
+            write!(self.output, "case Args of")?;
+            writeln!(self.output)?;
+            self.indent += 1;
+
+            self.write_indent()?;
+            write!(self.output, "<[")?;
+            for (i, param) in method.parameters.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                let var_name = self.fresh_var(&param.name);
+                write!(self.output, "{var_name}")?;
+            }
+            write!(self.output, "]> when 'true' ->")?;
+            writeln!(self.output)?;
+            self.indent += 1;
+        }
+
+        // Generate the method body with state threading
+        self.write_indent()?;
+        self.generate_method_definition_body_with_reply(method)?;
+        writeln!(self.output)?;
+
+        if !method.parameters.is_empty() {
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+            )?;
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "end")?;
+        }
+
+        self.indent -= 1;
+
+        // Pop the scope when done with this method
+        self.pop_scope();
 
         Ok(())
     }
