@@ -700,4 +700,44 @@ impl CoreErlangGenerator {
 
         Ok(())
     }
+
+    /// Generates the initial state fields for the actor's state map.
+    ///
+    /// Includes:
+    /// - Literal field values from module-level assignments
+    /// - State declarations from class definitions with their default values
+    pub(super) fn generate_initial_state_fields(&mut self, module: &Module) -> Result<()> {
+        // Initialize fields from module expressions (assignments at top level)
+        // Only include literal values - blocks are methods handled by dispatch/3
+        for expr in &module.expressions {
+            if let Expression::Assignment { target, value, .. } = expr {
+                if let Expression::Identifier(id) = target.as_ref() {
+                    // Only generate field if it's a simple literal (not a block/method)
+                    if matches!(value.as_ref(), Expression::Literal(..)) {
+                        self.write_indent()?;
+                        write!(self.output, ", '{}' => ", id.name)?;
+                        self.generate_expression(value)?;
+                        writeln!(self.output)?;
+                    }
+                }
+            }
+        }
+
+        // Initialize fields from class state declarations
+        for class in &module.classes {
+            for state in &class.state {
+                self.write_indent()?;
+                write!(self.output, ", '{}' => ", state.name.name)?;
+                if let Some(ref default_value) = state.default_value {
+                    self.generate_expression(default_value)?;
+                } else {
+                    // No default value - initialize to nil
+                    write!(self.output, "'nil'")?;
+                }
+                writeln!(self.output)?;
+            }
+        }
+
+        Ok(())
+    }
 }

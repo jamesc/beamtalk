@@ -528,14 +528,6 @@ impl CoreErlangGenerator {
                     ..
                 } = expr
                 {
-                    let selector_atom = match selector {
-                        MessageSelector::Unary(name) => name.to_string(),
-                        MessageSelector::Binary(op) => op.to_string(),
-                        MessageSelector::Keyword(parts) => {
-                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-                        }
-                    };
-
                     write!(self.output, "let _Unit = ")?;
                     self.generate_message_send(expr, selector, arguments)?;
                     write!(self.output, " in ")?;

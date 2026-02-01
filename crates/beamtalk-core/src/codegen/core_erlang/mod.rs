@@ -82,10 +82,7 @@ mod expressions;
 mod gen_server;
 mod util;
 
-use crate::ast::{
-    Block, ClassDefinition, Expression, Identifier, MessageSelector, MethodDefinition, MethodKind,
-    Module,
-};
+use crate::ast::{Block, Expression, MessageSelector, MethodDefinition, Module};
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -3067,46 +3064,6 @@ impl CoreErlangGenerator {
             }
         }
         write!(self.output, ")")?;
-
-        Ok(())
-    }
-
-    /// Generates code for binary operators.
-    /// Generates field initialization code for the initial state map.
-    ///
-    /// This extracts the common logic of initializing fields from module-level
-    /// assignments, used by both `spawn/0` and `init/1`.
-    fn generate_initial_state_fields(&mut self, module: &Module) -> Result<()> {
-        // Initialize fields from module expressions (assignments at top level)
-        // Only include literal values - blocks are methods handled by dispatch/3
-        for expr in &module.expressions {
-            if let Expression::Assignment { target, value, .. } = expr {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    // Only generate field if it's a simple literal (not a block/method)
-                    if matches!(value.as_ref(), Expression::Literal(..)) {
-                        self.write_indent()?;
-                        write!(self.output, ", '{}' => ", id.name)?;
-                        self.generate_expression(value)?;
-                        writeln!(self.output)?;
-                    }
-                }
-            }
-        }
-
-        // Initialize fields from class state declarations
-        for class in &module.classes {
-            for state in &class.state {
-                self.write_indent()?;
-                write!(self.output, ", '{}' => ", state.name.name)?;
-                if let Some(ref default_value) = state.default_value {
-                    self.generate_expression(default_value)?;
-                } else {
-                    // No default value - initialize to nil
-                    write!(self.output, "'nil'")?;
-                }
-                writeln!(self.output)?;
-            }
-        }
 
         Ok(())
     }
