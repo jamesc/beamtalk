@@ -73,8 +73,8 @@ mod gen_server;
 mod util;
 
 use crate::ast::{
-    Block, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, Module,
+    Block, ClassDefinition, Expression, Identifier, MessageSelector, MethodDefinition, MethodKind,
+    Module,
 };
 use std::collections::HashMap;
 use std::fmt::{self, Write};
