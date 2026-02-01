@@ -436,4 +436,117 @@ impl CoreErlangGenerator {
             Ok(())
         }
     }
+
+    pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<()> {
+        if block.body.is_empty() {
+            write!(self.output, "'nil'")?;
+            return Ok(());
+        }
+
+        // Generate body expressions in sequence
+        // For state threading to work correctly, field assignments must leave
+        // their let bindings OPEN so that State{n} is visible to subsequent expressions.
+        //
+        // For a block like: [self.value := self.value + 1. ^self.value]
+        // We need:
+        //   let _Val1 = ... in let State1 = ... in <return expression>
+        // NOT:
+        //   let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>
+        //
+        // The difference is crucial: in the first form, State1 is visible in <return expression>.
+        //
+        // Similarly, for local variable assignments like: [count := 0. count + 1]
+        // We need:
+        //   let Count = 0 in Count + 1
+        // NOT:
+        //   let _seq1 = 0 in <expression that can't see Count>
+
+        for (i, expr) in block.body.iter().enumerate() {
+            let is_last = i == block.body.len() - 1;
+            let is_field_assignment = Self::is_field_assignment(expr);
+            let is_local_assignment = Self::is_local_var_assignment(expr);
+
+            if is_last {
+                // Last expression: generate directly (its value is the block's result)
+                self.generate_expression(expr)?;
+            } else if is_field_assignment {
+                // Field assignment not at end: generate WITHOUT closing the value
+                // This leaves the let bindings open for subsequent expressions
+                self.generate_field_assignment_open(expr)?;
+            } else if is_local_assignment {
+                // Local variable assignment: generate with proper binding
+                if let Expression::Assignment { target, value, .. } = expr {
+                    // Check if we're storing a block with mutations (ERROR)
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        // Determine the Core Erlang variable name:
+                        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
+                        // - Otherwise, create a new Core Erlang variable name.
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        // Generate: let VarName = <value> in ...
+                        // Important: do NOT update the mapping before generating the RHS,
+                        // so that any uses of the variable in the RHS see the previous binding.
+                        write!(self.output, "let {core_var} = ")?;
+                        self.generate_expression(value)?;
+                        // Now update the mapping so subsequent expressions see this binding.
+                        self.bind_var(var_name, &core_var);
+                        write!(self.output, " in ")?;
+                    }
+                }
+            } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
+                // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
+                // For single var, the loop returns its final value directly
+                // For multiple vars, we'd need a tuple (not yet supported)
+                if threaded_vars.len() == 1 {
+                    let var = &threaded_vars[0];
+                    // Get the Core Erlang variable name for this var
+                    let core_var = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    write!(self.output, "let {core_var} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
+                } else {
+                    // Multi-var case not supported yet
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "Multiple threaded variables in control flow".to_string(),
+                        location: "generate_block_body".to_string(),
+                    });
+                }
+            } else {
+                // Not an assignment or loop - generate and discard result
+                // Manually generate super_dispatch call with current state
+                if let Expression::MessageSend {
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                {
+                    let selector_atom = match selector {
+                        MessageSelector::Unary(name) => name.to_string(),
+                        MessageSelector::Binary(op) => op.to_string(),
+                        MessageSelector::Keyword(parts) => {
+                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                        }
+                    };
+
+                    write!(self.output, "let _Unit = ")?;
+                    self.generate_message_send(expr, selector, arguments)?;
+                    write!(self.output, " in ")?;
+                } else {
+                    write!(self.output, "let _Unit = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
