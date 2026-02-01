@@ -586,12 +586,6 @@ concurrent_doesNotUnderstand_test() ->
 
 make_self_test() ->
     %% Test that make_self/1 constructs a proper #beamtalk_object{} record
-    State = #{
-        '__class__' => 'Counter',
-        '__class_mod__' => 'counter',
-        value => 42
-    },
-    
     %% Start an actor to get a valid pid context
     {ok, Pid} = test_counter:start_link(0),
     
@@ -673,5 +667,21 @@ dispatch4_dnu_with_self_test() ->
     
     %% DNU handler should return Self
     ?assertMatch({beamtalk_object, 'SelfAwareProxy', 'test_self_aware_proxy', _}, Result),
+    
+    gen_server:stop(Actor).
+
+dispatch4_async_with_self_test() ->
+    %% Test async messages work with new-style methods (Fun/4)
+    {ok, Actor} = test_self_aware_actor:start_link(0),
+    
+    %% Send async message to getSelf method
+    Future = beamtalk_future:new(),
+    gen_server:cast(Actor, {getSelf, [], Future}),
+    
+    %% Wait for result
+    Result = beamtalk_future:await(Future),
+    
+    %% Should return Self
+    ?assertMatch({beamtalk_object, 'SelfAwareActor', 'test_self_aware_actor', _}, Result),
     
     gen_server:stop(Actor).
