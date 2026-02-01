@@ -533,19 +533,19 @@ impl CoreErlangGenerator {
 
                     // `whileTrue:` - loop while condition block returns true
                     "whileTrue:" => {
-                        self.generate_while_true(receiver, arguments)?;
+                        self.generate_while_true(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
 
                     // `whileFalse:` - loop while condition block returns false
                     "whileFalse:" => {
-                        self.generate_while_false(receiver, arguments)?;
+                        self.generate_while_false(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
 
                     // `timesRepeat:` - repeat body N times
                     "timesRepeat:" => {
-                        self.generate_times_repeat(receiver, arguments)?;
+                        self.generate_times_repeat(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
 
