@@ -8,6 +8,29 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 
 ---
 
+## Table of Contents
+
+- [String Encoding and UTF-8](#string-encoding-and-utf-8)
+- [Core Syntax](#core-syntax)
+- [Async Message Passing](#async-message-passing)
+- [Pattern Matching (Erlang-inspired)](#pattern-matching-erlang-inspired)
+- [Pipe Operator (Elixir-inspired)](#pipe-operator-elixir-inspired)
+- [With Blocks (Elixir/Gleam-inspired)](#with-blocks-elixirgleam-inspired)
+- [Result Type (Gleam-inspired)](#result-type-gleam-inspired)
+- [Comprehensions (Elixir-inspired)](#comprehensions-elixir-inspired)
+- [Supervision (OTP-inspired)](#supervision-otp-inspired)
+- [Live Patching](#live-patching)
+- [Protocols (Elixir-inspired)](#protocols-elixir-inspired)
+- [Optional Type Annotations (Dylan-inspired)](#optional-type-annotations-dylan-inspired)
+- [Conditions and Restarts (Dylan-inspired)](#conditions-and-restarts-dylan-inspired)
+- [Method Combinations (Dylan/CLOS-inspired)](#method-combinations-dylanclos-inspired)
+- [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
+- [Tooling](#tooling)
+- [Inspiration Sources](#inspiration-sources)
+- [References](#references)
+
+---
+
 ## String Encoding and UTF-8
 
 **Beamtalk strings are UTF-8 by default.** This follows modern BEAM conventions and matches Elixir's approach.
