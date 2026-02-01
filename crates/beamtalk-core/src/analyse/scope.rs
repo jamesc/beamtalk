@@ -51,17 +51,21 @@ impl Scope {
 
     /// Exits the current scope.
     ///
-    /// # Panics
-    /// Panics if attempting to pop the module-level scope (depth 0).
-    pub fn pop(&mut self) {
-        assert!(self.levels.len() > 1, "Cannot pop module-level scope");
-        self.levels.pop();
+    /// Returns `true` if a scope was popped, `false` if already at module level (depth 0).
+    /// This method will not panic; attempting to pop the module-level scope is a no-op.
+    pub fn pop(&mut self) -> bool {
+        if self.levels.len() > 1 {
+            self.levels.pop();
+            true
+        } else {
+            false
+        }
     }
 
-    /// Defines a variable in the current scope.
+    /// Defines or redefines a variable in the current scope.
     ///
     /// If a variable with the same name already exists in the current scope,
-    /// it will be redefined (shadowed).
+    /// its existing binding in this scope will be overwritten.
     ///
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
@@ -73,7 +77,7 @@ impl Scope {
             depth,
         };
 
-        // SAFETY: levels always contains at least the module-level scope
+        // INVARIANT: levels always contains at least the module-level scope
         self.levels
             .last_mut()
             .expect("levels should never be empty")
@@ -167,18 +171,24 @@ mod tests {
         scope.push();
         assert_eq!(scope.current_depth(), 2);
 
-        scope.pop();
+        assert!(scope.pop()); // Returns true when successful
         assert_eq!(scope.current_depth(), 1);
 
-        scope.pop();
+        assert!(scope.pop()); // Returns true when successful
+        assert_eq!(scope.current_depth(), 0);
+
+        assert!(!scope.pop()); // Returns false at module level
         assert_eq!(scope.current_depth(), 0);
     }
 
     #[test]
-    #[should_panic(expected = "Cannot pop module-level scope")]
-    fn pop_panics_at_module_level() {
+    fn pop_returns_false_at_module_level() {
         let mut scope = Scope::new();
-        scope.pop();
+        assert_eq!(scope.current_depth(), 0);
+
+        // Attempting to pop at module level returns false (no-op)
+        assert!(!scope.pop());
+        assert_eq!(scope.current_depth(), 0); // Still at module level
     }
 
     #[test]
