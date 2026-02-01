@@ -1,0 +1,135 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test non-nil objects' nil-testing protocol (inherited from Actor)
+
+// ═══════════════════════════════════════════════════════════════════════
+// Basic Testing Methods (Non-Nil Objects)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Test isNil / notNil on integers
+result1 := 42 isNil       // => false
+result2 := 42 notNil      // => true
+result3 := 0 isNil        // => false (zero is not nil!)
+
+// Test isNil / notNil on strings
+result4 := 'hello' isNil   // => false
+result5 := 'hello' notNil  // => true
+result6 := '' isNil        // => false (empty string is not nil!)
+
+// Test isNil / notNil on booleans
+result7 := true isNil      // => false
+result8 := true notNil     // => true
+result9 := false isNil     // => false (false is not nil!)
+result10 := false notNil   // => true
+
+// ═══════════════════════════════════════════════════════════════════════
+// Control Flow Methods (Non-Nil Objects)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Test ifNil: returns self without evaluating block
+result11 := 42 ifNil: ['default']  // => 42
+
+// Test ifNotNil: evaluates block with receiver as argument
+result12 := 42 ifNotNil: [:val | val + 1]  // => 43
+
+// Test ifNil:ifNotNil: evaluates notNilBlock with receiver
+result13 := 'hello' ifNil: ['was nil'] ifNotNil: [:val | val uppercase]  // => 'HELLO'
+
+// Test ifNotNil:ifNil: (reversed order) evaluates notNilBlock with receiver
+result14 := 10 ifNotNil: [:val | val * 2] ifNil: [0]  // => 20
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Block Receives Receiver
+// ═══════════════════════════════════════════════════════════════════════
+
+// Verify block receives the receiver as argument
+result15 := 100 ifNotNil: [:x | x + 50]  // => 150
+result16 := 'test' ifNotNil: [:str | str size]  // => 4
+
+// Multiple operations on the passed value
+result17 := 5 ifNotNil: [:n | (n * 2) + 3]  // => 13
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Chaining and Composition
+// ═══════════════════════════════════════════════════════════════════════
+
+// Chaining: ifNotNil: result in further computation
+result18 := (42 ifNotNil: [:v | v * 2]) + 10  // => 94
+
+// Nested ifNotNil: - both evaluate
+result19 := 10 ifNotNil: [:outer | outer ifNotNil: [:inner | inner + 5]]  // => 15
+
+// ifNil: on non-nil returns self, can chain
+result20 := (100 ifNil: [0]) + 50  // => 150
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Boolean Logic Integration
+// ═══════════════════════════════════════════════════════════════════════
+
+// Combining notNil with boolean logic
+result21 := 42 notNil and: [true]   // => true
+result22 := 'test' isNil or: [false]  // => false
+
+// Using notNil result in ifTrue:ifFalse:
+result23 := 100 notNil ifTrue: ['is not nil'] ifFalse: ['is nil']  // => 'is not nil'
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Different Object Types
+// ═══════════════════════════════════════════════════════════════════════
+
+// Blocks are not nil
+result24 := [42] isNil       // => false
+result25 := [:x | x] isNil   // => false
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: ifNil: Should NOT Evaluate Block
+// ═══════════════════════════════════════════════════════════════════════
+
+// Verify ifNil: doesn't evaluate by checking return equals receiver
+result26 := (42 ifNil: [9999]) = 42  // => true
+
+// ifNil: with complex block expression (should not evaluate)
+result27 := 10 ifNil: [1 + 2 * 3]  // => 10 (not 7)
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Mixed nil and non-nil in Expressions
+// ═══════════════════════════════════════════════════════════════════════
+
+// Assign value based on isNil test
+value := 42
+result28 := value isNil ifTrue: [0] ifFalse: [value]  // => 42
+
+// Use ifNotNil: to safely transform
+value2 := 10
+result29 := value2 ifNotNil: [:v | v * 3]  // => 30
+
+// Compare with nil's behavior (for contrast)
+result30 := nil ifNil: ['nil case'] ifNotNil: [:v | 'not nil case']  // => 'nil case'
+result31 := 42 ifNil: ['nil case'] ifNotNil: [:v | 'not nil case']   // => 'not nil case'
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge Cases: Return Value Verification
+// ═══════════════════════════════════════════════════════════════════════
+
+// ifNotNil: returns block result
+result32 := (5 ifNotNil: [:x | x * 10]) = 50  // => true
+
+// ifNil: returns self unchanged
+result33 := (100 ifNil: [0]) = 100  // => true
+
+// ═══════════════════════════════════════════════════════════════════════
+// Real-World Usage Patterns
+// ═══════════════════════════════════════════════════════════════════════
+
+// Safe access pattern with ifNotNil:
+userName := 'Alice'
+greeting := userName ifNotNil: [:name | 'Hello, ' + name + '!']  // => 'Hello, Alice!'
+
+// Default value pattern with ifNil:
+userInput := 42
+processedValue := userInput ifNil: [0]  // => 42
+
+// Transformation with default pattern
+maybeNumber := 7
+doubled := maybeNumber ifNil: [0] ifNotNil: [:n | n * 2]  // => 14
