@@ -15,7 +15,7 @@
 //! - Cascades
 
 use super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Block, Expression, Identifier, Literal, MapPair};
+use crate::ast::{Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -232,5 +232,208 @@ impl CoreErlangGenerator {
         self.generate_expression(future)?;
         write!(self.output, ")")?;
         Ok(())
+    }
+
+    /// Generates code for cascade expressions.
+    ///
+    /// Cascades send multiple messages to the same receiver using semicolon separators.
+    /// The receiver is evaluated once and each message is sent to that receiver.
+    ///
+    /// # Example
+    ///
+    /// ```beamtalk
+    /// collection add: 1; add: 2; add: 3
+    /// ```
+    ///
+    /// Generates:
+    ///
+    /// ```erlang
+    /// let Receiver = <evaluate collection> in
+    ///   let _ = <send add: 1 to Receiver> in
+    ///   let _ = <send add: 2 to Receiver> in
+    ///   <send add: 3 to Receiver>
+    /// ```
+    ///
+    /// The cascade returns the result of the final message.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "cascade codegen handles both normal and fallback paths"
+    )]
+    pub(super) fn generate_cascade(
+        &mut self,
+        receiver: &Expression,
+        messages: &[CascadeMessage],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            // Edge case: cascade with no messages just evaluates to the receiver
+            return self.generate_expression(receiver);
+        }
+
+        // The parser represents cascades such that `receiver` is the *first*
+        // message send expression, e.g. for:
+        //
+        //   counter increment; increment; getValue
+        //
+        // `receiver` is a MessageSend for `counter increment`, and `messages`
+        // holds the remaining cascade messages. We need to:
+        //   1. Evaluate the underlying receiver expression (`counter`) once,
+        //      bind it to a temp variable.
+        //   2. Send the first message (`increment`) and all subsequent
+        //      cascade messages to that same bound receiver.
+        if let Expression::MessageSend {
+            receiver: underlying_receiver,
+            selector: first_selector,
+            arguments: first_arguments,
+            ..
+        } = receiver
+        {
+            // Bind the underlying receiver once
+            let receiver_var = self.fresh_temp_var("Receiver");
+            write!(self.output, "let {receiver_var} = ")?;
+            self.generate_expression(underlying_receiver)?;
+            write!(self.output, " in ")?;
+
+            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+            let pid_var = self.fresh_temp_var("Pid");
+            write!(
+                self.output,
+                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+            )?;
+
+            // Total number of messages in the cascade: first + remaining
+            let total_messages = messages.len() + 1;
+
+            for index in 0..total_messages {
+                let is_last = index == total_messages - 1;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    write!(self.output, "let _ = ")?;
+                }
+
+                // Determine which selector/arguments to use:
+                // index 0 -> first message from the initial MessageSend
+                // index > 0 -> messages[index - 1]
+                let (selector, arguments): (&MessageSelector, &[Expression]) = if index == 0 {
+                    (first_selector, first_arguments.as_slice())
+                } else {
+                    let msg = &messages[index - 1];
+                    (&msg.selector, msg.arguments.as_slice())
+                };
+
+                // Generate async message send to the receiver pid variable
+                let future_var = self.fresh_var("Future");
+                write!(
+                    self.output,
+                    "let {future_var} = call 'beamtalk_future':'new'() in "
+                )?;
+                write!(
+                    self.output,
+                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
+                )?;
+
+                // Selector
+                write!(self.output, "'")?;
+                match selector {
+                    MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+                    MessageSelector::Keyword(parts) => {
+                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                        write!(self.output, "{name}")?;
+                    }
+                    MessageSelector::Binary(_) => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: "binary selectors in cascades".to_string(),
+                            location: "cascade message with binary selector".to_string(),
+                        });
+                    }
+                }
+                write!(self.output, "', [")?;
+
+                // Arguments
+                for (j, arg) in arguments.iter().enumerate() {
+                    if j > 0 {
+                        write!(self.output, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+
+                write!(self.output, "], {future_var}}}) in {future_var}")?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
+            }
+
+            Ok(())
+        } else {
+            // Fallback: if the receiver is not a MessageSend (which should not
+            // happen for well-formed cascades), preserve the previous behavior:
+            // evaluate the receiver once and send all cascade messages to it.
+            let receiver_var = self.fresh_temp_var("Receiver");
+            write!(self.output, "let {receiver_var} = ")?;
+            self.generate_expression(receiver)?;
+            write!(self.output, " in ")?;
+
+            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+            let pid_var = self.fresh_temp_var("Pid");
+            write!(
+                self.output,
+                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+            )?;
+
+            // Generate each message send, discarding intermediate results
+            for (i, message) in messages.iter().enumerate() {
+                let is_last = i == messages.len() - 1;
+
+                if !is_last {
+                    // For all but the last message, discard the result
+                    write!(self.output, "let _ = ")?;
+                }
+
+                // Generate async message send to the receiver pid variable
+                let future_var = self.fresh_var("Future");
+                write!(
+                    self.output,
+                    "let {future_var} = call 'beamtalk_future':'new'() in "
+                )?;
+                write!(
+                    self.output,
+                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
+                )?;
+
+                // Selector
+                write!(self.output, "'")?;
+                match &message.selector {
+                    MessageSelector::Unary(name) => write!(self.output, "{name}")?,
+                    MessageSelector::Keyword(parts) => {
+                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
+                        write!(self.output, "{name}")?;
+                    }
+                    MessageSelector::Binary(_) => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: "binary selectors in cascades".to_string(),
+                            location: "cascade message with binary selector".to_string(),
+                        });
+                    }
+                }
+                write!(self.output, "', [")?;
+
+                // Arguments
+                for (j, arg) in message.arguments.iter().enumerate() {
+                    if j > 0 {
+                        write!(self.output, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+
+                write!(self.output, "], {future_var}}}) in {future_var}")?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
+            }
+
+            Ok(())
+        }
     }
 }
