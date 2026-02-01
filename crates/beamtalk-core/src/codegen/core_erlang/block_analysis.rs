@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // Will be used when codegen is implemented
 pub struct BlockMutationAnalysis {
     /// Local variables that are read in the block.
     pub local_reads: HashSet<String>,
@@ -24,16 +25,19 @@ pub struct BlockMutationAnalysis {
 
 impl BlockMutationAnalysis {
     /// Creates a new empty analysis.
+    #[allow(dead_code)] // Will be used when codegen is implemented
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Returns true if the block has any mutations (local or field).
+    #[allow(dead_code)] // Will be used when codegen is implemented
     pub fn has_mutations(&self) -> bool {
         !self.local_writes.is_empty() || !self.field_writes.is_empty()
     }
 
     /// Returns all variables that need threading (read AND written).
+    #[allow(dead_code)] // Will be used when codegen is implemented
     pub fn threaded_vars(&self) -> HashSet<String> {
         self.local_reads
             .intersection(&self.local_writes)
@@ -42,6 +46,7 @@ impl BlockMutationAnalysis {
     }
 
     /// Returns all fields that need threading (read AND written).
+    #[allow(dead_code)] // Will be used when codegen is implemented
     pub fn threaded_fields(&self) -> HashSet<String> {
         self.field_reads
             .intersection(&self.field_writes)
@@ -51,6 +56,7 @@ impl BlockMutationAnalysis {
 }
 
 /// Analyzes a block to detect variable and field mutations.
+#[allow(dead_code)] // Will be used when codegen is implemented
 pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     let mut analysis = BlockMutationAnalysis::new();
     let mut ctx = AnalysisContext::new();
@@ -69,12 +75,14 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
 }
 
 /// Context tracking for analysis traversal.
+#[allow(dead_code)] // Will be used when codegen is implemented
 struct AnalysisContext {
     /// Local variables bound in the current scope (block params, let bindings).
     local_bindings: HashSet<String>,
 }
 
 impl AnalysisContext {
+    #[allow(dead_code)] // Will be used when codegen is implemented
     fn new() -> Self {
         Self {
             local_bindings: HashSet::new(),
@@ -83,13 +91,15 @@ impl AnalysisContext {
 }
 
 /// Recursively analyzes an expression for variable/field access.
+#[allow(dead_code)] // Will be used when codegen is implemented
+#[allow(clippy::too_many_lines)] // Analysis needs comprehensive pattern matching
 fn analyze_expression(
     expr: &Expression,
     analysis: &mut BlockMutationAnalysis,
     ctx: &mut AnalysisContext,
 ) {
     match expr {
-        Expression::Literal(..) => {
+        Expression::Literal(..) | Expression::Error { .. } => {
             // No variable access
         }
 
@@ -224,24 +234,23 @@ fn analyze_expression(
                 analyze_expression(&pair.value, analysis, ctx);
             }
         }
-
-        Expression::Error { .. } => {
-            // Error nodes don't contribute to analysis
-        }
     }
 }
 
 /// Returns true if the expression is a reference to `self`.
+#[allow(dead_code)] // Will be used when codegen is implemented
 fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
 /// Checks if a block is a literal block (not a variable reference).
+#[allow(dead_code)] // Will be used when codegen is implemented
 pub fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
 }
 
 /// Checks if a message send is a control flow construct with a literal block.
+#[allow(dead_code)] // Will be used when codegen is implemented
 pub fn is_control_flow_construct(
     receiver: &Expression,
     selector: &MessageSelector,
@@ -254,22 +263,19 @@ pub fn is_control_flow_construct(
             match selector_name.as_str() {
                 // whileTrue: / whileFalse: - block receiver + literal block arg
                 "whileTrue:" | "whileFalse:" => {
-                    is_literal_block(receiver) && arguments.get(0).map_or(false, is_literal_block)
+                    is_literal_block(receiver) && arguments.first().is_some_and(is_literal_block)
                 }
 
                 // timesRepeat: - integer receiver + literal block
-                "timesRepeat:" => arguments.get(0).map_or(false, is_literal_block),
+                "timesRepeat:" => arguments.first().is_some_and(is_literal_block),
 
-                // to:do: - integer receiver + literal block as second arg
-                "to:do:" => arguments.get(1).map_or(false, is_literal_block),
+                // to:do: and inject:into: - literal block as second arg
+                "to:do:" | "inject:into:" => arguments.get(1).is_some_and(is_literal_block),
 
-                // Collection iteration: do:, collect:, select:, reject:
+                // Collection iteration: do:, collect:, select:, reject: - literal block as first arg
                 "do:" | "collect:" | "select:" | "reject:" => {
-                    arguments.get(0).map_or(false, is_literal_block)
+                    arguments.first().is_some_and(is_literal_block)
                 }
-
-                // inject:into: - literal block as second argument
-                "inject:into:" => arguments.get(1).map_or(false, is_literal_block),
 
                 _ => false,
             }
