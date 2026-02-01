@@ -79,8 +79,7 @@ impl CoreErlangGenerator {
         let item_param = body
             .parameters
             .first()
-            .map(|p| p.name.as_str())
-            .unwrap_or("_");
+            .map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
         write!(self.output, "{item_var}, StateAcc) -> ")?;
 
@@ -104,8 +103,8 @@ impl CoreErlangGenerator {
         }
 
         // Replace "State" with "StateAcc" for this nested context
-        let saved_state_version = self.state_version;
-        self.state_version = 0;
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
 
         // Generate the body expression(s), threading state through assignments
         for (i, expr) in body.body.iter().enumerate() {
@@ -116,8 +115,8 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 // Field assignment - will generate: let StateAcc1 = ... in
                 write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version + 1);
-                self.state_version += 1;
+                let next_state = format!("StateAcc{}", self.state_version() + 1);
+                self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in {next_state}")?;
             } else {
@@ -125,7 +124,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        self.state_version = saved_state_version;
+        self.set_state_version(saved_state_version);
         self.pop_scope();
 
         Ok(())
@@ -301,7 +300,7 @@ impl CoreErlangGenerator {
         // The block should have 2 parameters: item and accumulator
         self.push_scope();
 
-        if body.parameters.len() >= 1 {
+        if !body.parameters.is_empty() {
             self.bind_var(&body.parameters[0].name, "Item");
         }
         if body.parameters.len() >= 2 {
@@ -309,8 +308,8 @@ impl CoreErlangGenerator {
         }
 
         // Replace "State" with "StateAcc" for this nested context
-        let saved_state_version = self.state_version;
-        self.state_version = 0;
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
 
         // Generate the body expression(s), threading state through assignments
         let mut has_mutations = false;
@@ -322,8 +321,8 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
                 write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version + 1);
-                self.state_version += 1;
+                let next_state = format!("StateAcc{}", self.state_version() + 1);
+                self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in {next_state}")?;
             } else {
@@ -333,14 +332,14 @@ impl CoreErlangGenerator {
 
         // Return {NewAcc, NewState}
         if has_mutations {
-            let final_state = format!("StateAcc{}", self.state_version);
+            let final_state = format!("StateAcc{}", self.state_version());
             // The last expression is the new accumulator value
             write!(self.output, " in {{<last expression>, {final_state}}}")?;
         } else {
             write!(self.output, " in {{<last expression>, StateAcc}}")?;
         }
 
-        self.state_version = saved_state_version;
+        self.set_state_version(saved_state_version);
         self.pop_scope();
 
         Ok(())
@@ -495,8 +494,8 @@ impl CoreErlangGenerator {
         _mutated_vars: &[String],
     ) -> Result<()> {
         // Generate the body with state threading
-        let saved_state_version = self.state_version;
-        self.state_version = 0;
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
@@ -505,8 +504,8 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version + 1);
-                self.state_version += 1;
+                let _next_state = format!("StateAcc{}", self.state_version() + 1);
+                self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in")?;
             } else {
@@ -515,7 +514,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        self.state_version = saved_state_version;
+        self.set_state_version(saved_state_version);
         Ok(())
     }
 
@@ -743,7 +742,7 @@ impl CoreErlangGenerator {
         write!(self.output, " in letrec 'repeat'/{arity} = fun (I")?;
 
         let mut param_names = Vec::new();
-        for var in mutated_vars.iter() {
+        for var in &mutated_vars {
             let param = Self::to_core_erlang_var(var);
             write!(self.output, ", {param}")?;
             param_names.push(param);
@@ -759,7 +758,7 @@ impl CoreErlangGenerator {
             self.output,
             " apply 'repeat'/{arity} (call 'erlang':'+'(I, 1)"
         )?;
-        for param in param_names.iter() {
+        for param in &param_names {
             write!(self.output, ", {param}1")?;
         }
         write!(self.output, ", StateAcc1) ")?;
@@ -770,7 +769,7 @@ impl CoreErlangGenerator {
         write!(self.output, "in let ")?;
         let new_state = self.next_state_var();
         write!(self.output, "{new_state} = apply 'repeat'/{arity} (1")?;
-        for var in mutated_vars.iter() {
+        for var in &mutated_vars {
             write!(
                 self.output,
                 ", call 'maps':'get'('{var}', {})",
@@ -787,8 +786,8 @@ impl CoreErlangGenerator {
         body: &Block,
         _mutated_vars: &[String],
     ) -> Result<()> {
-        let saved_state_version = self.state_version;
-        self.state_version = 0;
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
@@ -797,8 +796,8 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version + 1);
-                self.state_version += 1;
+                let _next_state = format!("StateAcc{}", self.state_version() + 1);
+                self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in")?;
             } else {
@@ -807,7 +806,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        self.state_version = saved_state_version;
+        self.set_state_version(saved_state_version);
         Ok(())
     }
 
@@ -906,7 +905,7 @@ impl CoreErlangGenerator {
         write!(self.output, " in letrec 'loop'/{arity} = fun (I")?;
 
         let mut param_names = Vec::new();
-        for var in mutated_vars.iter() {
+        for var in &mutated_vars {
             let param = Self::to_core_erlang_var(var);
             write!(self.output, ", {param}")?;
             param_names.push(param);
@@ -922,7 +921,7 @@ impl CoreErlangGenerator {
             self.output,
             " apply 'loop'/{arity} (call 'erlang':'+'(I, 1)"
         )?;
-        for param in param_names.iter() {
+        for param in &param_names {
             write!(self.output, ", {param}1")?;
         }
         write!(self.output, ", StateAcc1) ")?;
@@ -936,7 +935,7 @@ impl CoreErlangGenerator {
             self.output,
             "{new_state} = apply 'loop'/{arity} ({start_var}"
         )?;
-        for var in mutated_vars.iter() {
+        for var in &mutated_vars {
             write!(
                 self.output,
                 ", call 'maps':'get'('{var}', {})",
@@ -959,12 +958,12 @@ impl CoreErlangGenerator {
             self.bind_var(&param.name, "I");
         }
 
-        let saved_state_version = self.state_version;
-        self.state_version = 0;
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
 
         // Track which variables are assigned in the body
         let mut assigned_vars = std::collections::HashSet::new();
-        for expr in body.body.iter() {
+        for expr in &body.body {
             if Self::is_field_assignment(expr) {
                 if let Expression::Assignment { target, .. } = expr {
                     if let Expression::FieldAccess { field, .. } = target.as_ref() {
@@ -998,8 +997,8 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version + 1);
-                self.state_version += 1;
+                let _next_state = format!("StateAcc{}", self.state_version() + 1);
+                self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in ")?;
             } else {
@@ -1036,7 +1035,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        self.state_version = saved_state_version;
+        self.set_state_version(saved_state_version);
         self.pop_scope();
 
         Ok(())

@@ -57,43 +57,8 @@ impl CoreErlangGenerator {
     /// - Version 1: `State1` (after first assignment)
     /// - Version 2: `State2` (after second assignment)
     /// - etc.
-    pub(super) fn current_state_var(&self) -> String {
-        if self.state_version == 0 {
-            "State".to_string()
-        } else {
-            format!("State{}", self.state_version)
-        }
-    }
-
-    /// Increments the state version and returns the new state variable name.
     ///
-    /// Call this when generating a field assignment (`self.field := value`)
-    /// to get the name for the new state after the update.
-    pub(super) fn next_state_var(&mut self) -> String {
-        self.state_version += 1;
-        self.current_state_var()
-    }
-
-    /// Resets the state version to 0 at the start of each method.
-    pub(super) fn reset_state_version(&mut self) {
-        self.state_version = 0;
-    }
-
     /// Converts a module name to a class name by capitalizing the first letter.
-    ///
-    /// Module names in Beamtalk follow Erlang conventions (lowercase atoms),
-    /// while class names follow Smalltalk conventions (`UpperCamelCase`).
-    ///
-    /// # Examples
-    ///
-    /// - `"counter"` -> `"Counter"`
-    /// - `"my_class"` -> `"My_class"`
-    ///
-    /// # Panics
-    ///
-    /// Panics if the module name is empty, as an empty module name represents an
-    /// invalid state in the code generation pipeline.
-    /// Converts module name (`snake_case`) to class name (`CamelCase`).
     pub(super) fn to_class_name(&self) -> String {
         // Convert snake_case to CamelCase
         self.module_name

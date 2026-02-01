@@ -82,10 +82,12 @@ mod control_flow;
 mod expressions;
 mod gen_server;
 mod message_dispatch;
+mod state_threading;
 mod util;
 mod variable_context;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
+use state_threading::StateThreading;
 use std::fmt::{self, Write};
 use thiserror::Error;
 use variable_context::VariableContext;
@@ -231,10 +233,8 @@ pub(super) struct CoreErlangGenerator {
     indent: usize,
     /// Variable binding and scope management.
     var_context: VariableContext,
-    /// Current state version for state threading in method bodies.
-    /// Version 0 = "State", 1 = "State1", 2 = "State2", etc.
-    /// This is used to thread state through field assignments.
-    state_version: usize,
+    /// State threading for field assignments.
+    state_threading: StateThreading,
 }
 
 impl CoreErlangGenerator {
@@ -245,7 +245,7 @@ impl CoreErlangGenerator {
             output: String::new(),
             indent: 0,
             var_context: VariableContext::new(),
-            state_version: 0,
+            state_threading: StateThreading::new(),
         }
     }
 
@@ -267,6 +267,31 @@ impl CoreErlangGenerator {
     /// Binds an identifier to a Core Erlang variable name in the current scope.
     fn bind_var(&mut self, name: &str, core_var: &str) {
         self.var_context.bind(name, core_var);
+    }
+
+    /// Returns the current state variable name for state threading.
+    pub(super) fn current_state_var(&self) -> String {
+        self.state_threading.current_var()
+    }
+
+    /// Increments the state version and returns the new state variable name.
+    pub(super) fn next_state_var(&mut self) -> String {
+        self.state_threading.next_var()
+    }
+
+    /// Resets the state version to 0.
+    pub(super) fn reset_state_version(&mut self) {
+        self.state_threading.reset();
+    }
+
+    /// Gets the current state version.
+    pub(super) fn state_version(&self) -> usize {
+        self.state_threading.version()
+    }
+
+    /// Sets the state version.
+    pub(super) fn set_state_version(&mut self, version: usize) {
+        self.state_threading.set_version(version);
     }
 
     /// Generates a full module with `gen_server` behaviour.
@@ -555,7 +580,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// let _Val1 = <value1> in let State1 = ... in
     /// let _Val2 = <value2> in let State2 = ... in
-
+    ///
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
     #[allow(clippy::too_many_lines)]
