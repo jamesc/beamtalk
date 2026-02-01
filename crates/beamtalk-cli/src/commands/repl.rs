@@ -396,7 +396,12 @@ fn print_help() {
     println!("  x := 42              # Variable assignment");
     println!("  x + 10               # Arithmetic");
     println!("  Counter spawn        # Spawn an actor");
-    println!("  counter increment    # Send a message");
+    println!("  counter increment    # Send a message (auto-awaits result)");
+    println!("  counter getValue     # Query actor state (auto-awaits)");
+    println!();
+    println!("Actor message sends return Futures, which are automatically");
+    println!("awaited for synchronous REPL experience. If you store a Future");
+    println!("in a binding before it resolves, you'll see #Future<pending>.");
 }
 
 /// Guard to ensure BEAM child process is killed on drop.
