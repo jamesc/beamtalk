@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Simple whileTrue test with local variable mutation
+
+test := [
+    count := 0.
+    [count < 3] whileTrue: [count := count + 1].
+    ^count
+].
+
+// Test without module-level field
+testLocal := [
+    x := 0.
+    [x < 5] whileTrue: [x := x + 1].
+    ^x
+].
+
+// Test mutating a block parameter (BT-142 PR review fix)
+testBlockParam := [
+    result := [:x | 
+        [x < 5] whileTrue: [x := x + 1].
+        x
+    ] value: 0.
+    ^result
+].
+
+// Test whileFalse with block parameter mutation (BT-142 PR review fix)
+testBlockParamWhileFalse := [
+    result := [:n |
+        [n = 0] whileFalse: [n := n - 1].
+        n
+    ] value: 5.
+    ^result
+].
+
+// Test timesRepeat: with mutation (BT-143)
+testTimesRepeat := [
+    counter := 0.
+    5 timesRepeat: [counter := counter + 1].
+    ^counter
+].
+
+// Test timesRepeat: with block parameter mutation (BT-143)
+testTimesRepeatBlockParam := [
+    result := [:n |
+        3 timesRepeat: [n := n + 10].
+        n
+    ] value: 5.
+    ^result
+].
+
+// Test to:do: with mutation (BT-143)
+testToDo := [
+    total := 0.
+    1 to: 10 do: [:n | total := total + n].
+    ^total
+].
+
+// Test to:do: with block parameter mutation (BT-143)
+testToDoBlockParam := [
+    result := [:x |
+        sum := 0.
+        x to: 5 do: [:i | sum := sum + i].
+        sum
+    ] value: 1.
+    ^result
+].
