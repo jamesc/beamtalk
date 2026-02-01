@@ -293,7 +293,7 @@ ensure_secure_temp_dir() ->
     
     %% Ensure parent directory exists with secure permissions (0700)
     case ensure_dir_with_mode(BeamtalkDir, 8#700) of
-        ok ->
+        {ok, _} ->
             %% Ensure temp directory exists with secure permissions (0700)
             ensure_dir_with_mode(TempDir, 8#700);
         {error, _} = Error ->
@@ -302,8 +302,8 @@ ensure_secure_temp_dir() ->
 
 %% Ensure a directory exists with the specified mode (octal permissions).
 %% If the directory exists, verifies and corrects permissions if needed.
-%% Returns ok | {ok, Path} | {error, Reason}.
--spec ensure_dir_with_mode(string(), non_neg_integer()) -> ok | {ok, string()} | {error, term()}.
+%% Returns {ok, Path} | {error, Reason}.
+-spec ensure_dir_with_mode(string(), non_neg_integer()) -> {ok, string()} | {error, term()}.
 ensure_dir_with_mode(Dir, Mode) ->
     case filelib:is_dir(Dir) of
         true ->
