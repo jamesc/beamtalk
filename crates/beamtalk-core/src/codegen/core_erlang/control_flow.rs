@@ -396,12 +396,12 @@ impl CoreErlangGenerator {
         self.generate_expression(body)?;
         write!(
             self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}' () "
+            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
         )?;
 
         write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
         write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}' ()")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
 
         Ok(())
     }
@@ -558,12 +558,12 @@ impl CoreErlangGenerator {
         self.generate_expression(body)?;
         write!(
             self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}' () "
+            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
         )?;
 
         write!(self.output, "<'true'> when 'true' -> 'nil' ")?;
         write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}' ()")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
 
         Ok(())
     }
@@ -655,10 +655,10 @@ impl CoreErlangGenerator {
         self.generate_expression(body)?;
         write!(
             self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}' () "
+            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
         )?;
 
-        write!(self.output, "in apply '{loop_fn}' ()")?;
+        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
 
         Ok(())
     }
