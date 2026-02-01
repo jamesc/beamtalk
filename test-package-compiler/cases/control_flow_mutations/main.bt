@@ -1,0 +1,154 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test control flow constructs with variable and field mutations
+// Per BT-90 design: literal blocks in control flow positions can mutate
+
+// ========================================
+// Local Variable Mutations
+// ========================================
+
+// Simple whileTrue with local variable mutation
+count := 0.
+[count < 3] whileTrue: [count := count + 1].
+// Expected: count = 3
+
+// whileFalse with mutation
+count2 := 10.
+[count2 = 0] whileFalse: [count2 := count2 - 1].
+// Expected: count2 = 0
+
+// Multiple variables mutated in one loop
+sum := 0.
+product := 1.
+i := 1.
+[i <= 3] whileTrue: [
+    sum := sum + i.
+    product := product * i.
+    i := i + 1
+].
+// Expected: sum = 6 (1+2+3), product = 6 (1*2*3), i = 4
+
+// ========================================
+// Control Flow with Index Variables
+// ========================================
+
+// timesRepeat with mutation
+counter := 0.
+5 timesRepeat: [counter := counter + 1].
+// Expected: counter = 5
+
+// to:do: with index and accumulator
+total := 0.
+1 to: 10 do: [:n | total := total + n].
+// Expected: total = 55 (sum 1..10)
+
+// ========================================
+// Collection Iteration with Mutations
+// ========================================
+
+// Array do: with accumulation
+numbers := #[1, 2, 3, 4, 5].
+arraySum := 0.
+numbers do: [:n | arraySum := arraySum + n].
+// Expected: arraySum = 15
+
+// collect: (returns new collection, but can mutate locals)
+evenCount := 0.
+doubled := numbers collect: [:n |
+    evenCount := evenCount + (n % 2 = 0 ifTrue: [1] ifFalse: [0]).
+    n * 2
+].
+// Expected: evenCount = 2, doubled = #[2,4,6,8,10]
+
+// select: with side effects
+matchCount := 0.
+evens := numbers select: [:n |
+    matchCount := matchCount + 1.
+    n % 2 = 0
+].
+// Expected: matchCount = 5, evens = #[2,4]
+
+// inject:into: with external mutation
+maxSeen := 0.
+finalSum := numbers inject: 0 into: [:acc :n |
+    n > maxSeen ifTrue: [maxSeen := n].
+    acc + n
+].
+// Expected: maxSeen = 5, finalSum = 15
+
+// ========================================
+// Nested Control Flow
+// ========================================
+
+// Nested loops with multiple mutations
+outerSum := 0.
+innerSum := 0.
+x := 1.
+[x <= 3] whileTrue: [
+    y := 1.
+    [y <= 2] whileTrue: [
+        innerSum := innerSum + 1.
+        y := y + 1
+    ].
+    outerSum := outerSum + innerSum.
+    x := x + 1
+].
+// Expected: innerSum = 6, outerSum = (2 + 4 + 6) = 12
+
+// ========================================
+// Field Mutations (Actor State)
+// ========================================
+
+Counter := class [
+    state: value: Integer = 0.
+    
+    increment =>
+        [self.value < 10] whileTrue: [
+            self.value := self.value + 1
+        ].
+        ^self.value.
+    
+    incrementBy: amount =>
+        amount timesRepeat: [
+            self.value := self.value + 1
+        ].
+        ^self.value.
+    
+    multiplyFieldWithLoop =>
+        result := 1.
+        self.value timesRepeat: [
+            result := result * 2
+        ].
+        self.result := result.
+        ^result.
+    
+    complexMutation =>
+        // Mix of field and local mutations
+        temp := 0.
+        [self.value < 5] whileTrue: [
+            self.value := self.value + 1.
+            temp := temp + self.value
+        ].
+        ^temp.
+    
+    state: result: Integer = 0.
+].
+
+// ========================================
+// REPL Binding Updates
+// ========================================
+
+// After control flow, REPL should see updated bindings
+replCount := 0.
+3 timesRepeat: [replCount := replCount + 1].
+// REPL should now show: replCount = 3
+
+// Multiple mutations visible in REPL
+a := 1.
+b := 2.
+[a < 5] whileTrue: [
+    a := a + 1.
+    b := b * 2
+].
+// REPL should show: a = 5, b = 32

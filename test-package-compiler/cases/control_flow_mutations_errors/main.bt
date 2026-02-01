@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test error cases: stored closures should NOT allow mutations
+// Per BT-90 design: only literal blocks in control flow positions can mutate
+
+// ERROR: Field Assignment in Stored Closure
+Counter := class [
+    state: value: Integer = 0.
+    
+    // ERROR: Cannot store a block that assigns to fields
+    badBlock =>
+        myBlock := [self.value := self.value + 1].
+        ^myBlock.
+].
+
+// WARNING: Local Variable Mutation in Stored Closure
+testLocalMutationWarning =>
+    count := 0.
+    myBlock := [count := count + 1].
+    10 timesRepeat: myBlock.
+    ^count.
