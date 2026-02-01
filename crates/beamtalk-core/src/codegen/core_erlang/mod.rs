@@ -66,6 +66,7 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
+mod block_analysis;
 mod builtins;
 mod expressions;
 mod gen_server;

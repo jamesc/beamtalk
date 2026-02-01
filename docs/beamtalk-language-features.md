@@ -246,6 +246,214 @@ This is tracked in issue BT-98 for future enhancement.
 
 ---
 
+## Control Flow and Mutations (BT-90)
+
+Beamtalk supports Smalltalk-style control flow via messages to booleans and blocks, with one important enhancement: **literal blocks in control flow positions can mutate local variables and fields**.
+
+### The Simple Rule
+
+> **Literal blocks in control flow positions can mutate (both local vars AND fields). Stored/passed closures cannot.**
+
+This enables idiomatic Smalltalk patterns while maintaining clear semantics on the BEAM.
+
+### Control Flow Constructs
+
+These message sends detect literal blocks and generate tail-recursive loops with state threading:
+
+| Construct | Example | Mutations Allowed |
+|-----------|---------|-------------------|
+| `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
+| `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
+| `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
+| `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
+| `inject:into:` | `items inject: 0 into: [:acc :x \| acc + x]` | ✅ |
+
+### Local Variable Mutations
+
+```
+// Simple counter
+count := 0.
+[count < 10] whileTrue: [count := count + 1].
+// count is now 10
+
+// Multiple variables
+sum := 0.
+product := 1.
+i := 1.
+[i <= 5] whileTrue: [
+    sum := sum + i.
+    product := product * i.
+    i := i + 1
+].
+// sum = 15, product = 120, i = 6
+
+// Collection iteration
+numbers := #[1, 2, 3, 4, 5].
+total := 0.
+numbers do: [:n | total := total + n].
+// total = 15
+
+// With index
+result := 0.
+1 to: 10 do: [:n | result := result + n].
+// result = 55 (sum of 1..10)
+```
+
+### Field Mutations
+
+Mutations to actor state (`self.field`) work the same way:
+
+```
+Counter := class [
+    state: value: Integer = 0.
+    
+    // ✅ Field mutation in control flow
+    increment =>
+        [self.value < 10] whileTrue: [
+            self.value := self.value + 1
+        ].
+        ^self.value.
+    
+    // ✅ Multiple fields
+    incrementBoth =>
+        [self.value < 10] whileTrue: [
+            self.value := self.value + 1.
+            self.count := self.count + 1
+        ].
+    
+    state: count: Integer = 0.
+].
+```
+
+### Mixed Mutations
+
+Local variables and fields can be mutated together:
+
+```
+processItems =>
+    total := 0.
+    self.processed := 0.
+    
+    self.items do: [:item |
+        total := total + item.
+        self.processed := self.processed + 1
+    ].
+    
+    ^total.
+```
+
+### What's Forbidden
+
+Stored or passed closures cannot mutate:
+
+```
+// ❌ ERROR: Field assignment in stored closure
+badBlock =>
+    myBlock := [self.value := self.value + 1].
+    // ERROR: Cannot assign to field 'value' inside a stored closure.
+    
+// ⚠️ WARNING: Local mutation in stored closure has no effect
+testWarning =>
+    count := 0.
+    myBlock := [count := count + 1].
+    // WARNING: Assignment to 'count' has no effect on outer scope.
+    
+    10 timesRepeat: myBlock.
+    ^count.  // Still 0, not 10
+    
+// ✅ CORRECT: Use literal blocks in control flow
+testCorrect =>
+    count := 0.
+    10 timesRepeat: [count := count + 1].  // ✅ Works!
+    ^count.  // Now 10
+```
+
+### Why This Design?
+
+| Property | ✅ Benefit |
+|----------|-----------|
+| **Simple** | One rule covers everything |
+| **Orthogonal** | Same behavior for local vars and fields |
+| **Smalltalk-like** | Natural iteration patterns work |
+| **Safe** | Escaping closures can't cause confusion |
+| **Good DX** | Clear errors with fix suggestions |
+| **BEAM-idiomatic** | Compiles to tail recursion + state threading |
+
+### Error Messages
+
+When you accidentally store a mutating closure, you get helpful guidance:
+
+```
+Error: Cannot assign to field 'sum' inside a stored closure.
+
+Field assignments require immediate execution context for state threading.
+
+Fix: Use control flow directly, or extract to a method:
+  // Instead of:
+  myBlock := [:item | self.sum := self.sum + item].
+  items do: myBlock.
+  
+  // Write:
+  items do: [:item | self.sum := self.sum + item].
+  
+  // Or use a method:
+  addToSum: item => self.sum := self.sum + item.
+  items do: [:item | self addToSum: item].
+```
+
+### How It Works
+
+**Compile-time transformation:** When codegen detects control flow messages with **literal blocks**, it analyzes for mutations and generates tail-recursive loops:
+
+```erlang
+%% Beamtalk: [count < 10] whileTrue: [count := count + 1]
+%% Generated Core Erlang:
+letrec 'Loop'/1 = fun (Count) ->
+    case Count < 10 of
+      'true' ->
+          let Count1 = Count + 1
+          in apply 'Loop'/1 (Count1)
+      'false' ->
+          Count
+    end
+in apply 'Loop'/1 (Count0)
+```
+
+For field mutations, the State map is threaded through the loop:
+
+```erlang
+%% Beamtalk: [self.value < 10] whileTrue: [self.value := self.value + 1]
+%% Generated Core Erlang:
+letrec 'Loop'/1 = fun (State) ->
+    let Value = maps:get(value, State)
+    in case Value < 10 of
+      'true' ->
+          let Value1 = Value + 1
+          in let State1 = maps:put(value, Value1, State)
+          in apply 'Loop'/1 (State1)
+      'false' ->
+          State
+    end
+in apply 'Loop'/1 (State0)
+```
+
+### REPL Integration
+
+After control flow with mutations, the REPL updates its bindings:
+
+```
+beamtalk> count := 0
+0
+beamtalk> 5 timesRepeat: [count := count + 1]
+nil
+beamtalk> count
+5
+```
+
+This makes the REPL feel natural and interactive, just like Smalltalk.
+
+---
+
 ## Async Message Passing
 
 Beamtalk uses **async-first** message passing (like Newspeak), unlike Smalltalk's synchronous model.

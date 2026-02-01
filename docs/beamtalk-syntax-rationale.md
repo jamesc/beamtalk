@@ -201,6 +201,65 @@ literal := 'No {interpolation} here'
 
 **Why:** String interpolation is table stakes in 2026. Using `{expr}` inside double-quoted strings is clean and unambiguous.
 
+### Control Flow Mutations: Make Them Work (BT-90)
+
+**Smalltalk-80 problem:** Blocks capture variables by value, so mutations inside blocks don't affect outer scope:
+
+```smalltalk
+"Smalltalk-80"
+count := 0.
+[count < 10] whileTrue: [count := count + 1].
+"count is still 0! whileTrue: doesn't see the updates"
+```
+
+**Beamtalk solution:** Literal blocks in control flow positions CAN mutate:
+
+```
+// ✅ Works!
+count := 0.
+[count < 10] whileTrue: [count := count + 1].
+// count is now 10
+
+// ✅ Field mutations work too
+[self.value < 10] whileTrue: [
+    self.value := self.value + 1
+].
+```
+
+**Why change:**
+
+1. **Smalltalk idioms require it** - `whileTrue:`, `timesRepeat:`, `do:` are central to Smalltalk style
+2. **BEAM enables it** - We compile to tail-recursive loops with state threading
+3. **Clear boundary** - Only literal blocks in control flow can mutate; stored closures cannot
+4. **Better than alternatives:**
+   - **C-style loops** (`for`, `while`) lose message-passing elegance
+   - **Immutable-only** makes simple counters painful
+   - **Mutable-everywhere** loses reasoning guarantees
+
+**The simple rule:**
+
+> **Literal blocks in control flow positions can mutate. Stored/passed closures cannot.**
+
+```
+// ✅ Literal block in control flow
+[count < 10] whileTrue: [count := count + 1]
+
+// ❌ Stored closure cannot mutate
+myBlock := [count := count + 1]  // WARNING or ERROR
+10 timesRepeat: myBlock          // count won't change
+```
+
+This gives us Smalltalk's elegant control flow WITH mutations that actually work, while maintaining clear semantics for closures.
+
+**Detected control flow constructs:**
+- `whileTrue:`, `whileFalse:` - loops
+- `timesRepeat:` - repeat N times
+- `to:do:` - range iteration
+- `do:`, `collect:`, `select:`, `reject:` - collection iteration
+- `inject:into:` - reduction with accumulator
+
+See [beamtalk-language-features.md](beamtalk-language-features.md#control-flow-and-mutations-bt-90) for full specification.
+
 ---
 
 ## Complete Syntax Summary

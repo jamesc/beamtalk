@@ -1,0 +1,472 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Block mutation analysis for control flow constructs.
+//!
+//! This module analyzes blocks to detect which variables and fields are read/written,
+//! enabling proper state threading in tail-recursive loops.
+
+use crate::ast::{Block, Expression, MessageSelector};
+use std::collections::HashSet;
+
+/// Analysis results for a block's variable and field usage.
+#[derive(Debug, Clone, Default)]
+pub struct BlockMutationAnalysis {
+    /// Local variables that are read in the block.
+    pub local_reads: HashSet<String>,
+    /// Local variables that are written to in the block.
+    pub local_writes: HashSet<String>,
+    /// Fields (self.field) that are read in the block.
+    pub field_reads: HashSet<String>,
+    /// Fields (self.field) that are written to in the block.
+    pub field_writes: HashSet<String>,
+}
+
+impl BlockMutationAnalysis {
+    /// Creates a new empty analysis.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns true if the block has any mutations (local or field).
+    pub fn has_mutations(&self) -> bool {
+        !self.local_writes.is_empty() || !self.field_writes.is_empty()
+    }
+
+    /// Returns all variables that need threading (read AND written).
+    pub fn threaded_vars(&self) -> HashSet<String> {
+        self.local_reads
+            .intersection(&self.local_writes)
+            .cloned()
+            .collect()
+    }
+
+    /// Returns all fields that need threading (read AND written).
+    pub fn threaded_fields(&self) -> HashSet<String> {
+        self.field_reads
+            .intersection(&self.field_writes)
+            .cloned()
+            .collect()
+    }
+}
+
+/// Analyzes a block to detect variable and field mutations.
+pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
+    let mut analysis = BlockMutationAnalysis::new();
+    let mut ctx = AnalysisContext::new();
+
+    // Block parameters are local bindings
+    for param in &block.parameters {
+        ctx.local_bindings.insert(param.name.to_string());
+    }
+
+    // Analyze all expressions in the block body
+    for expr in &block.body {
+        analyze_expression(expr, &mut analysis, &mut ctx);
+    }
+
+    analysis
+}
+
+/// Context tracking for analysis traversal.
+struct AnalysisContext {
+    /// Local variables bound in the current scope (block params, let bindings).
+    local_bindings: HashSet<String>,
+}
+
+impl AnalysisContext {
+    fn new() -> Self {
+        Self {
+            local_bindings: HashSet::new(),
+        }
+    }
+}
+
+/// Recursively analyzes an expression for variable/field access.
+fn analyze_expression(
+    expr: &Expression,
+    analysis: &mut BlockMutationAnalysis,
+    ctx: &mut AnalysisContext,
+) {
+    match expr {
+        Expression::Literal(..) => {
+            // No variable access
+        }
+
+        Expression::Identifier(id) => {
+            // Read of a variable
+            if ctx.local_bindings.contains(id.name.as_str()) {
+                analysis.local_reads.insert(id.name.to_string());
+            }
+        }
+
+        Expression::FieldAccess { receiver, field, .. } => {
+            // Read of a field (self.field)
+            analyze_expression(receiver, analysis, ctx);
+            if is_self_reference(receiver) {
+                analysis.field_reads.insert(field.name.to_string());
+            }
+        }
+
+        Expression::Assignment { target, value, .. } => {
+            // Assignment: target is written, value is read
+            analyze_expression(value, analysis, ctx);
+
+            match target.as_ref() {
+                Expression::Identifier(id) => {
+                    // Local variable write
+                    if ctx.local_bindings.contains(id.name.as_str()) {
+                        analysis.local_writes.insert(id.name.to_string());
+                    } else {
+                        // New binding - add to context
+                        ctx.local_bindings.insert(id.name.to_string());
+                        analysis.local_writes.insert(id.name.to_string());
+                    }
+                }
+                Expression::FieldAccess { receiver, field, .. } => {
+                    // Field assignment
+                    if is_self_reference(receiver) {
+                        analysis.field_writes.insert(field.name.to_string());
+                    }
+                }
+                _ => {
+                    // Complex assignment target - analyze it
+                    analyze_expression(target, analysis, ctx);
+                }
+            }
+        }
+
+        Expression::CompoundAssignment { target, value, .. } => {
+            // Compound assignment: both read and write
+            analyze_expression(value, analysis, ctx);
+
+            match target.as_ref() {
+                Expression::Identifier(id) => {
+                    if ctx.local_bindings.contains(id.name.as_str()) {
+                        analysis.local_reads.insert(id.name.to_string());
+                        analysis.local_writes.insert(id.name.to_string());
+                    }
+                }
+                Expression::FieldAccess { receiver, field, .. } => {
+                    if is_self_reference(receiver) {
+                        analysis.field_reads.insert(field.name.to_string());
+                        analysis.field_writes.insert(field.name.to_string());
+                    }
+                }
+                _ => {
+                    analyze_expression(target, analysis, ctx);
+                }
+            }
+        }
+
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            analyze_expression(receiver, analysis, ctx);
+            for arg in arguments {
+                analyze_expression(arg, analysis, ctx);
+            }
+        }
+
+        Expression::Block(block) => {
+            // Nested block - analyze it separately
+            // Note: mutations in nested blocks don't escape unless the block is evaluated
+            let nested_analysis = analyze_block(block);
+            // Merge reads (nested block reads outer vars)
+            analysis
+                .local_reads
+                .extend(nested_analysis.local_reads.iter().cloned());
+            analysis
+                .field_reads
+                .extend(nested_analysis.field_reads.iter().cloned());
+            // Don't merge writes - nested block mutations are isolated
+        }
+
+        Expression::Return { value, .. } => {
+            analyze_expression(value, analysis, ctx);
+        }
+
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            analyze_expression(receiver, analysis, ctx);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    analyze_expression(arg, analysis, ctx);
+                }
+            }
+        }
+
+        Expression::Parenthesized { expression, .. } => {
+            analyze_expression(expression, analysis, ctx);
+        }
+
+        Expression::Pipe { value, target, .. } => {
+            analyze_expression(value, analysis, ctx);
+            analyze_expression(target, analysis, ctx);
+        }
+
+        Expression::Match { value, arms, .. } => {
+            analyze_expression(value, analysis, ctx);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    analyze_expression(guard, analysis, ctx);
+                }
+                analyze_expression(&arm.body, analysis, ctx);
+            }
+        }
+
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                analyze_expression(&pair.key, analysis, ctx);
+                analyze_expression(&pair.value, analysis, ctx);
+            }
+        }
+
+        Expression::Error { .. } => {
+            // Error nodes don't contribute to analysis
+        }
+    }
+}
+
+/// Returns true if the expression is a reference to `self`.
+fn is_self_reference(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == "self")
+}
+
+/// Checks if a block is a literal block (not a variable reference).
+pub fn is_literal_block(expr: &Expression) -> bool {
+    matches!(expr, Expression::Block(_))
+}
+
+/// Checks if a message send is a control flow construct with a literal block.
+pub fn is_control_flow_construct(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    match selector {
+        MessageSelector::Keyword(parts) => {
+            let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+            match selector_name.as_str() {
+                // whileTrue: / whileFalse: - block receiver + literal block arg
+                "whileTrue:" | "whileFalse:" => {
+                    is_literal_block(receiver) && arguments.get(0).map_or(false, is_literal_block)
+                }
+
+                // timesRepeat: - integer receiver + literal block
+                "timesRepeat:" => arguments.get(0).map_or(false, is_literal_block),
+
+                // to:do: - integer receiver + literal block as second arg
+                "to:do:" => arguments.get(1).map_or(false, is_literal_block),
+
+                // Collection iteration: do:, collect:, select:, reject:
+                "do:" | "collect:" | "select:" | "reject:" => {
+                    arguments.get(0).map_or(false, is_literal_block)
+                }
+
+                // inject:into: - literal block as second argument
+                "inject:into:" => arguments.get(1).map_or(false, is_literal_block),
+
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{BlockParameter, CompoundOperator, Identifier};
+    use crate::parse::Span;
+
+    fn make_id(name: &str) -> Identifier {
+        Identifier::new(name, Span::new(0, name.len() as u32))
+    }
+
+    fn make_expr_id(name: &str) -> Expression {
+        Expression::Identifier(make_id(name))
+    }
+
+    #[test]
+    fn test_analyze_empty_block() {
+        let block = Block::new(vec![], vec![], Span::new(0, 2));
+        let analysis = analyze_block(&block);
+        assert!(analysis.local_reads.is_empty());
+        assert!(analysis.local_writes.is_empty());
+        assert!(analysis.field_reads.is_empty());
+        assert!(analysis.field_writes.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_local_variable_read() {
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(0, 1))],
+            vec![make_expr_id("x")],
+            Span::new(0, 5),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.local_reads.contains("x"));
+        assert!(analysis.local_writes.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_local_variable_write() {
+        let block = Block::new(
+            vec![],
+            vec![Expression::Assignment {
+                target: Box::new(make_expr_id("count")),
+                value: Box::new(Expression::Literal(
+                    crate::ast::Literal::Integer(0),
+                    Span::new(9, 10),
+                )),
+                span: Span::new(0, 10),
+            }],
+            Span::new(0, 12),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.local_writes.contains("count"));
+    }
+
+    #[test]
+    fn test_analyze_local_variable_mutation() {
+        // [:count | count := count + 1]
+        // Variable is a parameter, so it's in scope for both read and write
+        let block = Block::new(
+            vec![BlockParameter::new("count", Span::new(1, 6))],
+            vec![Expression::Assignment {
+                target: Box::new(make_expr_id("count")),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("count")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(16, 17),
+                    )],
+                    span: Span::new(9, 17),
+                }),
+                span: Span::new(0, 17),
+            }],
+            Span::new(0, 19),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.local_reads.contains("count"));
+        assert!(analysis.local_writes.contains("count"));
+        assert_eq!(analysis.threaded_vars().len(), 1);
+        assert!(analysis.threaded_vars().contains("count"));
+    }
+
+    #[test]
+    fn test_analyze_field_read() {
+        // [self.value]
+        let block = Block::new(
+            vec![],
+            vec![Expression::FieldAccess {
+                receiver: Box::new(make_expr_id("self")),
+                field: make_id("value"),
+                span: Span::new(0, 10),
+            }],
+            Span::new(0, 12),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.field_reads.contains("value"));
+        assert!(analysis.field_writes.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_field_write() {
+        // [self.value := 0]
+        let block = Block::new(
+            vec![],
+            vec![Expression::Assignment {
+                target: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(make_expr_id("self")),
+                    field: make_id("value"),
+                    span: Span::new(0, 10),
+                }),
+                value: Box::new(Expression::Literal(
+                    crate::ast::Literal::Integer(0),
+                    Span::new(14, 15),
+                )),
+                span: Span::new(0, 15),
+            }],
+            Span::new(0, 17),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.field_writes.contains("value"));
+        assert!(!analysis.field_reads.contains("value"));
+    }
+
+    #[test]
+    fn test_analyze_field_mutation_compound() {
+        // [self.value += 1]
+        let block = Block::new(
+            vec![],
+            vec![Expression::CompoundAssignment {
+                target: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(make_expr_id("self")),
+                    field: make_id("value"),
+                    span: Span::new(0, 10),
+                }),
+                operator: CompoundOperator::Add,
+                value: Box::new(Expression::Literal(
+                    crate::ast::Literal::Integer(1),
+                    Span::new(15, 16),
+                )),
+                span: Span::new(0, 16),
+            }],
+            Span::new(0, 18),
+        );
+        let analysis = analyze_block(&block);
+        assert!(analysis.field_reads.contains("value"));
+        assert!(analysis.field_writes.contains("value"));
+        assert_eq!(analysis.threaded_fields().len(), 1);
+        assert!(analysis.threaded_fields().contains("value"));
+    }
+
+    #[test]
+    fn test_is_literal_block() {
+        let block_expr = Expression::Block(Block::new(vec![], vec![], Span::new(0, 2)));
+        assert!(is_literal_block(&block_expr));
+
+        let var_expr = make_expr_id("myBlock");
+        assert!(!is_literal_block(&var_expr));
+    }
+
+    #[test]
+    fn test_is_control_flow_construct_while_true() {
+        let condition = Expression::Block(Block::new(vec![], vec![], Span::new(0, 10)));
+        let body = Expression::Block(Block::new(vec![], vec![], Span::new(20, 30)));
+        let selector = MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+            "whileTrue:",
+            Span::new(11, 21),
+        )]);
+
+        assert!(is_control_flow_construct(
+            &condition,
+            &selector,
+            &[body]
+        ));
+    }
+
+    #[test]
+    fn test_is_not_control_flow_with_stored_block() {
+        let condition = make_expr_id("conditionBlock");
+        let body = Expression::Block(Block::new(vec![], vec![], Span::new(20, 30)));
+        let selector = MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+            "whileTrue:",
+            Span::new(11, 21),
+        )]);
+
+        // Not a control flow construct because receiver is not a literal block
+        assert!(!is_control_flow_construct(
+            &condition,
+            &selector,
+            &[body]
+        ));
+    }
+}
