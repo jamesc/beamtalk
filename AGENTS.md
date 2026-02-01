@@ -893,7 +893,30 @@ max: other =>
 
 **Source:** See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md#return-value--value-keep-but-implicit-at-end)
 
-#### 2. Comments
+#### 2. No Statement Terminators (REQUIRED)
+
+**Rule:** Do NOT use `.` (period) to terminate statements. Newlines separate statements.
+
+```beamtalk
+// ✅ CORRECT - No periods
+count := 0
+count := count + 1
+self doSomething
+
+// ❌ WRONG - Smalltalk-style periods
+count := 0.
+count := count + 1.
+self doSomething.
+
+// ✅ CORRECT - Semicolons optional for multiple statements on one line
+count := 0; count := count + 1
+```
+
+**Why:** Period-as-terminator feels archaic. Newlines naturally end statements in modern languages. Less visual noise.
+
+**Source:** See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md#statement-terminator-required---optional-newlines-work)
+
+#### 3. Comments
 
 Use `//` for single-line and `/* */` for multi-line comments (not Smalltalk's `"..."`):
 
@@ -907,7 +930,7 @@ count := 0  // inline comment
 */
 ```
 
-#### 3. Standard Math Precedence
+#### 4. Standard Math Precedence
 
 Beamtalk uses standard operator precedence (PEMDAS), not Smalltalk's strict left-to-right:
 
@@ -915,7 +938,7 @@ Beamtalk uses standard operator precedence (PEMDAS), not Smalltalk's strict left
 2 + 3 * 4   // => 14 (not 20)
 ```
 
-#### 4. License Headers
+#### 5. License Headers
 
 All `.bt` files must include Apache 2.0 license header:
 
