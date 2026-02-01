@@ -50,7 +50,7 @@ undefinedVar + 5
 
 // Calling non-existent method on integer
 42 nonExistentMethod
-// => ERROR: function_clause
+// => ERROR: badarg
 
 // Wrong number of block arguments (too few)
 [:x :y | x + y] value: 5

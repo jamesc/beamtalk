@@ -18,9 +18,44 @@ Key features:
 - **doesNotUnderstand**: Fallback handler for unknown messages (metaprogramming)
 - **Sync and async**: Supports both `gen_server:call` (blocking) and `gen_server:cast` (with futures)
 - **Hot reload**: Implements `code_change/3` for state migration during code updates
-- **Helper functions**: `start_link/2`, `spawn_actor/2` for creating actors
+- **Helper functions**: `start_link/2` and `start_link/3` for creating supervised actors
 
 See module documentation in `beamtalk_actor.erl` for the complete protocol and API.
+
+### beamtalk.hrl
+
+Shared record definitions for the Beamtalk runtime.
+
+#### #beamtalk_object{} Record
+
+Beamtalk object references use a record to bundle class metadata with the actor pid:
+
+```erlang
+-record(beamtalk_object, {
+    class :: atom(),           % Class name (e.g., 'Counter')
+    class_mod :: atom(),       % Class module (e.g., 'counter')
+    pid :: pid()               % The actor process
+}).
+```
+
+This design follows LFE Flavors' `#flavor-instance{}` pattern and enables:
+
+- **Proper object semantics**: Object references carry their class identity
+- **Reflection**: Access the class name via the record field
+- **Type safety**: Distinguish object references from raw pids
+
+Generated code creates these records in `spawn/0` and `spawn/1`:
+```erlang
+{'beamtalk_object', 'Counter', 'counter', Pid}
+```
+
+Message sends extract the pid using `element/2`:
+```erlang
+let Pid = call 'erlang':'element'(4, Obj)
+in call 'gen_server':'cast'(Pid, {Selector, Args, Future})
+```
+
+See [beamtalk-object-model.md](../docs/beamtalk-object-model.md) Part 5 for the complete design.
 
 ### beamtalk_future.erl
 
