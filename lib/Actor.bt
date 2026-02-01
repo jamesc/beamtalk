@@ -81,3 +81,34 @@ Actor
   // Example: Counter spawnWith: #{value => 10}
   // Generated code: gen_server:start_link(ClassName, InitArgs, [])
   spawnWith: initArgs => // implemented by compiler
+
+  // ## Nil Testing Protocol
+  //
+  // These messages allow nil-safe control flow. All objects (except Nil) return
+  // false for `isNil` and true for `notNil`.
+  //
+  // Examples:
+  // ```beamtalk
+  // 42 isNil        // => false
+  // 42 notNil       // => true
+  // 42 ifNil: [0]   // => 42
+  // 42 ifNotNil: [:v | v + 1]  // => 43
+  // ```
+
+  // Returns false for all objects except Nil
+  isNil => false
+
+  // Returns true for all objects except Nil
+  notNil => true
+
+  // Returns self without evaluating the block (non-nil objects)
+  ifNil: nilBlock => self
+
+  // Evaluates the block passing the receiver as argument (non-nil objects)
+  ifNotNil: notNilBlock => notNilBlock value: self
+
+  // Evaluates notNilBlock with receiver (non-nil objects)
+  ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
+
+  // Evaluates notNilBlock with receiver (non-nil objects, reversed order)
+  ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self

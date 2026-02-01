@@ -5,15 +5,26 @@
 %%%
 %%% This module handles compilation, bytecode generation, and evaluation
 %%% of Beamtalk expressions via the compiler daemon.
+%%%
+%%% ## Platform Requirements
+%%%
+%%% The secure temp file handling in this module requires Unix-like systems
+%%% with support for file permissions (chmod). Windows is not currently
+%%% supported due to its different security model (ACLs vs Unix permissions).
+%%% The `ensure_secure_temp_dir/0` and `ensure_dir_with_mode/2` functions
+%%% rely on `file:change_mode/2` which has limited or no effect on Windows.
 
 -module(beamtalk_repl_eval).
+
+-include_lib("kernel/include/file.hrl").
 
 -export([do_eval/2, handle_load/2]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
-         compile_core_erlang/2, extract_class_names/1]).
+         compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
+         ensure_dir_with_mode/2]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -233,31 +244,117 @@ parse_compile_result(Result, ModuleName) ->
     end.
 
 %% Compile Core Erlang source to BEAM bytecode.
-%% TODO: BT-56 (security) - This writes to a predictable temp file path which
-%% could be exploited via symlink attacks on multi-user systems. Should use
-%% a per-user private directory with securely created temp files, or use
-%% in-memory compilation APIs if available.
+%% Uses a secure per-user temp directory to prevent symlink attacks (CWE-377, CWE-59).
 -spec compile_core_erlang(binary(), atom()) -> {ok, binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin, ModuleName) ->
-    %% Write Core Erlang to temp file (filename must match module name)
-    TempDir = os:getenv("TMPDIR", "/tmp"),
-    TempFile = filename:join(TempDir, atom_to_list(ModuleName) ++ ".core"),
-    try
-        ok = file:write_file(TempFile, CoreErlangBin),
-        %% Compile Core Erlang to BEAM
-        case compile:file(TempFile, [from_core, binary, return_errors]) of
-            {ok, _CompiledModule, Binary} ->
-                {ok, Binary};
-            {ok, _CompiledModule, Binary, _Warnings} ->
-                {ok, Binary};
-            {error, Errors, _Warnings} ->
-                {error, {core_compile_error, format_compile_errors(Errors)}}
-        end
-    catch
-        _:Error ->
-            {error, {core_compile_error, Error}}
-    after
-        file:delete(TempFile)
+    case ensure_secure_temp_dir() of
+        {ok, SecureTempDir} ->
+            %% Generate unique filename to prevent race conditions
+            %% Format: {module_name}_{random_suffix}.core
+            RandomSuffix = integer_to_list(erlang:unique_integer([positive])),
+            TempFile = filename:join(SecureTempDir, 
+                                     atom_to_list(ModuleName) ++ "_" ++ RandomSuffix ++ ".core"),
+            try
+                ok = file:write_file(TempFile, CoreErlangBin),
+                %% Compile Core Erlang to BEAM
+                case compile:file(TempFile, [from_core, binary, return_errors]) of
+                    {ok, _CompiledModule, Binary} ->
+                        {ok, Binary};
+                    {ok, _CompiledModule, Binary, _Warnings} ->
+                        {ok, Binary};
+                    {error, Errors, _Warnings} ->
+                        {error, {core_compile_error, format_compile_errors(Errors)}}
+                end
+            catch
+                _:Error ->
+                    {error, {core_compile_error, Error}}
+            after
+                file:delete(TempFile)
+            end;
+        {error, Reason} ->
+            {error, {temp_dir_error, Reason}}
+    end.
+
+%% Ensure a secure per-user temp directory exists for Core Erlang compilation.
+%% Creates ~/.beamtalk/tmp/ with mode 0700 (user-only access) to prevent
+%% symlink attacks (CWE-377, CWE-59).
+%%
+%% The directory is created with restricted permissions so that:
+%% - Only the user can read/write/execute (mode 0700)
+%% - Other users cannot create symlinks in this directory
+%% - Combined with unique filenames, this prevents symlink race conditions
+%%
+%% Returns {ok, Path} where Path is the absolute path to the secure temp directory,
+%% or {error, Reason} if the directory cannot be created.
+-spec ensure_secure_temp_dir() -> {ok, string()} | {error, term()}.
+ensure_secure_temp_dir() ->
+    %% Use ~/.beamtalk/tmp/ as secure per-user temp directory
+    %% Requires HOME to be set to avoid falling back to insecure /tmp
+    case os:getenv("HOME") of
+        false ->
+            %% Do not fall back to /tmp to avoid reintroducing symlink attacks.
+            %% Mirror behavior of beamtalk_repl_state: require HOME to be set.
+            {error, no_home_dir};
+        HomeDir ->
+            BeamtalkDir = filename:join(HomeDir, ".beamtalk"),
+            TempDir = filename:join(BeamtalkDir, "tmp"),
+            
+            %% Ensure parent directory exists with secure permissions (0700)
+            case ensure_dir_with_mode(BeamtalkDir, 8#700) of
+                {ok, _} ->
+                    %% Ensure temp directory exists with secure permissions (0700)
+                    ensure_dir_with_mode(TempDir, 8#700);
+                {error, _} = Error ->
+                    Error
+            end
+    end.
+
+%% Ensure a directory exists with the specified mode (octal permissions).
+%% If the directory exists, verifies and corrects permissions if needed.
+%%
+%% ## Platform Support
+%%
+%% This function requires Unix-like systems. On Windows, file:change_mode/2
+%% has limited or no effect, and the security guarantees cannot be ensured.
+%%
+%% Returns {ok, Path} | {error, Reason}.
+-spec ensure_dir_with_mode(string(), non_neg_integer()) -> {ok, string()} | {error, term()}.
+ensure_dir_with_mode(Dir, Mode) ->
+    case filelib:is_dir(Dir) of
+        true ->
+            %% Directory exists, verify permissions
+            case file:read_file_info(Dir) of
+                {ok, FileInfo} ->
+                    CurrentMode = FileInfo#file_info.mode,
+                    %% Check if mode matches (compare only permission bits)
+                    case CurrentMode band 8#777 of
+                        Mode ->
+                            {ok, Dir};
+                        _ ->
+                            %% Fix permissions
+                            case file:change_mode(Dir, Mode) of
+                                ok -> {ok, Dir};
+                                {error, ChmodReason} -> {error, {chmod_failed, Dir, ChmodReason}}
+                            end
+                    end;
+                {error, StatReason} ->
+                    {error, {stat_failed, Dir, StatReason}}
+            end;
+        false ->
+            case file:make_dir(Dir) of
+                ok ->
+                    %% Set restrictive permissions
+                    case file:change_mode(Dir, Mode) of
+                        ok -> {ok, Dir};
+                        {error, ChmodReason} -> {error, {chmod_failed, Dir, ChmodReason}}
+                    end;
+                {error, eexist} ->
+                    %% Race condition: dir was created between check and make_dir
+                    %% Recurse to verify permissions
+                    ensure_dir_with_mode(Dir, Mode);
+                {error, MkdirReason} ->
+                    {error, {make_dir_failed, Dir, MkdirReason}}
+            end
     end.
 
 %% Format daemon diagnostics for display.

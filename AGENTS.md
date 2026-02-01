@@ -861,6 +861,92 @@ greeting := "Hello, {name}!"
 2. Binary messages: `3 + 4` (with standard math precedence)
 3. Keyword messages: `array at: 1`
 
+### Beamtalk Style Guidelines
+
+**Critical style rules for writing Beamtalk code:**
+
+#### 1. Implicit Returns (REQUIRED)
+
+**Rule:** Use `^` ONLY for early returns. Never use `^` on the last line of a method or block.
+
+```beamtalk
+// ✅ CORRECT - Implicit return on last expression
+isNil => false
+getValue => self.value
+add: x => self.count + x
+
+// ❌ WRONG - Unnecessary ^ on final expression
+isNil => ^false
+getValue => ^self.value
+
+// ✅ CORRECT - ^ used ONLY for early return
+max: other =>
+  self > other ifTrue: [^self]   // early return - needs ^
+  other                           // last expression - no ^
+
+// ✅ CORRECT - Blocks also use implicit returns
+[:x | x * 2]          // returns x * 2
+[self doSomething]    // returns result of doSomething
+```
+
+**Why:** Reduces noise. The `^` is distinctive and should only appear when returning early, making control flow immediately visible.
+
+**Source:** See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md#return-value--value-keep-but-implicit-at-end)
+
+#### 2. No Statement Terminators (REQUIRED)
+
+**Rule:** Do NOT use `.` (period) to terminate statements. Newlines separate statements.
+
+```beamtalk
+// ✅ CORRECT - No periods
+count := 0
+count := count + 1
+self doSomething
+
+// ❌ WRONG - Smalltalk-style periods
+count := 0.
+count := count + 1.
+self doSomething.
+
+// ✅ CORRECT - Semicolons optional for multiple statements on one line
+count := 0; count := count + 1
+```
+
+**Why:** Period-as-terminator feels archaic. Newlines naturally end statements in modern languages. Less visual noise.
+
+**Source:** See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md#statement-terminator-required---optional-newlines-work)
+
+#### 3. Comments
+
+Use `//` for single-line and `/* */` for multi-line comments (not Smalltalk's `"..."`):
+
+```beamtalk
+// Single-line comment
+count := 0  // inline comment
+
+/*
+  Multi-line comment
+  for longer explanations
+*/
+```
+
+#### 4. Standard Math Precedence
+
+Beamtalk uses standard operator precedence (PEMDAS), not Smalltalk's strict left-to-right:
+
+```beamtalk
+2 + 3 * 4   // => 14 (not 20)
+```
+
+#### 5. License Headers
+
+All `.bt` files must include Apache 2.0 license header:
+
+```beamtalk
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+```
+
 ---
 
 ## Common Tasks
