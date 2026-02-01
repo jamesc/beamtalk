@@ -13,7 +13,7 @@ Beamtalk uses a multi-layered testing strategy covering both the Rust compiler a
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
 | Runtime Unit Tests | EUnit | `runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
-| E2E Tests (Erlang) | EUnit | `runtime/test/beamtalk_e2e_tests.erl` | Full Beamtalk → BEAM → execution |
+| Codegen Simulation Tests | EUnit | `runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
 | E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | Language feature validation via REPL |
 
 ## Running Tests
@@ -58,7 +58,7 @@ cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobe
 **Erlang coverage:**
 ```bash
 cd runtime
-rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
+rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests --cover
 rebar3 cover --verbose
 # Generate Cobertura XML for CI
 rebar3 covertool generate
@@ -277,18 +277,20 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 ---
 
-### 6. End-to-End Tests (Erlang)
+### 6. Codegen Simulation Tests
 
-Full pipeline tests: Beamtalk source → Core Erlang → BEAM → execution.
+Simulates compiler-generated code patterns to test runtime behavior without requiring full compilation.
 
-**Location:** `runtime/test/beamtalk_e2e_tests.erl`
+**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
 
 **What they test:**
-- Complete compilation pipeline
-- Actor spawning with `spawn/0` and `spawn/1`
+- Runtime behavior with simulated compiler output
+- Actor spawning state initialization (`spawn/0` and `spawn/1` patterns)
 - Method invocation (sync and async)
 - State initialization and mutation
 - Interaction between multiple actors
+
+**Note:** These manually construct state structures. For true E2E tests with real compiled Beamtalk, see `tests/e2e/`.
 
 **Example:**
 ```erlang
@@ -482,11 +484,11 @@ mod tests {
 2. Name it `descriptive_name_test()` (EUnit convention)
 3. Run `cd runtime && rebar3 eunit`
 
-### Adding an E2E Test (Erlang)
+### Adding a Codegen Simulation Test
 
-1. Add to `runtime/test/beamtalk_e2e_tests.erl`
-2. May need to compile Beamtalk source first
-3. Run `cd runtime && rebar3 eunit --module=beamtalk_e2e_tests`
+1. Add to `runtime/test/beamtalk_codegen_simulation_tests.erl`
+2. Manually construct state as compiler would generate
+3. Run `cd runtime && rebar3 eunit --module=beamtalk_codegen_simulation_tests`
 
 ### Adding an E2E Test (Rust/REPL)
 

@@ -1,12 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc End-to-end tests for Beamtalk compiler output.
+%%% @doc Simulation tests for compiler-generated code patterns.
 %%%
-%%% These tests verify that compiled Beamtalk modules work correctly
-%%% on the BEAM VM. Each test manually creates module structures that
-%%% mirror what the compiler generates, allowing us to test the runtime
-%%% behavior of compiled actors.
+%%% These tests verify runtime behavior by manually constructing state
+%%% structures that mirror what the compiler generates. This allows testing
+%%% the runtime without requiring the full compiler pipeline.
+%%%
+%%% **Note:** These are NOT true end-to-end tests. For real E2E tests that
+%%% compile actual Beamtalk source, see `tests/e2e/cases/*.bt`.
 %%%
 %%% Test categories:
 %%% - spawn/0 tests (Counter spawn)
@@ -25,7 +27,7 @@
 %%%
 %%% @see beamtalk_actor for the runtime implementation
 
--module(beamtalk_e2e_tests).
+-module(beamtalk_codegen_simulation_tests).
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ===========================================================================

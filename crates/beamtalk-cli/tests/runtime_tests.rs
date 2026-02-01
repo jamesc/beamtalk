@@ -27,7 +27,7 @@ fn find_runtime_dir() -> PathBuf {
 /// Integration tests (`beamtalk_repl_integration_tests`) require the daemon
 /// and are run separately in CI.
 const UNIT_TEST_MODULES: &str =
-    "beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests";
+    "beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests";
 
 /// Uses `#[serial(erlang_runtime)]` to prevent parallel rebar3 eunit runs
 /// in the same runtime/ directory, which can cause build conflicts.
