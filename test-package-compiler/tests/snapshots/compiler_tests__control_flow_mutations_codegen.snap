@@ -12,7 +12,7 @@ module 'control_flow_mutations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('control_flow_mutations', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Control_flow_mutations', 'control_flow_mutations', Pid}
+            {'beamtalk_object', 'ControlFlowMutations', 'control_flow_mutations', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'control_flow_mutations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('control_flow_mutations', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Control_flow_mutations', 'control_flow_mutations', Pid}
+            {'beamtalk_object', 'ControlFlowMutations', 'control_flow_mutations', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

@@ -12,7 +12,7 @@ module 'nested_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('nested_blocks', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Nested_blocks', 'nested_blocks', Pid}
+            {'beamtalk_object', 'NestedBlocks', 'nested_blocks', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'nested_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('nested_blocks', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Nested_blocks', 'nested_blocks', Pid}
+            {'beamtalk_object', 'NestedBlocks', 'nested_blocks', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

@@ -12,7 +12,7 @@ module 'actor_state_mutation' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('actor_state_mutation', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Actor_state_mutation', 'actor_state_mutation', Pid}
+            {'beamtalk_object', 'ActorStateMutation', 'actor_state_mutation', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'actor_state_mutation' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('actor_state_mutation', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Actor_state_mutation', 'actor_state_mutation', Pid}
+            {'beamtalk_object', 'ActorStateMutation', 'actor_state_mutation', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

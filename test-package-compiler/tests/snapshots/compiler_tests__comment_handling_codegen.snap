@@ -12,7 +12,7 @@ module 'comment_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('comment_handling', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Comment_handling', 'comment_handling', Pid}
+            {'beamtalk_object', 'CommentHandling', 'comment_handling', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'comment_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('comment_handling', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Comment_handling', 'comment_handling', Pid}
+            {'beamtalk_object', 'CommentHandling', 'comment_handling', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

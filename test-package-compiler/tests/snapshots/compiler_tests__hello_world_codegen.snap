@@ -12,7 +12,7 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('hello_world', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Hello_world', 'hello_world', Pid}
+            {'beamtalk_object', 'HelloWorld', 'hello_world', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'hello_world' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('hello_world', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Hello_world', 'hello_world', Pid}
+            {'beamtalk_object', 'HelloWorld', 'hello_world', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

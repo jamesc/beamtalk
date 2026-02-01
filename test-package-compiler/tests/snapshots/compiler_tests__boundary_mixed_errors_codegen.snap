@@ -12,7 +12,7 @@ module 'boundary_mixed_errors' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('boundary_mixed_errors', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Boundary_mixed_errors', 'boundary_mixed_errors', Pid}
+            {'beamtalk_object', 'BoundaryMixedErrors', 'boundary_mixed_errors', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'boundary_mixed_errors' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('boundary_mixed_errors', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Boundary_mixed_errors', 'boundary_mixed_errors', Pid}
+            {'beamtalk_object', 'BoundaryMixedErrors', 'boundary_mixed_errors', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
