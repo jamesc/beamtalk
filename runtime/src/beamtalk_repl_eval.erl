@@ -538,9 +538,10 @@ register_classes(ClassNames, ModuleName) ->
 -spec maybe_await_future(term()) -> term().
 maybe_await_future(Value) when is_pid(Value) ->
     %% For REPL purposes, we attempt to await any PID result.
-    %% If it's a Future, it will respond with the protocol.
-    %% If it's an actor or other process, await will timeout quickly.
-    %% We use a short timeout (100ms) to detect non-futures fast.
+    %% If it's a Future, it will respond with the future protocol.
+    %% If it's an actor or other process, it will ignore the message and
+    %% we'll timeout waiting for a response.
+    %% We use a short timeout (100ms) to detect non-futures quickly.
     TestTimeout = 100,
     Value ! {await, self(), TestTimeout},
     receive
@@ -548,11 +549,13 @@ maybe_await_future(Value) when is_pid(Value) ->
             %% It was a resolved future
             AwaitedValue;
         {future_rejected, Value, Reason} ->
-            %% It was a rejected future
+            %% It was a rejected future - return error tuple for REPL inspection.
+            %% We use tuples instead of throwing (like beamtalk_future:await/1 does)
+            %% because REPL should be forgiving and allow users to inspect errors.
             {future_rejected, Reason};
         {future_timeout, Value} ->
-            %% Future timed out waiting for resolution
-            %% Try a longer await in case it's just slow
+            %% Future explicitly timed out waiting for resolution.
+            %% This confirms it IS a future. Try a longer await.
             case beamtalk_future:await(Value, 5000) of
                 {ok, AwaitedValue} ->
                     AwaitedValue;
@@ -561,14 +564,15 @@ maybe_await_future(Value) when is_pid(Value) ->
                 {error, Reason} ->
                     {future_rejected, Reason}
             end
-    after TestTimeout ->
-        %% Not a future process - it didn't respond to the protocol
-        %% Flush any late responses to avoid mailbox pollution
+    after TestTimeout + 50 ->
+        %% Not a future process - it didn't respond to the protocol.
+        %% Use TestTimeout + 50 to give the future time to send {future_timeout, Value}.
+        %% Flush any late responses to avoid mailbox pollution.
         receive
             {future_resolved, Value, _} -> ok;
             {future_rejected, Value, _} -> ok;
             {future_timeout, Value} -> ok
-        after 0 ->
+        after 20 ->
             ok
         end,
         %% Return the PID as-is (likely an actor or other process)

@@ -233,19 +233,21 @@ term_to_json(Value) when is_pid(Value) ->
     %% Futures are running beamtalk_future:pending/resolved/rejected functions
     case is_process_alive(Value) of
         true ->
+            %% Handle race condition: process could die between alive check and process_info
             case process_info(Value, current_function) of
                 {current_function, {beamtalk_future, pending, _}} ->
-                    PidStr = pid_to_list(Value),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Future<pending,">>, Inner, <<">">>]);
+                    iolist_to_binary(<<"#Future<pending>">>);
                 {current_function, {beamtalk_future, resolved, _}} ->
-                    PidStr = pid_to_list(Value),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Future<resolved,">>, Inner, <<">">>]);
+                    %% Future has been resolved; we only know its state here
+                    iolist_to_binary(<<"#Future<resolved>">>);
                 {current_function, {beamtalk_future, rejected, _}} ->
+                    %% Future has been rejected; we only know its state here
+                    iolist_to_binary(<<"#Future<rejected>">>);
+                undefined ->
+                    %% Process died between alive check and process_info
                     PidStr = pid_to_list(Value),
                     Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Future<rejected,">>, Inner, <<">">>]);
+                    iolist_to_binary([<<"#Dead<">>, Inner, <<">">>]);
                 _ ->
                     %% Regular process/actor
                     PidStr = pid_to_list(Value),
