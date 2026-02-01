@@ -1,17 +1,17 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Simulation tests for compiler-generated code patterns.
+%%% @doc Tests for compiler-generated code patterns using real compiled Beamtalk.
 %%%
-%%% These tests verify runtime behavior by manually constructing state
-%%% structures that mirror what the compiler generates. This allows testing
-%%% the runtime without requiring the full compiler pipeline.
+%%% These tests verify runtime behavior by using the counter module compiled
+%%% from tests/fixtures/counter.bt. This tests the actual code generation,
+%%% not simulated patterns.
 %%%
 %%% **Note:** These are NOT true end-to-end tests. For real E2E tests that
-%%% compile actual Beamtalk source, see `tests/e2e/cases/*.bt`.
+%%% compile actual Beamtalk source files in full, see `tests/e2e/cases/*.bt`.
 %%%
 %%% Test categories:
-%%% - spawn/0 tests (Counter spawn)
+%%% - spawn/0 tests (Counter spawn) - returns #beamtalk_object{}
 %%% - spawn/1 tests (Counter spawnWith: #{...})
 %%% - State merging behavior (InitArgs override defaults)
 %%% - Async message protocol (BT-79) - futures, awaits, errors, concurrency
@@ -31,8 +31,14 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ===========================================================================
-%%% Test Fixtures - Simulated compiled Beamtalk modules
+%%% Test Fixtures - Counter simulation and compiled module
 %%% ===========================================================================
+
+%% Note: For spawn/0 and spawn/1 tests, we use the real compiled counter module
+%% from tests/fixtures/counter.bt which generates actual #beamtalk_object{} records.
+%%
+%% For other tests that need manual state manipulation (async, cascade, etc.),
+%% we use simulated state structures below.
 
 %% @doc Creates a Counter module structure as the compiler would generate.
 %% This mirrors the output of compiling:
@@ -77,52 +83,55 @@ counter_divide([N], State) ->
         _ -> {reply, Value / N, State}
     end.
 
-%%% ===========================================================================
+%%%
 %%% spawn/0 tests (Counter spawn)
+%%% 
+%%% Tests use counter:spawn() from compiled tests/fixtures/counter.bt
+%%% which returns {beamtalk_object, 'Counter', counter, Pid}
 %%% ===========================================================================
 
 spawn_zero_uses_default_state_test() ->
     %% spawn/0 passes empty map to init, which merges with defaults
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
+    Object = counter:spawn(),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _Pid}, Object),
     
-    %% Start gen_server with this state
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    %% Extract pid from #beamtalk_object{} record (element 4, 1-indexed)
+    Pid = element(4, Object),
     
     %% Verify default value is 0
-    Value = gen_server:call(Pid, {getValue, []}),
+    {ok, Value} = gen_server:call(Pid, {getValue, []}),
     ?assertEqual(0, Value),
     
     gen_server:stop(Pid).
 
 spawn_zero_methods_work_test() ->
-    InitArgs = #{},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = counter:spawn(),
+    Pid = element(4, Object),
     
     %% Increment several times
-    ?assertEqual(1, gen_server:call(Pid, {increment, []})),
-    ?assertEqual(2, gen_server:call(Pid, {increment, []})),
-    ?assertEqual(3, gen_server:call(Pid, {increment, []})),
+    ?assertEqual({ok, 1}, gen_server:call(Pid, {increment, []})),
+    ?assertEqual({ok, 2}, gen_server:call(Pid, {increment, []})),
+    ?assertEqual({ok, 3}, gen_server:call(Pid, {increment, []})),
     
     %% Verify final value
-    ?assertEqual(3, gen_server:call(Pid, {getValue, []})),
+    ?assertEqual({ok, 3}, gen_server:call(Pid, {getValue, []})),
     
     gen_server:stop(Pid).
 
 %%% ===========================================================================
 %%% spawn/1 tests (Counter spawnWith: #{...})
+%%% 
+%%% Tests use counter:spawn(InitArgs) with initialization arguments
 %%% ===========================================================================
 
 spawn_with_overrides_default_value_test() ->
     %% spawnWith: #{value => 42} passes InitArgs to init
     InitArgs = #{value => 42},
-    State = counter_module_state(InitArgs),
-    
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = counter:spawn(InitArgs),
+    Pid = element(4, Object),
     
     %% Verify initial value was overridden
-    Value = gen_server:call(Pid, {getValue, []}),
+    {ok, Value} = gen_server:call(Pid, {getValue, []}),
     ?assertEqual(42, Value),
     
     gen_server:stop(Pid).
@@ -130,23 +139,23 @@ spawn_with_overrides_default_value_test() ->
 spawn_with_methods_still_work_test() ->
     %% spawnWith: #{value => 100}
     InitArgs = #{value => 100},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = counter:spawn(InitArgs),
+    Pid = element(4, Object),
     
     %% Increment from 100
-    ?assertEqual(101, gen_server:call(Pid, {increment, []})),
-    ?assertEqual(102, gen_server:call(Pid, {increment, []})),
+    ?assertEqual({ok, 101}, gen_server:call(Pid, {increment, []})),
+    ?assertEqual({ok, 102}, gen_server:call(Pid, {increment, []})),
     
     gen_server:stop(Pid).
 
 spawn_with_preserves_unspecified_defaults_test() ->
     %% spawnWith: #{extra => foo} - should preserve value default
     InitArgs = #{extra => foo},
-    State = counter_module_state(InitArgs),
-    {ok, Pid} = gen_server:start_link(beamtalk_actor, State, []),
+    Object = counter:spawn(InitArgs),
+    Pid = element(4, Object),
     
     %% Value should still be default (0)
-    ?assertEqual(0, gen_server:call(Pid, {getValue, []})),
+    ?assertEqual({ok, 0}, gen_server:call(Pid, {getValue, []})),
     
     %% Extra field should be in state
     ActorState = sys:get_state(Pid),
