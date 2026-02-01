@@ -21,7 +21,7 @@ init(_Args) ->
         '__class__' => 'InvalidMethodActor',
         '__methods__' => #{
             notAFunction => "this is a string, not a function",
-            validMethod => fun(_Args, State) -> {reply, ok, State} end
+            validMethod => fun(Args, State) -> {reply, ok, State} end
         }
     }).
 
