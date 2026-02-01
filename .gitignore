@@ -1,27 +1,106 @@
-# Build outputs
-/target/
-/crates/*/target
-/build/
-*.beam
-*.core
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment (secrets)
-.env
-
 # Rust
-Cargo.lock
+# Build artifacts
+/target/
+/crates/*/target/
+**/target/
+**/*.rs.bk
+*.pdb
 
-# Erlang
-erl_crash.dump
+# Cargo
+Cargo.lock
+.cargo/
+
+# IDEs and editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# Profiling and coverage
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+lcov.info
+/coverage/
+/tarpaulin-report.html
+*.dSYM/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Erlang/OTP
+# Build artifacts
+*.beam
 *.ez
+*.core
 _build/
+ebin/
+deps/
+doc/
+logs/
+
+# Rebar3
 .rebar3/
 rebar.lock
-*.profraw
+rebar3.crashdump
 
-# Backup files
+# Erlang crash dumps
+erl_crash.dump
+erlang_ls.config
+
+# Coverage and profiling
+cover/
+.eunit/
+.ct_run/
+*.coverdata
+
+# PLT files (Dialyzer)
+*.plt
+.dialyzer_plt
+.local_dialyzer_plt
+
+# Release artifacts
+rel/
+_rel/
+
+# Development
+.erlang.cookie
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Session and temporary files
+*.tmp
+*.log
+*.swp
+*.swo
+
+# Build outputs
+/build/
 *.backup
+*.crashdump

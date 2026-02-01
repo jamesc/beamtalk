@@ -12,7 +12,7 @@ module 'future_string_interpolation' ['start_link'/1, 'init'/1, 'handle_cast'/2,
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('future_string_interpolation', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Future_string_interpolation', 'future_string_interpolation', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'future_string_interpolation' ['start_link'/1, 'init'/1, 'handle_cast'/2,
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('future_string_interpolation', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Future_string_interpolation', 'future_string_interpolation', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

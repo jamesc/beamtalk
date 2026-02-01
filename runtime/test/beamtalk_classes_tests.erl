@@ -794,3 +794,173 @@ wide_hierarchy_test_() ->
              [?assert(lists:member(C, Subs)) || C <- ['A', 'B', 'C', 'D', 'E']]
          end)]
      end}.
+
+%%====================================================================
+%% Super Dispatch Tests
+%%====================================================================
+
+super_dispatch_basic_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Build hierarchy: Object <- Counter <- LoggingCounter
+             ok = beamtalk_classes:register_class(Pid, 'Object', #{
+                 module => object,
+                 superclass => none,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             % Counter with increment method (runtime block)
+             IncrementBlock = fun(State) ->
+                 Value = maps:get(value, State, 0),
+                 NewState = maps:put(value, Value + 1, State),
+                 {ok, NewState}
+             end,
+             ok = beamtalk_classes:register_class(Pid, 'Counter', #{
+                 module => counter,
+                 superclass => 'Object',
+                 methods => #{increment => #{block => IncrementBlock}},
+                 instance_variables => [value],
+                 class_variables => #{}
+             }),
+             
+             % LoggingCounter extends Counter
+             ok = beamtalk_classes:register_class(Pid, 'LoggingCounter', #{
+                 module => logging_counter,
+                 superclass => 'Counter',
+                 methods => #{},
+                 instance_variables => [value, log],
+                 class_variables => #{}
+             }),
+             
+             % State for LoggingCounter instance
+             State = #{'__class__' => 'LoggingCounter', value => 5, log => []},
+             
+             % Dispatch super increment - should find Counter's implementation
+             {ok, NewState} = beamtalk_classes:super_dispatch(Pid, State, increment, [State]),
+             
+             % Verify value was incremented by Counter's method
+             ?assertEqual(6, maps:get(value, NewState))
+         end)]
+     end}.
+
+super_dispatch_no_superclass_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Register root class with no superclass
+             ok = beamtalk_classes:register_class(Pid, 'Object', #{
+                 module => object,
+                 superclass => none,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             State = #{'__class__' => 'Object'},
+             
+             % Super dispatch should error - no superclass
+             Result = beamtalk_classes:super_dispatch(Pid, State, anyMethod, []),
+             ?assertMatch({error, {no_superclass, _, _}}, Result)
+         end)]
+     end}.
+
+super_dispatch_method_not_found_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Build hierarchy: Object <- Counter
+             ok = beamtalk_classes:register_class(Pid, 'Object', #{
+                 module => object,
+                 superclass => none,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             ok = beamtalk_classes:register_class(Pid, 'Counter', #{
+                 module => counter,
+                 superclass => 'Object',
+                 methods => #{increment => #{}},
+                 instance_variables => [value],
+                 class_variables => #{}
+             }),
+             
+             State = #{'__class__' => 'Counter'},
+             
+             % Super dispatch for method not in superclass
+             Result = beamtalk_classes:super_dispatch(Pid, State, nonExistentMethod, []),
+             ?assertMatch({error, {method_not_found_in_superclass, _}}, Result)
+         end)]
+     end}.
+
+super_dispatch_missing_class_field_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(_Pid) ->
+         [?_test(begin
+             % State without __class__ field
+             State = #{value => 42},
+             
+             Result = beamtalk_classes:super_dispatch(State, anyMethod, []),
+             ?assertEqual({error, missing_class_field_in_state}, Result)
+         end)]
+     end}.
+
+super_dispatch_walks_chain_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     fun(Pid) ->
+         [?_test(begin
+             % Build deep hierarchy: Object <- A <- B <- C
+             % Method defined in A, called from C
+             ToStringBlock = fun(_State) -> {ok, "from_A"} end,
+             
+             ok = beamtalk_classes:register_class(Pid, 'Object', #{
+                 module => object,
+                 superclass => none,
+                 methods => #{},
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             ok = beamtalk_classes:register_class(Pid, 'A', #{
+                 module => a,
+                 superclass => 'Object',
+                 methods => #{toString => #{block => ToStringBlock}},
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             ok = beamtalk_classes:register_class(Pid, 'B', #{
+                 module => b,
+                 superclass => 'A',
+                 methods => #{},  % B doesn't override toString
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             ok = beamtalk_classes:register_class(Pid, 'C', #{
+                 module => c,
+                 superclass => 'B',
+                 methods => #{},  % C doesn't override toString
+                 instance_variables => [],
+                 class_variables => #{}
+             }),
+             
+             % Call from C - should walk B -> A and find toString in A
+             State = #{'__class__' => 'C'},
+             {ok, Result} = beamtalk_classes:super_dispatch(Pid, State, toString, [State]),
+             ?assertEqual("from_A", Result)
+         end)]
+     end}.

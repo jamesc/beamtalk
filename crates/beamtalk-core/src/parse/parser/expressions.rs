@@ -475,7 +475,12 @@ impl Parser {
         };
         let span = name_token.span();
 
-        let mut expr = Expression::Identifier(Identifier::new(name.clone(), span));
+        // Check for special keyword 'super'
+        let mut expr = if name.as_str() == "super" {
+            Expression::Super(span)
+        } else {
+            Expression::Identifier(Identifier::new(name.clone(), span))
+        };
 
         // Check for field access: identifier.field
         // Only treat a '.' as starting a field access if:

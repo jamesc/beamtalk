@@ -255,7 +255,7 @@ terminate_callback_test() ->
 %%% Spawn helper tests
 
 spawn_actor_test() ->
-    Pid = beamtalk_actor:spawn_actor(test_counter, 15),
+    {ok, Pid} = test_counter:start_link(15),
     ?assert(is_pid(Pid)),
     ?assert(is_process_alive(Pid)),
     
@@ -339,7 +339,7 @@ invalid_method_not_function_async_test() ->
 stress_many_actors_test() ->
     %% Create 50 actors and verify they all work independently
     NumActors = 50,
-    Actors = [beamtalk_actor:spawn_actor(test_counter, N) || N <- lists:seq(1, NumActors)],
+    Actors = [element(2, test_counter:start_link(N)) || N <- lists:seq(1, NumActors)],
     
     %% Verify initial values
     Values = [gen_server:call(A, {getValue, []}) || A <- Actors],
@@ -543,7 +543,7 @@ memory_cleanup_after_termination_test() ->
     InitialMemory = erlang:memory(processes),
     
     %% Create and destroy multiple actors
-    Actors = [beamtalk_actor:spawn_actor(test_counter, N) || N <- lists:seq(1, 100)],
+    Actors = [element(2, test_counter:start_link(N)) || N <- lists:seq(1, 100)],
     
     %% Stop all actors
     [gen_server:stop(A) || A <- Actors],

@@ -159,7 +159,7 @@ cargo run -- repl
 
 ### REPL Usage
 
-```
+```text
 Beamtalk v0.1.0
 Type :help for available commands, :exit to quit.
 
@@ -178,7 +178,7 @@ message = "Hello, Beamtalk!"
 
 ### Load Files
 
-```
+```text
 > :load examples/counter.bt
 Loaded
 

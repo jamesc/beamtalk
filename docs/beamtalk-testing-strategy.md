@@ -13,7 +13,7 @@ Beamtalk uses a multi-layered testing strategy covering both the Rust compiler a
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
 | Runtime Unit Tests | EUnit | `runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
-| E2E Tests (Erlang) | EUnit | `runtime/test/beamtalk_e2e_tests.erl` | Full Beamtalk → BEAM → execution |
+| Codegen Simulation Tests | EUnit | `runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
 | E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | Language feature validation via REPL |
 
 ## Running Tests
@@ -58,7 +58,7 @@ cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobe
 **Erlang coverage:**
 ```bash
 cd runtime
-rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_e2e_tests --cover
+rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests --cover
 rebar3 cover --verbose
 # Generate Cobertura XML for CI
 rebar3 covertool generate
@@ -277,26 +277,52 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 ---
 
-### 6. End-to-End Tests (Erlang)
+### 6. Codegen Simulation Tests
 
-Full pipeline tests: Beamtalk source → Core Erlang → BEAM → execution.
+Tests runtime behavior using **real compiled Beamtalk code** and simulated patterns.
 
-**Location:** `runtime/test/beamtalk_e2e_tests.erl`
+**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
 
 **What they test:**
-- Complete compilation pipeline
-- Actor spawning with `spawn/0` and `spawn/1`
+- `spawn/0` and `spawn/1` tests use **real compiled `counter.bt`**
+  - Validates actual `#beamtalk_object{}` record generation
+  - Tests `counter:spawn()` from compiled module
+- Other tests use simulated state for complex scenarios
 - Method invocation (sync and async)
 - State initialization and mutation
 - Interaction between multiple actors
 
+**Test Fixtures:** Compiled automatically by rebar3 pre-hook
+- Source: `tests/fixtures/counter.bt`
+- Compiled by: `scripts/compile-test-fixtures.sh` (runs automatically)
+- Output: `runtime/test/counter.beam`
+- **No manual compilation needed** - hook runs before every `rebar3 eunit`
+
+**Compilation Workflow:**
+```
+Developer runs: cargo test OR rebar3 eunit
+  └─> cargo build (if needed) - creates ./target/debug/beamtalk
+  └─> rebar3 pre-hook runs: ./scripts/compile-test-fixtures.sh
+      └─> Uses ./target/debug/beamtalk to compile tests/fixtures/*.bt
+      └─> Copies *.beam to runtime/test/
+  └─> Tests run with compiled fixtures available
+```
+
+**Note:** For true E2E tests with full compilation pipeline, see `tests/e2e/`.
+
 **Example:**
 ```erlang
-spawn_with_args_initializes_state_test() ->
-    %% Compile a counter actor with initial value via spawnWith:
-    Counter = counter:spawn(#{value => 10}),
-    %% Verify initial state was set
-    ?assertEqual(10, gen_server:call(Counter, {getValue, []})).
+spawn_zero_uses_default_state_test() ->
+    %% Uses real compiled counter module
+    Object = counter:spawn(),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _Pid}, Object),
+    
+    %% Extract pid from #beamtalk_object{} record
+    Pid = element(4, Object),
+    
+    %% Verify default value
+    {ok, Value} = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(0, Value).
 ```
 
 ---
@@ -482,11 +508,11 @@ mod tests {
 2. Name it `descriptive_name_test()` (EUnit convention)
 3. Run `cd runtime && rebar3 eunit`
 
-### Adding an E2E Test (Erlang)
+### Adding a Codegen Simulation Test
 
-1. Add to `runtime/test/beamtalk_e2e_tests.erl`
-2. May need to compile Beamtalk source first
-3. Run `cd runtime && rebar3 eunit --module=beamtalk_e2e_tests`
+1. Add to `runtime/test/beamtalk_codegen_simulation_tests.erl`
+2. Manually construct state as compiler would generate
+3. Run `cd runtime && rebar3 eunit --module=beamtalk_codegen_simulation_tests`
 
 ### Adding an E2E Test (Rust/REPL)
 

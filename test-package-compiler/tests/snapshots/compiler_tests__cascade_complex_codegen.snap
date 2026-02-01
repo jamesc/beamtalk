@@ -12,7 +12,7 @@ module 'cascade_complex' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('cascade_complex', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Cascade_complex', 'cascade_complex', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'cascade_complex' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('cascade_complex', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Cascade_complex', 'cascade_complex', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

@@ -1,5 +1,7 @@
 # Binary Operator Implementation Status
 
+**Status:** Current - Tracks implementation vs. specification
+
 Cross-reference of binary operators documented in Beamtalk specifications versus actual implementation across the codebase.
 
 ## Source Documents
@@ -9,7 +11,7 @@ Cross-reference of binary operators documented in Beamtalk specifications versus
 
 ## Documented Operator Precedence
 
-From `docs/beamtalk-syntax-rationale.md`:
+From `../beamtalk-syntax-rationale.md`:
 
 ```
 Binary operators have precedence levels:

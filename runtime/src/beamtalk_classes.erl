@@ -37,7 +37,9 @@
     add_method/3,          % add_method(Class, Selector, Block) - production API
     add_method/4,          % add_method(ServerRef, Class, Selector, Block) - with Pid
     remove_method/2,       % remove_method(Class, Selector) - production API
-    remove_method/3        % remove_method(ServerRef, Class, Selector) - with Pid
+    remove_method/3,       % remove_method(ServerRef, Class, Selector) - with Pid
+    super_dispatch/3,      % super_dispatch(State, Selector, Args) - super method dispatch
+    super_dispatch/4       % super_dispatch(ServerRef, State, Selector, Args) - with Pid
 ]).
 
 %% gen_server callbacks
@@ -145,6 +147,48 @@ remove_method(ServerRef, Class, Selector) ->
 remove_method(Class, Selector) ->
     remove_method(?MODULE, Class, Selector).
 
+%% @doc Dispatches a message to the superclass implementation.
+%%
+%% Looks up the superclass of State's __class__, finds the method
+%% in the superclass method table, and invokes it with the given arguments.
+%%
+%% The function walks the inheritance chain recursively until it finds
+%% the method or reaches the root class.
+%%
+%% @param State The current actor state (must contain __class__ field)
+%% @param Selector The method selector atom (e.g., 'increment', 'at:put:')
+%% @param Args List of arguments for the method
+%% @returns For compiled modules: {reply, Result, NewState} (actor protocol).
+%%          For runtime blocks: varies based on block implementation.
+-spec super_dispatch(map(), selector(), list()) -> {term(), term()} | {term(), term(), term()} | {error, term()}.
+super_dispatch(State, Selector, Args) ->
+    super_dispatch(?MODULE, State, Selector, Args).
+
+%% @doc Super dispatch with explicit server reference (for testing).
+-spec super_dispatch(pid() | atom(), map(), selector(), list()) -> {term(), term()} | {term(), term(), term()} | {error, term()}.
+super_dispatch(ServerRef, State, Selector, Args) ->
+    %% Extract the current class from state
+    case maps:find('__class__', State) of
+        {ok, CurrentClass} ->
+            %% Look up the current class info
+            case lookup(ServerRef, CurrentClass) of
+                {ok, ClassInfo} ->
+                    %% Get the superclass
+                    case maps:get(superclass, ClassInfo) of
+                        none ->
+                            %% No superclass - cannot dispatch super
+                            {error, {no_superclass, CurrentClass, Selector}};
+                        Superclass ->
+                            %% Find and invoke the method in the superclass chain
+                            find_and_invoke_super_method(ServerRef, Superclass, Selector, Args, State)
+                    end;
+                undefined ->
+                    {error, {class_not_found, CurrentClass}}
+            end;
+        error ->
+            {error, missing_class_field_in_state}
+    end.
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -250,4 +294,49 @@ validate_class_info(ClassInfo, RequiredFields) ->
     case MissingFields of
         [] -> ok;
         _ -> {error, {missing_fields, MissingFields}}
+    end.
+
+%% @private
+%% Find and invoke a method in the superclass chain.
+%% Recursively walks up the inheritance hierarchy until the method is found.
+-spec find_and_invoke_super_method(pid() | atom(), class_name(), selector(), list(), map()) ->
+    {term(), map()} | {error, term()}.
+find_and_invoke_super_method(ServerRef, ClassName, Selector, Args, State) ->
+    case lookup(ServerRef, ClassName) of
+        {ok, ClassInfo} ->
+            Methods = maps:get(methods, ClassInfo),
+            case maps:find(Selector, Methods) of
+                {ok, MethodInfo} ->
+                    %% Found the method - invoke it
+                    invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State);
+                error ->
+                    %% Method not found in this class, try superclass
+                    case maps:get(superclass, ClassInfo) of
+                        none ->
+                            %% Reached root, method not found
+                            {error, {method_not_found_in_superclass, Selector}};
+                        Superclass ->
+                            %% Recursively search in superclass
+                            find_and_invoke_super_method(ServerRef, Superclass, Selector, Args, State)
+                    end
+            end;
+        undefined ->
+            {error, {class_not_found, ClassName}}
+    end.
+
+%% @private
+%% Invoke a method found in the superclass.
+-spec invoke_super_method(class_info(), selector(), method_info(), list(), map()) ->
+    {term(), map()}.
+invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State) ->
+    case maps:find(block, MethodInfo) of
+        {ok, Block} ->
+            %% Runtime block available (from live development) - call it
+            apply(Block, Args);
+        error ->
+            %% No runtime block, must call the compiled module
+            Module = maps:get(module, ClassInfo),
+            %% Call the module's dispatch function with the selector
+            %% This maintains the actor protocol (returns {reply, Result, NewState})
+            Module:dispatch(Selector, Args, State)
     end.

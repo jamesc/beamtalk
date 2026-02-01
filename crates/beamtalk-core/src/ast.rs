@@ -495,6 +495,12 @@ pub enum Expression {
     /// An identifier (variable or class name).
     Identifier(Identifier),
 
+    /// The `super` keyword for superclass method dispatch.
+    ///
+    /// When used as a message receiver, calls the superclass implementation.
+    /// Example: `super increment` or `super at: 1 put: value`
+    Super(Span),
+
     /// Field access (`self.value`).
     ///
     /// This is direct field access within an actor, not a message send.
@@ -626,6 +632,7 @@ impl Expression {
     pub const fn span(&self) -> Span {
         match self {
             Self::Literal(_, span)
+            | Self::Super(span)
             | Self::FieldAccess { span, .. }
             | Self::MessageSend { span, .. }
             | Self::Assignment { span, .. }

@@ -12,7 +12,7 @@ module 'whitespace_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('whitespace_handling', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Whitespace_handling', 'whitespace_handling', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'whitespace_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('whitespace_handling', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Whitespace_handling', 'whitespace_handling', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

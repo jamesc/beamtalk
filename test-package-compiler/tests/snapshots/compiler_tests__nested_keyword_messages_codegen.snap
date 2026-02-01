@@ -12,7 +12,7 @@ module 'nested_keyword_messages' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'ha
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('nested_keyword_messages', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Nested_keyword_messages', 'nested_keyword_messages', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'nested_keyword_messages' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'ha
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('nested_keyword_messages', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Nested_keyword_messages', 'nested_keyword_messages', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

@@ -93,7 +93,7 @@ fn analyze_expression(
     ctx: &mut AnalysisContext,
 ) {
     match expr {
-        Expression::Literal(..) | Expression::Error { .. } => {
+        Expression::Literal(..) | Expression::Error { .. } | Expression::Super(_) => {
             // No variable access
         }
 

@@ -188,6 +188,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `add-cli-command` | "add CLI command" | Add a new command to the CLI |
 | `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
+| `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
 
 ### Skill Locations
 
@@ -317,10 +318,43 @@ beamtalk/
 │   ├── beamtalk-cli/      # Command-line interface
 │   └── beamtalk-lsp/      # Language server (future)
 ├── lib/                    # Beamtalk standard library (.bt files)
+├── runtime/
+│   ├── src/               # Erlang runtime modules
+│   └── test/              # Erlang unit tests (EUnit)
 ├── test-package-compiler/  # Snapshot test harness
+├── tests/
+│   └── e2e/cases/         # Real E2E tests (.bt source files)
 ├── docs/                   # Documentation
 └── examples/               # Example beamtalk programs
 ```
+
+### Test Organization - CRITICAL DISTINCTION
+
+⚠️ **IMPORTANT:** The test suite has multiple layers. Be precise about which tests you're referring to:
+
+#### 1. Runtime Unit Tests
+**Location:** `runtime/test/*_tests.erl` (e.g., `beamtalk_actor_tests.erl`)
+- Tests individual runtime modules in isolation
+- Uses hand-written test fixtures (e.g., `test_counter.erl`)
+- Calls `gen_server` protocol directly with raw pids
+- Appropriate for testing low-level runtime behavior
+
+#### 2. Codegen Simulation Tests  
+**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
+- Tests using **real compiled Beamtalk code** from `tests/fixtures/counter.bt`
+- The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
+- Other tests use simulated state structures for complex scenarios
+- **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
+- See `docs/beamtalk-testing-strategy.md` for compilation workflow details
+
+#### 3. Real End-to-End Tests
+**Location:** `tests/e2e/cases/*.bt`
+- Actual Beamtalk source files (`.bt` extension)
+- Compiled by the real compiler (lexer → parser → codegen → erlc)
+- Executed on BEAM and validated against expected results
+- **These are the TRUE end-to-end tests**
+
+**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/test/`.**
 
 ---
 

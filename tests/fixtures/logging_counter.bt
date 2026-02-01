@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LoggingCounter - demonstrates super keyword for method dispatch
+// This fixture tests super calls in inheritance hierarchy:
+//   Actor -> Counter -> LoggingCounter
+
+// Instance variables
+value := 0.
+logCount := 0.
+
+// Override increment to add logging, then call super
+increment := [
+    self.logCount := self.logCount + 1.
+    super increment.
+    ^self.value
+].
+
+// New method to get log count
+getLogCount := [
+    ^self.logCount
+].
+
+// Override getValue to test super with different method
+getValue := [
+    super getValue
+].
+

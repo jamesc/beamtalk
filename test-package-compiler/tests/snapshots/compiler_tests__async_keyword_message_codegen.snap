@@ -12,7 +12,7 @@ module 'async_keyword_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('async_keyword_message', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Async_keyword_message', 'async_keyword_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'async_keyword_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('async_keyword_message', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Async_keyword_message', 'async_keyword_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -85,7 +85,7 @@ module 'async_keyword_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'dispatch'/3 = fun (Selector, Args, State) ->
     case Selector of
         <'update'> when 'true' ->
-            let _Result = let _Future1 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(call 'maps':'get'('object', State), {'foo:bar:', [1, #{#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#], _Future1}) in _Future1 in {'reply', _Result, State}
+            let _Result = let _Receiver1 = call 'maps':'get'('object', State) in let _Pid2 = call 'erlang':'element'(4, _Receiver1) in let _Future3 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Pid2, {'foo:bar:', [1, #{#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']])}#], _Future3}) in _Future3 in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
