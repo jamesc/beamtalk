@@ -480,10 +480,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(
-                self.output,
-                "call 'maps':'get'('{var}', {prev_state})",
-            )?;
+            write!(self.output, "call 'maps':'get'('{var}', {prev_state})",)?;
         }
         if !mutated_vars.is_empty() {
             write!(self.output, ", ")?;
@@ -636,10 +633,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(
-                self.output,
-                "call 'maps':'get'('{var}', {prev_state})",
-            )?;
+            write!(self.output, "call 'maps':'get'('{var}', {prev_state})",)?;
         }
         if !mutated_vars.is_empty() {
             write!(self.output, ", ")?;
@@ -783,10 +777,7 @@ impl CoreErlangGenerator {
         let new_state = self.next_state_var();
         write!(self.output, "{new_state} = apply 'repeat'/{arity} (1")?;
         for var in &mutated_vars {
-            write!(
-                self.output,
-                ", call 'maps':'get'('{var}', {prev_state})",
-            )?;
+            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
 
@@ -952,10 +943,7 @@ impl CoreErlangGenerator {
             "{new_state} = apply 'loop'/{arity} ({start_var}"
         )?;
         for var in &mutated_vars {
-            write!(
-                self.output,
-                ", call 'maps':'get'('{var}', {prev_state})",
-            )?;
+            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
 
