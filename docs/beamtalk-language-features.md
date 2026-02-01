@@ -139,12 +139,12 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
 
 | Feature | Status |
 |---------|--------|
-| UTF-8 string literals | ✅ Lexer supports |
-| String interpolation | 🚧 Planned |
-| Grapheme-aware length | 🚧 Via Erlang `:string` |
-| Unicode normalization | 🚧 Via Erlang `:unicode` |
-| Case folding | 🚧 Via Erlang `:string` |
-| Binary pattern UTF-8 | ✅ AST supports |
+| UTF-8 string literals | ✅ Implemented - Lexer and parser support |
+| String interpolation | ❌ Not yet implemented - See `test-package-compiler/cases/future_string_interpolation/` for planned behavior |
+| Grapheme-aware length | ✅ Available via Erlang `:string` module |
+| Unicode normalization | ✅ Available via Erlang `:unicode` module |
+| Case folding | ✅ Available via Erlang `:string` module |
+| Binary pattern UTF-8 | ✅ Implemented - AST and codegen support |
 
 ---
 
@@ -708,21 +708,22 @@ Tooling is part of the language, not an afterthought. Beamtalk is designed to be
 ### CLI Tools
 
 ```bash
-# Project management
-beamtalk new myapp          # Create new project
-beamtalk build              # Compile to BEAM
-beamtalk run                # Compile and start
-beamtalk test               # Run tests
+# Project management (implemented)
+beamtalk new myapp          # ✅ Create new project
+beamtalk build              # ✅ Compile to BEAM
+beamtalk run                # ✅ Compile and start
+beamtalk check              # ✅ Check for errors without compiling
+beamtalk daemon start/stop  # ✅ Manage compiler daemon
 
 # Development
-beamtalk repl               # Interactive REPL
-beamtalk attach node@host   # Attach to running node
-beamtalk inspect pid        # Inspect process state
+beamtalk repl               # ✅ Interactive REPL (basic implementation)
+beamtalk attach node@host   # ❌ Not yet implemented
+beamtalk inspect pid        # ❌ Not yet implemented
 
-# Debugging
-beamtalk trace actor        # Trace message flow
-beamtalk profile            # Performance profiling
-beamtalk observer           # Launch observer GUI
+# Debugging (planned)
+beamtalk trace actor        # ❌ Not yet implemented
+beamtalk profile            # ❌ Not yet implemented  
+beamtalk observer           # ❌ Not yet implemented
 ```
 
 ### REPL Features
