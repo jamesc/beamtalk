@@ -22,6 +22,7 @@ start_link(Target) ->
 init(Target) ->
     beamtalk_actor:init(#{
         '__class__' => 'Proxy',
+        '__class_mod__' => 'test_proxy',
         '__methods__' => #{
             'doesNotUnderstand:args:' => fun ?MODULE:'handle_doesNotUnderstand:args:'/2,
             setTarget => fun ?MODULE:handle_setTarget/2
