@@ -110,7 +110,9 @@ fn analyze_expression(
             }
         }
 
-        Expression::FieldAccess { receiver, field, .. } => {
+        Expression::FieldAccess {
+            receiver, field, ..
+        } => {
             // Read of a field (self.field)
             analyze_expression(receiver, analysis, ctx);
             if is_self_reference(receiver) {
@@ -133,7 +135,9 @@ fn analyze_expression(
                         analysis.local_writes.insert(id.name.to_string());
                     }
                 }
-                Expression::FieldAccess { receiver, field, .. } => {
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } => {
                     // Field assignment
                     if is_self_reference(receiver) {
                         analysis.field_writes.insert(field.name.to_string());
@@ -157,7 +161,9 @@ fn analyze_expression(
                         analysis.local_writes.insert(id.name.to_string());
                     }
                 }
-                Expression::FieldAccess { receiver, field, .. } => {
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } => {
                     if is_self_reference(receiver) {
                         analysis.field_reads.insert(field.name.to_string());
                         analysis.field_writes.insert(field.name.to_string());
@@ -291,7 +297,7 @@ mod tests {
     use crate::parse::Span;
 
     fn make_id(name: &str) -> Identifier {
-        Identifier::new(name, Span::new(0, name.len() as u32))
+        Identifier::new(name, Span::new(0, u32::try_from(name.len()).unwrap_or(0)))
     }
 
     fn make_expr_id(name: &str) -> Expression {
@@ -452,11 +458,7 @@ mod tests {
             Span::new(11, 21),
         )]);
 
-        assert!(is_control_flow_construct(
-            &condition,
-            &selector,
-            &[body]
-        ));
+        assert!(is_control_flow_construct(&condition, &selector, &[body]));
     }
 
     #[test]
@@ -469,10 +471,6 @@ mod tests {
         )]);
 
         // Not a control flow construct because receiver is not a literal block
-        assert!(!is_control_flow_construct(
-            &condition,
-            &selector,
-            &[body]
-        ));
+        assert!(!is_control_flow_construct(&condition, &selector, &[body]));
     }
 }

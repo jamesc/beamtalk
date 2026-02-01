@@ -1,0 +1,278 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 69
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    expressions: [
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "Counter",
+                    span: Span {
+                        start: 258,
+                        end: 265,
+                    },
+                },
+            ),
+            value: Identifier(
+                Identifier {
+                    name: "class",
+                    span: Span {
+                        start: 269,
+                        end: 274,
+                    },
+                },
+            ),
+            span: Span {
+                start: 258,
+                end: 274,
+            },
+        },
+        Block(
+            Block {
+                parameters: [],
+                body: [
+                    MessageSend {
+                        receiver: Error {
+                            message: "Unexpected token: expected expression, found state:",
+                            span: Span {
+                                start: 281,
+                                end: 287,
+                            },
+                        },
+                        selector: Keyword(
+                            [
+                                KeywordPart {
+                                    keyword: "value:",
+                                    span: Span {
+                                        start: 288,
+                                        end: 294,
+                                    },
+                                },
+                            ],
+                        ),
+                        arguments: [
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "Integer",
+                                        span: Span {
+                                            start: 295,
+                                            end: 302,
+                                        },
+                                    },
+                                ),
+                                selector: Binary(
+                                    "=",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            0,
+                                        ),
+                                        Span {
+                                            start: 305,
+                                            end: 306,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 295,
+                                    end: 306,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 281,
+                            end: 306,
+                        },
+                    },
+                    Identifier(
+                        Identifier {
+                            name: "badBlock",
+                            span: Span {
+                                start: 375,
+                                end: 383,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    start: 275,
+                    end: 276,
+                },
+            },
+        ),
+        Error {
+            message: "Unexpected token: expected expression, found =>",
+            span: Span {
+                start: 384,
+                end: 386,
+            },
+        },
+        Error {
+            message: "Invalid assignment target",
+            span: Span {
+                start: 411,
+                end: 417,
+            },
+        },
+        MessageSend {
+            receiver: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found .",
+                    span: Span {
+                        start: 425,
+                        end: 426,
+                    },
+                },
+                selector: Unary(
+                    "value",
+                ),
+                arguments: [],
+                span: Span {
+                    start: 425,
+                    end: 431,
+                },
+            },
+            selector: Binary(
+                "+",
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        1,
+                    ),
+                    Span {
+                        start: 434,
+                        end: 435,
+                    },
+                ),
+            ],
+            span: Span {
+                start: 425,
+                end: 435,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
+            span: Span {
+                start: 435,
+                end: 436,
+            },
+        },
+        Return {
+            value: Identifier(
+                Identifier {
+                    name: "myBlock",
+                    span: Span {
+                        start: 447,
+                        end: 454,
+                    },
+                },
+            ),
+            span: Span {
+                start: 446,
+                end: 454,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
+            span: Span {
+                start: 456,
+                end: 457,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found .",
+            span: Span {
+                start: 556,
+                end: 557,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found ]",
+            span: Span {
+                start: 592,
+                end: 593,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found .",
+            span: Span {
+                start: 622,
+                end: 623,
+            },
+        },
+        Error {
+            message: "Unexpected token: expected expression, found .",
+            span: Span {
+                start: 634,
+                end: 635,
+            },
+        },
+    ],
+    span: Span {
+        start: 258,
+        end: 635,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 258,
+                end: 265,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 258,
+                end: 265,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test error cases: stored closures should NOT allow mutations",
+            span: Span {
+                start: 258,
+                end: 265,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Per BT-90 design: only literal blocks in control flow positions can mutate",
+            span: Span {
+                start: 258,
+                end: 265,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// ERROR: Field Assignment in Stored Closure",
+            span: Span {
+                start: 258,
+                end: 265,
+            },
+            kind: Line,
+        },
+    ],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 281, end: 287 } }
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 384, end: 386 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 384, end: 386 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 411, end: 412 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 411, end: 417 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 425, end: 426 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 435, end: 436 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 456, end: 457 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 556, end: 557 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 592, end: 593 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 622, end: 623 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 634, end: 635 } }
