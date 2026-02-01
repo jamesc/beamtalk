@@ -150,6 +150,22 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
 
 ## Core Syntax
 
+### Implementation Status
+
+| Feature | Status | Test Coverage |
+|---------|--------|---------------|
+| Actor definition & spawning | ✅ Implemented | `actor_spawn`, `actor_spawn_with_args` |
+| Unary messages | ✅ Implemented | `async_unary_message`, `unary_operators` |
+| Binary messages/operators | ✅ Implemented | `binary_operators` |
+| Keyword messages | ✅ Implemented | `async_keyword_message`, `multi_keyword_complex_args` |
+| Cascades | ✅ Implemented | `cascades`, `cascade_complex` |
+| Blocks/closures | ✅ Implemented | `blocks_no_args`, `empty_blocks`, `nested_blocks` |
+| Field access & assignment | ✅ Implemented (with limitations) | `actor_state_mutation` |
+| Class definitions | ✅ Implemented | `class_definition` |
+| Map literals | ✅ Implemented | `map_literals` |
+| Comments | ✅ Implemented | `comment_handling` |
+| Async message sends | ✅ Implemented | `async_with_await`, `async_keyword_message` |
+
 ### Actor Definition
 
 ```
@@ -671,6 +687,27 @@ around (enter) → before → primary → after → around (exit)
 | Workspace | Connected REPL to live node |
 | Class browser | Code introspection via `code:` module |
 | Global variable | Registered process or application env |
+
+---
+
+## Standard Library
+
+Core classes implemented and tested:
+
+| Class | Status | Description | Test Coverage |
+|-------|--------|-------------|---------------|
+| **Actor** | ✅ Implemented | Base class for all actors (BEAM processes) | `actor_spawn`, `actor_state_mutation` |
+| **Block** | ✅ Implemented | First-class closures | `stdlib_block`, `blocks_no_args` |
+| **Boolean** | ✅ Implemented | `True` and `False` with control flow | `stdlib_boolean` |
+| **Integer** | ✅ Implemented | Arbitrary precision arithmetic | `stdlib_integer` |
+| **String** | ✅ Implemented | UTF-8 text with operations | `stdlib_string`, `string_operations` |
+| **Array** | ✅ Implemented | Fixed-size indexed collection (tuple) | `stdlib_array` |
+| **List** | ✅ Implemented | Linked list with fast prepend | `stdlib_list` |
+| **Dictionary** | ✅ Implemented | Key-value map | `stdlib_dictionary`, `map_literals` |
+| **Set** | ✅ Implemented | Unordered unique elements | `stdlib_set` |
+| **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |
+
+For detailed API documentation, see [`lib/README.md`](../lib/README.md).
 
 ---
 
