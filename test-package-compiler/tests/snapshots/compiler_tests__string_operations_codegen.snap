@@ -12,7 +12,7 @@ module 'string_operations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('string_operations', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'String_operations', 'string_operations', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'string_operations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('string_operations', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'String_operations', 'string_operations', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

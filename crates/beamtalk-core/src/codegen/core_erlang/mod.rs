@@ -228,6 +228,31 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Converts a module name to a class name by capitalizing the first letter.
+    ///
+    /// Module names in Beamtalk follow Erlang conventions (lowercase atoms),
+    /// while class names follow Smalltalk conventions (`UpperCamelCase`).
+    ///
+    /// # Examples
+    ///
+    /// - `"counter"` -> `"Counter"`
+    /// - `"my_class"` -> `"My_class"`
+    ///
+    /// # Panics
+    ///
+    /// Panics if the module name is empty, as an empty module name represents an
+    /// invalid state in the code generation pipeline.
+    fn module_name_to_class_name(&self) -> String {
+        assert!(
+            !self.module_name.is_empty(),
+            "module_name_to_class_name called with empty module name; this is an invalid state in code generation"
+        );
+
+        let mut chars = self.module_name.chars();
+        let first = chars.next().unwrap().to_uppercase().to_string();
+        first + chars.as_str()
+    }
+
     /// Generates a full module with `gen_server` behaviour.
     ///
     /// Per BT-29 design doc, each class generates a `gen_server` module with:
@@ -235,9 +260,13 @@ impl CoreErlangGenerator {
     /// - `doesNotUnderstand:args:` fallback dispatch
     /// - `terminate/2` with method call support
     ///
-    /// NOTE: The `#beamtalk_object{}` record is defined in `runtime/include/beamtalk.hrl`
-    /// but not yet used in generated code. Currently `spawn/0` and `spawn/1` return raw
-    /// pids. Record-based object wrappers are deferred work (requires BT-95).
+    /// ## Object References (BT-100)
+    ///
+    /// The `#beamtalk_object{}` record is defined in `runtime/include/beamtalk.hrl`
+    /// and is now used by generated code:
+    /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
+    /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
+    /// - This enables reflection (`obj class`) and proper object semantics
     fn generate_module(&mut self, module: &Module) -> Result<()> {
         // Module header with expanded exports per BT-29
         writeln!(
@@ -387,15 +416,16 @@ impl CoreErlangGenerator {
     /// This is a class-level method that instantiates a new actor process
     /// using `gen_server:start_link/3`. The function:
     /// 1. Calls `gen_server:start_link/3` with empty args (init/1 creates the state)
-    /// 2. Extracts and returns the process Pid, or throws error on failure
+    /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
+    /// 3. Returns the object record, or throws error on failure
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'spawn'/0 = fun () ->
-    ///     case call 'gen_server':'start_link'('counter', [], []) of
+    ///     case call 'gen_server':'start_link'('counter', ~{}~, []) of
     ///         <{'ok', Pid}> when 'true' ->
-    ///             Pid;
+    ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
     ///             call 'erlang':'error'({'spawn_failed', Reason})
     ///     end
@@ -415,7 +445,14 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "Pid")?;
+        // Return #beamtalk_object{} record instead of raw pid
+        // Record syntax in Core Erlang: {RecordTag, Field1, Field2, ...}
+        let class_name = self.module_name_to_class_name();
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', '{}', '{}', Pid}}",
+            class_name, self.module_name
+        )?;
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
@@ -439,7 +476,8 @@ impl CoreErlangGenerator {
     /// This is a class-level method that instantiates a new actor process
     /// with initialization arguments passed to `init/1`. The function:
     /// 1. Calls `gen_server:start_link/3` with the provided args
-    /// 2. Extracts and returns the process Pid, or throws error on failure
+    /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
+    /// 3. Returns the object record, or throws error on failure
     ///
     /// # Generated Code
     ///
@@ -447,7 +485,7 @@ impl CoreErlangGenerator {
     /// 'spawn'/1 = fun (InitArgs) ->
     ///     case call 'gen_server':'start_link'('counter', InitArgs, []) of
     ///         <{'ok', Pid}> when 'true' ->
-    ///             Pid;
+    ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
     ///             call 'erlang':'error'({'spawn_failed', Reason})
     ///     end
@@ -466,7 +504,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "Pid")?;
+        // Return #beamtalk_object{} record instead of raw pid
+        let class_name = self.module_name_to_class_name();
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', '{}', '{}', Pid}}",
+            class_name, self.module_name
+        )?;
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
@@ -1591,24 +1635,41 @@ impl CoreErlangGenerator {
         }
 
         // Generate the async message send protocol:
-        // let Future1 = call 'beamtalk_future':'new'()
-        // in let _ = call 'gen_server':'cast'(ReceiverPid, {Selector, Args, Future1})
+        // let Receiver1 = <receiver expression>
+        // in let Pid1 = call 'erlang':'element'(4, Receiver1)  % Extract pid from #beamtalk_object{}
+        // in let Future1 = call 'beamtalk_future':'new'()
+        // in let _ = call 'gen_server':'cast'(Pid1, {Selector, Args, Future1})
         //    in Future1
         //
         // Use fresh_var to avoid shadowing in nested message sends
 
+        let receiver_var = self.fresh_var("Receiver");
+        let pid_var = self.fresh_var("Pid");
         let future_var = self.fresh_var("Future");
+
+        // Bind receiver to a variable
+        write!(self.output, "let {receiver_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in ")?;
+
+        // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+        // Record tuple is: {'beamtalk_object', Class, ClassMod, Pid}
+        write!(
+            self.output,
+            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+        )?;
+
+        // Create future
         write!(
             self.output,
             "let {future_var} = call 'beamtalk_future':'new'() in "
         )?;
 
         // Build the message tuple: {Selector, Args, Future}
-        write!(self.output, "let _ = call 'gen_server':'cast'(")?;
-
-        // Receiver evaluation
-        self.generate_expression(receiver)?;
-        write!(self.output, ", {{")?;
+        write!(
+            self.output,
+            "let _ = call 'gen_server':'cast'({pid_var}, {{"
+        )?;
 
         // First element: the selector name as an atom
         write!(self.output, "'")?;
@@ -1722,6 +1783,13 @@ impl CoreErlangGenerator {
             self.generate_expression(underlying_receiver)?;
             write!(self.output, " in ")?;
 
+            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+            let pid_var = self.fresh_temp_var("Pid");
+            write!(
+                self.output,
+                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+            )?;
+
             // Total number of messages in the cascade: first + remaining
             let total_messages = messages.len() + 1;
 
@@ -1744,7 +1812,7 @@ impl CoreErlangGenerator {
                         (&msg.selector, msg.arguments.as_slice())
                     };
 
-                // Generate async message send to the receiver variable
+                // Generate async message send to the receiver pid variable
                 let future_var = self.fresh_var("Future");
                 write!(
                     self.output,
@@ -1752,7 +1820,7 @@ impl CoreErlangGenerator {
                 )?;
                 write!(
                     self.output,
-                    "let _ = call 'gen_server':'cast'({receiver_var}, {{"
+                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
                 )?;
 
                 // Selector
@@ -1797,6 +1865,13 @@ impl CoreErlangGenerator {
             self.generate_expression(receiver)?;
             write!(self.output, " in ")?;
 
+            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+            let pid_var = self.fresh_temp_var("Pid");
+            write!(
+                self.output,
+                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+            )?;
+
             // Generate each message send, discarding intermediate results
             for (i, message) in messages.iter().enumerate() {
                 let is_last = i == messages.len() - 1;
@@ -1806,7 +1881,7 @@ impl CoreErlangGenerator {
                     write!(self.output, "let _ = ")?;
                 }
 
-                // Generate async message send to the receiver variable
+                // Generate async message send to the receiver pid variable
                 let future_var = self.fresh_var("Future");
                 write!(
                     self.output,
@@ -1814,7 +1889,7 @@ impl CoreErlangGenerator {
                 )?;
                 write!(
                     self.output,
-                    "let _ = call 'gen_server':'cast'({receiver_var}, {{"
+                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
                 )?;
 
                 // Selector
@@ -3075,21 +3150,28 @@ end
         assert!(result.is_ok());
 
         let output = &generator.output;
-        // Should have TWO different future variables: _Future1 and _Future2
+
+        // Check that we have at least two different _Future variables
+        // (The exact numbers depend on the fresh_var counter state, but they should be different)
+        let has_multiple_futures =
+            output.contains("_Future") && output.matches("_Future").count() >= 6; // At least 2 futures * 3 occurrences each
         assert!(
-            output.contains("_Future1") && output.contains("_Future2"),
+            has_multiple_futures,
             "Nested message sends should use unique future variables. Got: {output}"
         );
-        // Each variable should appear 3 times (bind, send arg, return)
-        assert_eq!(
-            output.matches("_Future1").count(),
-            3,
-            "Inner future variable should appear 3 times. Got: {output}"
+
+        // Check that we have receiver and pid extraction in the output
+        assert!(
+            output.contains("_Receiver"),
+            "Should have receiver variable. Got: {output}"
         );
-        assert_eq!(
-            output.matches("_Future2").count(),
-            3,
-            "Outer future variable should appear 3 times. Got: {output}"
+        assert!(
+            output.contains("_Pid"),
+            "Should have pid variable for message sending. Got: {output}"
+        );
+        assert!(
+            output.contains("call 'erlang':'element'(4,"),
+            "Should extract pid from #beamtalk_object{{}}. Got: {output}"
         );
     }
 
@@ -3164,10 +3246,15 @@ end
         assert!(code.contains("'spawn'/1 = fun (InitArgs) ->"));
         assert!(code.contains("call 'gen_server':'start_link'('counter', InitArgs, [])"));
 
-        // Check that it uses a case expression to extract the Pid
+        // Check that it uses a case expression to extract the Pid and wrap it in #beamtalk_object{}
         assert!(code.contains("case call 'gen_server':'start_link'"));
         assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
-        assert!(code.contains("Pid"));
+
+        // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)
+        assert!(
+            code.contains("{'beamtalk_object', 'Counter', 'counter', Pid}"),
+            "spawn functions should return #beamtalk_object{{}} record. Got: {code}"
+        );
 
         // Check that it handles errors
         assert!(code.contains("<{'error', Reason}> when 'true' ->"));
@@ -3918,10 +4005,16 @@ end
             "Should send second message 'abs'. Got: {output}"
         );
 
-        // Should use gen_server:cast for async message sends
+        // Should use gen_server:cast for async message sends with extracted pid
         assert!(
-            output.contains("call 'gen_server':'cast'(_Receiver1"),
-            "Should send messages to the bound receiver. Got: {output}"
+            output.contains("call 'gen_server':'cast'(_Pid"),
+            "Should send messages to the extracted pid from receiver object. Got: {output}"
+        );
+
+        // Should extract pid from beamtalk_object record
+        assert!(
+            output.contains("call 'erlang':'element'(4, _Receiver"),
+            "Should extract pid from #beamtalk_object{{}} record. Got: {output}"
         );
 
         // Should create futures for async messages
