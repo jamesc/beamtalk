@@ -5,6 +5,14 @@
 %%%
 %%% This module handles compilation, bytecode generation, and evaluation
 %%% of Beamtalk expressions via the compiler daemon.
+%%%
+%%% ## Platform Requirements
+%%%
+%%% The secure temp file handling in this module requires Unix-like systems
+%%% with support for file permissions (chmod). Windows is not currently
+%%% supported due to its different security model (ACLs vs Unix permissions).
+%%% The `ensure_secure_temp_dir/0` and `ensure_dir_with_mode/2` functions
+%%% rely on `file:change_mode/2` which has limited or no effect on Windows.
 
 -module(beamtalk_repl_eval).
 
@@ -281,27 +289,34 @@ compile_core_erlang(CoreErlangBin, ModuleName) ->
 -spec ensure_secure_temp_dir() -> {ok, string()} | {error, term()}.
 ensure_secure_temp_dir() ->
     %% Use ~/.beamtalk/tmp/ as secure per-user temp directory
-    HomeDir = case os:getenv("HOME") of
+    %% Requires HOME to be set to avoid falling back to insecure /tmp
+    case os:getenv("HOME") of
         false ->
-            %% Fallback for systems without HOME (unlikely on Unix)
-            "/tmp";
-        Home ->
-            Home
-    end,
-    BeamtalkDir = filename:join(HomeDir, ".beamtalk"),
-    TempDir = filename:join(BeamtalkDir, "tmp"),
-    
-    %% Ensure parent directory exists with secure permissions (0700)
-    case ensure_dir_with_mode(BeamtalkDir, 8#700) of
-        {ok, _} ->
-            %% Ensure temp directory exists with secure permissions (0700)
-            ensure_dir_with_mode(TempDir, 8#700);
-        {error, _} = Error ->
-            Error
+            %% Do not fall back to /tmp to avoid reintroducing symlink attacks.
+            %% Mirror behavior of beamtalk_repl_state: require HOME to be set.
+            {error, no_home_dir};
+        HomeDir ->
+            BeamtalkDir = filename:join(HomeDir, ".beamtalk"),
+            TempDir = filename:join(BeamtalkDir, "tmp"),
+            
+            %% Ensure parent directory exists with secure permissions (0700)
+            case ensure_dir_with_mode(BeamtalkDir, 8#700) of
+                {ok, _} ->
+                    %% Ensure temp directory exists with secure permissions (0700)
+                    ensure_dir_with_mode(TempDir, 8#700);
+                {error, _} = Error ->
+                    Error
+            end
     end.
 
 %% Ensure a directory exists with the specified mode (octal permissions).
 %% If the directory exists, verifies and corrects permissions if needed.
+%%
+%% ## Platform Support
+%%
+%% This function requires Unix-like systems. On Windows, file:change_mode/2
+%% has limited or no effect, and the security guarantees cannot be ensured.
+%%
 %% Returns {ok, Path} | {error, Reason}.
 -spec ensure_dir_with_mode(string(), non_neg_integer()) -> {ok, string()} | {error, term()}.
 ensure_dir_with_mode(Dir, Mode) ->

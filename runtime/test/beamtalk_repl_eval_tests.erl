@@ -241,13 +241,26 @@ ensure_secure_temp_dir_creates_directory_test() ->
     %% Verify it's under ~/.beamtalk/tmp/
     ?assert(lists:suffix("/tmp", Dir) orelse lists:suffix("/tmp/", Dir)).
 
+%% Helper to check if we're on Unix (where permission tests work)
+is_unix() ->
+    case os:type() of
+        {unix, _} -> true;
+        _ -> false
+    end.
+
 ensure_secure_temp_dir_has_secure_permissions_test() ->
-    %% Test that directory has mode 0700
-    {ok, Dir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-    {ok, FileInfo} = file:read_file_info(Dir),
-    Mode = FileInfo#file_info.mode band 8#777,
-    %% Should be 0700 (448 in decimal)
-    ?assertEqual(8#700, Mode).
+    %% Test that directory has mode 0700 (Unix only)
+    case is_unix() of
+        true ->
+            {ok, Dir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
+            {ok, FileInfo} = file:read_file_info(Dir),
+            Mode = FileInfo#file_info.mode band 8#777,
+            %% Should be 0700 (448 in decimal)
+            ?assertEqual(8#700, Mode);
+        false ->
+            %% Skip on non-Unix platforms (Windows)
+            ok
+    end.
 
 ensure_secure_temp_dir_idempotent_test() ->
     %% Calling multiple times should return same directory
@@ -256,94 +269,118 @@ ensure_secure_temp_dir_idempotent_test() ->
     ?assertEqual(Dir1, Dir2).
 
 ensure_dir_with_mode_creates_new_directory_test() ->
-    %% Create a temporary directory with unique name for testing
-    UniqueId = erlang:unique_integer([positive]),
-    TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                            io_lib:format("test_dir_mode_~p", [UniqueId])),
-    
-    %% Ensure it doesn't exist
-    file:del_dir(TestDir),
-    
-    %% Create with mode 0700
-    Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-    ?assertMatch({ok, _}, Result),
-    {ok, ReturnedDir} = Result,
-    ?assertEqual(TestDir, ReturnedDir),
-    
-    %% Verify it exists and has correct permissions
-    ?assert(filelib:is_dir(TestDir)),
-    {ok, FileInfo} = file:read_file_info(TestDir),
-    Mode = FileInfo#file_info.mode band 8#777,
-    ?assertEqual(8#700, Mode),
-    
-    %% Clean up
-    file:del_dir(TestDir).
+    %% Create a temporary directory with unique name for testing (Unix only)
+    case is_unix() of
+        true ->
+            UniqueId = erlang:unique_integer([positive]),
+            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
+                                    io_lib:format("test_dir_mode_~p", [UniqueId])),
+            
+            %% Ensure it doesn't exist
+            file:del_dir(TestDir),
+            
+            %% Create with mode 0700
+            Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
+            ?assertMatch({ok, _}, Result),
+            {ok, ReturnedDir} = Result,
+            ?assertEqual(TestDir, ReturnedDir),
+            
+            %% Verify it exists and has correct permissions
+            ?assert(filelib:is_dir(TestDir)),
+            {ok, FileInfo} = file:read_file_info(TestDir),
+            Mode = FileInfo#file_info.mode band 8#777,
+            ?assertEqual(8#700, Mode),
+            
+            %% Clean up
+            file:del_dir(TestDir);
+        false ->
+            %% Skip on non-Unix platforms
+            ok
+    end.
 
 ensure_dir_with_mode_fixes_permissions_test() ->
-    %% Create a directory with wrong permissions, verify it gets fixed
-    UniqueId = erlang:unique_integer([positive]),
-    TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                            io_lib:format("test_dir_perms_~p", [UniqueId])),
-    
-    %% Create with permissive mode 0755
-    file:del_dir(TestDir),
-    ok = file:make_dir(TestDir),
-    ok = file:change_mode(TestDir, 8#755),
-    
-    %% Verify wrong permissions
-    {ok, FileInfo1} = file:read_file_info(TestDir),
-    ?assertEqual(8#755, FileInfo1#file_info.mode band 8#777),
-    
-    %% Call ensure_dir_with_mode to fix it
-    {ok, _} = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-    
-    %% Verify permissions are now correct
-    {ok, FileInfo2} = file:read_file_info(TestDir),
-    ?assertEqual(8#700, FileInfo2#file_info.mode band 8#777),
-    
-    %% Clean up
-    file:del_dir(TestDir).
+    %% Create a directory with wrong permissions, verify it gets fixed (Unix only)
+    case is_unix() of
+        true ->
+            UniqueId = erlang:unique_integer([positive]),
+            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
+                                    io_lib:format("test_dir_perms_~p", [UniqueId])),
+            
+            %% Create with permissive mode 0755
+            file:del_dir(TestDir),
+            ok = file:make_dir(TestDir),
+            ok = file:change_mode(TestDir, 8#755),
+            
+            %% Verify wrong permissions
+            {ok, FileInfo1} = file:read_file_info(TestDir),
+            ?assertEqual(8#755, FileInfo1#file_info.mode band 8#777),
+            
+            %% Call ensure_dir_with_mode to fix it
+            {ok, _} = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
+            
+            %% Verify permissions are now correct
+            {ok, FileInfo2} = file:read_file_info(TestDir),
+            ?assertEqual(8#700, FileInfo2#file_info.mode band 8#777),
+            
+            %% Clean up
+            file:del_dir(TestDir);
+        false ->
+            %% Skip on non-Unix platforms
+            ok
+    end.
 
 ensure_dir_with_mode_existing_correct_permissions_test() ->
-    %% If directory exists with correct permissions, should just return ok
-    UniqueId = erlang:unique_integer([positive]),
-    TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
-                            io_lib:format("test_dir_ok_~p", [UniqueId])),
-    
-    %% Create with correct mode
-    file:del_dir(TestDir),
-    ok = file:make_dir(TestDir),
-    ok = file:change_mode(TestDir, 8#700),
-    
-    %% Call ensure_dir_with_mode
-    Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
-    ?assertMatch({ok, _}, Result),
-    
-    %% Permissions should still be correct
-    {ok, FileInfo} = file:read_file_info(TestDir),
-    ?assertEqual(8#700, FileInfo#file_info.mode band 8#777),
-    
-    %% Clean up
-    file:del_dir(TestDir).
+    %% If directory exists with correct permissions, should just return ok (Unix only)
+    case is_unix() of
+        true ->
+            UniqueId = erlang:unique_integer([positive]),
+            TestDir = filename:join(os:getenv("TMPDIR", "/tmp"), 
+                                    io_lib:format("test_dir_ok_~p", [UniqueId])),
+            
+            %% Create with correct mode
+            file:del_dir(TestDir),
+            ok = file:make_dir(TestDir),
+            ok = file:change_mode(TestDir, 8#700),
+            
+            %% Call ensure_dir_with_mode
+            Result = beamtalk_repl_eval:ensure_dir_with_mode(TestDir, 8#700),
+            ?assertMatch({ok, _}, Result),
+            
+            %% Permissions should still be correct
+            {ok, FileInfo} = file:read_file_info(TestDir),
+            ?assertEqual(8#700, FileInfo#file_info.mode band 8#777),
+            
+            %% Clean up
+            file:del_dir(TestDir);
+        false ->
+            %% Skip on non-Unix platforms
+            ok
+    end.
 
 compile_core_erlang_uses_secure_temp_dir_test() ->
-    %% Test that compile_core_erlang uses the secure temp directory
-    %% We can't easily test the full compilation path without a valid Core Erlang module,
-    %% but we can verify that the secure temp dir is created
-    CoreErlang = <<"module 'test_secure' ['main'/0]\n"
-                   "attributes []\n"
-                   "'main'/0 = fun () -> 42\n">>,
-    ModuleName = test_secure,
-    
-    %% Call compile_core_erlang (will likely fail with invalid Core Erlang syntax)
-    _Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
-    
-    %% Verify secure temp directory was created
-    {ok, SecureTempDir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
-    ?assert(filelib:is_dir(SecureTempDir)),
-    
-    %% Verify it has secure permissions
-    {ok, FileInfo} = file:read_file_info(SecureTempDir),
-    Mode = FileInfo#file_info.mode band 8#777,
-    ?assertEqual(8#700, Mode).
+    %% Test that compile_core_erlang uses the secure temp directory (Unix only)
+    case is_unix() of
+        true ->
+            %% We can't easily test the full compilation path without a valid Core Erlang module,
+            %% but we can verify that the secure temp dir is created
+            CoreErlang = <<"module 'test_secure' ['main'/0]\n"
+                           "attributes []\n"
+                           "'main'/0 = fun () -> 42\n">>,
+            ModuleName = test_secure,
+            
+            %% Call compile_core_erlang (will likely fail with invalid Core Erlang syntax)
+            _Result = beamtalk_repl_eval:compile_core_erlang(CoreErlang, ModuleName),
+            
+            %% Verify secure temp directory was created
+            {ok, SecureTempDir} = beamtalk_repl_eval:ensure_secure_temp_dir(),
+            ?assert(filelib:is_dir(SecureTempDir)),
+            
+            %% Verify it has secure permissions
+            {ok, FileInfo} = file:read_file_info(SecureTempDir),
+            Mode = FileInfo#file_info.mode band 8#777,
+            ?assertEqual(8#700, Mode);
+        false ->
+            %% Skip on non-Unix platforms
+            ok
+    end.
 
