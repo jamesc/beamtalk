@@ -581,3 +581,85 @@ concurrent_doesNotUnderstand_test() ->
     
     gen_server:stop(Proxy),
     gen_server:stop(Target).
+
+%%% BT-159: Self-as-object tests
+
+make_self_test() ->
+    %% Test that make_self/1 constructs a proper #beamtalk_object{} record
+    State = #{
+        '__class__' => 'Counter',
+        '__class_mod__' => 'counter',
+        value => 42
+    },
+    
+    %% Start an actor to get a valid pid context
+    {ok, Pid} = test_counter:start_link(0),
+    
+    %% Call make_self in the actor's context via a helper function
+    Self = gen_server:call(Pid, {test_make_self, []}),
+    
+    %% Verify the record structure
+    ?assertMatch({beamtalk_object, 'Counter', 'counter', _}, Self),
+    ?assertEqual('Counter', element(2, Self)),
+    ?assertEqual('counter', element(3, Self)),
+    ?assertEqual(Pid, element(4, Self)),
+    
+    gen_server:stop(Pid).
+
+dispatch4_with_self_parameter_test() ->
+    %% Test dispatch/4 with Self parameter using new-style method
+    {ok, Actor} = test_self_aware_actor:start_link(100),
+    
+    %% Call method that returns Self
+    Result = gen_server:call(Actor, {getSelf, []}),
+    
+    %% Should return #beamtalk_object{} record
+    ?assertMatch({beamtalk_object, 'SelfAwareActor', 'test_self_aware_actor', _}, Result),
+    ?assertEqual('SelfAwareActor', element(2, Result)),
+    ?assertEqual('test_self_aware_actor', element(3, Result)),
+    
+    gen_server:stop(Actor).
+
+dispatch4_access_self_class_test() ->
+    %% Test that methods can access Self.class
+    {ok, Actor} = test_self_aware_actor:start_link(0),
+    
+    %% Call method that returns self's class
+    Result = gen_server:call(Actor, {getClassName, []}),
+    
+    ?assertEqual('SelfAwareActor', Result),
+    
+    gen_server:stop(Actor).
+
+dispatch3_backward_compatibility_test() ->
+    %% Test that old dispatch/3 still works with existing actors
+    {ok, Counter} = test_counter:start_link(10),
+    
+    %% Old-style methods (Fun/2) should still work
+    Result1 = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(10, Result1),
+    
+    %% Modify state
+    ok = gen_server:call(Counter, {'setValue:', [25]}),
+    Result2 = gen_server:call(Counter, {getValue, []}),
+    ?assertEqual(25, Result2),
+    
+    gen_server:stop(Counter).
+
+dispatch4_mixed_methods_test() ->
+    %% Test actor with both old-style (Fun/2) and new-style (Fun/4) methods
+    {ok, Actor} = test_mixed_actor:start_link(50),
+    
+    %% Call old-style method
+    Old = gen_server:call(Actor, {getValueOldStyle, []}),
+    ?assertEqual(50, Old),
+    
+    %% Call new-style method
+    New = gen_server:call(Actor, {getValueNewStyle, []}),
+    ?assertEqual(50, New),
+    
+    %% Call method that returns Self (new-style)
+    Self = gen_server:call(Actor, {getSelf, []}),
+    ?assertMatch({beamtalk_object, 'MixedActor', _, _}, Self),
+    
+    gen_server:stop(Actor).

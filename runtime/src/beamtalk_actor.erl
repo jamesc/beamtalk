@@ -111,7 +111,7 @@
          code_change/3, terminate/2]).
 
 %% Internal dispatch
--export([dispatch/3]).
+-export([dispatch/3, dispatch/4, make_self/1]).
 
 %%% Public API
 
@@ -152,7 +152,8 @@ init(_NonMapState) ->
 %% Errors are communicated via the future (rejection) rather than crash.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
 handle_cast({Selector, Args, FuturePid}, State) ->
-    case dispatch(Selector, Args, State) of
+    Self = make_self(State),
+    case dispatch(Selector, Args, Self, State) of
         {reply, Result, NewState} ->
             %% Resolve the future with the result
             beamtalk_future:resolve(FuturePid, Result),
@@ -176,7 +177,8 @@ handle_cast(Msg, State) ->
 %% Dispatches to method and returns result immediately.
 -spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
 handle_call({Selector, Args}, _From, State) ->
-    case dispatch(Selector, Args, State) of
+    Self = make_self(State),
+    case dispatch(Selector, Args, Self, State) of
         {reply, Result, NewState} ->
             {reply, Result, NewState};
         {noreply, NewState} ->
@@ -212,22 +214,48 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(_Reason, _State) ->
     ok.
 
+%%% Helper Functions
+
+%% @doc Construct a Self reference (#beamtalk_object{}) from the actor's state.
+%% Self contains class metadata and the actor's pid, enabling reflection
+%% and self-sends within methods.
+-spec make_self(map()) -> #beamtalk_object{}.
+make_self(State) ->
+    #beamtalk_object{
+        class = maps:get('__class__', State),
+        class_mod = maps:get('__class_mod__', State, undefined),
+        pid = self()
+    }.
+
 %%% Message Dispatch
 
-%% @doc Dispatch a message to the appropriate method.
+%% @doc Dispatch a message to the appropriate method (dispatch/4 version).
+%% This is the new signature that passes Self as a separate parameter.
 %% Looks up the selector in the __methods__ map and calls the method function.
 %% If not found, attempts to call doesNotUnderstand handler.
 %% Returns one of:
 %%   {reply, Result, NewState} - Method returned a value
 %%   {noreply, NewState} - Method didn't return a value
 %%   {error, Reason, State} - Method or dispatch failed
--spec dispatch(atom(), list(), map()) ->
+-spec dispatch(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
-dispatch(Selector, Args, State) ->
+dispatch(Selector, Args, Self, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find(Selector, Methods) of
+        {ok, Fun} when is_function(Fun, 4) ->
+            %% New-style method: Fun(Selector, Args, Self, State)
+            try
+                Fun(Selector, Args, Self, State)
+            catch
+                Class:Reason:_Stacktrace ->
+                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
+                    io:format(standard_error,
+                        "Error in method ~p: ~p:~p~n",
+                        [Selector, Class, Reason]),
+                    {error, {method_error, Selector, Reason}, State}
+            end;
         {ok, Fun} when is_function(Fun, 2) ->
-            %% Call the method function with Args and State
+            %% Old-style method: Fun(Args, State) - for backward compatibility
             try
                 Fun(Args, State)
             catch
@@ -243,20 +271,47 @@ dispatch(Selector, Args, State) ->
             {error, {invalid_method, Selector}, State};
         error ->
             %% Method not found - try doesNotUnderstand
-            handle_dnu(Selector, Args, State)
+            handle_dnu(Selector, Args, Self, State)
     end.
+
+%% @doc Dispatch a message to the appropriate method (dispatch/3 version - backward compatibility).
+%% This is the old signature maintained for backward compatibility with existing
+%% generated code. It constructs Self internally and delegates to dispatch/4.
+%% Looks up the selector in the __methods__ map and calls the method function.
+%% If not found, attempts to call doesNotUnderstand handler.
+%% Returns one of:
+%%   {reply, Result, NewState} - Method returned a value
+%%   {noreply, NewState} - Method didn't return a value
+%%   {error, Reason, State} - Method or dispatch failed
+-spec dispatch(atom(), list(), map()) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
+dispatch(Selector, Args, State) ->
+    Self = make_self(State),
+    dispatch(Selector, Args, Self, State).
 
 %% @private
 %% @doc Handle messages for unknown selectors.
 %% Attempts to call the doesNotUnderstand:args: handler if defined.
 %% Otherwise, returns an error.
--spec handle_dnu(atom(), list(), map()) ->
+-spec handle_dnu(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
-handle_dnu(Selector, Args, State) ->
+handle_dnu(Selector, Args, Self, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find('doesNotUnderstand:args:', Methods) of
+        {ok, DnuFun} when is_function(DnuFun, 4) ->
+            %% New-style DNU handler with Self parameter
+            try
+                DnuFun([Selector, Args], Self, State)
+            catch
+                Class:Reason:_Stacktrace ->
+                    %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
+                    io:format(standard_error,
+                        "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
+                        [Selector, Class, Reason]),
+                    {error, {dnu_handler_error, Reason}, State}
+            end;
         {ok, DnuFun} when is_function(DnuFun, 2) ->
-            %% Call the DNU handler with [Selector, Args]
+            %% Old-style DNU handler (backward compatibility)
             try
                 DnuFun([Selector, Args], State)
             catch

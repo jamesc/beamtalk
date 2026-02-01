@@ -15,7 +15,7 @@
 
 %% Method implementations
 -export([handle_increment/2, handle_decrement/2, handle_getValue/2,
-         'handle_setValue:'/2]).
+         'handle_setValue:'/2, handle_test_make_self/2]).
 
 start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).
@@ -23,11 +23,13 @@ start_link(InitialValue) ->
 init(InitialValue) ->
     beamtalk_actor:init(#{
         '__class__' => 'Counter',
+        '__class_mod__' => 'counter',
         '__methods__' => #{
             increment => fun ?MODULE:handle_increment/2,
             decrement => fun ?MODULE:handle_decrement/2,
             getValue => fun ?MODULE:handle_getValue/2,
-            'setValue:' => fun ?MODULE:'handle_setValue:'/2
+            'setValue:' => fun ?MODULE:'handle_setValue:'/2,
+            test_make_self => fun ?MODULE:handle_test_make_self/2
         },
         value => InitialValue
     }).
@@ -60,3 +62,8 @@ handle_getValue([], State) ->
 'handle_setValue:'([NewValue], State) ->
     NewState = maps:put(value, NewValue, State),
     {reply, ok, NewState}.
+
+handle_test_make_self([], State) ->
+    %% Test helper to expose make_self/1
+    Self = beamtalk_actor:make_self(State),
+    {reply, Self, State}.
