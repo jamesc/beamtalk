@@ -99,6 +99,50 @@ pub enum CodeGenError {
     /// Formatting error during code generation.
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
+
+    /// Field assignment in a stored closure.
+    #[error(
+        "Cannot assign to field '{field}' inside a stored closure at {location}.\n\n\
+             Field assignments require immediate execution context for state threading.\n\n\
+             Fix: Use control flow directly, or extract to a method:\n\
+             \x20 // Instead of:\n\
+             \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
+             \x20 items do: myBlock.\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 items do: [:item | self.{field} := self.{field} + item].\n\
+             \x20 \n\
+             \x20 // Or use a method:\n\
+             \x20 addTo{field_capitalized}: item => self.{field} := self.{field} + item.\n\
+             \x20 items do: [:item | self addTo{field_capitalized}: item]."
+    )]
+    FieldAssignmentInStoredClosure {
+        /// The field being assigned.
+        field: String,
+        /// The capitalized field name for method suggestion.
+        field_capitalized: String,
+        /// Source location.
+        location: String,
+    },
+
+    /// Local variable mutation in a stored closure.
+    #[error(
+        "Warning: Assignment to '{variable}' inside stored closure has no effect on outer scope at {location}.\n\n\
+             Closures capture variables by value. The outer '{variable}' won't change.\n\n\
+             Fix: Use control flow directly:\n\
+             \x20 // Instead of:\n\
+             \x20 myBlock := [{variable} := {variable} + 1].\n\
+             \x20 10 timesRepeat: myBlock.\n\
+             \x20 \n\
+             \x20 // Write:\n\
+             \x20 10 timesRepeat: [{variable} := {variable} + 1]."
+    )]
+    LocalMutationInStoredClosure {
+        /// The variable being mutated.
+        variable: String,
+        /// Source location.
+        location: String,
+    },
 }
 
 /// Result type for code generation operations.
@@ -1200,7 +1244,17 @@ impl CoreErlangGenerator {
                 arguments,
                 ..
             } => self.generate_message_send(receiver, selector, arguments),
-            Expression::Assignment { target, value, .. } => {
+            Expression::Assignment {
+                target,
+                value,
+                span,
+            } => {
+                // Check if we're storing a block with mutations (ERROR)
+                // Per BT-90: only literal blocks in control flow can mutate
+                if let Expression::Block(block) = value.as_ref() {
+                    Self::validate_stored_closure(block, format!("{span:?}"))?;
+                }
+
                 // Check if this is a field assignment (self.field := value)
                 if let Expression::FieldAccess {
                     receiver, field, ..
@@ -1486,6 +1540,11 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
+                    // Check if we're storing a block with mutations (ERROR)
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         // Reuse existing Core Erlang variable if already bound (e.g. parameter),
@@ -1609,6 +1668,11 @@ impl CoreErlangGenerator {
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
+                    // Check if we're storing a block with mutations (ERROR)
+                    if let Expression::Block(block) = value.as_ref() {
+                        Self::validate_stored_closure(block, format!("{:?}", expr.span()))?;
+                    }
+
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
                         // Determine the Core Erlang variable name:
@@ -1905,6 +1969,55 @@ impl CoreErlangGenerator {
         }
 
         None
+    }
+
+    /// Validates that a stored closure (block assigned to variable) doesn't contain mutations.
+    /// Returns an error for field assignments, logs a warning for local mutations.
+    ///
+    /// Per BT-90 design: only literal blocks in control flow positions can mutate.
+    fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let analysis = analyze_block(block);
+
+        // ERROR: Field assignments in stored closures are not allowed
+        if !analysis.field_writes.is_empty() {
+            let field = analysis
+                .field_writes
+                .iter()
+                .next()
+                .expect("field_writes is non-empty");
+            let field_capitalized = {
+                let mut chars = field.chars();
+                chars
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_default()
+                    + chars.as_str()
+            };
+            return Err(CodeGenError::FieldAssignmentInStoredClosure {
+                field: field.clone(),
+                field_capitalized,
+                location: span_str,
+            });
+        }
+
+        // WARNING: Local mutations in stored closures won't work as expected
+        // Note: For now we're treating this as an error too, but the error type
+        // is labeled as a warning in the message.
+        if !analysis.local_writes.is_empty() {
+            let variable = analysis
+                .local_writes
+                .iter()
+                .next()
+                .expect("local_writes is non-empty");
+            return Err(CodeGenError::LocalMutationInStoredClosure {
+                variable: variable.clone(),
+                location: span_str,
+            });
+        }
+
+        Ok(())
     }
 
     /// Generate a field assignment WITHOUT the closing value.
