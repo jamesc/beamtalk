@@ -7,26 +7,26 @@
 %%% Runtime Erlang modules that need these records should include it with:
 %%%   -include("beamtalk.hrl").
 %%%
-%%% Note: Generated Core Erlang modules do not emit this include directive.
-%%% The record is currently used only by runtime support modules.
+%%% Note: Generated Core Erlang modules do not emit this include directive,
+%%% but they do generate code that uses the record tuple representation directly.
 
-%% @doc Object reference record (planned).
+%% @doc Object reference record.
 %%
-%% This record is the target representation for Beamtalk object references,
-%% bundling class metadata with the actor pid:
+%% This record bundles class metadata with the actor pid, enabling proper
+%% object semantics and reflection:
 %% - class: The class name atom (e.g., 'Counter')
-%% - class_mod: The class module atom (e.g., 'beamtalk_counter_class')
+%% - class_mod: The class module atom (e.g., 'counter')  
 %% - pid: The actor process pid
 %%
-%% This will enable reflection (obj#beamtalk_object.class) and proper
-%% message routing through the class module.
+%% Generated code creates these records in spawn/0 and spawn/1 functions:
+%%   {'beamtalk_object', 'Counter', 'counter', Pid}
 %%
-%% NOTE: Currently, generated code returns raw pids from spawn/0 and spawn/1.
-%% Integration with this record is deferred work (requires BT-95 class runtime).
+%% Message sends extract the pid using element/2:
+%%   call 'erlang':'element'(4, Obj)
 %%
 %% Following LFE Flavors' #flavor-instance{} pattern.
 -record(beamtalk_object, {
     class :: atom(),           % Class name (e.g., 'Counter')
-    class_mod :: atom(),       % Class module (e.g., 'beamtalk_counter_class')
+    class_mod :: atom(),       % Class module (e.g., 'counter')
     pid :: pid()               % The actor process
 }).

@@ -22,6 +22,41 @@ Key features:
 
 See module documentation in `beamtalk_actor.erl` for the complete protocol and API.
 
+### beamtalk.hrl
+
+Shared record definitions for the Beamtalk runtime.
+
+#### #beamtalk_object{} Record
+
+Beamtalk object references use a record to bundle class metadata with the actor pid:
+
+```erlang
+-record(beamtalk_object, {
+    class :: atom(),           % Class name (e.g., 'Counter')
+    class_mod :: atom(),       % Class module (e.g., 'counter')
+    pid :: pid()               % The actor process
+}).
+```
+
+This design follows LFE Flavors' `#flavor-instance{}` pattern and enables:
+
+- **Proper object semantics**: Object references carry their class identity
+- **Reflection**: Access the class name via the record field
+- **Type safety**: Distinguish object references from raw pids
+
+Generated code creates these records in `spawn/0` and `spawn/1`:
+```erlang
+{'beamtalk_object', 'Counter', 'counter', Pid}
+```
+
+Message sends extract the pid using `element/2`:
+```erlang
+let Pid = call 'erlang':'element'(4, Obj)
+in call 'gen_server':'cast'(Pid, {Selector, Args, Future})
+```
+
+See [beamtalk-object-model.md](../docs/beamtalk-object-model.md) Part 5 for the complete design.
+
 ### beamtalk_future.erl
 
 The Future/Promise runtime implementation. Beamtalk is async-first: message sends return futures by default.

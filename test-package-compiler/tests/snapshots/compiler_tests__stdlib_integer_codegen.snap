@@ -12,7 +12,7 @@ module 'stdlib_integer' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('stdlib_integer', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Stdlib_integer', 'stdlib_integer', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'stdlib_integer' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('stdlib_integer', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            Pid
+            {'beamtalk_object', 'Stdlib_integer', 'stdlib_integer', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

@@ -101,6 +101,8 @@
 -module(beamtalk_actor).
 -behaviour(gen_server).
 
+-include("beamtalk.hrl").
+
 %% Public API
 -export([start_link/2, start_link/3, spawn_actor/2, spawn_actor/3]).
 
