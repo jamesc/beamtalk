@@ -6593,10 +6593,7 @@ end
         if let Err(CodeGenError::FieldAssignmentInStoredClosure { field, .. }) = result {
             assert_eq!(field, "value", "Should report the correct field name");
         } else {
-            panic!(
-                "Expected FieldAssignmentInStoredClosure error, got: {:?}",
-                result
-            );
+            panic!("Expected FieldAssignmentInStoredClosure error, got: {result:?}");
         }
     }
 
@@ -6675,10 +6672,7 @@ end
         if let Err(CodeGenError::LocalMutationInStoredClosure { variable, .. }) = result {
             assert_eq!(variable, "count", "Should report the correct variable name");
         } else {
-            panic!(
-                "Expected LocalMutationInStoredClosure error, got: {:?}",
-                result
-            );
+            panic!("Expected LocalMutationInStoredClosure error, got: {result:?}");
         }
     }
 }
