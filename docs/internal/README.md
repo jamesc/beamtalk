@@ -7,6 +7,8 @@ This directory contains internal implementation documentation, design decisions,
 | Document | Description |
 |----------|-------------|
 | [Semantic Analysis](semantic-analysis.md) | Design for AST validation, name resolution, and block context analysis |
+| [Parser Architecture](parser-architecture.md) | Parser design decisions, Pratt parsing integration, BT-109 research findings |
+| [REPL Internals](beamtalk-repl-internals.md) | REPL architecture, session state, protocol details, and evaluation flow |
 
 ## When to Add Documents Here
 
