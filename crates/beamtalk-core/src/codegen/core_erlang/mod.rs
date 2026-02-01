@@ -1972,7 +1972,8 @@ impl CoreErlangGenerator {
     }
 
     /// Validates that a stored closure (block assigned to variable) doesn't contain mutations.
-    /// Returns an error for field assignments, logs a warning for local mutations.
+    /// Returns an error for both field assignments and local mutations; the local-mutation
+    /// error is phrased as a warning in its message.
     ///
     /// Per BT-90 design: only literal blocks in control flow positions can mutate.
     fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
@@ -6525,8 +6526,159 @@ end
 
         // Should be field error (checked first), not local
         assert!(
-            matches!(result, Err(CodeGenError::FieldAssignmentInStoredClosure { .. })),
+            matches!(
+                result,
+                Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+            ),
             "Field error should take precedence over local mutation"
         );
+    }
+
+    #[test]
+    fn test_codegen_rejects_stored_closure_with_field_assignment() {
+        // Integration test: verify the full codegen pipeline catches field assignments
+        // Build a module with: test := [ myBlock := [self.value := 1]. myBlock ]
+        let module = Module {
+            classes: vec![],
+            expressions: vec![Expression::Assignment {
+                target: Box::new(Expression::Identifier(Identifier::new(
+                    "test",
+                    Span::new(0, 4),
+                ))),
+                value: Box::new(Expression::Block(Block {
+                    parameters: vec![],
+                    body: vec![
+                        // myBlock := [self.value := self.value + 1]
+                        Expression::Assignment {
+                            target: Box::new(Expression::Identifier(Identifier::new(
+                                "myBlock",
+                                Span::new(10, 17),
+                            ))),
+                            value: Box::new(Expression::Block(Block {
+                                parameters: vec![],
+                                body: vec![Expression::Assignment {
+                                    target: Box::new(Expression::FieldAccess {
+                                        receiver: Box::new(Expression::Identifier(
+                                            Identifier::new("self", Span::new(22, 26)),
+                                        )),
+                                        field: Identifier::new("value", Span::new(27, 32)),
+                                        span: Span::new(22, 32),
+                                    }),
+                                    value: Box::new(Expression::Literal(
+                                        Literal::Integer(1),
+                                        Span::new(36, 37),
+                                    )),
+                                    span: Span::new(22, 37),
+                                }],
+                                span: Span::new(21, 38),
+                            })),
+                            span: Span::new(10, 38),
+                        },
+                        Expression::Identifier(Identifier::new("myBlock", Span::new(40, 47))),
+                    ],
+                    span: Span::new(8, 49),
+                })),
+                span: Span::new(0, 49),
+            }],
+            span: Span::new(0, 50),
+            leading_comments: vec![],
+        };
+
+        let result = generate(&module);
+        assert!(
+            result.is_err(),
+            "Should reject field assignment in stored closure"
+        );
+
+        if let Err(CodeGenError::FieldAssignmentInStoredClosure { field, .. }) = result {
+            assert_eq!(field, "value", "Should report the correct field name");
+        } else {
+            panic!(
+                "Expected FieldAssignmentInStoredClosure error, got: {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_codegen_rejects_stored_closure_with_local_mutation() {
+        // Integration test: verify the full codegen pipeline catches local mutations
+        // Build a module with: test := [ count := 0. myBlock := [count := count + 1]. myBlock ]
+        let module = Module {
+            classes: vec![],
+            expressions: vec![Expression::Assignment {
+                target: Box::new(Expression::Identifier(Identifier::new(
+                    "test",
+                    Span::new(0, 4),
+                ))),
+                value: Box::new(Expression::Block(Block {
+                    parameters: vec![],
+                    body: vec![
+                        // count := 0
+                        Expression::Assignment {
+                            target: Box::new(Expression::Identifier(Identifier::new(
+                                "count",
+                                Span::new(10, 15),
+                            ))),
+                            value: Box::new(Expression::Literal(
+                                Literal::Integer(0),
+                                Span::new(19, 20),
+                            )),
+                            span: Span::new(10, 20),
+                        },
+                        // myBlock := [count := count + 1]
+                        Expression::Assignment {
+                            target: Box::new(Expression::Identifier(Identifier::new(
+                                "myBlock",
+                                Span::new(22, 29),
+                            ))),
+                            value: Box::new(Expression::Block(Block {
+                                parameters: vec![],
+                                body: vec![Expression::Assignment {
+                                    target: Box::new(Expression::Identifier(Identifier::new(
+                                        "count",
+                                        Span::new(34, 39),
+                                    ))),
+                                    value: Box::new(Expression::MessageSend {
+                                        receiver: Box::new(Expression::Identifier(
+                                            Identifier::new("count", Span::new(43, 48)),
+                                        )),
+                                        selector: MessageSelector::Binary("+".into()),
+                                        arguments: vec![Expression::Literal(
+                                            Literal::Integer(1),
+                                            Span::new(51, 52),
+                                        )],
+                                        span: Span::new(43, 52),
+                                    }),
+                                    span: Span::new(34, 52),
+                                }],
+                                span: Span::new(33, 53),
+                            })),
+                            span: Span::new(22, 53),
+                        },
+                        Expression::Identifier(Identifier::new("myBlock", Span::new(55, 62))),
+                    ],
+                    span: Span::new(8, 64),
+                })),
+                span: Span::new(0, 64),
+            }],
+            span: Span::new(0, 65),
+            leading_comments: vec![],
+        };
+
+        let result = generate(&module);
+        assert!(
+            result.is_err(),
+            "Should reject local mutation in stored closure"
+        );
+
+        if let Err(CodeGenError::LocalMutationInStoredClosure { variable, .. }) = result {
+            assert_eq!(variable, "count", "Should report the correct variable name");
+        } else {
+            panic!(
+                "Expected LocalMutationInStoredClosure error, got: {:?}",
+                result
+            );
+        }
     }
 }
