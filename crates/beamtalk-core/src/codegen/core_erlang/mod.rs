@@ -224,6 +224,22 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 }
 
 // NOTE: Implementation copied from erlang.rs - will be split into submodules next
+/// Core Erlang code generator.
+///
+/// This is the main code generator that coordinates compilation of Beamtalk
+/// AST nodes to Core Erlang. It maintains:
+///
+/// - **Module name**: The Erlang module being generated
+/// - **Output buffer**: Accumulated Core Erlang code
+/// - **Variable context**: Scope management and variable generation
+/// - **State threading**: Simulated mutation via State, State1, State2...
+///
+/// The generator delegates to specialized submodules:
+/// - [`control_flow`] - Iteration and loop compilation
+/// - [`message_dispatch`] - Message sending and dispatch
+/// - [`expressions`] - Expression code generation
+/// - [`gen_server`] - OTP gen_server scaffolding
+/// - [`builtins`] - Built-in type operations
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
     module_name: String,

@@ -31,6 +31,10 @@ use crate::ast::{Block, Expression};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
+    /// Generates code for `list do:` iteration.
+    ///
+    /// Analyzes the body block for state mutations and chooses the appropriate
+    /// compilation strategy (pure functional vs stateful with threading).
     pub(super) fn generate_list_do(
         &mut self,
         receiver: &Expression,

@@ -439,6 +439,10 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Generates the body of a block with proper state threading.
+    ///
+    /// Handles field assignments specially to keep State{n} variables in scope
+    /// for subsequent expressions. See inline comments for threading details.
     pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<()> {
         if block.body.is_empty() {
             write!(self.output, "'nil'")?;

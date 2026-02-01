@@ -745,6 +745,10 @@ impl CoreErlangGenerator {
 
         Ok(())
     }
+
+    /// Generates a method definition body wrapped in a reply tuple.
+    ///
+    /// For `MethodDefinition` nodes with explicit body expressions.
     pub(super) fn generate_method_definition_body_with_reply(
         &mut self,
         method: &MethodDefinition,
@@ -833,6 +837,9 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates a block-based method body with state threading and reply tuple.
+    ///
+    /// For methods using block syntax with implicit returns.
     #[expect(
         clippy::too_many_lines,
         reason = "method body generation handles many expression types and state threading"
