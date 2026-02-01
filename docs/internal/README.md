@@ -4,11 +4,20 @@ This directory contains internal implementation documentation, design decisions,
 
 ## Contents
 
+### Architecture & Design
+
 | Document | Description |
 |----------|-------------|
 | [Semantic Analysis](semantic-analysis.md) | Design for AST validation, name resolution, and block context analysis |
 | [Parser Architecture](parser-architecture.md) | Parser design decisions, Pratt parsing integration, BT-109 research findings |
 | [REPL Internals](beamtalk-repl-internals.md) | REPL architecture, session state, protocol details, and evaluation flow |
+
+### Implementation Tracking
+
+| Document | Description |
+|----------|-------------|
+| [Operator Implementation Status](OPERATOR_IMPLEMENTATION_STATUS.md) | Cross-reference of documented vs. implemented binary operators |
+| [Coverage Analysis](COVERAGE_ANALYSIS.md) | Core Erlang compilation verification test coverage analysis |
 
 ## When to Add Documents Here
 
