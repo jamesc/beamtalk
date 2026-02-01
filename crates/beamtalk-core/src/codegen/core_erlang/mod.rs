@@ -61,15 +61,24 @@
 //! - **Tuples**: `{'tuple', 'elements'}`
 //! - **Lists**: `[1, 2, 3]` or `[Head | Tail]`
 //!
-//! # Module Organization
+//! # Module Organization (Domain-Driven Design)
 //!
-//! The code generator is split across several focused submodules:
+//! The code generator is organized around **bounded contexts** following DDD:
 //!
-//! - [`util`] - Utility functions (indentation, variable generation, name conversions)
-//! - [`expressions`] - Expression code generation (literals, identifiers, maps)
+//! ## Core Domain Modules
+//!
+//! - [`control_flow`] - Control flow compilation (iteration, loops, mutation analysis)
+//! - [`message_dispatch`] - Message sending and dispatch (the core Beamtalk operation)
+//! - [`variable_context`] - Variable binding and scope management aggregate
+//! - [`state_threading`] - State threading service for simulated mutation
+//!
+//! ## Supporting Modules
+//!
+//! - [`expressions`] - Expression code generation (literals, identifiers, maps, cascades)
 //! - [`gen_server`] - OTP `gen_server` scaffolding (spawn, init, callbacks)
-//! - [`builtins`] - Built-in operations (blocks, dictionaries, booleans, arithmetic)
+//! - [`builtins`] - Built-in type operations (blocks, dictionaries, booleans, arithmetic)
 //! - [`block_analysis`] - Block mutation analysis for control flow
+//! - [`util`] - Utility functions (indentation, name conversions)
 //!
 //! # References
 //!
@@ -223,7 +232,6 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     Ok(generator.output)
 }
 
-// NOTE: Implementation copied from erlang.rs - will be split into submodules next
 /// Core Erlang code generator.
 ///
 /// This is the main code generator that coordinates compilation of Beamtalk
@@ -238,7 +246,7 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 /// - [`control_flow`] - Iteration and loop compilation
 /// - [`message_dispatch`] - Message sending and dispatch
 /// - [`expressions`] - Expression code generation
-/// - [`gen_server`] - OTP gen_server scaffolding
+/// - [`gen_server`] - OTP `gen_server` scaffolding
 /// - [`builtins`] - Built-in type operations
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
