@@ -481,4 +481,177 @@ impl CoreErlangGenerator {
             _ => Ok(None),
         }
     }
+
+    /// Tries to generate code for Block evaluation messages.
+    ///
+    /// Block evaluation messages are synchronous operations that execute blocks.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a Block method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a Block method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Block Methods
+    ///
+    /// - `value` (0 args) → evaluate block with no arguments
+    /// - `value:` (1 arg) → evaluate block with one argument
+    /// - `value:value:` (2 args) → evaluate block with two arguments  
+    /// - `value:value:value:` (3 args) → evaluate block with three arguments
+    /// - `repeat` (0 args) → infinite loop
+    /// - `whileTrue:` (1 arg) → loop while condition block returns true
+    /// - `whileFalse:` (1 arg) → loop while condition block returns false
+    /// - `timesRepeat:` (1 arg) → repeat body N times
+    pub(super) fn try_generate_block_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            // `value` - evaluate block with no arguments
+            MessageSelector::Unary(name) if name == "value" => {
+                self.generate_block_value_call(receiver, &[])?;
+                Ok(Some(()))
+            }
+
+            // `repeat` - infinite loop
+            MessageSelector::Unary(name) if name == "repeat" => {
+                self.generate_repeat(receiver)?;
+                Ok(Some(()))
+            }
+
+            // Keyword messages for block evaluation
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    // `value:`, `value:value:`, `value:value:value:` - evaluate block with args
+                    "value:" | "value:value:" | "value:value:value:" => {
+                        self.generate_block_value_call(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // `whileTrue:` - loop while condition block returns true
+                    "whileTrue:" => {
+                        self.generate_while_true(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // `whileFalse:` - loop while condition block returns false
+                    "whileFalse:" => {
+                        self.generate_while_false(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // `timesRepeat:` - repeat body N times
+                    "timesRepeat:" => {
+                        self.generate_times_repeat(receiver, arguments)?;
+                        Ok(Some(()))
+                    }
+
+                    // Not a block evaluation message
+                    _ => Ok(None),
+                }
+            }
+
+            // Not a block evaluation message
+            _ => Ok(None),
+        }
+    }
+
+    /// Tries to generate code for List/Array methods.
+    ///
+    /// List methods are synchronous operations that generate direct Erlang list calls.
+    /// This function:
+    ///
+    /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # List Methods
+    ///
+    /// - `first` (0 args) → `hd(List)`
+    /// - `rest` (0 args) → `tl(List)`
+    /// - `size` (0 args) → `length(List)`
+    /// - `isEmpty` (0 args) → `List =:= []`
+    /// - `do:` (1 arg block) → iterate over elements with side effects
+    /// - `collect:` (1 arg block) → map to new list
+    /// - `select:` (1 arg block) → filter elements
+    /// - `reject:` (1 arg block) → filter out elements
+    /// - `inject:into:` (2 args) → fold with accumulator
+    pub(super) fn try_generate_list_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "first" if arguments.is_empty() => {
+                    // call 'erlang':'hd'(Receiver)
+                    write!(self.output, "call 'erlang':'hd'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "rest" if arguments.is_empty() => {
+                    // call 'erlang':'tl'(Receiver)
+                    write!(self.output, "call 'erlang':'tl'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "size" if arguments.is_empty() => {
+                    // call 'erlang':'length'(Receiver)
+                    write!(self.output, "call 'erlang':'length'(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ")")?;
+                    Ok(Some(()))
+                }
+                "isEmpty" if arguments.is_empty() => {
+                    // call 'erlang':'=:='(Receiver, [])
+                    write!(self.output, "call 'erlang':'=:='(")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, ", [])")?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "do:" if arguments.len() == 1 => {
+                        // list do: [:item | body]
+                        self.generate_list_do(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "collect:" if arguments.len() == 1 => {
+                        // list collect: [:item | transform]
+                        self.generate_list_collect(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "select:" if arguments.len() == 1 => {
+                        // list select: [:item | predicate]
+                        self.generate_list_select(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "reject:" if arguments.len() == 1 => {
+                        // list reject: [:item | predicate]
+                        self.generate_list_reject(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+                    "inject:into:" if arguments.len() == 2 => {
+                        // list inject: 0 into: [:acc :item | acc + item]
+                        self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
 }
