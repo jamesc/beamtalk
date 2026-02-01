@@ -188,6 +188,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `add-cli-command` | "add CLI command" | Add a new command to the CLI |
 | `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
+| `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
 
 ### Skill Locations
 
