@@ -317,10 +317,42 @@ beamtalk/
 │   ├── beamtalk-cli/      # Command-line interface
 │   └── beamtalk-lsp/      # Language server (future)
 ├── lib/                    # Beamtalk standard library (.bt files)
+├── runtime/
+│   ├── src/               # Erlang runtime modules
+│   └── test/              # Erlang unit tests (EUnit)
 ├── test-package-compiler/  # Snapshot test harness
+├── tests/
+│   └── e2e/cases/         # Real E2E tests (.bt source files)
 ├── docs/                   # Documentation
 └── examples/               # Example beamtalk programs
 ```
+
+### Test Organization - CRITICAL DISTINCTION
+
+⚠️ **IMPORTANT:** The test suite has multiple layers. Be precise about which tests you're referring to:
+
+#### 1. Runtime Unit Tests
+**Location:** `runtime/test/*_tests.erl` (e.g., `beamtalk_actor_tests.erl`)
+- Tests individual runtime modules in isolation
+- Uses hand-written test fixtures (e.g., `test_counter.erl`)
+- Calls `gen_server` protocol directly with raw pids
+- Appropriate for testing low-level runtime behavior
+
+#### 2. Codegen Simulation Tests  
+**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
+- **NOT true E2E tests** despite testing "compiler output"
+- Manually constructs state structures to simulate what compiler generates
+- Tests runtime behavior without requiring full compilation
+- Does NOT compile actual Beamtalk source
+
+#### 3. Real End-to-End Tests
+**Location:** `tests/e2e/cases/*.bt`
+- Actual Beamtalk source files (`.bt` extension)
+- Compiled by the real compiler (lexer → parser → codegen → erlc)
+- Executed on BEAM and validated against expected results
+- **These are the TRUE end-to-end tests**
+
+**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/test/`.**
 
 ---
 
