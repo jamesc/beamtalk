@@ -1119,19 +1119,7 @@ impl CoreErlangGenerator {
         }
 
         // Fall back to simple lists:foreach (no mutations)
-        let list_var = self.fresh_temp_var("List");
-        let body_var = self.fresh_temp_var("Body");
-
-        write!(self.output, "let {list_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in call 'lists':'foreach'({body_var}, {list_var})"
-        )?;
-
-        Ok(())
+        self.generate_simple_list_op(receiver, body, "foreach")
     }
 
     /// Generates a `do:` iteration over a list with mutation support.
@@ -1313,36 +1301,12 @@ impl CoreErlangGenerator {
 
     /// Generates a `collect:` map over a list.
     fn generate_list_collect(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
-        let list_var = self.fresh_temp_var("List");
-        let body_var = self.fresh_temp_var("Body");
-
-        write!(self.output, "let {list_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in call 'lists':'map'({body_var}, {list_var})"
-        )?;
-
-        Ok(())
+        self.generate_simple_list_op(receiver, body, "map")
     }
 
     /// Generates a `select:` filter over a list.
     fn generate_list_select(&mut self, receiver: &Expression, body: &Expression) -> Result<()> {
-        let list_var = self.fresh_temp_var("List");
-        let body_var = self.fresh_temp_var("Body");
-
-        write!(self.output, "let {list_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in call 'lists':'filter'({body_var}, {list_var})"
-        )?;
-
-        Ok(())
+        self.generate_simple_list_op(receiver, body, "filter")
     }
 
     /// Generates a `reject:` filter over a list (inverse of select:).
@@ -1358,6 +1322,30 @@ impl CoreErlangGenerator {
         write!(
             self.output,
             " in call 'lists':'filter'(fun (X) -> call 'erlang':'not'(apply {body_var} (X)) end, {list_var})"
+        )?;
+
+        Ok(())
+    }
+
+    /// Helper to generate simple list operations with two-argument pattern.
+    ///
+    /// Generates: `let List = <receiver> in let Body = <body> in call 'lists':<op>(Body, List)`
+    fn generate_simple_list_op(
+        &mut self,
+        receiver: &Expression,
+        body: &Expression,
+        operation: &str,
+    ) -> Result<()> {
+        let list_var = self.fresh_temp_var("List");
+        let body_var = self.fresh_temp_var("Body");
+
+        write!(self.output, "let {list_var} = ")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, " in let {body_var} = ")?;
+        self.generate_expression(body)?;
+        write!(
+            self.output,
+            " in call 'lists':'{operation}'({body_var}, {list_var})"
         )?;
 
         Ok(())
