@@ -2936,14 +2936,14 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("List");
         let body_var = self.fresh_temp_var("Body");
 
-        // Use filtermap with a predicate that inverts the result
+        // Use lists:filter with a predicate that inverts the result of the body function
         write!(self.output, "let {list_var} = ")?;
         self.generate_expression(receiver)?;
         write!(self.output, " in let {body_var} = ")?;
         self.generate_expression(body)?;
         write!(
             self.output,
-            " in call 'lists':'filter'(fun (X) -> call 'erlang':'not'(apply {body_var} (X)) , {list_var})"
+            " in call 'lists':'filter'(fun (X) -> call 'erlang':'not'(apply {body_var} (X)) end, {list_var})"
         )?;
 
         Ok(())
@@ -3002,7 +3002,7 @@ impl CoreErlangGenerator {
         // Beamtalk uses [:acc :item | ...] so we need to swap the arguments
         write!(
             self.output,
-            " in call 'lists':'foldl'(fun (Item, Acc) -> apply {body_var} (Acc, Item) , {init_var}, {list_var})"
+            " in call 'lists':'foldl'(fun (Item, Acc) -> apply {body_var} (Acc, Item) end, {init_var}, {list_var})"
         )?;
 
         Ok(())
