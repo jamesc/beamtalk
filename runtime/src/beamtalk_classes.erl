@@ -336,12 +336,6 @@ invoke_super_method(ClassInfo, Selector, MethodInfo, Args, State) ->
             %% No runtime block, must call the compiled module
             Module = maps:get(module, ClassInfo),
             %% Call the module's dispatch function with the selector
-            %% This maintains the actor protocol
-            case erlang:function_exported(Module, dispatch, 3) of
-                true ->
-                    Module:dispatch(Selector, Args, State);
-                false ->
-                    ClassName = maps:get('__class__', State, unknown),
-                    {error, {method_not_callable, ClassName, Selector}}
-            end
+            %% This maintains the actor protocol (returns {reply, Result, NewState})
+            Module:dispatch(Selector, Args, State)
     end.

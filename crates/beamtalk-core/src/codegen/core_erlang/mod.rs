@@ -1455,9 +1455,11 @@ impl CoreErlangGenerator {
                     }
                 } else if Self::is_super_message_send(expr) {
                     // Super call as last expression: unpack the {reply, Result, NewState} tuple
-                    write!(self.output, "let {{'reply', _Result, _FinalState}} = ")?;
+                    // Extract both result and state to return them properly
+                    let super_result_var = self.fresh_temp_var("SuperReply");
+                    write!(self.output, "let {super_result_var} = ")?;
                     self.generate_expression(expr)?;
-                    write!(self.output, " in {{'reply', _Result, _FinalState}}")?;
+                    write!(self.output, " in {super_result_var}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -1469,15 +1471,31 @@ impl CoreErlangGenerator {
                 self.generate_field_assignment_open(expr)?;
             } else if Self::is_super_message_send(expr) {
                 // Super message send: must thread state from {reply, Result, NewState} tuple
-                // Generate the super_dispatch call with current state
+                let super_result_var = self.fresh_temp_var("SuperReply");
+                let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
                 
-                write!(self.output, "let {{'reply', _SuperResult, {new_state}}} = ")?;
-                // Temporarily reset state version to use current state in the call
-                self.state_version -= 1;
-                self.generate_expression(expr)?;
-                self.state_version += 1;
-                write!(self.output, " in ")?;
+                // Manually generate super_dispatch call with current state (not via generate_expression)
+                if let Expression::MessageSend { selector, arguments, .. } = expr {
+                    let selector_atom = match selector {
+                        MessageSelector::Unary(name) => name.to_string(),
+                        MessageSelector::Binary(op) => op.to_string(),
+                        MessageSelector::Keyword(parts) => {
+                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                        }
+                    };
+                    write!(self.output, "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', [")?;
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(self.output, ", ")?;
+                        }
+                        self.generate_expression(arg)?;
+                    }
+                    write!(self.output, "])")?;
+                }
+                
+                // Extract state from the {reply, Result, NewState} tuple using element/2
+                write!(self.output, " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in ")?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -1521,14 +1539,31 @@ impl CoreErlangGenerator {
                 self.generate_field_assignment_open(expr)?;
             } else if Self::is_super_message_send(expr) {
                 // Super message send in block: thread state from {reply, Result, NewState}
+                let super_result_var = self.fresh_temp_var("SuperReply");
+                let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
                 
-                write!(self.output, "let {{'reply', _SuperResult, {new_state}}} = ")?;
-                // Temporarily reset state version to use current state in the call
-                self.state_version -= 1;
-                self.generate_expression(expr)?;
-                self.state_version += 1;
-                write!(self.output, " in ")?;
+                // Manually generate super_dispatch call with current state
+                if let Expression::MessageSend { selector, arguments, .. } = expr {
+                    let selector_atom = match selector {
+                        MessageSelector::Unary(name) => name.to_string(),
+                        MessageSelector::Binary(op) => op.to_string(),
+                        MessageSelector::Keyword(parts) => {
+                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                        }
+                    };
+                    write!(self.output, "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', [")?;
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(self.output, ", ")?;
+                        }
+                        self.generate_expression(arg)?;
+                    }
+                    write!(self.output, "])")?;
+                }
+                
+                // Extract state from the {reply, Result, NewState} tuple using element/2
+                write!(self.output, " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in ")?;
             } else {
                 // Non-field-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
