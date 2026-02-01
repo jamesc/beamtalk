@@ -279,26 +279,50 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 ### 6. Codegen Simulation Tests
 
-Simulates compiler-generated code patterns to test runtime behavior without requiring full compilation.
+Tests runtime behavior using **real compiled Beamtalk code** and simulated patterns.
 
 **Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
 
 **What they test:**
-- Runtime behavior with simulated compiler output
-- Actor spawning state initialization (`spawn/0` and `spawn/1` patterns)
+- `spawn/0` and `spawn/1` tests use **real compiled `counter.bt`**
+  - Validates actual `#beamtalk_object{}` record generation
+  - Tests `counter:spawn()` from compiled module
+- Other tests use simulated state for complex scenarios
 - Method invocation (sync and async)
 - State initialization and mutation
 - Interaction between multiple actors
 
-**Note:** These manually construct state structures. For true E2E tests with real compiled Beamtalk, see `tests/e2e/`.
+**Test Fixtures:** Compiled automatically by rebar3 pre-hook
+- Source: `tests/fixtures/counter.bt`
+- Compiled by: `scripts/compile-test-fixtures.sh` (runs automatically)
+- Output: `runtime/test/counter.beam`
+- **No manual compilation needed** - hook runs before every `rebar3 eunit`
+
+**Compilation Workflow:**
+```
+Developer runs: cargo test OR rebar3 eunit
+  └─> cargo build (if needed) - creates ./target/debug/beamtalk
+  └─> rebar3 pre-hook runs: ./scripts/compile-test-fixtures.sh
+      └─> Uses ./target/debug/beamtalk to compile tests/fixtures/*.bt
+      └─> Copies *.beam to runtime/test/
+  └─> Tests run with compiled fixtures available
+```
+
+**Note:** For true E2E tests with full compilation pipeline, see `tests/e2e/`.
 
 **Example:**
 ```erlang
-spawn_with_args_initializes_state_test() ->
-    %% Compile a counter actor with initial value via spawnWith:
-    Counter = counter:spawn(#{value => 10}),
-    %% Verify initial state was set
-    ?assertEqual(10, gen_server:call(Counter, {getValue, []})).
+spawn_zero_uses_default_state_test() ->
+    %% Uses real compiled counter module
+    Object = counter:spawn(),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _Pid}, Object),
+    
+    %% Extract pid from #beamtalk_object{} record
+    Pid = element(4, Object),
+    
+    %% Verify default value
+    {ok, Value} = gen_server:call(Pid, {getValue, []}),
+    ?assertEqual(0, Value).
 ```
 
 ---

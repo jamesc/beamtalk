@@ -340,10 +340,11 @@ beamtalk/
 
 #### 2. Codegen Simulation Tests  
 **Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
-- **NOT true E2E tests** despite testing "compiler output"
-- Manually constructs state structures to simulate what compiler generates
-- Tests runtime behavior without requiring full compilation
-- Does NOT compile actual Beamtalk source
+- Tests using **real compiled Beamtalk code** from `tests/fixtures/counter.bt`
+- The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
+- Other tests use simulated state structures for complex scenarios
+- **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
+- See `docs/beamtalk-testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests
 **Location:** `tests/e2e/cases/*.bt`
