@@ -14,6 +14,7 @@
 
 #![doc = include_str!("../../../README.md")]
 
+pub mod analyse;
 pub mod ast;
 pub mod codegen;
 pub mod erlang;
