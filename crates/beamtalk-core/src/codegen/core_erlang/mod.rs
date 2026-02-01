@@ -230,18 +230,27 @@ impl CoreErlangGenerator {
 
     /// Converts a module name to a class name by capitalizing the first letter.
     ///
-    /// Examples:
-    /// - "counter" -> "Counter"
-    /// - "my_class" -> "My_class"
-    /// - "" -> ""
+    /// Module names in Beamtalk follow Erlang conventions (lowercase atoms),
+    /// while class names follow Smalltalk conventions (`UpperCamelCase`).
+    ///
+    /// # Examples
+    ///
+    /// - `"counter"` -> `"Counter"`
+    /// - `"my_class"` -> `"My_class"`
+    ///
+    /// # Panics
+    ///
+    /// Panics if the module name is empty, as an empty module name represents an
+    /// invalid state in the code generation pipeline.
     fn module_name_to_class_name(&self) -> String {
-        if self.module_name.is_empty() {
-            String::new()
-        } else {
-            let mut chars = self.module_name.chars();
-            let first = chars.next().unwrap().to_uppercase().to_string();
-            first + chars.as_str()
-        }
+        assert!(
+            !self.module_name.is_empty(),
+            "module_name_to_class_name called with empty module name; this is an invalid state in code generation"
+        );
+
+        let mut chars = self.module_name.chars();
+        let first = chars.next().unwrap().to_uppercase().to_string();
+        first + chars.as_str()
     }
 
     /// Generates a full module with `gen_server` behaviour.
