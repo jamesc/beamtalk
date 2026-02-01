@@ -542,6 +542,7 @@ maybe_await_future(Value) when is_pid(Value) ->
     %% If it's an actor or other process, await will timeout quickly.
     %% We use a short timeout (100ms) to detect non-futures fast.
     TestTimeout = 100,
+    Ref = make_ref(),
     Value ! {await, self(), TestTimeout},
     receive
         {future_resolved, Value, AwaitedValue} ->
@@ -563,6 +564,14 @@ maybe_await_future(Value) when is_pid(Value) ->
             end
     after TestTimeout ->
         %% Not a future process - it didn't respond to the protocol
+        %% Flush any late responses to avoid mailbox pollution
+        receive
+            {future_resolved, Value, _} -> ok;
+            {future_rejected, Value, _} -> ok;
+            {future_timeout, Value} -> ok
+        after 0 ->
+            ok
+        end,
         %% Return the PID as-is (likely an actor or other process)
         Value
     end;
