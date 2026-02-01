@@ -1483,3 +1483,147 @@ chained_binary_operators_test() ->
     
     Result = Block(),
     ?assertEqual(13, Result).
+
+%%% ===========================================================================
+%%% Super Keyword Tests (BT-108) - PENDING BT-152
+%%% ===========================================================================
+%%%
+%%% These tests use the compiled logging_counter module from
+%%% tests/fixtures/logging_counter.bt which demonstrates super dispatch
+%%% in an inheritance hierarchy.
+%%%
+%%% Inheritance chain: Actor -> Counter -> LoggingCounter
+%%%
+%%% LoggingCounter overrides increment to:
+%%% 1. Increment logCount
+%%% 2. Call super increment (Counter's version)
+%%% 3. Return the value
+%%%
+%%% **NOTE:** These tests are currently DISABLED because beamtalk_classes:super_dispatch/3
+%%% is not yet implemented. Issue BT-152 tracks the runtime implementation.
+%%% The compiler (BT-108) correctly generates super_dispatch calls - these tests
+%%% will be enabled once the runtime support is merged.
+%%%
+%%% @see tests/fixtures/logging_counter.bt
+%%% @see BT-152 for runtime super_dispatch/3 implementation
+
+%% DISABLED: Test: Super dispatch calls parent method
+%% LoggingCounter increment calls Counter increment via super
+%% Uncomment when BT-152 is merged:
+%%
+%% super_calls_parent_method_test() ->
+%%     %% Create logging counter with initial state
+%%     Object = logging_counter:spawn(),
+%%     ?assertMatch({beamtalk_object, 'LoggingCounter', logging_counter, _Pid}, Object),
+%%     
+%%     Pid = element(4, Object),
+%%     
+%%     %% Increment should:
+%%     %% 1. Increment logCount to 1
+%%     %% 2. Call super increment (increments value to 1)
+%%     %% 3. Return value (1)
+%%     {ok, Value} = gen_server:call(Pid, {increment, []}),
+%%     ?assertEqual(1, Value),
+%%     
+%%     %% Verify logCount was incremented
+%%     {ok, LogCount} = gen_server:call(Pid, {getLogCount, []}),
+%%     ?assertEqual(1, LogCount),
+%%     
+%%     gen_server:stop(Pid).
+
+%% DISABLED: Test: Multiple super calls accumulate properly
+%% Uncomment when BT-152 is merged:
+%%
+%% super_multiple_calls_test() ->
+%%     Object = logging_counter:spawn(),
+%%     Pid = element(4, Object),
+%%     
+%%     %% Call increment 3 times
+%%     {ok, _} = gen_server:call(Pid, {increment, []}),
+%%     {ok, _} = gen_server:call(Pid, {increment, []}),
+%%     {ok, Value3} = gen_server:call(Pid, {increment, []}),
+%%     
+%%     %% Value should be 3 (super incremented it)
+%%     ?assertEqual(3, Value3),
+%%     
+%%     %% LogCount should also be 3
+%%     {ok, LogCount} = gen_server:call(Pid, {getLogCount, []}),
+%%     ?assertEqual(3, LogCount),
+%%     
+%%     gen_server:stop(Pid).
+
+%% DISABLED: Test: Super with getValue - different method
+%% Uncomment when BT-152 is merged:
+%%
+%% super_with_different_method_test() ->
+%%     InitArgs = #{value => 42},
+%%     Object = logging_counter:spawn(InitArgs),
+%%     Pid = element(4, Object),
+%%     
+%%     %% getValue calls super getValue (Counter's version)
+%%     {ok, Value} = gen_server:call(Pid, {getValue, []}),
+%%     ?assertEqual(42, Value),
+%%     
+%%     gen_server:stop(Pid).
+
+%% DISABLED: Test: Child adds new methods alongside super
+%% Uncomment when BT-152 is merged:
+%%
+%% super_with_new_methods_test() ->
+%%     Object = logging_counter:spawn(),
+%%     Pid = element(4, Object),
+%%     
+%%     %% getLogCount is new to LoggingCounter
+%%     {ok, LogCount} = gen_server:call(Pid, {getLogCount, []}),
+%%     ?assertEqual(0, LogCount),
+%%     
+%%     %% After increment, both value and logCount change
+%%     {ok, _} = gen_server:call(Pid, {increment, []}),
+%%     
+%%     {ok, Value} = gen_server:call(Pid, {getValue, []}),
+%%     {ok, LogCount2} = gen_server:call(Pid, {getLogCount, []}),
+%%     
+%%     ?assertEqual(1, Value),
+%%     ?assertEqual(1, LogCount2),
+%%     
+%%     gen_server:stop(Pid).
+
+%% DISABLED: Test: Super maintains state consistency
+%% Uncomment when BT-152 is merged:
+%%
+%% super_maintains_state_test() ->
+%%     Object = logging_counter:spawn(),
+%%     Pid = element(4, Object),
+%%     
+%%     %% Mix calls to overridden and non-overridden methods
+%%     {ok, 1} = gen_server:call(Pid, {increment, []}),  % Calls super
+%%     {ok, 1} = gen_server:call(Pid, {getValue, []}),   % Calls super
+%%     {ok, 2} = gen_server:call(Pid, {increment, []}),  % Calls super
+%%     {ok, 2} = gen_server:call(Pid, {getValue, []}),   % Calls super
+%%     
+%%     %% Both state variables updated correctly
+%%     {ok, LogCount} = gen_server:call(Pid, {getLogCount, []}),
+%%     ?assertEqual(2, LogCount),
+%%     
+%%     gen_server:stop(Pid).
+
+%% DISABLED: Test: Super with initial state override
+%% Uncomment when BT-152 is merged:
+%%
+%% super_with_init_args_test() ->
+%%     InitArgs = #{value => 100, logCount => 5},
+%%     Object = logging_counter:spawn(InitArgs),
+%%     Pid = element(4, Object),
+%%     
+%%     %% Starting values should be overridden
+%%     {ok, Value} = gen_server:call(Pid, {getValue, []}),
+%%     {ok, LogCount} = gen_server:call(Pid, {getLogCount, []}),
+%%     
+%%     ?assertEqual(100, Value),
+%%     ?assertEqual(5, LogCount),
+%%     
+%%     %% Increment should work from these values
+%%     {ok, 101} = gen_server:call(Pid, {increment, []}),
+%%     {ok, 6} = gen_server:call(Pid, {getLogCount, []}),
+%%     
+%%     gen_server:stop(Pid).
