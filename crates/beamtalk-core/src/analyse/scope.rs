@@ -326,4 +326,33 @@ mod tests {
         assert!(vars.contains(&"inner2"));
         assert!(!vars.contains(&"outer")); // From parent scope
     }
+
+    #[test]
+    fn handles_empty_variable_name() {
+        let mut scope = Scope::new();
+        scope.define("", test_span());
+        scope.define("valid", test_span());
+
+        // Empty names are allowed (parser's responsibility to reject)
+        assert!(scope.lookup("").is_some());
+        assert!(scope.lookup("valid").is_some());
+        assert_eq!(scope.lookup("").unwrap().depth, 0);
+    }
+
+    #[test]
+    fn iterator_lifetime_is_correct() {
+        let mut scope = Scope::new();
+        scope.define("x", test_span());
+        scope.define("y", test_span());
+
+        // Iterator should be independent of scope lifetime
+        let iter = scope.current_scope_vars();
+        let names: Vec<&str> = iter.map(|(name, _)| name).collect();
+
+        // Can still use scope after iterator is collected
+        assert_eq!(scope.current_depth(), 0);
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"x"));
+        assert!(names.contains(&"y"));
+    }
 }
