@@ -67,7 +67,7 @@
 //!
 //! - [`util`] - Utility functions (indentation, variable generation, name conversions)
 //! - [`expressions`] - Expression code generation (literals, identifiers, maps)
-//! - [`gen_server`] - OTP gen_server scaffolding (spawn, init, callbacks)
+//! - [`gen_server`] - OTP `gen_server` scaffolding (spawn, init, callbacks)
 //! - [`builtins`] - Built-in operations (blocks, dictionaries, booleans, arithmetic)
 //! - [`block_analysis`] - Block mutation analysis for control flow
 //!
@@ -480,8 +480,6 @@ impl CoreErlangGenerator {
     ///
     /// This handles the `body: Vec<Expression>` structure of `MethodDefinition`
     /// (as opposed to `Block` which is used for expression-based methods).
-
-    /// Generates the `method_table/0` function.
     /// Generates code for an expression.
     fn generate_expression(&mut self, expr: &Expression) -> Result<()> {
         match expr {
@@ -572,8 +570,6 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// This ensures that State{n} bindings are in scope when generating the reply tuple.
-    #[allow(clippy::too_many_lines)]
-
     /// Check if an expression is a field assignment (self.field := value)
     fn is_field_assignment(expr: &Expression) -> bool {
         if let Expression::Assignment { target, .. } = expr {
@@ -1070,10 +1066,6 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The cascade returns the result of the final message.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "cascade codegen handles both normal and fallback paths"
-    )]
     /// Tries to generate code for block evaluation messages.
     ///
     /// Block evaluation messages (`value`, `value:`, `whileTrue:`, etc.) are
@@ -1090,11 +1082,6 @@ impl CoreErlangGenerator {
     /// - `value:value:` (2 args) → `apply Fun (Arg1, Arg2)`
     /// - `value:value:value:` (3 args) → `apply Fun (Arg1, Arg2, Arg3)`
     ///
-    /// # Control Flow Messages
-    ///
-    /// - `whileTrue:` → loop while condition block returns true
-    /// - `whileFalse:` → loop while condition block returns false
-    /// - `repeat` → infinite loop (until return or error)
     /// Generates a `do:` iteration over a list.
     ///
     /// Beamtalk: `list do: [:item | body]`
@@ -1650,10 +1637,6 @@ impl CoreErlangGenerator {
     /// - Returns `Ok(None)` if the message is NOT a String method (caller should continue)
     /// - Returns `Err(...)` on error
     ///
-    /// # String Methods
-    ///
-    /// - `length` (0 args) → `string:length(Receiver)`
-    /// - `isEmpty` (0 args) → `string:length(Receiver) =:= 0`
     /// Generates a `whileTrue:` loop.
     ///
     /// Beamtalk: `[condition] whileTrue: [body]`

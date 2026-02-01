@@ -633,7 +633,10 @@ impl CoreErlangGenerator {
     }
 
     /// Generates dispatch case clauses for all methods in a class definition.
-    pub(super) fn generate_class_method_dispatches(&mut self, class: &ClassDefinition) -> Result<()> {
+    pub(super) fn generate_class_method_dispatches(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<()> {
         for method in &class.methods {
             // Only generate dispatch for primary methods for now
             if method.kind == MethodKind::Primary {
@@ -829,6 +832,11 @@ impl CoreErlangGenerator {
 
         Ok(())
     }
+    
+    #[expect(
+        clippy::too_many_lines,
+        reason = "method body generation handles many expression types and state threading"
+    )]
     pub(super) fn generate_method_body_with_reply(&mut self, block: &Block) -> Result<()> {
         if block.body.is_empty() {
             let final_state = self.current_state_var();

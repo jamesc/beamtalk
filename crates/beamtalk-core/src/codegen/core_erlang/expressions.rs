@@ -15,7 +15,9 @@
 //! - Cascades
 
 use super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector};
+use crate::ast::{
+    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector,
+};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
