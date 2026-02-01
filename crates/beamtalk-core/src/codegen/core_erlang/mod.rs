@@ -2516,19 +2516,31 @@ impl CoreErlangGenerator {
         let loop_fn = self.fresh_temp_var("Loop");
         let arity = threaded_vars.len();
 
+        // Convert variable names to Core Erlang format and bind them in a new scope
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
         // Generate letrec
         write!(self.output, "letrec '{loop_fn}'/{arity} = fun (")?;
 
-        // Parameters: one for each threaded variable
-        for (i, var) in threaded_vars.iter().enumerate() {
+        // Parameters: one for each threaded variable (capitalized)
+        for (i, core_var) in core_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(self.output, "{var}")?;
+            write!(self.output, "{core_var}")?;
         }
         write!(self.output, ") -> ")?;
 
-        // Evaluate condition inline
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+
+        // Evaluate condition inline (uses the loop parameters now)
         write!(self.output, "case ")?;
         self.generate_block_body(condition_block)?;
         write!(self.output, " of ")?;
@@ -2537,33 +2549,44 @@ impl CoreErlangGenerator {
         write!(self.output, "<'true'> when 'true' -> ")?;
 
         // Generate body and extract new variable values
-        self.generate_while_body_with_threading(body_block, threaded_vars, &loop_fn, arity)?;
+        self.generate_while_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+        )?;
 
         // False case: return final values
         write!(self.output, " <'false'> when 'true' -> ")?;
-        if threaded_vars.len() == 1 {
+        if core_vars.len() == 1 {
             // Single variable: return it directly
-            write!(self.output, "{}", &threaded_vars[0])?;
+            write!(self.output, "{}", &core_vars[0])?;
         } else {
             // Multiple values: return tuple
             write!(self.output, "{{")?;
-            for (i, var) in threaded_vars.iter().enumerate() {
+            for (i, core_var) in core_vars.iter().enumerate() {
                 if i > 0 {
                     write!(self.output, ", ")?;
                 }
-                write!(self.output, "{var}")?;
+                write!(self.output, "{core_var}")?;
             }
             write!(self.output, "}}")?;
         }
         write!(self.output, " end ")?;
 
-        // Initial call to loop function
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call to loop function (uses the outer scope variable values)
         write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
         for (i, var) in threaded_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(self.output, "{var}")?;
+            // Look up the variable in the OUTER scope (before we pushed the loop scope)
+            // We need the capitalized version from the outer method scope
+            write!(self.output, "{}", Self::to_core_erlang_var(var))?;
         }
         write!(self.output, ")")?;
 
@@ -2575,6 +2598,7 @@ impl CoreErlangGenerator {
         &mut self,
         body_block: &Block,
         threaded_vars: &[String],
+        core_vars: &[String],
         loop_fn: &str,
         arity: usize,
     ) -> Result<()> {
@@ -2584,15 +2608,18 @@ impl CoreErlangGenerator {
         if body_block.body.is_empty() {
             // Empty body - just recurse with same values
             write!(self.output, "apply '{loop_fn}'/{arity} (")?;
-            for (i, var) in threaded_vars.iter().enumerate() {
+            for (i, core_var) in core_vars.iter().enumerate() {
                 if i > 0 {
                     write!(self.output, ", ")?;
                 }
-                write!(self.output, "{var}")?;
+                write!(self.output, "{core_var}")?;
             }
             write!(self.output, ")")?;
             return Ok(());
         }
+
+        // Track which variables have been assigned new values
+        let mut assigned_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // Process each expression in the body
         for (i, expr) in body_block.body.iter().enumerate() {
@@ -2605,10 +2632,12 @@ impl CoreErlangGenerator {
                         let var_name = id.name.as_str();
                         if threaded_vars.contains(&var_name.to_string()) {
                             // Generate: let Var1 = <value> in ...
-                            let new_var = format!("{var_name}1");
+                            let core_var = Self::to_core_erlang_var(var_name);
+                            let new_var = format!("{core_var}1");
                             write!(self.output, "let {new_var} = ")?;
                             self.generate_expression(value)?;
                             write!(self.output, " in ")?;
+                            assigned_vars.insert(var_name.to_string());
                             continue;
                         }
                     }
@@ -2638,12 +2667,16 @@ impl CoreErlangGenerator {
 
         // After processing all expressions, recurse with updated values
         write!(self.output, " apply '{loop_fn}'/{arity} (")?;
-        for (i, var) in threaded_vars.iter().enumerate() {
+        for (i, (var, core_var)) in threaded_vars.iter().zip(core_vars.iter()).enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
             // Use the new variable name (Var1) if it was assigned in the body
-            write!(self.output, "{var}1")?;
+            if assigned_vars.contains(var) {
+                write!(self.output, "{core_var}1")?;
+            } else {
+                write!(self.output, "{core_var}")?;
+            }
         }
         write!(self.output, ")")?;
 
@@ -2762,19 +2795,31 @@ impl CoreErlangGenerator {
         let loop_fn = self.fresh_temp_var("Loop");
         let arity = threaded_vars.len();
 
+        // Convert variable names to Core Erlang format and bind them in a new scope
+        let core_vars: Vec<String> = threaded_vars
+            .iter()
+            .map(|v| Self::to_core_erlang_var(v))
+            .collect();
+
         // Generate letrec
         write!(self.output, "letrec '{loop_fn}'/{arity} = fun (")?;
 
-        // Parameters: one for each threaded variable
-        for (i, var) in threaded_vars.iter().enumerate() {
+        // Parameters: one for each threaded variable (capitalized)
+        for (i, core_var) in core_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(self.output, "{var}")?;
+            write!(self.output, "{core_var}")?;
         }
         write!(self.output, ") -> ")?;
 
-        // Evaluate condition inline
+        // Push a new scope with the loop variables bound
+        self.push_scope();
+        for (var, core_var) in threaded_vars.iter().zip(core_vars.iter()) {
+            self.bind_var(var, core_var);
+        }
+
+        // Evaluate condition inline (uses the loop parameters now)
         write!(self.output, "case ")?;
         self.generate_block_body(condition_block)?;
         write!(self.output, " of ")?;
@@ -2783,33 +2828,43 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> ")?;
 
         // Generate body and extract new variable values
-        self.generate_while_body_with_threading(body_block, threaded_vars, &loop_fn, arity)?;
+        self.generate_while_body_with_threading(
+            body_block,
+            threaded_vars,
+            &core_vars,
+            &loop_fn,
+            arity,
+        )?;
 
         // True case: return final values
         write!(self.output, " <'true'> when 'true' -> ")?;
-        if threaded_vars.len() == 1 {
+        if core_vars.len() == 1 {
             // Single variable: return it directly
-            write!(self.output, "{}", &threaded_vars[0])?;
+            write!(self.output, "{}", &core_vars[0])?;
         } else {
             // Multiple values: return tuple
             write!(self.output, "{{")?;
-            for (i, var) in threaded_vars.iter().enumerate() {
+            for (i, core_var) in core_vars.iter().enumerate() {
                 if i > 0 {
                     write!(self.output, ", ")?;
                 }
-                write!(self.output, "{var}")?;
+                write!(self.output, "{core_var}")?;
             }
             write!(self.output, "}}")?;
         }
         write!(self.output, " end ")?;
 
-        // Initial call to loop function
+        // Pop the scope
+        self.pop_scope();
+
+        // Initial call to loop function (uses the outer scope variable values)
         write!(self.output, "in apply '{loop_fn}'/{arity} (")?;
         for (i, var) in threaded_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            write!(self.output, "{var}")?;
+            // Look up the variable in the OUTER scope
+            write!(self.output, "{}", Self::to_core_erlang_var(var))?;
         }
         write!(self.output, ")")?;
 

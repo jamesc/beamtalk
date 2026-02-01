@@ -104,10 +104,9 @@ fn analyze_expression(
         }
 
         Expression::Identifier(id) => {
-            // Read of a variable
-            if ctx.local_bindings.contains(id.name.as_str()) {
-                analysis.local_reads.insert(id.name.to_string());
-            }
+            // Read of a variable - track ALL reads, not just known locals
+            // This is important for detecting outer scope variables that need threading
+            analysis.local_reads.insert(id.name.to_string());
         }
 
         Expression::FieldAccess {
