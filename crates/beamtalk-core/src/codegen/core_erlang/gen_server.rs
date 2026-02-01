@@ -56,7 +56,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         // Return #beamtalk_object{} record instead of raw pid
         // Record syntax in Core Erlang: {RecordTag, Field1, Field2, ...}
-        let class_name = self.module_name_to_class_name();
+        let class_name = self.to_class_name();
         writeln!(
             self.output,
             "{{'beamtalk_object', '{}', '{}', Pid}}",
@@ -114,7 +114,7 @@ impl CoreErlangGenerator {
         self.indent += 1;
         self.write_indent()?;
         // Return #beamtalk_object{} record instead of raw pid
-        let class_name = self.module_name_to_class_name();
+        let class_name = self.to_class_name();
         writeln!(
             self.output,
             "{{'beamtalk_object', '{}', '{}', Pid}}",
@@ -832,7 +832,7 @@ impl CoreErlangGenerator {
 
         Ok(())
     }
-    
+
     #[expect(
         clippy::too_many_lines,
         reason = "method body generation handles many expression types and state threading"

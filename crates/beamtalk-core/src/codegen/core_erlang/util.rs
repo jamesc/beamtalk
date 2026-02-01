@@ -103,17 +103,6 @@ impl CoreErlangGenerator {
     ///
     /// Panics if the module name is empty, as an empty module name represents an
     /// invalid state in the code generation pipeline.
-    pub(super) fn module_name_to_class_name(&self) -> String {
-        assert!(
-            !self.module_name.is_empty(),
-            "module_name_to_class_name called with empty module name; this is an invalid state in code generation"
-        );
-
-        let mut chars = self.module_name.chars();
-        let first = chars.next().unwrap().to_uppercase().to_string();
-        first + chars.as_str()
-    }
-
     /// Converts module name (`snake_case`) to class name (`CamelCase`).
     pub(super) fn to_class_name(&self) -> String {
         // Convert snake_case to CamelCase
