@@ -4,7 +4,7 @@
 //! Semantic analysis for Beamtalk.
 //!
 //! This module performs semantic analysis on the AST, including:
-//! - Variable scope and lifetime analysis
+//! - Variable scope and lifetime analysis (via `scope` module)
 //! - Block context determination (control flow, stored, passed)
 //! - Capture analysis for blocks
 //! - Mutation tracking for captured variables in blocks
@@ -17,6 +17,7 @@ use ecow::EcoString;
 use std::collections::HashMap;
 
 pub mod error;
+pub mod scope;
 
 pub use error::{SemanticError, SemanticErrorKind};
 
