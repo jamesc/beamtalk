@@ -927,83 +927,6 @@ impl CoreErlangGenerator {
     }
 
     /// Generates code for field access (e.g., self.value).
-    fn generate_field_access(&mut self, receiver: &Expression, field: &Identifier) -> Result<()> {
-        // For now, assume receiver is 'self' and access from State
-        if let Expression::Identifier(recv_id) = receiver {
-            if recv_id.name == "self" {
-                let state_var = self.current_state_var();
-                write!(
-                    self.output,
-                    "call 'maps':'get'('{}', {state_var})",
-                    field.name
-                )?;
-                return Ok(());
-            }
-        }
-
-        Err(CodeGenError::UnsupportedFeature {
-            feature: "complex field access".to_string(),
-            location: format!("{:?}", receiver.span()),
-        })
-    }
-
-    /// Generates code for a field assignment (self.field := value).
-    ///
-    /// Uses state threading to simulate mutation in Core Erlang:
-    /// ```erlang
-    /// let _Val = <value> in
-    /// let State{n} = call 'maps':'put'('fieldName', _Val, State{n-1}) in
-    /// _Val
-    /// ```
-    ///
-    /// The assignment returns the assigned value (Smalltalk semantics).
-    fn generate_field_assignment(&mut self, field_name: &str, value: &Expression) -> Result<()> {
-        let val_var = self.fresh_temp_var("Val");
-
-        // Capture current state BEFORE generating value expression,
-        // because the value expression may reference state (e.g., self.value + 1)
-        let current_state = self.current_state_var();
-
-        // let _Val = <value> in
-        write!(self.output, "let {val_var} = ")?;
-        self.generate_expression(value)?;
-
-        // Now increment state version for the new state after assignment
-        let new_state = self.next_state_var();
-
-        // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
-        write!(
-            self.output,
-            " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
-        )?;
-
-        // _Val (assignment returns the assigned value)
-        write!(self.output, "{val_var}")?;
-
-        Ok(())
-    }
-
-    /// Generates code for a block (closure).
-    fn generate_block(&mut self, block: &Block) -> Result<()> {
-        // Push a new scope for block parameters
-        self.push_scope();
-
-        write!(self.output, "fun (")?;
-        for (i, param) in block.parameters.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            let var_name = self.fresh_var(&param.name);
-            write!(self.output, "{var_name}")?;
-        }
-        write!(self.output, ") -> ")?;
-        self.generate_block_body(block)?;
-
-        // Pop the scope when done with the block
-        self.pop_scope();
-        Ok(())
-    }
-
     /// Generates a method body with the reply tuple embedded.
     ///
     /// This is used for actor method dispatch to ensure state threading works correctly.
@@ -1831,14 +1754,6 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// For a timed await with timeout handling, use `beamtalk_future:await/2`.
-    fn generate_await(&mut self, future: &Expression) -> Result<()> {
-        // Delegate to beamtalk_future:await/1, which blocks until resolution/rejection
-        write!(self.output, "call 'beamtalk_future':'await'(")?;
-        self.generate_expression(future)?;
-        write!(self.output, ")")?;
-        Ok(())
-    }
-
     /// Generates code for cascade expressions.
     ///
     /// Cascades send multiple messages to the same receiver using semicolon separators.
