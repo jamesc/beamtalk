@@ -79,6 +79,15 @@ impl CoreErlangGenerator {
             "true" => write!(self.output, "'true'")?,
             "false" => write!(self.output, "'false'")?,
             "nil" => write!(self.output, "'nil'")?,
+            "self" => write!(self.output, "Self")?, // self → Self parameter (BT-161)
+            "super" => {
+                // super alone is an error - must be used in message send (super method: args)
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "super used alone (must be in message send like 'super method: arg')"
+                        .to_string(),
+                    location: format!("byte offset {}", id.span.start()),
+                });
+            }
             _ => {
                 // Check if it's a bound variable in current or outer scopes
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {

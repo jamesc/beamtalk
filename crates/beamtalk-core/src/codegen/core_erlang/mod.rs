@@ -337,7 +337,7 @@ impl CoreErlangGenerator {
         writeln!(
             self.output,
             "module '{}' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-             'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, \
+             'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
              'method_table'/0, 'spawn'/0, 'spawn'/1]",
             self.module_name
         )?;

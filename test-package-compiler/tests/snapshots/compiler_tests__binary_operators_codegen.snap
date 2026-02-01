@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/3, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'start_link'/1 = fun (InitArgs) ->
@@ -30,6 +30,7 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
         '__class__' => 'BinaryOperators',
+        '__class_mod__' => 'binary_operators',
         '__methods__' => call 'binary_operators':'method_table'()
         , 'x' => 10
         , 'y' => 3
@@ -71,7 +72,8 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 'terminate'/2 = fun (Reason, State) ->
     %% Call terminate method if defined (Flavors pattern)
-    case call 'binary_operators':'dispatch'('terminate', [Reason], State) of
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    case call 'binary_operators':'dispatch'('terminate', [Reason], Self, State) of
         <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
         <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
         <_TermOther> when 'true' -> 'ok'
@@ -79,12 +81,13 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    try call 'binary_operators':'dispatch'(Selector, Args, State)
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    try call 'binary_operators':'dispatch'(Selector, Args, Self, State)
     of Result -> Result
     catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
-'dispatch'/3 = fun (Selector, Args, State) ->
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'blockWithOp'> when 'true' ->
             case Args of
@@ -99,7 +102,7 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
             case call 'maps':'is_key'(DnuSelector, Methods) of
                 <'true'> when 'true' ->
                     %% Call doesNotUnderstand:args: with [Selector, Args]
-                    call 'binary_operators':'dispatch'(DnuSelector, [OtherSelector, Args], State)
+                    call 'binary_operators':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
                 <'false'> when 'true' ->
                     %% No DNU handler - return unknown_message error
                     let ClassName = call 'maps':'get'('__class__', State) in
