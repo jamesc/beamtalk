@@ -22,6 +22,7 @@ start_link() ->
 init(_Args) ->
     beamtalk_actor:init(#{
         '__class__' => 'ThrowingActor',
+        '__class_mod__' => 'test_throwing_actor',
         '__methods__' => #{
             throwError => fun ?MODULE:handle_throwError/2,
             normalMethod => fun ?MODULE:handle_normalMethod/2
