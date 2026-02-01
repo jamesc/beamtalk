@@ -228,6 +228,22 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Converts a module name to a class name by capitalizing the first letter.
+    ///
+    /// Examples:
+    /// - "counter" -> "Counter"
+    /// - "my_class" -> "My_class"
+    /// - "" -> ""
+    fn module_name_to_class_name(&self) -> String {
+        if self.module_name.is_empty() {
+            String::new()
+        } else {
+            let mut chars = self.module_name.chars();
+            let first = chars.next().unwrap().to_uppercase().to_string();
+            first + chars.as_str()
+        }
+    }
+
     /// Generates a full module with `gen_server` behaviour.
     ///
     /// Per BT-29 design doc, each class generates a `gen_server` module with:
@@ -422,13 +438,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         // Return #beamtalk_object{} record instead of raw pid
         // Record syntax in Core Erlang: {RecordTag, Field1, Field2, ...}
-        let class_name = self
-            .module_name
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_default()
-            + &self.module_name[1..];
+        let class_name = self.module_name_to_class_name();
         writeln!(
             self.output,
             "{{'beamtalk_object', '{}', '{}', Pid}}",
@@ -486,13 +496,7 @@ impl CoreErlangGenerator {
         self.indent += 1;
         self.write_indent()?;
         // Return #beamtalk_object{} record instead of raw pid
-        let class_name = self
-            .module_name
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_default()
-            + &self.module_name[1..];
+        let class_name = self.module_name_to_class_name();
         writeln!(
             self.output,
             "{{'beamtalk_object', '{}', '{}', Pid}}",
