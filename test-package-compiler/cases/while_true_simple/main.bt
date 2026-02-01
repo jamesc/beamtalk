@@ -15,3 +15,12 @@ testLocal := [
     [x < 5] whileTrue: [x := x + 1].
     ^x
 ].
+
+// Test mutating a block parameter (BT-142 PR review fix)
+testBlockParam := [
+    result := [:x | 
+        [x < 5] whileTrue: [x := x + 1].
+        x
+    ] value: 0.
+    ^result
+].

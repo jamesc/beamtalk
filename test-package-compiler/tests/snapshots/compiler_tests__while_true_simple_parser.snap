@@ -364,10 +364,236 @@ Module {
                 end: 322,
             },
         },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "testBlockParam",
+                    span: Span {
+                        start: 383,
+                        end: 397,
+                    },
+                },
+            ),
+            value: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: Identifier(
+                                Identifier {
+                                    name: "result",
+                                    span: Span {
+                                        start: 407,
+                                        end: 413,
+                                    },
+                                },
+                            ),
+                            value: MessageSend {
+                                receiver: Block(
+                                    Block {
+                                        parameters: [
+                                            BlockParameter {
+                                                name: "x",
+                                                span: Span {
+                                                    start: 419,
+                                                    end: 420,
+                                                },
+                                            },
+                                        ],
+                                        body: [
+                                            MessageSend {
+                                                receiver: Block(
+                                                    Block {
+                                                        parameters: [],
+                                                        body: [
+                                                            MessageSend {
+                                                                receiver: Identifier(
+                                                                    Identifier {
+                                                                        name: "x",
+                                                                        span: Span {
+                                                                            start: 433,
+                                                                            end: 434,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                selector: Binary(
+                                                                    "<",
+                                                                ),
+                                                                arguments: [
+                                                                    Literal(
+                                                                        Integer(
+                                                                            5,
+                                                                        ),
+                                                                        Span {
+                                                                            start: 437,
+                                                                            end: 438,
+                                                                        },
+                                                                    ),
+                                                                ],
+                                                                span: Span {
+                                                                    start: 433,
+                                                                    end: 438,
+                                                                },
+                                                            },
+                                                        ],
+                                                        span: Span {
+                                                            start: 432,
+                                                            end: 439,
+                                                        },
+                                                    },
+                                                ),
+                                                selector: Keyword(
+                                                    [
+                                                        KeywordPart {
+                                                            keyword: "whileTrue:",
+                                                            span: Span {
+                                                                start: 440,
+                                                                end: 450,
+                                                            },
+                                                        },
+                                                    ],
+                                                ),
+                                                arguments: [
+                                                    Block(
+                                                        Block {
+                                                            parameters: [],
+                                                            body: [
+                                                                Assignment {
+                                                                    target: Identifier(
+                                                                        Identifier {
+                                                                            name: "x",
+                                                                            span: Span {
+                                                                                start: 452,
+                                                                                end: 453,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                    value: MessageSend {
+                                                                        receiver: Identifier(
+                                                                            Identifier {
+                                                                                name: "x",
+                                                                                span: Span {
+                                                                                    start: 457,
+                                                                                    end: 458,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                        selector: Binary(
+                                                                            "+",
+                                                                        ),
+                                                                        arguments: [
+                                                                            Literal(
+                                                                                Integer(
+                                                                                    1,
+                                                                                ),
+                                                                                Span {
+                                                                                    start: 461,
+                                                                                    end: 462,
+                                                                                },
+                                                                            ),
+                                                                        ],
+                                                                        span: Span {
+                                                                            start: 457,
+                                                                            end: 462,
+                                                                        },
+                                                                    },
+                                                                    span: Span {
+                                                                        start: 452,
+                                                                        end: 462,
+                                                                    },
+                                                                },
+                                                            ],
+                                                            span: Span {
+                                                                start: 451,
+                                                                end: 463,
+                                                            },
+                                                        },
+                                                    ),
+                                                ],
+                                                span: Span {
+                                                    start: 432,
+                                                    end: 463,
+                                                },
+                                            },
+                                            Identifier(
+                                                Identifier {
+                                                    name: "x",
+                                                    span: Span {
+                                                        start: 473,
+                                                        end: 474,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        span: Span {
+                                            start: 417,
+                                            end: 480,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "value:",
+                                            span: Span {
+                                                start: 481,
+                                                end: 487,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            0,
+                                        ),
+                                        Span {
+                                            start: 488,
+                                            end: 489,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 417,
+                                    end: 489,
+                                },
+                            },
+                            span: Span {
+                                start: 407,
+                                end: 489,
+                            },
+                        },
+                        Return {
+                            value: Identifier(
+                                Identifier {
+                                    name: "result",
+                                    span: Span {
+                                        start: 496,
+                                        end: 502,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 495,
+                                end: 502,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 401,
+                        end: 504,
+                    },
+                },
+            ),
+            span: Span {
+                start: 383,
+                end: 504,
+            },
+        },
     ],
     span: Span {
         start: 125,
-        end: 323,
+        end: 505,
     },
     leading_comments: [
         Comment {

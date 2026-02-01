@@ -1409,15 +1409,37 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
-                        // Create a Core Erlang variable name (capitalize first letter for Core Erlang convention)
-                        let core_var = Self::to_core_erlang_var(var_name);
-                        // Register the variable in scope
-                        self.bind_var(var_name, &core_var);
+                        // Reuse existing Core Erlang variable if already bound (e.g. parameter),
+                        // otherwise create a new one following Core Erlang conventions.
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                         // Generate: let VarName = <value> in ...
+                        // Note: we delay updating the binding until after generating the RHS
+                        // so that the RHS sees the prior value (for rebinding cases).
                         write!(self.output, "let {core_var} = ")?;
                         self.generate_expression(value)?;
+                        // Now update the variable binding to point at the (possibly shadowing) let-bound var.
+                        self.bind_var(var_name, &core_var);
                         write!(self.output, " in ")?;
                     }
+                }
+            } else if let Some(threaded_vars) = Self::get_while_threaded_vars(expr) {
+                // whileTrue:/whileFalse: with mutations - need to rebind threaded vars after loop
+                if threaded_vars.len() == 1 {
+                    let var = &threaded_vars[0];
+                    let core_var = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    write!(self.output, "let {core_var} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
+                } else {
+                    // Multiple threaded vars - fall back for now
+                    let tmp_var = self.fresh_temp_var("seq");
+                    write!(self.output, "let {tmp_var} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
                 }
             } else {
                 // Non-assignment intermediate expression: wrap in let
@@ -1472,15 +1494,45 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = &id.name;
-                        // Create a Core Erlang variable name (capitalize first letter for Core Erlang convention)
-                        let core_var = Self::to_core_erlang_var(var_name);
-                        // Register the variable in scope
-                        self.bind_var(var_name, &core_var);
+                        // Determine the Core Erlang variable name:
+                        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
+                        // - Otherwise, create a new Core Erlang variable name.
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                         // Generate: let VarName = <value> in ...
+                        // Important: do NOT update the mapping before generating the RHS,
+                        // so that any uses of the variable in the RHS see the previous binding.
                         write!(self.output, "let {core_var} = ")?;
                         self.generate_expression(value)?;
+                        // Now update the mapping so subsequent expressions see this binding.
+                        self.bind_var(var_name, &core_var);
                         write!(self.output, " in ")?;
                     }
+                }
+            } else if let Some(threaded_vars) = Self::get_while_threaded_vars(expr) {
+                // whileTrue:/whileFalse: with mutations - need to rebind threaded vars after loop
+                // For single var, the loop returns its final value directly
+                // For multiple vars, we'd need a tuple (not yet supported)
+                if threaded_vars.len() == 1 {
+                    let var = &threaded_vars[0];
+                    // Get the Core Erlang variable name for this var
+                    let core_var = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    // Generate: let CoreVar = <loop> in ...
+                    // This rebinds the variable to the loop's result
+                    write!(self.output, "let {core_var} = ")?;
+                    self.generate_expression(expr)?;
+                    // The binding already points to core_var, no need to update
+                    write!(self.output, " in ")?;
+                } else {
+                    // Multiple threaded vars - fall back to simple wrapper for now
+                    // TODO: Support multiple vars with tuple destructuring
+                    let tmp_var = self.fresh_temp_var("seq");
+                    write!(self.output, "let {tmp_var} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
                 }
             } else {
                 // Non-assignment intermediate expression: wrap in let
@@ -1512,6 +1564,63 @@ impl CoreErlangGenerator {
         } else {
             false
         }
+    }
+
+    /// Check if an expression is a whileTrue: or whileFalse: with literal blocks
+    /// that has threaded mutations. Returns the threaded variable names if so.
+    fn get_while_threaded_vars(expr: &Expression) -> Option<Vec<String>> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+
+        let selector_name: String = parts.iter().map(|kw| kw.keyword.as_str()).collect();
+
+        // Check for whileTrue:/whileFalse: with literal blocks
+        if (selector_name == "whileTrue:" || selector_name == "whileFalse:")
+            && matches!(receiver.as_ref(), Expression::Block(_))
+            && arguments
+                .first()
+                .is_some_and(|a| matches!(a, Expression::Block(_)))
+        {
+            // Extract blocks - the matches! above guarantees these will succeed
+            let Expression::Block(cond_block) = receiver.as_ref() else {
+                return None;
+            };
+            let Some(Expression::Block(body_block)) = arguments.first() else {
+                return None;
+            };
+
+            let cond_analysis = analyze_block(cond_block);
+            let body_analysis = analyze_block(body_block);
+
+            // Combine reads and writes from both blocks
+            let all_reads: std::collections::HashSet<String> = cond_analysis
+                .local_reads
+                .union(&body_analysis.local_reads)
+                .cloned()
+                .collect();
+            let all_writes: std::collections::HashSet<String> = cond_analysis
+                .local_writes
+                .union(&body_analysis.local_writes)
+                .cloned()
+                .collect();
+
+            // Threaded vars are those that are both read AND written
+            let threaded: Vec<String> = all_reads.intersection(&all_writes).cloned().collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+        None
     }
 
     /// Generate a field assignment WITHOUT the closing value.
@@ -2584,9 +2693,12 @@ impl CoreErlangGenerator {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            // Look up the variable in the OUTER scope (before we pushed the loop scope)
-            // We need the capitalized version from the outer method scope
-            write!(self.output, "{}", Self::to_core_erlang_var(var))?;
+            // Prefer the currently bound Core Erlang variable name (which may be a fresh_var),
+            // and fall back to the synthesized name if there is no existing binding.
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
         }
         write!(self.output, ")")?;
 
@@ -2863,8 +2975,11 @@ impl CoreErlangGenerator {
             if i > 0 {
                 write!(self.output, ", ")?;
             }
-            // Look up the variable in the OUTER scope
-            write!(self.output, "{}", Self::to_core_erlang_var(var))?;
+            // Look up the variable in the OUTER scope; fall back to a synthesized name
+            let var_name = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            write!(self.output, "{var_name}")?;
         }
         write!(self.output, ")")?;
 
