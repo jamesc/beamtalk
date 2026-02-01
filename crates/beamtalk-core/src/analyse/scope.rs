@@ -28,7 +28,6 @@ struct ScopeLevel {
 /// Information about a defined variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarInfo {
-    pub name: String,
     pub defined_at: Span,
     pub depth: usize,
 }
@@ -60,17 +59,26 @@ impl Scope {
     }
 
     /// Defines a variable in the current scope.
+    ///
+    /// If a variable with the same name already exists in the current scope,
+    /// it will be redefined (shadowed).
+    ///
+    /// # Panics
+    /// Never panics. The `expect` is for internal invariant checking only.
+    /// The `levels` vec is guaranteed to have at least one element (module scope).
     pub fn define(&mut self, name: &str, span: Span) {
         let depth = self.current_depth();
         let var_info = VarInfo {
-            name: name.to_string(),
             defined_at: span,
             depth,
         };
 
-        if let Some(level) = self.levels.last_mut() {
-            level.variables.insert(name.to_string(), var_info);
-        }
+        // SAFETY: levels always contains at least the module-level scope
+        self.levels
+            .last_mut()
+            .expect("levels should never be empty")
+            .variables
+            .insert(name.to_string(), var_info);
     }
 
     /// Looks up a variable by name, searching from innermost to outermost scope.
@@ -97,6 +105,23 @@ impl Scope {
     pub fn is_captured(&self, name: &str) -> bool {
         self.lookup(name)
             .is_some_and(|v| v.depth < self.current_depth())
+    }
+
+    /// Returns an iterator over all variables in the current scope.
+    ///
+    /// This only returns variables defined in the current scope level,
+    /// not variables from outer scopes.
+    ///
+    /// # Panics
+    /// Never panics. The `expect` is for internal invariant checking only.
+    /// The `levels` vec is guaranteed to have at least one element (module scope).
+    pub fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &VarInfo)> {
+        self.levels
+            .last()
+            .expect("levels should never be empty")
+            .variables
+            .iter()
+            .map(|(name, info)| (name.as_str(), info))
     }
 }
 
@@ -162,7 +187,6 @@ mod tests {
         scope.define("x", test_span());
 
         let var = scope.lookup("x").unwrap();
-        assert_eq!(var.name, "x");
         assert_eq!(var.depth, 0);
     }
 
@@ -228,6 +252,19 @@ mod tests {
     }
 
     #[test]
+    fn redefine_variable_in_same_scope() {
+        let mut scope = Scope::new();
+        scope.define("x", Span::new(0, 1));
+
+        // Redefine in same scope with different span
+        scope.define("x", Span::new(10, 11));
+
+        let var = scope.lookup("x").unwrap();
+        assert_eq!(var.depth, 0);
+        assert_eq!(var.defined_at.start(), 10); // Uses most recent definition
+    }
+
+    #[test]
     fn scope_levels_track_correct_depth() {
         let mut scope = Scope::new();
 
@@ -261,5 +298,22 @@ mod tests {
         assert!(scope.is_captured("class_var"));
         assert!(scope.is_captured("method_var"));
         assert!(!scope.is_captured("block_var")); // Local to current scope
+    }
+
+    #[test]
+    fn current_scope_vars_returns_only_current_level() {
+        let mut scope = Scope::new();
+        scope.define("outer", test_span());
+
+        scope.push();
+        scope.define("inner1", test_span());
+        scope.define("inner2", test_span());
+
+        // Should only return variables from current (inner) scope
+        let vars: Vec<&str> = scope.current_scope_vars().map(|(name, _)| name).collect();
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains(&"inner1"));
+        assert!(vars.contains(&"inner2"));
+        assert!(!vars.contains(&"outer")); // From parent scope
     }
 }
