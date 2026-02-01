@@ -6413,4 +6413,120 @@ end
             "Should have second message abs. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_validate_stored_closure_empty_block() {
+        // Empty block should not trigger errors
+        let block = Block {
+            parameters: vec![],
+            body: vec![],
+            span: Span::new(0, 2),
+        };
+
+        let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+        assert!(result.is_ok(), "Empty block should be valid");
+    }
+
+    #[test]
+    fn test_validate_stored_closure_with_local_mutation() {
+        // Block with local variable assignment: [count := count + 1]
+        let block = Block {
+            parameters: vec![],
+            body: vec![Expression::Assignment {
+                target: Box::new(Expression::Identifier(Identifier::new(
+                    "count",
+                    Span::new(1, 6),
+                ))),
+                value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(10, 11))),
+                span: Span::new(1, 11),
+            }],
+            span: Span::new(0, 12),
+        };
+
+        let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+        assert!(result.is_err(), "Local mutation should produce error");
+
+        if let Err(CodeGenError::LocalMutationInStoredClosure { variable, .. }) = result {
+            assert_eq!(variable, "count");
+        } else {
+            panic!("Expected LocalMutationInStoredClosure error");
+        }
+    }
+
+    #[test]
+    fn test_validate_stored_closure_with_field_assignment() {
+        // Block with field assignment: [self.value := 1]
+        let block = Block {
+            parameters: vec![],
+            body: vec![Expression::Assignment {
+                target: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(Expression::Identifier(Identifier::new(
+                        "self",
+                        Span::new(1, 5),
+                    ))),
+                    field: Identifier::new("value", Span::new(6, 11)),
+                    span: Span::new(1, 11),
+                }),
+                value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(15, 16))),
+                span: Span::new(1, 16),
+            }],
+            span: Span::new(0, 17),
+        };
+
+        let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+        assert!(result.is_err(), "Field assignment should produce error");
+
+        if let Err(CodeGenError::FieldAssignmentInStoredClosure {
+            field,
+            field_capitalized,
+            ..
+        }) = result
+        {
+            assert_eq!(field, "value");
+            assert_eq!(field_capitalized, "Value");
+        } else {
+            panic!("Expected FieldAssignmentInStoredClosure error");
+        }
+    }
+
+    #[test]
+    fn test_validate_stored_closure_field_takes_precedence() {
+        // Block with both field and local assignment
+        // Field error should be reported first
+        let block = Block {
+            parameters: vec![],
+            body: vec![
+                Expression::Assignment {
+                    target: Box::new(Expression::Identifier(Identifier::new(
+                        "count",
+                        Span::new(1, 6),
+                    ))),
+                    value: Box::new(Expression::Literal(Literal::Integer(0), Span::new(10, 11))),
+                    span: Span::new(1, 11),
+                },
+                Expression::Assignment {
+                    target: Box::new(Expression::FieldAccess {
+                        receiver: Box::new(Expression::Identifier(Identifier::new(
+                            "self",
+                            Span::new(13, 17),
+                        ))),
+                        field: Identifier::new("value", Span::new(18, 23)),
+                        span: Span::new(13, 23),
+                    }),
+                    value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(27, 28))),
+                    span: Span::new(13, 28),
+                },
+            ],
+            span: Span::new(0, 29),
+        };
+
+        let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+        assert!(result.is_err());
+
+        // Should be field error (checked first), not local
+        assert!(
+            matches!(result, Err(CodeGenError::FieldAssignmentInStoredClosure { .. })),
+            "Field error should take precedence over local mutation"
+        );
+    }
 }
