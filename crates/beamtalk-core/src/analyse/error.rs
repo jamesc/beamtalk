@@ -4,6 +4,7 @@
 //! Semantic analysis error types.
 
 use crate::parse::Span;
+use ecow::EcoString;
 
 /// A semantic error discovered during analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,23 +17,24 @@ pub struct SemanticError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticErrorKind {
     /// Variable referenced before definition.
-    UndefinedVariable { name: String },
+    UndefinedVariable { name: EcoString },
 
     /// Variable assigned to but never read.
-    UnusedVariable { name: String },
+    UnusedVariable { name: EcoString },
 
     /// Captured variable mutated in block (requires `RefCell`).
-    MutatedCapture { name: String },
+    MutatedCapture { name: EcoString },
 
     /// Block escapes but has unknown context.
     EscapingBlockUnknownContext,
 
     /// Multiple assignments to same immutable variable.
-    MultipleAssignment { name: String },
+    MultipleAssignment { name: EcoString },
 }
 
 impl SemanticError {
     /// Create a new semantic error.
+    #[must_use]
     pub fn new(kind: SemanticErrorKind, span: Span) -> Self {
         Self { kind, span }
     }

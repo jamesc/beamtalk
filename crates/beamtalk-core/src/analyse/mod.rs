@@ -13,6 +13,7 @@
 
 use crate::ast::Module;
 use crate::parse::{Diagnostic, Span};
+use ecow::EcoString;
 use std::collections::HashMap;
 
 pub mod error;
@@ -31,6 +32,7 @@ pub struct AnalysisResult {
 
 impl AnalysisResult {
     /// Create a new empty analysis result.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
@@ -81,7 +83,7 @@ pub enum BlockContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedVar {
     /// Name of the captured variable.
-    pub name: String,
+    pub name: EcoString,
 
     /// Span where the variable was defined.
     pub defined_at: Span,
@@ -101,13 +103,13 @@ pub struct Mutation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MutationKind {
     /// Assignment to a local variable.
-    LocalVariable { name: String },
+    LocalVariable { name: EcoString },
 
     /// Assignment to a captured variable (requires `RefCell`).
-    CapturedVariable { name: String },
+    CapturedVariable { name: EcoString },
 
     /// Assignment to an object field.
-    Field { name: String },
+    Field { name: EcoString },
 }
 
 /// Perform semantic analysis on a module.
@@ -168,9 +170,7 @@ mod tests {
     #[test]
     fn test_semantic_error_creation() {
         let error = SemanticError::new(
-            SemanticErrorKind::UndefinedVariable {
-                name: "foo".to_string(),
-            },
+            SemanticErrorKind::UndefinedVariable { name: "foo".into() },
             Span::default(),
         );
 
