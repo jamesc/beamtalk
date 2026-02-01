@@ -12,7 +12,7 @@ module 'future_pattern_matching' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'ha
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('future_pattern_matching', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Future_pattern_matching', 'future_pattern_matching', Pid}
+            {'beamtalk_object', 'FuturePatternMatching', 'future_pattern_matching', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'future_pattern_matching' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'ha
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('future_pattern_matching', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Future_pattern_matching', 'future_pattern_matching', Pid}
+            {'beamtalk_object', 'FuturePatternMatching', 'future_pattern_matching', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

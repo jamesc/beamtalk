@@ -12,7 +12,7 @@ module 'async_keyword_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('async_keyword_message', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Async_keyword_message', 'async_keyword_message', Pid}
+            {'beamtalk_object', 'AsyncKeywordMessage', 'async_keyword_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'async_keyword_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('async_keyword_message', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Async_keyword_message', 'async_keyword_message', Pid}
+            {'beamtalk_object', 'AsyncKeywordMessage', 'async_keyword_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

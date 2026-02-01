@@ -631,6 +631,11 @@ let lexer = Lexer::builder()
 - **All new or changed code MUST have tests** - flag missing tests in code review
 - Unit tests go in the same file as the code (`#[cfg(test)] mod tests`)
 - Use `insta` for snapshot testing of parser output and codegen
+- **After compiler changes, ALWAYS refresh insta snapshots:**
+  ```bash
+  cargo insta test          # Run tests and check for snapshot changes
+  cargo insta review        # Interactively review and accept/reject
+  ```
 - Integration tests in `test-package-compiler/cases/` directories
 - Name test functions descriptively: `fn parse_message_send_with_multiple_keywords()`
 - Use `?` in examples, not `.unwrap()` or `try!`

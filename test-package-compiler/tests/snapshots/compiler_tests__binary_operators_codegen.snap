@@ -12,7 +12,7 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('binary_operators', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Binary_operators', 'binary_operators', Pid}
+            {'beamtalk_object', 'BinaryOperators', 'binary_operators', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'binary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('binary_operators', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Binary_operators', 'binary_operators', Pid}
+            {'beamtalk_object', 'BinaryOperators', 'binary_operators', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

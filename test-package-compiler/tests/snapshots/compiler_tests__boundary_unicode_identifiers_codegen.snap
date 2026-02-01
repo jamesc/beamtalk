@@ -12,7 +12,7 @@ module 'boundary_unicode_identifiers' ['start_link'/1, 'init'/1, 'handle_cast'/2
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('boundary_unicode_identifiers', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Boundary_unicode_identifiers', 'boundary_unicode_identifiers', Pid}
+            {'beamtalk_object', 'BoundaryUnicodeIdentifiers', 'boundary_unicode_identifiers', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'boundary_unicode_identifiers' ['start_link'/1, 'init'/1, 'handle_cast'/2
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('boundary_unicode_identifiers', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Boundary_unicode_identifiers', 'boundary_unicode_identifiers', Pid}
+            {'beamtalk_object', 'BoundaryUnicodeIdentifiers', 'boundary_unicode_identifiers', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

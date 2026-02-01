@@ -12,7 +12,7 @@ module 'actor_spawn_with_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('actor_spawn_with_args', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Actor_spawn_with_args', 'actor_spawn_with_args', Pid}
+            {'beamtalk_object', 'ActorSpawnWithArgs', 'actor_spawn_with_args', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'actor_spawn_with_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('actor_spawn_with_args', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Actor_spawn_with_args', 'actor_spawn_with_args', Pid}
+            {'beamtalk_object', 'ActorSpawnWithArgs', 'actor_spawn_with_args', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

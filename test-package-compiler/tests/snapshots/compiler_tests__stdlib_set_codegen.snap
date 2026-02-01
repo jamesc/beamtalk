@@ -12,7 +12,7 @@ module 'stdlib_set' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3,
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('stdlib_set', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Stdlib_set', 'stdlib_set', Pid}
+            {'beamtalk_object', 'StdlibSet', 'stdlib_set', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'stdlib_set' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3,
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('stdlib_set', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Stdlib_set', 'stdlib_set', Pid}
+            {'beamtalk_object', 'StdlibSet', 'stdlib_set', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end

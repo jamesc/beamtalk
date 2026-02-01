@@ -12,7 +12,7 @@ module 'unary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('unary_operators', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Unary_operators', 'unary_operators', Pid}
+            {'beamtalk_object', 'UnaryOperators', 'unary_operators', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'unary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('unary_operators', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'Unary_operators', 'unary_operators', Pid}
+            {'beamtalk_object', 'UnaryOperators', 'unary_operators', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
