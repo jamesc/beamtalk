@@ -50,15 +50,16 @@ impl CoreErlangGenerator {
         super::variable_context::VariableContext::to_core_var(name)
     }
 
-    /// Returns the current state variable name for state threading.
+    /// Converts a module name to a class name (`snake_case` → CamelCase).
     ///
-    /// State threading uses incrementing variable names to simulate mutation:
-    /// - Version 0: `State` (the original state passed to the method)
-    /// - Version 1: `State1` (after first assignment)
-    /// - Version 2: `State2` (after second assignment)
-    /// - etc.
+    /// Module names in Beamtalk follow Erlang conventions (`snake_case` atoms),
+    /// while class names follow Smalltalk conventions (CamelCase).
     ///
-    /// Converts a module name to a class name by capitalizing the first letter.
+    /// # Examples
+    ///
+    /// - `"counter"` → `"Counter"`
+    /// - `"my_class"` → `"MyClass"`
+    /// - `"http_router"` → `"HttpRouter"`
     pub(super) fn to_class_name(&self) -> String {
         // Convert snake_case to CamelCase
         self.module_name

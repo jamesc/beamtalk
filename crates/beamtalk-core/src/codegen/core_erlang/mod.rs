@@ -452,45 +452,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates the `spawn/0` class method for creating actor instances.
-    ///
-    /// This is a class-level method that instantiates a new actor process
-    /// using `gen_server:start_link/3`. The function:
-    /// 1. Calls `gen_server:start_link/3` with empty args (init/1 creates the state)
-    /// 2. Wraps the pid in a `#beamtalk_object{}` record with class metadata
-    /// 3. Returns the object record, or throws error on failure
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// 'spawn'/0 = fun () ->
-    ///     case call 'gen_server':'start_link'('counter', ~{}~, []) of
-    ///         <{'ok', Pid}> when 'true' ->
-    ///             {'beamtalk_object', 'Counter', 'counter', Pid};
-    ///         <{'error', Reason}> when 'true' ->
-    ///             call 'erlang':'error'({'spawn_failed', Reason})
-    ///     end
-    /// ```
-    /// Generates the `init/1` callback for `gen_server`.
-    ///
-    /// The init function:
-    /// 1. Creates a default state map with `__class__`, `__methods__`, and default field values
-    /// 2. Merges the `InitArgs` map into the default state (`InitArgs` values override defaults)
-    /// 3. Returns `{ok, FinalState}`
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// 'init'/1 = fun (InitArgs) ->
-    ///     let DefaultState = ~{
-    ///         '__class__' => 'Counter',
-    ///         '__methods__' => call 'counter':'method_table'(),
-    ///         'value' => 0
-    ///     }~
-    ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
-    ///        in {'ok', FinalState}
-    /// ```
-    /// Generates the method body with a reply tuple for a `MethodDefinition`.
     ///
     /// Generates code for an expression by dispatching to the appropriate handler.
     ///
