@@ -1320,6 +1320,14 @@ impl CoreErlangGenerator {
 
     /// Generates code for field access (e.g., self.value).
     fn generate_field_access(&mut self, receiver: &Expression, field: &Identifier) -> Result<()> {
+        // Check for invalid super.field usage
+        if matches!(receiver, Expression::Super(_)) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "super.field - use 'super message' for method calls instead".to_string(),
+                location: format!("{:?}", receiver.span()),
+            });
+        }
+
         // For now, assume receiver is 'self' and access from State
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
@@ -4240,5 +4248,39 @@ end
             code.contains("'abs'"),
             "Should have second message abs. Got:\n{code}"
         );
+    }
+
+    #[test]
+    fn test_super_field_access_error() {
+        // super.field should produce a clear error message
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.push_scope();
+
+        let super_expr = Expression::Super(Span::new(0, 5));
+        let field_access = Expression::FieldAccess {
+            receiver: Box::new(super_expr),
+            field: Identifier::new("value", Span::new(6, 11)),
+            span: Span::new(0, 11),
+        };
+
+        let result = generator.generate_expression(&field_access);
+
+        assert!(result.is_err(), "super.field should be an error");
+        let err = result.unwrap_err();
+
+        if let CodeGenError::UnsupportedFeature { feature, .. } = err {
+            assert!(
+                feature.contains("super.field"),
+                "Error should mention super.field, got: {feature}"
+            );
+            assert!(
+                feature.contains("super message"),
+                "Error should suggest using super message, got: {feature}"
+            );
+        } else {
+            panic!("Expected UnsupportedFeature error, got: {err:?}");
+        }
+
+        generator.pop_scope();
     }
 }
