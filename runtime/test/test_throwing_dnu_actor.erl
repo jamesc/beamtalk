@@ -22,6 +22,7 @@ start_link() ->
 init(_Args) ->
     beamtalk_actor:init(#{
         '__class__' => 'ThrowingDnuActor',
+        '__class_mod__' => 'test_throwing_dnu_actor',
         '__methods__' => #{
             'doesNotUnderstand:args:' => fun ?MODULE:'handle_doesNotUnderstand:args:'/2
         }
