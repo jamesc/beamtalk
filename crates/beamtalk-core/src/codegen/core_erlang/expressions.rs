@@ -523,15 +523,16 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Not an assignment or loop - generate and discard result
-                // Manually generate super_dispatch call with current state
+                // Message send: generate and discard result explicitly
                 if let Expression::MessageSend {
+                    receiver,
                     selector,
                     arguments,
                     ..
                 } = expr
                 {
                     write!(self.output, "let _Unit = ")?;
-                    self.generate_message_send(expr, selector, arguments)?;
+                    self.generate_message_send(receiver, selector, arguments)?;
                     write!(self.output, " in ")?;
                 } else {
                     write!(self.output, "let _Unit = ")?;

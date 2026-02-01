@@ -76,10 +76,7 @@ impl CoreErlangGenerator {
 
         // Generate lambda: fun (Item, StateAcc) -> ... end
         write!(self.output, "fun (")?;
-        let item_param = body
-            .parameters
-            .first()
-            .map_or("_", |p| p.name.as_str());
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
         write!(self.output, "{item_var}, StateAcc) -> ")?;
 

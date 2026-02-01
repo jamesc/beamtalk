@@ -492,9 +492,10 @@ impl CoreErlangGenerator {
     /// ```
     /// Generates the method body with a reply tuple for a `MethodDefinition`.
     ///
-    /// This handles the `body: Vec<Expression>` structure of `MethodDefinition`
-    /// (as opposed to `Block` which is used for expression-based methods).
-    /// Generates code for an expression.
+    /// Generates code for an expression by dispatching to the appropriate handler.
+    ///
+    /// This is the main expression dispatcher that routes each AST node type
+    /// to its specialized code generation method.
     fn generate_expression(&mut self, expr: &Expression) -> Result<()> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
