@@ -641,22 +641,45 @@ sequential_error_recovery() ->
 spawn_actor_and_send_messages() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
     
-    %% Load the Counter class (compiled from tests/fixtures/counter.bt)
-    %% Note: Counter is pre-compiled and available in the test path
-    code:add_path("test"),
+    %% This test verifies the auto-await mechanism works with futures.
+    %% Full E2E testing with Counter spawn and message sends requires:
+    %% 1. Class reference resolution in expressions (`Counter spawn`)
+    %% 2. Message send codegen to return futures
+    %% Both are separate compiler features beyond BT-155's scope.
+    %%
+    %% BT-155 is specifically about: "auto-await futures from message sends"
+    %% We test this by verifying maybe_await_future/1 works correctly.
     
-    %% For now, just verify the REPL can evaluate basic expressions
-    %% The actual actor spawning requires Beamtalk class syntax support
-    %% which isn't yet implemented in expression context
-    {ok, Result} = beamtalk_repl:eval(Pid, "42"),
-    ?assertEqual(42, Result),
+    %% Test 1: maybe_await_future awaits a resolved future
+    Future1 = beamtalk_future:new(),
+    spawn(fun() ->
+        timer:sleep(10),
+        beamtalk_future:resolve(Future1, 42)
+    end),
+    Result1 = beamtalk_repl_eval:maybe_await_future(Future1),
+    ?assertEqual(42, Result1),
     
-    %% TODO: Once compiler fully supports class references in expressions, test:
-    %% {ok, CounterObj} = beamtalk_repl:eval(Pid, "counter := Counter spawn"),
-    %% ?assertMatch({beamtalk_object, 'Counter', counter, _ActorPid}, CounterObj),
-    %% {ok, 1} = beamtalk_repl:eval(Pid, "counter increment"),
-    %% {ok, 2} = beamtalk_repl:eval(Pid, "counter increment"),
-    %% {ok, 2} = beamtalk_repl:eval(Pid, "counter getValue"),
+    %% Test 2: maybe_await_future handles rejected futures
+    Future2 = beamtalk_future:new(),
+    spawn(fun() ->
+        timer:sleep(10),
+        beamtalk_future:reject(Future2, test_error)
+    end),
+    Result2 = beamtalk_repl_eval:maybe_await_future(Future2),
+    ?assertEqual({future_rejected, test_error}, Result2),
+    
+    %% Test 3: maybe_await_future passes through non-future PIDs
+    NonFuturePid = spawn(fun() -> timer:sleep(1000) end),
+    Result3 = beamtalk_repl_eval:maybe_await_future(NonFuturePid),
+    ?assertEqual(NonFuturePid, Result3),
+    exit(NonFuturePid, kill),
+    
+    %% Test 4: maybe_await_future passes through beamtalk_object tuples
+    ActorPid = spawn(fun() -> timer:sleep(1000) end),
+    ActorObj = {beamtalk_object, 'Counter', counter, ActorPid},
+    Result4 = beamtalk_repl_eval:maybe_await_future(ActorObj),
+    ?assertEqual(ActorObj, Result4),
+    exit(ActorPid, kill),
     
     beamtalk_repl:stop(Pid),
     ok.
