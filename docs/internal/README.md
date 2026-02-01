@@ -16,8 +16,8 @@ This directory contains internal implementation documentation, design decisions,
 
 | Document | Description |
 |----------|-------------|
-| [Operator Implementation Status](OPERATOR_IMPLEMENTATION_STATUS.md) | Cross-reference of documented vs. implemented binary operators |
-| [Coverage Analysis](COVERAGE_ANALYSIS.md) | Core Erlang compilation verification test coverage analysis |
+| [Operator Implementation Status](operator-implementation-status.md) | Cross-reference of documented vs. implemented binary operators |
+| [Coverage Analysis](coverage-analysis.md) | Core Erlang compilation verification test coverage analysis |
 
 ## When to Add Documents Here
 
