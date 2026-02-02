@@ -153,6 +153,9 @@ git clone https://github.com/jamesc/beamtalk.git
 cd beamtalk
 cargo build
 
+# Install git hooks (recommended - auto-formats code before commits)
+./scripts/install-git-hooks.sh
+
 # Start the REPL
 cargo run -- repl
 ```

@@ -537,26 +537,37 @@ extract_class_names(Result) ->
             [binary_to_list(C) || C <- ClassesBinList]
     end.
 
-%% Register loaded classes with beamtalk_classes.
+%% Register loaded classes by spawning per-class gen_server processes.
 -spec register_classes([string()], atom()) -> ok.
 register_classes([], _ModuleName) ->
     ok;
 register_classes(ClassNames, ModuleName) ->
     lists:foreach(
         fun(ClassName) ->
+            ClassAtom = list_to_atom(ClassName),
             ClassInfo = #{
+                name => ClassAtom,
                 module => ModuleName,
                 superclass => none,
-                methods => #{},
+                instance_methods => #{},
                 instance_variables => [],
                 class_variables => #{},
+                method_source => #{},
                 source_file => undefined
             },
-            case beamtalk_classes:register_class(list_to_atom(ClassName), ClassInfo) of
-                ok -> ok;
-                {error, Reason} ->
-                    io:format(standard_error, "Warning: Failed to register class ~s: ~p~n", 
-                              [ClassName, Reason])
+            %% Check if class process already exists
+            case beamtalk_class:whereis_class(ClassAtom) of
+                undefined ->
+                    %% Start new class process
+                    case beamtalk_class:start_link(ClassAtom, ClassInfo) of
+                        {ok, _Pid} -> ok;
+                        {error, Reason} ->
+                            io:format(standard_error, "Warning: Failed to start class ~s: ~p~n", 
+                                      [ClassName, Reason])
+                    end;
+                _Pid ->
+                    %% Class already exists - could update it here if needed
+                    ok
             end
         end,
         ClassNames
