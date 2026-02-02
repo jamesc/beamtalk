@@ -19,11 +19,36 @@ Beamtalk follows a three-level class hierarchy inspired by Pharo Smalltalk:
 
 ```
 ProtoObject (true root, minimal behavior)
-  └─ Object (common messages, reflection, nil testing)
+  └─ Object (reflection, nil testing, debugging)
        └─ Actor (async-first process-based objects)
+            └─ (user classes: Counter, Worker, etc.)
 ```
 
-Most user code should inherit from **Actor** (for stateful objects) or **Object** (for simple values). Inherit from ProtoObject only when implementing proxies or custom message dispatch.
+The hierarchy serves different purposes at each level:
+- **ProtoObject** - Absolute minimum (identity, fallback dispatch)
+- **Object** - Common protocol most classes need (nil testing, introspection)
+- **Actor** - Process-based concurrency (spawn, async messaging)
+
+Most user code should inherit from **Actor** (for stateful concurrent objects) or **Object** (for simple non-concurrent values). Inherit from ProtoObject only when implementing proxies or custom message dispatch.
+
+### Metaclass Hierarchy
+
+Just as in Smalltalk, the metaclass hierarchy mirrors the instance hierarchy:
+
+```
+Instance Hierarchy:          Metaclass Hierarchy:
+ProtoObject           <---   ProtoObject class (none)
+  └─ Object          <---     └─ Object class (ProtoObject class)
+       └─ Actor     <---        └─ Actor class (Object class)
+            └─ Counter <---        └─ Counter class (Actor class)
+```
+
+Each class is itself an object - a process holding metadata (methods, superclass, instance variables). This enables:
+- Runtime class introspection (`Counter methods`, `Counter superclass`)
+- Hot patching methods (`Counter >> #increment put: [...]`)
+- Factory methods (`Counter spawnWith: #{value => 10}`)
+
+The three classes are bootstrapped at runtime startup via `beamtalk_bootstrap.erl`.
 
 ## Core Classes
 
@@ -54,15 +79,41 @@ ProtoObject subclass: Proxy
 
 For normal classes, inherit from Object or Actor instead.
 
+### Object (`Object.bt`)
+
+Practical root class for most classes, inheriting from ProtoObject and adding common protocols.
+
+**Key messages:**
+- `isNil`, `notNil` - Nil testing (always false for non-nil objects)
+- `ifNil:`, `ifNotNil:` - Conditional execution based on nil
+- `inspect`, `describe` - Debugging and inspection
+- Inherits: `class`, `==`, `~=`, `doesNotUnderstand:args:` from ProtoObject
+
+**When to use:**
+- Non-concurrent utility classes (rare in Beamtalk)
+- Value objects that don't need process isolation
+- Data structures shared across processes
+
+**Usage:**
+```beamtalk
+Object subclass: Point
+  state: x = 0, y = 0
+  
+  isOrigin => (self.x == 0) and: [self.y == 0]
+  describe => "Point({self.x}, {self.y})"
+```
+
+For concurrent stateful objects, inherit from Actor instead.
+
 ### Actor (`Actor.bt`)
 
-Base class for all actors in Beamtalk. Every object is an actor (BEAM process).
+Base class for all actors in Beamtalk. Inherits from Object and adds process-based concurrency.
 
 **Key messages:**
 - `spawn` - Create new instance (compiler primitive)
-- `class` - Get actor's class name
-- `inspect` - Show description on Transcript
-- `describe` - Return string description
+- `spawnWith:` - Create with init args
+- `describe` - Return string description (overrides Object)
+- Inherits: nil testing, `inspect`, `class`, etc. from Object and ProtoObject
 
 **Usage:**
 ```beamtalk
@@ -96,7 +147,9 @@ Control flow via message sends to boolean objects.
 valid := enabled not
 ```
 
-### Nil Testing Protocol (`Nil.bt`, `Actor.bt`)
+### Nil Testing Protocol (`Nil.bt`, `Object.bt`)
+
+All objects (except Nil) inherit nil testing methods from **Object**:
 
 All objects respond to nil-testing messages, enabling nil-safe control flow. Nil represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
 

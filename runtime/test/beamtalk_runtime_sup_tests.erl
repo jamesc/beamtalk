@@ -32,16 +32,15 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
-    %% Should have exactly 1 child (beamtalk_instances)
-    %% Note: beamtalk_classes was removed - classes are now individual processes
-    ?assertEqual(1, length(ChildSpecs)).
+    %% Should have exactly 2 children (beamtalk_bootstrap and beamtalk_instances)
+    ?assertEqual(2, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
-    %% Children should only be beamtalk_instances
-    %% (beamtalk_classes removed - classes are per-class processes now)
+    %% Children should be beamtalk_bootstrap and beamtalk_instances
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    ?assert(lists:member(beamtalk_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_instances, Ids)),
     ?assertNot(lists:member(beamtalk_classes, Ids)).
 
@@ -50,24 +49,35 @@ children_are_workers_test() ->
     
     %% All children should be workers
     Types = [maps:get(type, Spec) || Spec <- ChildSpecs],
-    ?assertEqual([worker], Types).
+    ?assertEqual([worker, worker], Types).
 
 children_are_permanent_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
-    ?assertEqual([permanent], RestartTypes).
+    ?assertEqual([permanent, permanent], RestartTypes).
 
 %%% Child ordering tests - REMOVED
 %%% (Only one child now, so no ordering to test)
 
 %%% Child specifications tests
 
+bootstrap_child_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
+    
+    [BootstrapSpec, _InstancesSpec] = ChildSpecs,
+    ?assertEqual(beamtalk_bootstrap, maps:get(id, BootstrapSpec)),
+    ?assertEqual({beamtalk_bootstrap, start_link, []}, maps:get(start, BootstrapSpec)),
+    ?assertEqual(permanent, maps:get(restart, BootstrapSpec)),
+    ?assertEqual(5000, maps:get(shutdown, BootstrapSpec)),
+    ?assertEqual(worker, maps:get(type, BootstrapSpec)),
+    ?assertEqual([beamtalk_bootstrap], maps:get(modules, BootstrapSpec)).
+
 instances_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
-    [InstancesSpec] = ChildSpecs,
+    [_BootstrapSpec, InstancesSpec] = ChildSpecs,
     ?assertEqual(beamtalk_instances, maps:get(id, InstancesSpec)),
     ?assertEqual({beamtalk_instances, start_link, []}, maps:get(start, InstancesSpec)),
     ?assertEqual(permanent, maps:get(restart, InstancesSpec)),
@@ -79,7 +89,7 @@ instances_child_spec_test() ->
 
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
-    ?assertMatch({ok, {#{strategy := one_for_one}, [_]}}, Result).
+    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _]}}, Result).
 
 %%% Behavioral tests
 

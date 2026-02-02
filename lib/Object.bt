@@ -1,0 +1,128 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Object - Common root class for most Beamtalk classes
+//
+// Object inherits from ProtoObject and adds the standard protocol that almost
+// all objects need: reflection, nil testing, debugging, and comparison. Most
+// user classes should inherit from Actor (which inherits from Object) rather
+// than from Object directly.
+//
+// ## Class Hierarchy
+//
+// ```
+// ProtoObject (minimal root, identity and fallback)
+//   └─ Object (reflection, nil testing, debugging)
+//        └─ Actor (async-first process-based objects)
+//             └─ (user classes: Counter, Worker, etc.)
+// ```
+//
+// ## When to Inherit from Object
+//
+// Use Object directly for:
+// - **Non-concurrent utility classes** (rare in Beamtalk)
+// - **Value objects** that don't need process isolation
+// - **Data structures** used across processes
+//
+// Most application code should inherit from Actor instead, which adds
+// spawning, supervision, and async messaging on top of Object.
+//
+// ## Core Protocols
+//
+// ### Reflection
+// - `class` - Returns the object's class (inherited from ProtoObject)
+// - `respondsTo:` - Check if object understands a message
+// - `instVarNames` - List of instance variable names
+// - `instVarAt:` - Read instance variable by name
+// - `instVarAt:put:` - Write instance variable by name
+//
+// ### Nil Testing  
+// - `isNil` - Returns false for all objects except Nil
+// - `notNil` - Returns true for all objects except Nil
+// - `ifNil:` - Conditional execution if nil
+// - `ifNotNil:` - Conditional execution if not nil
+// - `ifNil:ifNotNil:` - Two-way conditional
+//
+// ### Debugging
+// - `inspect` - Print textual representation
+// - `describe` - Return string description
+//
+// ### Comparison (TODO - not yet implemented)
+// - `=` - Value equality (subclasses override)
+// - `hash` - Hash code for collections
+// - `<`, `>`, `<=`, `>=` - Ordering (Magnitude protocol)
+//
+// ## BEAM Mapping
+//
+// Object methods compile to functions in the instance module. For example,
+// a Counter class generates `beamtalk_counter.erl` with all instance methods.
+//
+// The Object protocol is available to all classes that inherit from Object
+// (which is everything except classes directly inheriting from ProtoObject).
+
+ProtoObject subclass: Object
+  // ## Nil Testing Protocol
+  //
+  // These messages allow nil-safe control flow. All objects (except Nil) return
+  // false for `isNil` and true for `notNil`.
+  //
+  // Examples:
+  // ```beamtalk
+  // 42 isNil        // => false
+  // 42 notNil       // => true
+  // 42 ifNil: [0]   // => 42
+  // 42 ifNotNil: [:v | v + 1]  // => 43
+  // ```
+
+  // Returns false for all objects except Nil
+  isNil => false
+
+  // Returns true for all objects except Nil
+  notNil => true
+
+  // Returns self without evaluating the block (non-nil objects)
+  ifNil: nilBlock => self
+
+  // Evaluates the block passing the receiver as argument (non-nil objects)
+  ifNotNil: notNilBlock => notNilBlock value: self
+
+  // Evaluates notNilBlock with receiver (non-nil objects)
+  ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
+
+  // Evaluates notNilBlock with receiver (non-nil objects, reversed order)
+  ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
+
+  // ## Debugging Protocol
+  //
+  // These messages help with inspecting and debugging objects.
+
+  // Show this object's description on the Transcript
+  inspect => Transcript show: self describe
+
+  // Returns a textual description of this object
+  // Subclasses should override to provide detailed info
+  describe => 'an Object'
+
+  // ## Reflection Protocol (TODO - not yet fully implemented)
+  //
+  // These messages enable runtime introspection of object structure.
+  
+  // Check if this object responds to a given selector (TODO)
+  // respondsTo: selector => // implemented by compiler
+  
+  // Returns list of instance variable names (TODO)
+  // instVarNames => // implemented by compiler
+  
+  // Read an instance variable by name (TODO)
+  // instVarAt: name => // implemented by compiler
+  
+  // Write an instance variable by name (TODO)
+  // instVarAt: name put: value => // implemented by compiler

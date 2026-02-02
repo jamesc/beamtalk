@@ -22,6 +22,16 @@ init([]) ->
     },
     
     ChildSpecs = [
+        %% Bootstrap the class hierarchy first
+        #{
+            id => beamtalk_bootstrap,
+            start => {beamtalk_bootstrap, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_bootstrap]
+        },
+        %% Then start instance tracking
         #{
             id => beamtalk_instances,
             start => {beamtalk_instances, start_link, []},
