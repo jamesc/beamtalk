@@ -80,7 +80,8 @@
     handle_call/3,
     handle_cast/2,
     handle_info/2,
-    terminate/2
+    terminate/2,
+    code_change/3
 ]).
 
 -type class_name() :: atom().
@@ -217,14 +218,15 @@ super_dispatch(State, Selector, Args) ->
 %%====================================================================
 
 init({ClassName, ClassInfo}) ->
-    %% Join the pg process group for enumeration
-    ok = pg:join(beamtalk_classes, self()),
-    
-    %% Register with well-known name for lookup
+    %% Register with well-known name for lookup FIRST
+    %% (do this before pg:join to avoid brief membership if registration fails)
     RegName = registry_name(ClassName),
     case catch register(RegName, self()) of
         true ->
-            %% Registration successful
+            %% Registration successful - now join pg group
+            ok = pg:join(beamtalk_classes, self()),
+            
+            %% Build state
             State = #class_state{
                 name = ClassName,
                 module = maps:get(module, ClassInfo, ClassName),
@@ -304,6 +306,7 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
     NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
     {reply, ok, State#class_state{after_methods = NewAfters}};
 
+%% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State}.
 
@@ -315,6 +318,9 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 %%====================================================================
 %% Internal functions
