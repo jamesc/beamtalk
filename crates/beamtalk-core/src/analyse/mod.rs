@@ -11,7 +11,7 @@
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
-use crate::ast::{Expression, Module};
+use crate::ast::{Expression, Identifier, Module, Pattern};
 use crate::parse::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -112,6 +112,69 @@ pub enum MutationKind {
 
     /// Assignment to an object field.
     Field { name: EcoString },
+}
+
+/// Extract variable bindings from a pattern.
+///
+/// Recursively traverses the pattern and collects all variable identifiers
+/// that will be bound when the pattern matches.
+///
+/// # Examples
+///
+/// ```
+/// # use beamtalk_core::analyse::extract_pattern_bindings;
+/// # use beamtalk_core::ast::{Pattern, Identifier};
+/// # use beamtalk_core::parse::Span;
+/// # use ecow::EcoString;
+/// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
+/// let bindings = extract_pattern_bindings(&pattern);
+/// assert_eq!(bindings.len(), 1);
+/// assert_eq!(bindings[0].name, EcoString::from("x"));
+/// ```
+pub fn extract_pattern_bindings(pattern: &Pattern) -> Vec<Identifier> {
+    let mut bindings = Vec::new();
+    extract_pattern_bindings_impl(pattern, &mut bindings);
+    bindings
+}
+
+/// Internal implementation of pattern binding extraction.
+fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifier>) {
+    match pattern {
+        // Variable patterns bind the identifier
+        Pattern::Variable(id) => {
+            bindings.push(id.clone());
+        }
+
+        // Tuple patterns: recursively extract from all elements
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                extract_pattern_bindings_impl(element, bindings);
+            }
+        }
+
+        // List patterns: recursively extract from elements and tail
+        Pattern::List {
+            elements, tail, ..
+        } => {
+            for element in elements {
+                extract_pattern_bindings_impl(element, bindings);
+            }
+            if let Some(tail_pattern) = tail {
+                extract_pattern_bindings_impl(tail_pattern, bindings);
+            }
+        }
+
+        // Binary patterns: extract from segment value patterns
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                // Binary segments may have value patterns that bind variables
+                extract_pattern_bindings_impl(&segment.value, bindings);
+            }
+        }
+
+        // Wildcards and literals don't bind variables
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+    }
 }
 
 /// Perform semantic analysis on a module.
@@ -523,11 +586,167 @@ enum ExprContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Block, BlockParameter, Expression, Identifier, MessageSelector};
+    use crate::ast::{BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector};
     use crate::parse::Span;
 
     fn test_span() -> Span {
         Span::new(0, 0)
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_variable() {
+        let pattern = Pattern::Variable(Identifier::new("x", test_span()));
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].name, "x");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_wildcard() {
+        let pattern = Pattern::Wildcard(test_span());
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_literal() {
+        let pattern = Pattern::Literal(Literal::Integer(42), test_span());
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_tuple() {
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("y", test_span())),
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "x");
+        assert_eq!(bindings[1].name, "y");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_nested_tuple() {
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("status", test_span())),
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Variable(Identifier::new("x", test_span())),
+                        Pattern::Variable(Identifier::new("y", test_span())),
+                    ],
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].name, "status");
+        assert_eq!(bindings[1].name, "x");
+        assert_eq!(bindings[2].name, "y");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_list() {
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("head", test_span())),
+                Pattern::Variable(Identifier::new("second", test_span())),
+            ],
+            tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                "tail",
+                test_span(),
+            )))),
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].name, "head");
+        assert_eq!(bindings[1].name, "second");
+        assert_eq!(bindings[2].name, "tail");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_list_no_tail() {
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("a", test_span())),
+                Pattern::Variable(Identifier::new("b", test_span())),
+            ],
+            tail: None,
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "a");
+        assert_eq!(bindings[1].name, "b");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_binary() {
+        let pattern = Pattern::Binary {
+            segments: vec![
+                BinarySegment {
+                    value: Pattern::Variable(Identifier::new("version", test_span())),
+                    size: None,
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: test_span(),
+                },
+                BinarySegment {
+                    value: Pattern::Variable(Identifier::new("data", test_span())),
+                    size: None,
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "version");
+        assert_eq!(bindings[1].name, "data");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_mixed() {
+        // Pattern like: {#ok, [first | _], value}
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                Pattern::List {
+                    elements: vec![Pattern::Variable(Identifier::new("first", test_span()))],
+                    tail: Some(Box::new(Pattern::Wildcard(test_span()))),
+                    span: test_span(),
+                },
+                Pattern::Variable(Identifier::new("value", test_span())),
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "first");
+        assert_eq!(bindings[1].name, "value");
     }
 
     #[test]
