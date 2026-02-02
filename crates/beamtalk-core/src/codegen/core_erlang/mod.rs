@@ -424,7 +424,7 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         // Generate eval/1 function
-        // Alias State = Bindings so identifier lookup works (it falls back to State)
+        // Returns {Result, UpdatedBindings} to support mutation threading
         writeln!(self.output, "'eval'/1 = fun (Bindings) ->")?;
         self.indent += 1;
 
@@ -436,10 +436,16 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "let State = Bindings in")?;
 
-        // Generate the expression
+        // Generate the expression, capturing intermediate result
         self.write_indent()?;
+        write!(self.output, "let Result = ")?;
         self.generate_expression(expression)?;
-        writeln!(self.output)?;
+        writeln!(self.output, " in")?;
+
+        // Return tuple {Result, UpdatedState}
+        // The final state variable may be State1, State2, etc. if mutations occurred
+        self.write_indent()?;
+        writeln!(self.output, "{{Result, {}}}", self.current_state_var())?;
 
         self.pop_scope();
         self.indent -= 1;
@@ -1393,6 +1399,24 @@ end
             "Should alias State to Bindings"
         );
         assert!(code.contains("apply"), "Should use apply for block call");
+    }
+
+    #[test]
+    fn test_generate_repl_module_returns_tuple_with_state() {
+        // BT-153: REPL eval/1 should return {Result, UpdatedBindings}
+        let expression = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
+        let code = generate_repl_expression(&expression, "repl_tuple_test")
+            .expect("codegen should work");
+
+        // Check that the result is wrapped in a tuple with State
+        assert!(
+            code.contains("let Result ="),
+            "Should bind the result to Result variable. Got:\n{code}"
+        );
+        assert!(
+            code.contains("{Result, State}"),
+            "Should return tuple {{Result, State}}. Got:\n{code}"
+        );
     }
 
     #[test]

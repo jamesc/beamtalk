@@ -52,18 +52,22 @@ do_eval(Expression, State) ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     %% Execute the eval function
+                    %% eval/1 now returns {Result, UpdatedBindings} to support mutation threading
                     try
-                        RawResult = apply(ModuleName, eval, [Bindings]),
+                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
                         %% Auto-await futures for synchronous REPL experience
                         Result = maybe_await_future(RawResult),
                         %% Check if this was an assignment
                         case extract_assignment(Expression) of
                             {ok, VarName} ->
-                                NewBindings = maps:put(VarName, Result, Bindings),
+                                %% Assignment: merge updated bindings with new assignment
+                                NewBindings = maps:put(VarName, Result, UpdatedBindings),
                                 FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
                                 {ok, Result, FinalState};
                             none ->
-                                {ok, Result, NewState}
+                                %% No assignment: use updated bindings from mutations
+                                FinalState = beamtalk_repl_state:set_bindings(UpdatedBindings, NewState),
+                                {ok, Result, FinalState}
                         end
                     catch
                         Class:Reason ->
