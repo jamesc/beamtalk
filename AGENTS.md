@@ -412,14 +412,28 @@ clone_on_ref_ptr = "warn"
 undocumented_unsafe_blocks = "warn"
 ```
 
-**CRITICAL: Always run the exact same clippy command as CI before committing:**
+**CRITICAL: Always run these exact commands (matching CI) before committing:**
 ```bash
-cargo fmt --all -- --check       # Check formatting (or use `cargo fmt` to auto-fix)
-cargo clippy --all-targets -- -D warnings  # Lint checks (MUST match CI)
-cargo test --all-targets         # Run all tests
+# Step 1: Auto-fix formatting issues
+cargo fmt --all
+
+# Step 2: Verify formatting matches CI
+cargo fmt --all -- --check
+
+# Step 3: Run clippy with warnings as errors (MUST match CI)
+cargo clippy --all-targets -- -D warnings
+
+# Step 4: Run all tests
+cargo test --all-targets
 ```
 
-**Why `-D warnings`?** CI treats warnings as errors. Running locally with `-D warnings` ensures you catch issues before pushing.
+**Why these exact commands?**
+- `cargo fmt --all` - Formats all crates in workspace (CI uses `--all`)
+- `cargo fmt --all -- --check` - Verifies formatting without modifying files (CI check)
+- `-D warnings` on clippy - CI treats warnings as errors
+- `--all-targets` - Includes tests, benches, examples (matches CI)
+
+**Common mistake:** Running `cargo fmt` without `--all` only formats the current crate, missing workspace members. Always use `cargo fmt --all`.
 
 Use `#[expect(...)]` instead of `#[allow(...)]` for lint overrides — it warns when the override becomes unnecessary:
 ```rust

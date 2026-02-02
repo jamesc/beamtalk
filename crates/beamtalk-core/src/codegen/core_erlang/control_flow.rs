@@ -452,13 +452,13 @@ impl CoreErlangGenerator {
         // Generate: let _CondFun = fun (StateAcc) -> <condition body> in case apply _CondFun (StateAcc) of
         let cond_var = self.fresh_temp_var("CondFun");
         write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
-        
+
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
         let prev_state_version = self.state_version();
         self.in_loop_body = true; // Enable StateAcc lookup for condition
         self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
-        
+
         // Extract block body from condition expression
         if let Expression::Block(cond_block) = condition {
             self.generate_block_body(cond_block)?;
@@ -466,7 +466,7 @@ impl CoreErlangGenerator {
             // Fallback: generate as expression (shouldn't happen for whileTrue:)
             self.generate_expression(condition)?;
         }
-        
+
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
@@ -645,19 +645,19 @@ impl CoreErlangGenerator {
         // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
         write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
-        
+
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
         let prev_state_version = self.state_version();
         self.in_loop_body = true; // Enable StateAcc lookup for condition
         self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
-        
+
         if let Expression::Block(cond_block) = condition {
             self.generate_block_body(cond_block)?;
         } else {
             self.generate_expression(condition)?;
         }
-        
+
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
@@ -824,7 +824,8 @@ impl CoreErlangGenerator {
         write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
         write!(self.output, "<'true'> when 'true' -> ")?;
 
-        let final_state_version = self.generate_times_repeat_body_with_threading(body, &mutated_vars)?;
+        let final_state_version =
+            self.generate_times_repeat_body_with_threading(body, &mutated_vars)?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
