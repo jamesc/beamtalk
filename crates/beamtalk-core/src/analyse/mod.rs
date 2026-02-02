@@ -620,7 +620,9 @@ enum ExprContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector};
+    use crate::ast::{
+        BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector,
+    };
     use crate::parse::Span;
 
     fn test_span() -> Span {
