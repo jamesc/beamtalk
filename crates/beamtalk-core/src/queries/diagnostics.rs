@@ -80,9 +80,9 @@ mod tests {
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
         // Should have error for field assignment in stored block
-        let has_field_error = diagnostics
-            .iter()
-            .any(|d| d.message.contains("cannot assign to field") && d.message.contains("stored closure"));
+        let has_field_error = diagnostics.iter().any(|d| {
+            d.message.contains("cannot assign to field") && d.message.contains("stored closure")
+        });
         assert!(
             has_field_error,
             "Expected field assignment error, got: {diagnostics:?}"

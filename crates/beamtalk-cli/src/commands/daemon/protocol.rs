@@ -420,10 +420,8 @@ fn handle_compile_expression(
     let (module, parse_diagnostics) = beamtalk_core::parse::parse(tokens);
 
     // Run semantic analysis to get full diagnostics (parse + semantic)
-    let all_diagnostics = beamtalk_core::queries::diagnostics::compute_diagnostics(
-        &module,
-        parse_diagnostics,
-    );
+    let all_diagnostics =
+        beamtalk_core::queries::diagnostics::compute_diagnostics(&module, parse_diagnostics);
 
     // Convert diagnostics
     let diagnostics: Vec<DiagnosticInfo> = all_diagnostics
