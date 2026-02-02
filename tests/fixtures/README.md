@@ -38,7 +38,7 @@ which differs from the planned `=>` method syntax documented in design docs.
 
 Demonstrates super keyword for superclass method dispatch in inheritance hierarchy.
 
-Inheritance: `Actor -> Counter -> LoggingCounter`
+Inheritance: `Object -> Counter -> LoggingCounter`
 
 Methods:
 - `increment` - increments logCount, calls `super increment`, returns value
