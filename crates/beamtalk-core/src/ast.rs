@@ -62,10 +62,25 @@
 use crate::parse::Span;
 use ecow::EcoString;
 
-/// Top-level container for a Beamtalk module.
+/// Top-level container for a Beamtalk module (Aggregate Root).
 ///
 /// A module consists of class definitions and/or top-level expressions.
 /// Class definitions are the primary structure for actor-based code.
+///
+/// # DDD: Aggregate Root for Source Analysis Context
+///
+/// `Module` is the aggregate root for the Source Analysis bounded context.
+/// It owns all parsed AST nodes and enforces invariants across the parse tree.
+///
+/// # Invariants
+///
+/// The following invariants should hold for a valid module:
+///
+/// 1. **Span coverage**: The module's span must encompass all child spans
+/// 2. **No span overlap**: Expressions and classes should have non-overlapping spans
+/// 3. **Span containment**: All child node spans must be within the module span
+///
+/// These invariants ensure consistent source mapping for error reporting and IDE features.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     /// Class definitions in this module.
@@ -139,7 +154,7 @@ pub enum CommentKind {
     Block,
 }
 
-/// A class definition.
+/// A class definition (Aggregate Root).
 ///
 /// Example:
 /// ```text
@@ -149,6 +164,24 @@ pub enum CommentKind {
 ///   increment => self.value += 1
 ///   getValue => ^self.value
 /// ```
+///
+/// # DDD: Aggregate Root for Class Compilation
+///
+/// `ClassDefinition` is an aggregate root that encapsulates all class-related
+/// entities: state declarations and method definitions. It enforces class-level
+/// invariants and provides the boundary for class-specific code generation.
+///
+/// # Invariants
+///
+/// The following invariants should hold for a valid class:
+///
+/// 1. **Unique state names**: No two state declarations may have the same name
+/// 2. **Unique method selectors**: No two methods may have the same selector
+///    (within the same method kind)
+/// 3. **Valid superclass**: Superclass must be a valid identifier (existence
+///    checked during semantic analysis)
+/// 4. **Span containment**: All child spans must be within the class span
+/// 5. **Arity consistency**: Method parameter count must match selector arity
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDefinition {
     /// The class name (e.g., `Counter`).
@@ -838,6 +871,51 @@ impl MessageSelector {
             Self::Keyword(parts) => parts.len(),
         }
     }
+
+    /// Converts this selector to a Core Erlang atom representation.
+    ///
+    /// This is the **domain service** for selector mangling - converting Beamtalk
+    /// selectors to valid Erlang atoms. The returned string is ready to be wrapped
+    /// in single quotes for Core Erlang output.
+    ///
+    /// # DDD: `SelectorMangler` Domain Service
+    ///
+    /// In the Code Generation bounded context, selector mangling is a key domain
+    /// operation. This method encapsulates the domain knowledge of how Beamtalk
+    /// selectors map to Erlang atoms.
+    ///
+    /// # Returns
+    ///
+    /// The selector as a string suitable for use as an Erlang atom:
+    /// - Unary: `"increment"` → `'increment'`
+    /// - Binary: `"+"` → `'+'`
+    /// - Keyword: `["at:", "put:"]` → `'at:put:'`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use beamtalk_core::ast::{MessageSelector, KeywordPart};
+    /// use beamtalk_core::parse::Span;
+    ///
+    /// // Unary selector
+    /// let selector = MessageSelector::Unary("increment".into());
+    /// assert_eq!(selector.to_erlang_atom(), "increment");
+    ///
+    /// // Keyword selector
+    /// let selector = MessageSelector::Keyword(vec![
+    ///     KeywordPart::new("at:", Span::new(0, 3)),
+    ///     KeywordPart::new("put:", Span::new(5, 9)),
+    /// ]);
+    /// assert_eq!(selector.to_erlang_atom(), "at:put:");
+    /// ```
+    #[must_use]
+    pub fn to_erlang_atom(&self) -> String {
+        match self {
+            Self::Unary(name) => name.to_string(),
+            Self::Binary(op) => op.to_string(),
+            Self::Keyword(parts) => parts.iter().map(|p| p.keyword.as_str()).collect(),
+        }
+    }
 }
 
 /// A keyword part in a keyword message.
@@ -1159,6 +1237,27 @@ mod tests {
         ]);
         assert_eq!(selector.name(), "at:put:");
         assert_eq!(selector.arity(), 2);
+    }
+
+    #[test]
+    fn message_selector_to_erlang_atom_unary() {
+        let selector = MessageSelector::Unary("increment".into());
+        assert_eq!(selector.to_erlang_atom(), "increment");
+    }
+
+    #[test]
+    fn message_selector_to_erlang_atom_binary() {
+        let selector = MessageSelector::Binary("+".into());
+        assert_eq!(selector.to_erlang_atom(), "+");
+    }
+
+    #[test]
+    fn message_selector_to_erlang_atom_keyword() {
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("at:", Span::new(0, 3)),
+            KeywordPart::new("put:", Span::new(5, 9)),
+        ]);
+        assert_eq!(selector.to_erlang_atom(), "at:put:");
     }
 
     #[test]
