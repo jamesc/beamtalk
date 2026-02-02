@@ -52,15 +52,16 @@ impl CoreErlangGenerator {
     ///
     /// 1. **Super sends** → `generate_super_send`
     /// 2. **Binary operators** → `generate_binary_op` (synchronous)
-    /// 3. **Block messages** → `try_generate_block_message` (synchronous)
-    /// 4. **String messages** → `try_generate_string_message` (synchronous)
-    /// 5. **Dictionary messages** → `try_generate_dictionary_message` (synchronous)
-    /// 6. **Boolean messages** → `try_generate_boolean_message` (synchronous)
-    /// 7. **Integer messages** → `try_generate_integer_message` (synchronous)
-    /// 8. **List messages** → `try_generate_list_message` (synchronous)
-    /// 9. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
-    /// 10. **Await messages** → Blocking future resolution
-    /// 11. **Default** → Async actor message with future
+    /// 3. **ProtoObject messages** → `try_generate_protoobject_message` (synchronous)
+    /// 4. **Block messages** → `try_generate_block_message` (synchronous)
+    /// 5. **String messages** → `try_generate_string_message` (synchronous)
+    /// 6. **Dictionary messages** → `try_generate_dictionary_message` (synchronous)
+    /// 7. **Boolean messages** → `try_generate_boolean_message` (synchronous)
+    /// 8. **Integer messages** → `try_generate_integer_message` (synchronous)
+    /// 9. **List messages** → `try_generate_list_message` (synchronous)
+    /// 10. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
+    /// 11. **Await messages** → Blocking future resolution
+    /// 12. **Default** → Async actor message with future
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -76,6 +77,12 @@ impl CoreErlangGenerator {
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             return self.generate_binary_op(op, receiver, arguments);
+        }
+
+        // Special case: ProtoObject methods - fundamental operations on all objects
+        // class returns the class name for any object (primitives or actors)
+        if let Some(result) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
+            return Ok(result);
         }
 
         // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)

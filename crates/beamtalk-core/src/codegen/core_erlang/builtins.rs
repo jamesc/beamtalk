@@ -683,4 +683,69 @@ impl CoreErlangGenerator {
         write!(self.output, ")")?;
         Ok(())
     }
+
+    /// Tries to generate code for ProtoObject methods.
+    ///
+    /// ProtoObject methods are fundamental operations available on all objects:
+    ///
+    /// - `class` - Returns the class name (atom) of the receiver
+    ///
+    /// This function:
+    /// - Returns `Ok(Some(()))` if the message was a ProtoObject method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a ProtoObject method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # ProtoObject Methods
+    ///
+    /// ## class
+    ///
+    /// Returns the class name of any object. For primitives (Integer, String, Boolean),
+    /// uses pattern matching. For actors, extracts the class from the object record.
+    ///
+    /// ```core-erlang
+    /// % For primitives:
+    /// case Receiver of
+    ///   <I> when call 'erlang':'is_integer'(I) -> 'Integer'
+    ///   <S> when call 'erlang':'is_binary'(S) -> 'String'
+    ///   <'true'> when 'true' -> 'True'
+    ///   <'false'> when 'true' -> 'False'
+    ///   <'nil'> when 'true' -> 'Nil'
+    ///   <Obj> when 'true' -> call 'erlang':'element'(2, Obj)  % Extract from record
+    /// end
+    /// ```
+    pub(super) fn try_generate_protoobject_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "class" if arguments.is_empty() => {
+                    // Generate: case Receiver of pattern matching for primitives + record extraction
+                    let recv_var = self.fresh_temp_var("Obj");
+                    let int_var = self.fresh_temp_var("I");
+                    let str_var = self.fresh_temp_var("S");
+                    let obj_var = self.fresh_temp_var("O");
+                    
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case {recv_var} of \
+                         <{int_var}> when call 'erlang':'is_integer'({int_var}) -> 'Integer' \
+                         <{str_var}> when call 'erlang':'is_binary'({str_var}) -> 'String' \
+                         <'true'> when 'true' -> 'True' \
+                         <'false'> when 'true' -> 'False' \
+                         <'nil'> when 'true' -> 'Nil' \
+                         <{obj_var}> when 'true' -> call 'erlang':'element'(2, {obj_var}) \
+                         end"
+                    )?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+            _ => Ok(None),
+        }
+    }
 }
