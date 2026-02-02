@@ -224,17 +224,44 @@ if ($env:GIT_SIGNING_KEY) {
     if (Test-Path $sshKeyPath) {
         Write-Host "🔑 Copying SSH signing key..." -ForegroundColor Cyan
         
-        # Get container ID for this workspace
-        $containerInfo = docker ps --filter "label=devcontainer.local_folder=$worktreePath" --format "{{.ID}}" 2>$null
+        # Wait a moment for container to fully initialize
+        Start-Sleep -Seconds 2
+        
+        # Get container ID - try multiple methods
+        # Method 1: Try with normalized path (forward slashes)
+        $normalizedPath = $worktreePath -replace '\\', '/'
+        $containerInfo = docker ps --filter "label=devcontainer.local_folder=$normalizedPath" --format "{{.ID}}" 2>$null
+        
+        # Method 2: Try with exact workspace folder
+        if (-not $containerInfo) {
+            $containerInfo = docker ps --filter "label=devcontainer.local_folder=$worktreePath" --format "{{.ID}}" 2>$null
+        }
+        
+        # Method 3: Find most recent container with vscode user
+        if (-not $containerInfo) {
+            Write-Host "   Trying alternate container detection..." -ForegroundColor Gray
+            $containerInfo = docker ps --format "{{.ID}}" --filter "status=running" | Select-Object -First 1
+        }
+        
         if ($containerInfo) {
+            Write-Host "   Container ID: $containerInfo" -ForegroundColor Gray
+            
+            # Ensure .ssh directory exists in container
+            docker exec $containerInfo mkdir -p /home/vscode/.ssh 2>$null
+            docker exec $containerInfo chmod 700 /home/vscode/.ssh 2>$null
+            
+            # Copy the key
             docker cp $sshKeyPath "${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" 2>$null
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "✅ SSH key copied, re-running setup..." -ForegroundColor Green
                 devcontainer exec --workspace-folder $worktreePath bash .devcontainer/setup-ssh-signing.sh
             }
             else {
-                Write-Host "⚠️  Could not copy SSH key (container may not be ready)" -ForegroundColor Yellow
+                Write-Host "⚠️  Could not copy SSH key to container" -ForegroundColor Yellow
             }
+        }
+        else {
+            Write-Host "⚠️  Could not find running container" -ForegroundColor Yellow
         }
     }
     else {
