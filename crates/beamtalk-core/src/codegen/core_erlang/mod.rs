@@ -1591,6 +1591,79 @@ end
     }
 
     #[test]
+    fn test_generate_repl_module_with_while_true_mutation() {
+        // BT-181: REPL with whileTrue: mutation should read condition from StateAcc
+        // Expression: [x < 5] whileTrue: [x := x + 1]
+
+        // Build the condition: [x < 5]
+        let x_id = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let compare = Expression::MessageSend {
+            receiver: Box::new(x_id.clone()),
+            selector: MessageSelector::Binary("<".into()),
+            arguments: vec![five],
+            span: Span::new(0, 10),
+        };
+        let condition = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![compare],
+            span: Span::new(0, 12),
+        });
+
+        // Build the body: [x := x + 1]
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let add = Expression::MessageSend {
+            receiver: Box::new(x_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            span: Span::new(0, 10),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(x_id),
+            value: Box::new(add),
+            span: Span::new(0, 15),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![assignment],
+            span: Span::new(0, 17),
+        });
+
+        // Build: [x < 5] whileTrue: [x := x + 1]
+        let while_true = Expression::MessageSend {
+            receiver: Box::new(condition),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "whileTrue:".into(),
+                span: Span::new(10, 20),
+            }]),
+            arguments: vec![body],
+            span: Span::new(0, 40),
+        };
+
+        let code =
+            generate_repl_expression(&while_true, "repl_while_test").expect("codegen should work");
+
+        eprintln!("Generated code for [x < 5] whileTrue: [x := x + 1]:");
+        eprintln!("{code}");
+
+        // BT-181: Condition lambda should take StateAcc parameter
+        assert!(
+            code.contains("fun (StateAcc) ->"),
+            "Condition lambda should accept StateAcc parameter. Got:\n{code}"
+        );
+        // BT-181: Condition should read x from StateAcc, not outer scope
+        assert!(
+            code.contains("maps':'get'('x', StateAcc)"),
+            "Condition should read x from StateAcc. Got:\n{code}"
+        );
+        // BT-181: Condition should be applied with StateAcc argument
+        assert!(
+            code.contains("apply") && code.contains("(StateAcc)"),
+            "Condition should be applied with StateAcc argument. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_generate_repl_module_with_arithmetic() {
         // BT-57: Verify complex expressions with variable references work
         // Expression: x + 1

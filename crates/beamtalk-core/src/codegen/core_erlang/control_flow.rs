@@ -448,10 +448,20 @@ impl CoreErlangGenerator {
         write!(self.output, "StateAcc) -> ")?;
 
         // Generate condition check - bind block to variable and apply it
+        // BT-181: Condition needs to read from StateAcc, not outer State
+        // Generate: let _CondFun = fun (StateAcc) -> <condition body> in case apply _CondFun (StateAcc) of
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in case apply {cond_var} () of ")?;
+        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+        self.in_loop_body = true; // Enable StateAcc lookup for condition
+        // Extract block body from condition expression
+        if let Expression::Block(cond_block) = condition {
+            self.generate_block_body(cond_block)?;
+        } else {
+            // Fallback: generate as expression (shouldn't happen for whileTrue:)
+            self.generate_expression(condition)?;
+        }
+        self.in_loop_body = false;
+        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
 
         // True case: execute body and recurse
         write!(self.output, "<'true'> when 'true' -> ")?;
@@ -613,10 +623,17 @@ impl CoreErlangGenerator {
         write!(self.output, "StateAcc) -> ")?;
 
         // Generate condition check - bind block to variable and apply it
+        // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in case apply {cond_var} () of ")?;
+        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+        self.in_loop_body = true; // Enable StateAcc lookup for condition
+        if let Expression::Block(cond_block) = condition {
+            self.generate_block_body(cond_block)?;
+        } else {
+            self.generate_expression(condition)?;
+        }
+        self.in_loop_body = false;
+        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
 
         // FALSE case: execute body and recurse
         write!(self.output, "<'false'> when 'true' -> ")?;
