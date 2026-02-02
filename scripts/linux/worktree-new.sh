@@ -179,8 +179,11 @@ elif [ "$BRANCH" = "main" ]; then
     log_gray "   Node: $NODE_NAME (main branch default)"
 else
     # Hash branch name to port range 9100-9999
-    HASH=$(echo -n "$BRANCH" | md5sum | cut -d' ' -f1 | tr -d '[:alpha:]')
-    PORT=$((9100 + (HASH % 900)))
+    # Use md5sum and take first 8 hex chars as decimal for modulo
+    HASH=$(echo -n "$BRANCH" | md5sum | cut -c1-8)
+    # Convert hex to decimal: use printf %d with 0x prefix
+    HASH_DEC=$(printf "%d" "0x$HASH")
+    PORT=$((9100 + (HASH_DEC % 900)))
     NODE_NAME="beamtalk_$(echo "$BRANCH" | tr -c '[:alnum:]' '_')@localhost"
     log_gray "   Port: $PORT (derived from branch hash)"
     log_gray "   Node: $NODE_NAME"

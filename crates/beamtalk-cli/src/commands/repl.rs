@@ -533,15 +533,20 @@ impl Drop for BeamChildGuard {
     reason = "REPL main loop handles many commands"
 )]
 pub fn run(port_arg: u16, node_arg: Option<String>) -> Result<()> {
-    // Priority: CLI flag > environment variable > default
-    // Port: CLI --port > BEAMTALK_REPL_PORT > 9000
+    // Priority: CLI flag (if non-default) > environment variable > CLI default
+    // If user explicitly passes --port, it takes precedence
+    // If BEAMTALK_REPL_PORT is set, it overrides the default
+    // Note: Cannot distinguish "--port 9000" from omitting --port
     let port = if port_arg != 9000 {
+        // Explicitly passed a non-default port
         port_arg
     } else if let Ok(env_port) = std::env::var("BEAMTALK_REPL_PORT") {
+        // Use env var if set
         env_port
             .parse()
             .map_err(|_| miette!("Invalid BEAMTALK_REPL_PORT: {env_port}"))?
     } else {
+        // Use default
         port_arg
     };
 
