@@ -81,6 +81,18 @@ greater_than_or_equal_test() ->
     ?assertEqual(true, beamtalk_integer:dispatch('>=', [42], 42)),
     ?assertEqual(true, beamtalk_integer:dispatch('>=', [41], 42)).
 
+comparison_type_safety_test() ->
+    %% Comparing integer with non-numeric types
+    %% Equality with non-number should return false
+    ?assertEqual(false, beamtalk_integer:dispatch('=', [<<"42">>], 42)),
+    ?assertEqual(false, beamtalk_integer:dispatch('=', ['atom'], 42)),
+    
+    %% Ordering comparisons with non-numbers should raise does_not_understand
+    ?assertError({does_not_understand, 'Integer', '<', 1},
+                 beamtalk_integer:dispatch('<', [<<"42">>], 42)),
+    ?assertError({does_not_understand, 'Integer', '>', 1},
+                 beamtalk_integer:dispatch('>', ['atom'], 42)).
+
 %%% ============================================================================
 %%% Reflection Tests
 %%% ============================================================================
@@ -195,3 +207,13 @@ negative_numbers_test() ->
     ?assertEqual(-34, beamtalk_integer:dispatch('+', [-42], 8)),
     ?assertEqual(-50, beamtalk_integer:dispatch('-', [8], -42)),
     ?assertEqual(42, beamtalk_integer:dispatch('*', [-6], -7)).
+
+mixed_integer_float_test() ->
+    %% Integer operations should work with floats for comparisons
+    ?assertEqual(true, beamtalk_integer:dispatch('<', [42.5], 42)),
+    ?assertEqual(false, beamtalk_integer:dispatch('>', [42.5], 42)),
+    ?assertEqual(false, beamtalk_integer:dispatch('=', [42.0], 42)),  % 42 =:= 42.0 is false (strict equality)
+    
+    %% Arithmetic with float should work (Erlang handles mixed arithmetic)
+    ?assertEqual(50.5, beamtalk_integer:dispatch('+', [8.5], 42)),
+    ?assertEqual(5.0, beamtalk_integer:dispatch('/', [8.4], 42)).

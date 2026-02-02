@@ -115,17 +115,18 @@ is_builtin(_) -> false.
 %% Returns {ok, Result} if method exists, not_found otherwise.
 -spec builtin_dispatch(atom(), list(), integer()) -> {ok, term()} | not_found.
 %% Arithmetic operations
-builtin_dispatch('+', [Y], X) when is_integer(Y) -> {ok, X + Y};
-builtin_dispatch('-', [Y], X) when is_integer(Y) -> {ok, X - Y};
-builtin_dispatch('*', [Y], X) when is_integer(Y) -> {ok, X * Y};
-builtin_dispatch('/', [Y], X) when is_integer(Y), Y =/= 0 -> {ok, X / Y};
+builtin_dispatch('+', [Y], X) when is_number(Y) -> {ok, X + Y};
+builtin_dispatch('-', [Y], X) when is_number(Y) -> {ok, X - Y};
+builtin_dispatch('*', [Y], X) when is_number(Y) -> {ok, X * Y};
+builtin_dispatch('/', [Y], X) when is_number(Y), Y =/= 0 -> {ok, X / Y};
 
 %% Comparison operations
-builtin_dispatch('=', [Y], X) -> {ok, X =:= Y};
-builtin_dispatch('<', [Y], X) -> {ok, X < Y};
-builtin_dispatch('>', [Y], X) -> {ok, X > Y};
-builtin_dispatch('<=', [Y], X) -> {ok, X =< Y};
-builtin_dispatch('>=', [Y], X) -> {ok, X >= Y};
+builtin_dispatch('=', [Y], X) when is_number(Y) -> {ok, X =:= Y};
+builtin_dispatch('=', [Y], X) -> {ok, false};  % Non-numeric comparison always false
+builtin_dispatch('<', [Y], X) when is_number(Y) -> {ok, X < Y};
+builtin_dispatch('>', [Y], X) when is_number(Y) -> {ok, X > Y};
+builtin_dispatch('<=', [Y], X) when is_number(Y) -> {ok, X =< Y};
+builtin_dispatch('>=', [Y], X) when is_number(Y) -> {ok, X >= Y};
 
 %% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'Integer'};
