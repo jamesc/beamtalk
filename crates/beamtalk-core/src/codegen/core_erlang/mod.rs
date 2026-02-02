@@ -259,6 +259,11 @@ pub(super) struct CoreErlangGenerator {
     var_context: VariableContext,
     /// State threading for field assignments.
     state_threading: StateThreading,
+    /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
+    in_loop_body: bool,
+    /// BT-153: Whether we're generating REPL code (vs module code).
+    /// In REPL mode, local variable assignments should update bindings.
+    is_repl_mode: bool,
 }
 
 impl CoreErlangGenerator {
@@ -270,6 +275,8 @@ impl CoreErlangGenerator {
             indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
+            in_loop_body: false,
+            is_repl_mode: false,
         }
     }
 
@@ -316,6 +323,22 @@ impl CoreErlangGenerator {
     /// Sets the state version.
     pub(super) fn set_state_version(&mut self, version: usize) {
         self.state_threading.set_version(version);
+    }
+
+    /// BT-153: Check if mutation threading should be used for a block.
+    /// In REPL mode, local variable mutations trigger threading.
+    /// In module mode, only field writes trigger threading.
+    pub(super) fn needs_mutation_threading(
+        &self,
+        analysis: &block_analysis::BlockMutationAnalysis,
+    ) -> bool {
+        if self.is_repl_mode {
+            // REPL: both local vars and fields need threading
+            analysis.has_mutations()
+        } else {
+            // Module: only field writes need threading
+            !analysis.field_writes.is_empty()
+        }
     }
 
     /// Generates a full module with `gen_server` behaviour.
@@ -432,6 +455,9 @@ impl CoreErlangGenerator {
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
 
+        // BT-153: Set REPL mode so mutations to local variables update bindings
+        self.is_repl_mode = true;
+
         // Alias State to Bindings for identifier fallback lookup
         self.write_indent()?;
         writeln!(self.output, "let State = Bindings in")?;
@@ -442,10 +468,19 @@ impl CoreErlangGenerator {
         self.generate_expression(expression)?;
         writeln!(self.output, " in")?;
 
-        // Return tuple {Result, UpdatedState}
-        // The final state variable may be State1, State2, etc. if mutations occurred
+        // Return tuple {ResultValue, UpdatedBindings}
+        // BT-153: For mutation-threaded loops, Result IS the updated state.
+        // For simple expressions, Result is the value and State is unchanged.
+        let final_state = self.current_state_var();
         self.write_indent()?;
-        writeln!(self.output, "{{Result, {}}}", self.current_state_var())?;
+        if final_state == "State" {
+            // No mutation - Result is the value, State is unchanged bindings
+            writeln!(self.output, "{{Result, State}}")?;
+        } else {
+            // Mutation occurred - Result is the updated state
+            // Return {nil, Result} since loops return nil but state was updated
+            writeln!(self.output, "{{'nil', Result}}")?;
+        }
 
         self.pop_scope();
         self.indent -= 1;
@@ -1405,8 +1440,11 @@ end
     fn test_generate_repl_module_returns_tuple_with_state() {
         // BT-153: REPL eval/1 should return {Result, UpdatedBindings}
         let expression = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
-        let code = generate_repl_expression(&expression, "repl_tuple_test")
-            .expect("codegen should work");
+        let code =
+            generate_repl_expression(&expression, "repl_tuple_test").expect("codegen should work");
+
+        eprintln!("Generated code for literal 42:");
+        eprintln!("{code}");
 
         // Check that the result is wrapped in a tuple with State
         assert!(
@@ -1416,6 +1454,57 @@ end
         assert!(
             code.contains("{Result, State}"),
             "Should return tuple {{Result, State}}. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_times_repeat_mutation() {
+        // BT-153: REPL with mutation should return updated state
+        // Expression: 5 timesRepeat: [count := count + 1]
+
+        // Build the block: [count := count + 1]
+        let count_id = Expression::Identifier(Identifier::new("count", Span::new(0, 5)));
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let add = Expression::MessageSend {
+            receiver: Box::new(count_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            span: Span::new(0, 15),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(count_id),
+            value: Box::new(add),
+            span: Span::new(0, 20),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![assignment],
+            span: Span::new(0, 25),
+        });
+
+        // Build: 5 timesRepeat: [...]
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let times_repeat = Expression::MessageSend {
+            receiver: Box::new(five),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "timesRepeat:".into(),
+                span: Span::new(2, 14),
+            }]),
+            arguments: vec![body],
+            span: Span::new(0, 40),
+        };
+
+        let code = generate_repl_expression(&times_repeat, "repl_times_test")
+            .expect("codegen should work");
+
+        eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
+        eprintln!("{code}");
+
+        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        // where Result is the updated state (the loop returns the final StateAcc)
+        assert!(
+            code.contains("{'nil', Result}"),
+            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
         );
     }
 

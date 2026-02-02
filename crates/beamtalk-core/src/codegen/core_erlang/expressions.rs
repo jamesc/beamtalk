@@ -93,8 +93,18 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     write!(self.output, "{var_name}")?;
                 } else {
-                    // Field access from state (uses current state variable for state threading)
-                    let state_var = self.current_state_var();
+                    // Field access from state
+                    // BT-153: Use StateAcc when inside loop body, otherwise use State
+                    let state_var = if self.in_loop_body {
+                        // Get the current StateAcc version
+                        if self.state_version() == 0 {
+                            "StateAcc".to_string()
+                        } else {
+                            format!("StateAcc{}", self.state_version())
+                        }
+                    } else {
+                        self.current_state_var()
+                    };
                     write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
                 }
             }

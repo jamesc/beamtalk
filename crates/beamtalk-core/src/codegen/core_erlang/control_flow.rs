@@ -43,7 +43,8 @@ impl CoreErlangGenerator {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_list_do_with_mutations(receiver, body_block);
             }
         }
@@ -213,7 +214,8 @@ impl CoreErlangGenerator {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
             // Analyze block for mutations
-            if block_analysis::analyze_block(body_block).has_mutations() {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_list_inject_with_mutations(receiver, initial, body_block);
             }
         }
@@ -353,15 +355,15 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Only use mutations version if there are FIELD writes (actor state)
-            // Local variable mutations are handled by the simple version
+            // Use mutations version if there are any writes (local or field)
+            // BT-153: Include local_writes only in REPL mode
             let analysis = block_analysis::analyze_block(body_block);
-            if !analysis.field_writes.is_empty() {
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_while_true_with_mutations(condition, body_block);
             }
         }
 
-        // Simple case: no field mutations
+        // Simple case: no mutations
         self.generate_while_true_simple(condition, body)
     }
 
@@ -414,10 +416,9 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Analyze which variables are mutated
-        let mutated_vars = block_analysis::analyze_block(body)
-            .field_writes
-            .into_iter()
-            .collect::<Vec<_>>();
+        // BT-153: Include both field_writes AND local_writes for REPL context
+        let analysis = block_analysis::analyze_block(body);
+        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
         // Generate: letrec 'while'/N = fun (Var1, Var2, ..., StateAcc) ->
         //     let _CondFun = <condition> in
@@ -487,6 +488,10 @@ impl CoreErlangGenerator {
         }
         write!(self.output, "{prev_state})")?;
 
+        // Close the let by returning the new state (BT-153)
+        // This makes the expression a valid value in REPL context
+        write!(self.output, " in {new_state}")?;
+
         Ok(())
     }
 
@@ -499,6 +504,9 @@ impl CoreErlangGenerator {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
+        // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        self.in_loop_body = true;
+
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
                 write!(self.output, " ")?;
@@ -510,6 +518,9 @@ impl CoreErlangGenerator {
                 self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in")?;
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-153: Handle local variable assignments for REPL context
+                self.generate_local_var_assignment_in_loop(expr)?;
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
@@ -517,6 +528,8 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Restore state
+        self.in_loop_body = false;
         self.set_state_version(saved_state_version);
         Ok(())
     }
@@ -528,14 +541,15 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Only use mutations version if there are FIELD writes (actor state)
+            // Use mutations version if there are any writes (local or field)
+            // BT-153: Include local_writes only in REPL mode
             let analysis = block_analysis::analyze_block(body_block);
-            if !analysis.field_writes.is_empty() {
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_while_false_with_mutations(condition, body_block);
             }
         }
 
-        // Simple case: no field mutations
+        // Simple case: no mutations
         self.generate_while_false_simple(condition, body)
     }
 
@@ -577,10 +591,9 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Same as while_true but with false/true swapped in the case
-        let mutated_vars = block_analysis::analyze_block(body)
-            .field_writes
-            .into_iter()
-            .collect::<Vec<_>>();
+        // BT-153: Include both field_writes AND local_writes for REPL context
+        let analysis = block_analysis::analyze_block(body);
+        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
         let arity = mutated_vars.len() + 1;
         write!(self.output, "letrec 'while'/{arity} = fun (")?;
@@ -640,6 +653,9 @@ impl CoreErlangGenerator {
         }
         write!(self.output, "{prev_state})")?;
 
+        // Close the let by returning the new state (BT-153)
+        write!(self.output, " in {new_state}")?;
+
         Ok(())
     }
 
@@ -673,14 +689,15 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Only use mutations version if there are FIELD writes (actor state)
+            // Use mutations version if there are any writes (local or field)
+            // BT-153: Include local_writes only in REPL mode
             let analysis = block_analysis::analyze_block(body_block);
-            if !analysis.field_writes.is_empty() {
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_times_repeat_with_mutations(receiver, body_block);
             }
         }
 
-        // Simple case: no field mutations
+        // Simple case: no mutations
         self.generate_times_repeat_simple(receiver, body)
     }
 
@@ -724,10 +741,10 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Analyze which variables are mutated
-        let mutated_vars = block_analysis::analyze_block(body)
-            .field_writes
-            .into_iter()
-            .collect::<Vec<_>>();
+        // BT-153: Only include field_writes for loop parameters (actor state),
+        // local_writes are handled by updating StateAcc in the body via maps:put
+        let analysis = block_analysis::analyze_block(body);
+        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
         // Generate: let N = <receiver> in
         //           letrec 'repeat'/N+1 = fun (I, Var1, Var2, ..., StateAcc) ->
@@ -781,6 +798,9 @@ impl CoreErlangGenerator {
         }
         write!(self.output, ", {prev_state})")?;
 
+        // Close the let by returning the new state (BT-153)
+        write!(self.output, " in {new_state}")?;
+
         Ok(())
     }
 
@@ -791,6 +811,9 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
+
+        // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        self.in_loop_body = true;
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
@@ -803,6 +826,10 @@ impl CoreErlangGenerator {
                 self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in")?;
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-153: Handle local variable assignments for REPL context
+                // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
+                self.generate_local_var_assignment_in_loop(expr)?;
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
@@ -810,7 +837,44 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Restore state
+        self.in_loop_body = false;
         self.set_state_version(saved_state_version);
+        Ok(())
+    }
+
+    /// Generate a local variable assignment inside a loop body with state threading (BT-153).
+    ///
+    /// Generates code like:
+    /// ```erlang
+    /// let _Val = <value> in let StateAccN = maps:put('varname', _Val, StateAcc{N-1}) in
+    /// ```
+    fn generate_local_var_assignment_in_loop(&mut self, expr: &Expression) -> Result<()> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::Identifier(id) = target.as_ref() {
+                let val_var = self.fresh_temp_var("Val");
+                let current_state = if self.state_version() == 0 {
+                    "StateAcc".to_string()
+                } else {
+                    format!("StateAcc{}", self.state_version())
+                };
+
+                // let _Val = <value> in
+                write!(self.output, "let {val_var} = ")?;
+                self.generate_expression(value)?;
+
+                // Increment state version
+                self.set_state_version(self.state_version() + 1);
+                let new_state = format!("StateAcc{}", self.state_version());
+
+                // let StateAccN = call 'maps':'put'('varname', _Val, StateAcc{N-1}) in
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in",
+                    id.name
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -822,14 +886,15 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Check if body is a literal block (enables mutation analysis)
         if let Expression::Block(body_block) = body {
-            // Only use mutations version if there are FIELD writes (actor state)
+            // Use mutations version if there are any writes (local or field)
+            // BT-153: Include local_writes only in REPL mode
             let analysis = block_analysis::analyze_block(body_block);
-            if !analysis.field_writes.is_empty() {
+            if self.needs_mutation_threading(&analysis) {
                 return self.generate_to_do_with_mutations(receiver, limit, body_block);
             }
         }
 
-        // Simple case: no field mutations
+        // Simple case: no mutations
         self.generate_to_do_simple(receiver, limit, body)
     }
 
@@ -882,10 +947,9 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Analyze which variables are mutated
-        let mutated_vars = block_analysis::analyze_block(body)
-            .field_writes
-            .into_iter()
-            .collect::<Vec<_>>();
+        // BT-153: Include both field_writes AND local_writes for REPL context
+        let analysis = block_analysis::analyze_block(body);
+        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
         // Generate: let Start = <receiver> in let End = <limit> in
         //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->
@@ -947,6 +1011,9 @@ impl CoreErlangGenerator {
         }
         write!(self.output, ", {prev_state})")?;
 
+        // Close the let by returning the new state (BT-153)
+        write!(self.output, " in {new_state}")?;
+
         Ok(())
     }
 
@@ -963,6 +1030,9 @@ impl CoreErlangGenerator {
 
         let saved_state_version = self.state_version();
         self.set_state_version(0);
+
+        // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        self.in_loop_body = true;
 
         // Track which variables are assigned in the body
         let mut assigned_vars = std::collections::HashSet::new();
@@ -1004,6 +1074,10 @@ impl CoreErlangGenerator {
                 self.set_state_version(self.state_version() + 1);
                 self.generate_field_assignment_open(expr)?;
                 write!(self.output, " in ")?;
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-153: Handle local variable assignments for REPL context
+                self.generate_local_var_assignment_in_loop(expr)?;
+                write!(self.output, " ")?;
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
@@ -1038,6 +1112,8 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Restore state
+        self.in_loop_body = false;
         self.set_state_version(saved_state_version);
         self.pop_scope();
 

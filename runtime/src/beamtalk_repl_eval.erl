@@ -70,7 +70,8 @@ do_eval(Expression, State) ->
                                 {ok, Result, FinalState}
                         end
                     catch
-                        Class:Reason ->
+                        Class:Reason:Stacktrace ->
+                            io:format("REPL eval error: ~p:~p~nStacktrace: ~p~n", [Class, Reason, Stacktrace]),
                             {error, {eval_error, Class, Reason}, NewState}
                     after
                         %% Clean up the temporary module
