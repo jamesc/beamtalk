@@ -104,6 +104,7 @@ impl CoreErlangGenerator {
     /// - `isEven` (0 args) → `Receiver rem 2 =:= 0`
     /// - `isOdd` (0 args) → `Receiver rem 2 =/= 0`
     /// - `to:do:` (2 args) → iteration from start to end with body block
+    /// - `to:by:do:` (3 args) → iteration from start to end with custom step
     pub(super) fn try_generate_integer_message(
         &mut self,
         receiver: &Expression,
@@ -162,6 +163,17 @@ impl CoreErlangGenerator {
                         // 1 to: 10 do: [:n | body]
                         // receiver = start, arguments[0] = end, arguments[1] = body block
                         self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+                    "to:by:do:" if arguments.len() == 3 => {
+                        // 1 to: 10 by: 2 do: [:n | body]
+                        // receiver = start, arguments[0] = end, arguments[1] = step, arguments[2] = body block
+                        self.generate_to_by_do(
+                            receiver,
+                            &arguments[0],
+                            &arguments[1],
+                            &arguments[2],
+                        )?;
                         Ok(Some(()))
                     }
                     _ => Ok(None),
