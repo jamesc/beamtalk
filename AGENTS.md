@@ -731,13 +731,19 @@ Actor subclass: SimpleProxy
 
 **Step 3: Write E2E tests** (`tests/e2e/cases/protoobject.bt`)
 ```beamtalk
-// Test class message on primitives
+// ALWAYS verify responses with // => assertions!
 42 class
 // => Integer
 
 'hello' class
 // => String
+
+42 == 42
+// => true
 ```
+
+**Important:** Every testable expression MUST have a `// =>` assertion.
+Expressions without `// =>` are skipped by the test runner.
 
 **Step 4: Create runnable example** (`examples/protoobject_proxy.bt`)
 ```beamtalk
@@ -787,6 +793,66 @@ instance someMethod
 - Keep examples in `examples/` for user learning
 - Use `@load` for any test requiring actor/class definitions
 - Run E2E tests after every compiler change
+- **ALWAYS add `// =>` assertions** - Expressions without expected output are skipped!
+
+#### E2E Response Verification Rules
+
+**Rule 1: Every expression MUST have a `// =>` assertion**
+
+```beamtalk
+// ✅ GOOD - Verifies response
+42 + 3
+// => 45
+
+// ❌ BAD - Expression is skipped, not tested!
+42 + 3
+```
+
+**Rule 2: Test deterministic values, document non-deterministic ones**
+
+```beamtalk
+// ✅ GOOD - Primitives have deterministic output
+42 class
+// => Integer
+
+'hello' == 'hello'
+// => true
+
+// ⚠️ NON-DETERMINISTIC - Can't match exact PID
+// Instead, test what CAN be verified:
+Counter spawn           // Just verify no error
+c class                 // Can't test - 'c' wasn't assigned with => assertion
+```
+
+**Rule 3: For non-deterministic objects, test their METHODS**
+
+```beamtalk
+// Can't easily test spawn result, but CAN test methods:
+x := 42
+// => 42
+
+x + 1  
+// => 43
+
+// For actors: Test the behavior, not the object identity
+// Use runtime tests for full stateful actor testing
+```
+
+**Rule 4: Use runtime tests for complex actor scenarios**
+
+E2E tests are best for:
+- ✅ Primitive operations (arithmetic, strings, booleans)  
+- ✅ Class loading and compilation
+- ✅ Message syntax and parsing
+- ⚠️ Limited for: Stateful actor interactions (use `runtime/test/*.erl` instead)
+
+Example: `runtime/test/beamtalk_actor_tests.erl` has comprehensive tests for:
+- doesNotUnderstand with proxies
+- Concurrent message sends
+- State mutations
+- Future awaiting
+
+**Summary:** Add `// =>` assertions for every deterministic result. For actor state tests, use runtime EUnit tests where you have full control.
 
 ### Code Coverage Standards
 
