@@ -36,11 +36,12 @@
     }
   },
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
-  // postStartCommand: Set up git worktree paths, auth, and Copilot CLI config
+  // postStartCommand: Set up git worktree paths, auth, SSH signing, and Copilot CLI config
   // - fix-worktree-git.sh: Fix .git file paths for worktrees (see script for details)
   // - setup-git-auth.sh: Configure git with user name/email from env vars
+  // - setup-ssh-signing.sh: Copy SSH public key for commit signing (if GIT_SIGNING_KEY set)
   // - envsubst: Replace ${containerWorkspaceFolder} in copilot-config.json template
-  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh || true; bash .devcontainer/setup-git-auth.sh || true; mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json",
+  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh || true; bash .devcontainer/setup-git-auth.sh || true; bash .devcontainer/setup-ssh-signing.sh || true; mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json",
   "postAttachCommand": "bash .devcontainer/fix-worktree-git.sh || true",
   "remoteUser": "vscode",
   // Caching:
@@ -54,7 +55,7 @@
       "source": "${localEnv:BEAMTALK_MAIN_GIT_PATH}",
       "target": "/workspaces/.beamtalk-git",
       "type": "bind"
-    }
+    },
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // GIT WORKTREES: Parallel Copilot Sessions
@@ -66,10 +67,12 @@
   //        setx BEAMTALK_MAIN_GIT_PATH "C:/Users/you/source/beamtalk/.git"
   //        setx GIT_USER_NAME "Your Name"
   //        setx GIT_USER_EMAIL "you@example.com"
+  //        setx GIT_SIGNING_KEY "id_ed25519.pub"  (optional, filename in ~/.ssh)
   //      Linux/Mac (add to ~/.bashrc):
   //        export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"
   //        export GIT_USER_NAME="Your Name"
   //        export GIT_USER_EMAIL="you@example.com"
+  //        export GIT_SIGNING_KEY="id_ed25519.pub"  # optional, filename in ~/.ssh
   //
   // 2. Create worktrees and open each in its own container:
   //      git worktree add ../BT-99 -b BT-99-feature
@@ -86,6 +89,7 @@
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "GITHUB_TOKEN": "${localEnv:GH_TOKEN}",
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
-    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}"
+    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
+    "GIT_SIGNING_KEY": "${localEnv:GIT_SIGNING_KEY}"
   }
 }
