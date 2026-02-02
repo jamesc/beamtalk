@@ -104,9 +104,10 @@ send_to_beamtalk_object_test() ->
     %% (would need a test actor implementation)
     ok.
 
-send_to_integer_not_implemented_test() ->
-    %% Integer dispatch not yet implemented (BT-166)
-    ?assertError({not_implemented, _}, beamtalk_primitive:send(42, '+', [8])).
+send_to_integer_test() ->
+    %% Integer dispatch now implemented (BT-166)
+    ?assertEqual(50, beamtalk_primitive:send(42, '+', [8])),
+    ?assertEqual('Integer', beamtalk_primitive:send(42, 'class', [])).
 
 send_to_string_not_implemented_test() ->
     %% String dispatch not yet implemented (BT-167)
@@ -129,10 +130,16 @@ responds_to_beamtalk_object_test() ->
     },
     ?assertEqual(false, beamtalk_primitive:responds_to(Obj, 'increment')).
 
-responds_to_integer_test() ->
-    %% Integer class not implemented yet (BT-166)
-    ?assertEqual(false, beamtalk_primitive:responds_to(42, '+')),
-    ?assertEqual(false, beamtalk_primitive:responds_to(42, 'class')).
+responds_to_integer_test_() ->
+    {setup, 
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Integer class now implemented (BT-166)
+         ?assertEqual(true, beamtalk_primitive:responds_to(42, '+')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(42, 'class')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
+     end}.
 
 responds_to_string_test() ->
     %% String class not implemented yet (BT-167)
