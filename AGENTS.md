@@ -412,12 +412,14 @@ clone_on_ref_ptr = "warn"
 undocumented_unsafe_blocks = "warn"
 ```
 
-Run before committing:
+**CRITICAL: Always run the exact same clippy command as CI before committing:**
 ```bash
-cargo fmt          # Format code
-cargo clippy       # Lint checks
-cargo test         # Run tests
+cargo fmt --all -- --check       # Check formatting (or use `cargo fmt` to auto-fix)
+cargo clippy --all-targets -- -D warnings  # Lint checks (MUST match CI)
+cargo test --all-targets         # Run all tests
 ```
+
+**Why `-D warnings`?** CI treats warnings as errors. Running locally with `-D warnings` ensures you catch issues before pushing.
 
 Use `#[expect(...)]` instead of `#[allow(...)]` for lint overrides — it warns when the override becomes unnecessary:
 ```rust

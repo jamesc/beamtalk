@@ -478,7 +478,7 @@ impl CoreErlangGenerator {
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
-            format!("StateAcc{}", final_state_version)
+            format!("StateAcc{final_state_version}")
         };
         write!(self.output, " apply 'while'/{arity} (")?;
         for (i, param) in param_names.iter().enumerate() {
@@ -669,7 +669,7 @@ impl CoreErlangGenerator {
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
-            format!("StateAcc{}", final_state_version)
+            format!("StateAcc{final_state_version}")
         };
         write!(self.output, " apply 'while'/{arity} (")?;
         for (i, param) in param_names.iter().enumerate() {
@@ -828,7 +828,7 @@ impl CoreErlangGenerator {
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
-            format!("StateAcc{}", final_state_version)
+            format!("StateAcc{final_state_version}")
         };
 
         write!(
@@ -1048,7 +1048,7 @@ impl CoreErlangGenerator {
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
-            format!("StateAcc{}", final_state_version)
+            format!("StateAcc{final_state_version}")
         };
 
         write!(
