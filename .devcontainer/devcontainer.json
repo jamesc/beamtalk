@@ -1,4 +1,8 @@
 {
+  // Beamtalk Development Container Configuration
+  //
+  // Dockerfile: Installs all core development dependencies (Rust, Erlang, Node.js, etc.)
+  // This file: Configures GitHub Copilot CLI, VS Code extensions, and workspace setup
   "name": "Beamtalk Development",
   "build": {
     "dockerfile": "Dockerfile",
@@ -38,60 +42,25 @@
   // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
   "initializeCommand": "test -f .env || touch .env",
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
-  // postStartCommand: Set up git worktree paths, auth, SSH signing, and Copilot CLI config
-  // - fix-worktree-git.sh: Fix .git file paths for worktrees (see script for details)
-  // - setup-git-auth.sh: Configure git with user name/email from env vars
-  // - setup-ssh-signing.sh: Copy SSH public key for commit signing (if GIT_SIGNING_KEY set)
-  // - envsubst: Replace ${containerWorkspaceFolder} in copilot-config.json template
-  "postStartCommand": "bash .devcontainer/fix-worktree-git.sh || true; bash .devcontainer/setup-git-auth.sh || true; bash .devcontainer/setup-ssh-signing.sh || true; mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json",
-  "postAttachCommand": "bash .devcontainer/fix-worktree-git.sh || true",
+  "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
-  // Caching:
-  // - Cargo registry shared across all containers (saves downloads)
-  // - Target cache per-worktree (avoids build conflicts)
-  // - Main .git mounted for worktree support (set BEAMTALK_MAIN_GIT_PATH on host)
+  // Cargo caching for faster builds
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
-    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
-    {
-      "source": "${localEnv:BEAMTALK_MAIN_GIT_PATH}",
-      "target": "/workspaces/.beamtalk-git",
-      "type": "bind"
-    }
+    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
   ],
   // ═══════════════════════════════════════════════════════════════════════════
-  // GIT WORKTREES: Parallel Copilot Sessions
+  // DEVELOPMENT WORKFLOWS
   // ═══════════════════════════════════════════════════════════════════════════
-  // To run multiple Copilot sessions in parallel containers from worktrees:
+  // 1. VS Code (simple): Open folder in VS Code, it will build the devcontainer
+  //    - Basic git config from GIT_USER_NAME/GIT_USER_EMAIL env vars
+  //    - Can build and develop normally
   //
-  // 1. Set env vars on host:
-  //      Windows (permanent):
-  //        setx BEAMTALK_MAIN_GIT_PATH "C:/Users/you/source/beamtalk/.git"
-  //        setx GIT_USER_NAME "Your Name"
-  //        setx GIT_USER_EMAIL "you@example.com"
-  //
-  //    OPTIONAL: SSH commit signing (requires manual setup inside container)
-  //        setx GIT_SIGNING_KEY "id_rsa"  (optional, private key name in ~/.ssh)
-  //      Then inside container, manually copy:
-  //        mkdir -p ~/.ssh && cp /mnt/c/Users/you/.ssh/id_rsa.pub ~/.ssh/
-  //      (Automated mounting not supported due to Docker volume limitations)
-  //      Linux/Mac (add to ~/.bashrc):
-  //        export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"
-  //        export GIT_USER_NAME="Your Name"
-  //        export GIT_USER_EMAIL="you@example.com"
-  //
-  //    OPTIONAL: SSH commit signing (requires manual setup inside container)
-  //        export GIT_SIGNING_KEY="id_ed25519"  # optional, private key name in ~/.ssh
-  //      Then inside container, manually copy:
-  //        mkdir -p ~/.ssh && cp ~/.ssh/id_rsa.pub ~/.ssh/ (if .ssh is mounted)
-  //
-  // 2. Create worktrees and open each in its own container:
-  //      git worktree add ../BT-99 -b BT-99-feature
-  //      ./scripts/start-worktree.ps1 BT-99  # or start-worktree.sh on Linux/Mac
-  //
-  // Each worktree container can run Copilot independently.
-  // The fix-worktree-git.sh script auto-fixes the .git path on container start.
-  // SECURITY: Only the public key file is copied, never the entire .ssh directory.
+  // 2. Git Worktrees (advanced): Use scripts/worktree-new.ps1 for parallel work
+  //    - Creates worktrees with isolated containers
+  //    - Sets up SSH commit signing
+  //    - Configures Copilot CLI with MCP
+  //    - See scripts/worktree-new.ps1 for details
   // ═══════════════════════════════════════════════════════════════════════════
   "containerEnv": {
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
@@ -100,12 +69,10 @@
     "--env-file=${localWorkspaceFolder}/.env"
   ],
   "remoteEnv": {
-    "LINEAR_API_KEY": "${localEnv:LINEAR_API_KEY}",
+    "LINEAR_API_TOKEN": "${localEnv:LINEAR_API_TOKEN}",
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "GITHUB_TOKEN": "${localEnv:GH_TOKEN}",
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
-    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
-    "GIT_SIGNING_KEY": "${localEnv:GIT_SIGNING_KEY}",
-    "HOST_USERNAME": "${localEnv:USERNAME}${localEnv:USER}"
+    "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}"
   }
 }

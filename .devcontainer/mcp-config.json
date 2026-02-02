@@ -11,7 +11,7 @@
         "github:obra/streamlinear"
       ],
       "env": {
-        "LINEAR_API_TOKEN": "${LINEAR_API_KEY}"
+        "LINEAR_API_TOKEN": "${LINEAR_API_TOKEN}"
       }
     }
   }

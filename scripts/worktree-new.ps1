@@ -205,7 +205,7 @@ if (-not $env:BEAMTALK_MAIN_GIT_PATH) {
 }
 
 # Create .env file for devcontainer with port and node name derived from branch
-Write-Host "⚙️  Creating .env file for devcontainer..." -ForegroundColor Cyan
+Write-Host "Creating .env file for devcontainer..." -ForegroundColor Cyan
 $envPath = Join-Path $worktreePath ".env"
 
 # Derive port from branch name
@@ -280,6 +280,26 @@ try {
 }
 
 Write-Host "`n✨ Container ready!" -ForegroundColor Green
+
+# Fix worktree .git paths (critical for worktrees to work)
+Write-Host "🔧 Fixing worktree git paths..." -ForegroundColor Cyan
+devcontainer exec --workspace-folder $worktreePath bash .devcontainer/fix-worktree-git.sh 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ Git worktree paths fixed" -ForegroundColor Green
+}
+else {
+    Write-Host "⚠️  Could not fix git paths (may not be needed)" -ForegroundColor Yellow
+}
+
+# Set up Copilot CLI config
+Write-Host "🤖 Setting up Copilot CLI config..." -ForegroundColor Cyan
+devcontainer exec --workspace-folder $worktreePath bash -c "mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ Copilot CLI configured" -ForegroundColor Green
+}
+else {
+    Write-Host "⚠️  Could not configure Copilot CLI" -ForegroundColor Yellow
+}
 
 # Copy SSH signing key if configured
 if ($env:GIT_SIGNING_KEY) {
