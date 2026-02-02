@@ -136,6 +136,17 @@ mod tests {
             }
             Self { key, prev }
         }
+
+        /// Clear an environment variable and save its previous value.
+        /// SAFETY: Caller must ensure tests using this are serialized with `#[serial(env_var)]`.
+        unsafe fn clear(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            // SAFETY: Caller ensures tests are serialized
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
     }
 
     impl Drop for EnvVarGuard {
@@ -157,13 +168,19 @@ mod tests {
     }
 
     #[test]
+    #[serial(env_var)]
     fn lockfile_path_is_in_beamtalk_dir() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
         let lockfile = lockfile_path().expect("Failed to get lockfile_path");
         assert!(lockfile.ends_with(".beamtalk/daemon.lock"));
     }
 
     #[test]
+    #[serial(env_var)]
     fn socket_path_is_in_beamtalk_dir() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
         let socket = socket_path().expect("Failed to get socket_path");
         assert!(socket.ends_with(".beamtalk/daemon.sock"));
     }

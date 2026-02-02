@@ -14,9 +14,7 @@
 //! - Method table generation
 
 use super::{CoreErlangGenerator, Result};
-use crate::ast::{
-    Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
-};
+use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -978,13 +976,8 @@ impl CoreErlangGenerator {
                     ..
                 } = expr
                 {
-                    let selector_atom = match selector {
-                        MessageSelector::Unary(name) => name.to_string(),
-                        MessageSelector::Binary(op) => op.to_string(),
-                        MessageSelector::Keyword(parts) => {
-                            parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-                        }
-                    };
+                    // Use the domain service method for selector-to-atom conversion
+                    let selector_atom = selector.to_erlang_atom();
                     write!(
                         self.output,
                         "let {super_result_var} = call 'beamtalk_class':'super_dispatch'({current_state}, '{selector_atom}', ["
