@@ -11,7 +11,8 @@
 -export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
          get_eval_counter/1, increment_eval_counter/1,
          get_loaded_modules/1, add_loaded_module/2,
-         get_daemon_socket_path/1, get_listen_socket/1, get_port/1]).
+         get_daemon_socket_path/1, get_listen_socket/1, get_port/1,
+         get_actor_registry/1, set_actor_registry/2]).
 
 -export_type([state/0]).
 
@@ -21,7 +22,8 @@
     bindings :: map(),
     daemon_socket_path :: string(),
     eval_counter :: non_neg_integer(),
-    loaded_modules :: [atom()]
+    loaded_modules :: [atom()],
+    actor_registry :: pid() | undefined
 }).
 
 -opaque state() :: #state{}.
@@ -47,7 +49,8 @@ new(ListenSocket, Port, Options) ->
         bindings = #{},
         daemon_socket_path = DaemonSocketPath,
         eval_counter = 0,
-        loaded_modules = []
+        loaded_modules = [],
+        actor_registry = undefined
     }.
 
 %% @doc Get current variable bindings.
@@ -99,6 +102,16 @@ get_listen_socket(#state{listen_socket = Socket}) ->
 -spec get_port(state()) -> inet:port_number().
 get_port(#state{port = Port}) ->
     Port.
+
+%% @doc Get actor registry PID.
+-spec get_actor_registry(state()) -> pid() | undefined.
+get_actor_registry(#state{actor_registry = Registry}) ->
+    Registry.
+
+%% @doc Set actor registry PID.
+-spec set_actor_registry(pid() | undefined, state()) -> state().
+set_actor_registry(Registry, State) ->
+    State#state{actor_registry = Registry}.
 
 %%% Internal functions
 

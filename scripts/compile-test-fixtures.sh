@@ -18,12 +18,8 @@ cargo build --bin beamtalk --quiet
 echo "  Building counter.bt..."
 ./target/debug/beamtalk build tests/fixtures/counter.bt || true  # May report error even on success
 
-# Copy to runtime test directory (for source control and local dev)
+# Copy to rebar3 build directories (for test execution)
 if [ -f tests/fixtures/build/counter.beam ]; then
-    cp tests/fixtures/build/counter.beam runtime/test/
-    echo "  ✓ Copied counter.beam to runtime/test/"
-    
-    # Also copy to rebar3 build directories if they exist (for test execution)
     for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
         if [ -d "$build_dir" ]; then
             cp tests/fixtures/build/counter.beam "$build_dir/"
@@ -36,10 +32,8 @@ elif [ -f tests/fixtures/build/counter.core ]; then
     cd tests/fixtures/build
     erlc counter.core
     cd ../../..
-    cp tests/fixtures/build/counter.beam runtime/test/
-    echo "  ✓ Compiled and copied counter.beam to runtime/test/"
     
-    # Also copy to rebar3 build directories
+    # Copy to rebar3 build directories
     for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
         if [ -d "$build_dir" ]; then
             cp tests/fixtures/build/counter.beam "$build_dir/"
@@ -55,12 +49,8 @@ fi
 echo "  Building logging_counter.bt..."
 ./target/debug/beamtalk build tests/fixtures/logging_counter.bt || true
 
-# Copy to runtime test directory
+# Copy to rebar3 build directories
 if [ -f tests/fixtures/build/logging_counter.beam ]; then
-    cp tests/fixtures/build/logging_counter.beam runtime/test/
-    echo "  ✓ Copied logging_counter.beam to runtime/test/"
-    
-    # Also copy to rebar3 build directories
     for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
         if [ -d "$build_dir" ]; then
             cp tests/fixtures/build/logging_counter.beam "$build_dir/"
@@ -73,10 +63,8 @@ elif [ -f tests/fixtures/build/logging_counter.core ]; then
     cd tests/fixtures/build
     erlc logging_counter.core
     cd ../../..
-    cp tests/fixtures/build/logging_counter.beam runtime/test/
-    echo "  ✓ Compiled and copied logging_counter.beam to runtime/test/"
     
-    # Also copy to rebar3 build directories
+    # Copy to rebar3 build directories
     for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
         if [ -d "$build_dir" ]; then
             cp tests/fixtures/build/logging_counter.beam "$build_dir/"

@@ -121,9 +121,12 @@ init({Port, Options}) ->
         {ok, ListenSocket} ->
             %% Get actual port (important when Port=0)
             {ok, ActualPort} = inet:port(ListenSocket),
+            %% Start actor registry for this REPL session
+            {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
             %% Start accepting connections asynchronously
             self() ! accept,
-            State = beamtalk_repl_state:new(ListenSocket, ActualPort, Options),
+            State0 = beamtalk_repl_state:new(ListenSocket, ActualPort, Options),
+            State = beamtalk_repl_state:set_actor_registry(RegistryPid, State0),
             {ok, State};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
@@ -216,6 +219,37 @@ handle_info({client_request, Request, ClientPid}, State) ->
                     ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
                     {noreply, NewState}
             end;
+        {list_actors} ->
+            case beamtalk_repl_state:get_actor_registry(State) of
+                undefined ->
+                    ClientPid ! {response, beamtalk_repl_server:format_error(no_registry)},
+                    {noreply, State};
+                RegistryPid ->
+                    Actors = beamtalk_repl_actors:list_actors(RegistryPid),
+                    ClientPid ! {response, beamtalk_repl_server:format_actors(Actors)},
+                    {noreply, State}
+            end;
+        {kill_actor, PidStr} ->
+            case beamtalk_repl_state:get_actor_registry(State) of
+                undefined ->
+                    ClientPid ! {response, beamtalk_repl_server:format_error(no_registry)},
+                    {noreply, State};
+                RegistryPid ->
+                    case parse_pid_string(PidStr) of
+                        {ok, ActorPid} ->
+                            case beamtalk_repl_actors:kill_actor(RegistryPid, ActorPid) of
+                                ok ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_response(ok)},
+                                    {noreply, State};
+                                {error, Reason} ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
+                                    {noreply, State}
+                            end;
+                        {error, Reason} ->
+                            ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
+                            {noreply, State}
+                    end
+            end;
         {error, ParseError} ->
             ClientPid ! {response, beamtalk_repl_server:format_error(ParseError)},
             {noreply, State}
@@ -226,6 +260,13 @@ handle_info(_Info, State) ->
 
 %% @private
 terminate(_Reason, State) ->
+    %% Terminate actor registry (kills all actors)
+    case beamtalk_repl_state:get_actor_registry(State) of
+        undefined -> ok;
+        RegistryPid when is_pid(RegistryPid) ->
+            gen_server:stop(RegistryPid)
+    end,
+    %% Close listen socket
     ListenSocket = beamtalk_repl_state:get_listen_socket(State),
     case ListenSocket of
         undefined -> ok;
@@ -253,3 +294,19 @@ format_response(Value) ->
 -spec format_error(term()) -> binary().
 format_error(Reason) ->
     beamtalk_repl_server:format_error(Reason).
+
+%%% Helper functions
+
+%% @private
+%% Parse a PID string like "<0.123.0>" into a PID.
+-spec parse_pid_string(string()) -> {ok, pid()} | {error, invalid_pid}.
+parse_pid_string(PidStr) ->
+    try
+        list_to_pid(PidStr)
+    of
+        Pid when is_pid(Pid) ->
+            {ok, Pid}
+    catch
+        _:_ ->
+            {error, invalid_pid}
+    end.

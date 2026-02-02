@@ -104,7 +104,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3]).
+-export([start_link/2, start_link/3, spawn_with_registry/3, spawn_with_registry/4]).
 
 %% gen_server callbacks (for generated actors to delegate to)
 -export([init/1, handle_cast/2, handle_call/3, handle_info/2,
@@ -127,6 +127,36 @@ start_link(Module, Args) ->
 -spec start_link(term(), module(), term()) -> {ok, pid()} | {error, term()}.
 start_link(Name, Module, Args) ->
     gen_server:start_link(Name, Module, Args, []).
+
+%% @doc Spawn an actor and register it with the REPL actor registry.
+%% Returns {ok, Pid} or {error, Reason}.
+%% Used by generated code when spawning actors in a REPL context.
+-spec spawn_with_registry(pid(), module(), term()) -> {ok, pid()} | {error, term()}.
+spawn_with_registry(RegistryPid, Module, Args) ->
+    spawn_with_registry(RegistryPid, Module, Args, undefined).
+
+%% @doc Spawn an actor with registry, specifying a class name.
+%% ClassName is the Beamtalk class name (e.g., 'Counter'), used for display.
+-spec spawn_with_registry(pid(), module(), term(), atom() | undefined) -> {ok, pid()} | {error, term()}.
+spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
+    %% Add registry info to args for init callback
+    ArgsWithRegistry = case is_map(Args) of
+        true -> maps:put('__registry_pid__', RegistryPid, Args);
+        false -> #{'__registry_pid__' => RegistryPid, '__init_args__' => Args}
+    end,
+    
+    case gen_server:start_link(Module, ArgsWithRegistry, []) of
+        {ok, Pid} ->
+            %% Register with REPL registry
+            Class = case ClassName of
+                undefined -> Module; % Use module name as fallback
+                _ -> ClassName
+            end,
+            ok = beamtalk_repl_actors:register_actor(RegistryPid, Pid, Class, Module),
+            {ok, Pid};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 %%% gen_server callbacks
 
