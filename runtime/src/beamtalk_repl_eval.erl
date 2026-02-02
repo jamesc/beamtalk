@@ -156,8 +156,8 @@ handle_load(Path, State) ->
 %% Compile a Beamtalk expression to bytecode via compiler daemon.
 -spec compile_expression(string(), atom(), map(), beamtalk_repl_state:state()) ->
     {ok, binary(), term()} | {error, term()}.
-compile_expression(Expression, ModuleName, _Bindings, State) ->
-    case compile_via_daemon(Expression, ModuleName, State) of
+compile_expression(Expression, ModuleName, Bindings, State) ->
+    case compile_via_daemon(Expression, ModuleName, Bindings, State) of
         {ok, Binary} ->
             {ok, Binary, {daemon_compiled}};
         {error, daemon_unavailable} ->
@@ -173,15 +173,15 @@ compile_expression(Expression, ModuleName, _Bindings, State) ->
     end.
 
 %% Compile expression via compiler daemon using JSON-RPC over Unix socket.
--spec compile_via_daemon(string(), atom(), beamtalk_repl_state:state()) ->
+-spec compile_via_daemon(string(), atom(), map(), beamtalk_repl_state:state()) ->
     {ok, binary()} | {error, term()}.
-compile_via_daemon(Expression, ModuleName, State) ->
+compile_via_daemon(Expression, ModuleName, Bindings, State) ->
     SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
     %% Try to connect to daemon
     case connect_to_daemon(SocketPath) of
         {ok, Socket} ->
             try
-                compile_via_daemon_socket(Expression, ModuleName, Socket)
+                compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket)
             after
                 gen_tcp:close(Socket)
             end;
@@ -206,9 +206,15 @@ connect_to_daemon(SocketPath) ->
     end.
 
 %% Send compile request to daemon and process response.
--spec compile_via_daemon_socket(string(), atom(), gen_tcp:socket()) ->
+-spec compile_via_daemon_socket(string(), atom(), map(), gen_tcp:socket()) ->
     {ok, binary()} | {error, term()}.
-compile_via_daemon_socket(Expression, ModuleName, Socket) ->
+compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket) ->
+    %% Extract known variable names from bindings (filter internal keys)
+    KnownVariables = [atom_to_binary(K, utf8) 
+                      || K <- maps:keys(Bindings), 
+                         is_atom(K), 
+                         not is_internal_key(K)],
+    
     %% Build JSON-RPC request using jsx
     RequestId = erlang:unique_integer([positive]),
     Request = jsx:encode(#{
@@ -217,7 +223,8 @@ compile_via_daemon_socket(Expression, ModuleName, Socket) ->
         <<"method">> => <<"compile_expression">>,
         <<"params">> => #{
             <<"source">> => list_to_binary(Expression),
-            <<"module_name">> => atom_to_binary(ModuleName, utf8)
+            <<"module_name">> => atom_to_binary(ModuleName, utf8),
+            <<"known_variables">> => KnownVariables
         }
     }),
     
@@ -230,6 +237,15 @@ compile_via_daemon_socket(Expression, ModuleName, Socket) ->
             parse_daemon_response(ResponseLine, ModuleName);
         {error, Reason} ->
             {error, {recv_error, Reason}}
+    end.
+
+%% Check if a binding key is internal (not a user variable).
+-spec is_internal_key(atom()) -> boolean().
+is_internal_key(Key) when is_atom(Key) ->
+    %% Internal keys start with double underscore
+    case atom_to_list(Key) of
+        "__" ++ _ -> true;
+        _ -> false
     end.
 
 %% Parse daemon JSON-RPC response using jsx.
