@@ -256,10 +256,13 @@ This will:
 Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts:
 
 **Port derivation:**
-- `BT-190` branch → port `9190` (9000 + issue number, capped at 999)
-- `BT-64` branch → port `9064`
-- `main` branch → port `9000` (default)
-- Other branches → port `10000-10899` (hash-based, non-overlapping with BT range)
+- `BT-190` branch → port `49342` (49152 + issue number, capped at 999)
+- `BT-64` branch → port `49216`
+- `main` branch → port `49152` (default)
+- Other branches → port `50152-51051` (hash-based, non-overlapping with BT range)
+
+The base port 49152 is the start of the IANA ephemeral port range, avoiding conflicts
+with common services (PHP-FPM on 9000, Prometheus on 9090, Elasticsearch on 9200, etc.)
 
 **Node name derivation:**
 - `BT-190` branch → `beamtalk_bt190@localhost`
@@ -271,7 +274,7 @@ Each worktree automatically gets a unique REPL port and Erlang node name to avoi
 1. CLI flag: `beamtalk repl --port 9001 --node mynode@localhost`
 2. Environment variable: `BEAMTALK_REPL_PORT`, `BEAMTALK_NODE_NAME`
 3. Application config: `runtime/config/sys.config`
-4. Default: port `9000`, node `beamtalk@localhost`
+4. Default: port `49152`, node `beamtalk@localhost`
 
 The worktree scripts automatically set `BEAMTALK_REPL_PORT` and `BEAMTALK_NODE_NAME` in a `.env` file, which is loaded by the devcontainer. This file is in `.gitignore` and cleaned up when the worktree is removed.
 

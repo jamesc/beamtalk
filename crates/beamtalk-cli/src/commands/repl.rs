@@ -541,8 +541,12 @@ impl Drop for BeamChildGuard {
     }
 }
 
+/// Default REPL port in the ephemeral range (49152-65535).
+/// This avoids conflicts with common services (PHP-FPM on 9000, Prometheus on 9090, etc.)
+const DEFAULT_REPL_PORT: u16 = 49152;
+
 /// Resolve the REPL port from CLI arg and environment variable.
-/// Priority: CLI flag > `BEAMTALK_REPL_PORT` env var > default (9000)
+/// Priority: CLI flag > `BEAMTALK_REPL_PORT` env var > default (49152)
 fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
     if let Some(p) = port_arg {
         // CLI flag explicitly set
@@ -554,7 +558,7 @@ fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
             .map_err(|_| miette!("Invalid BEAMTALK_REPL_PORT: {env_port}"))
     } else {
         // Use default
-        Ok(9000)
+        Ok(DEFAULT_REPL_PORT)
     }
 }
 
@@ -1113,20 +1117,20 @@ mod tests {
     }
 
     #[test]
-    fn resolve_port_cli_flag_9000_still_takes_priority() {
-        // Even if CLI flag is 9000 (the default), it should be used
+    fn resolve_port_cli_flag_default_still_takes_priority() {
+        // Even if CLI flag is 49152 (the default), it should be used
         // This was the bug reported in the PR review
-        let result = resolve_port(Some(9000));
-        assert_eq!(result.unwrap(), 9000);
+        let result = resolve_port(Some(DEFAULT_REPL_PORT));
+        assert_eq!(result.unwrap(), DEFAULT_REPL_PORT);
     }
 
     #[test]
     fn resolve_port_default_without_env() {
-        // When no CLI flag and no env var, should return default 9000
+        // When no CLI flag and no env var, should return default (49152)
         // Note: This test assumes BEAMTALK_REPL_PORT is not set in the test environment
         // We can't safely unset it here without serial test coordination
         let result = resolve_port(None);
-        // If env var is set, it will return that; if not, 9000
+        // If env var is set, it will return that; if not, default
         // The test verifies the function runs without error
         assert!(result.is_ok());
     }

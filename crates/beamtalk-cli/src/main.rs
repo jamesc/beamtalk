@@ -45,7 +45,7 @@ enum Command {
 
     /// Start an interactive REPL
     Repl {
-        /// Port for the REPL backend (default: 9000, or `BEAMTALK_REPL_PORT` env var)
+        /// Port for the REPL backend (default: 49152, or `BEAMTALK_REPL_PORT` env var)
         #[arg(long)]
         port: Option<u16>,
 

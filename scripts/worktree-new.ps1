@@ -209,9 +209,10 @@ Write-Host "⚙️  Creating .env file for devcontainer..." -ForegroundColor Cya
 $envPath = Join-Path $worktreePath ".env"
 
 # Derive port from branch name
-# BT-190 -> 9190, BT-64 -> 9064, main -> 9000
-# Port ranges: BT branches 9001-9999, hash-based 10000-10899
-$port = 9000
+# BT-190 -> 49342, BT-64 -> 49216, main -> 49152
+# Uses ephemeral port range (49152-65535) to avoid conflicts with common services
+# Port ranges: BT branches 49152-50151 (capped at issue 999), hash-based 50152-51051
+$port = 49152
 $nodeName = "beamtalk@localhost"
 
 if ($Branch -match "^BT-(\d+)") {
@@ -221,7 +222,7 @@ if ($Branch -match "^BT-(\d+)") {
         Write-Host "⚠️  Issue number $issueNum too large, capping to 999 for port derivation" -ForegroundColor Yellow
         $issueNum = 999
     }
-    $port = 9000 + $issueNum
+    $port = 49152 + $issueNum
     $nodeName = "beamtalk_bt${issueNum}@localhost"
     Write-Host "   Port: $port (derived from $Branch)" -ForegroundColor Gray
     Write-Host "   Node: $nodeName" -ForegroundColor Gray
@@ -231,9 +232,9 @@ elseif ($Branch -eq "main") {
     Write-Host "   Node: $nodeName (main branch default)" -ForegroundColor Gray
 }
 else {
-    # Hash branch name to port range 10000-10899 (non-overlapping with BT branches)
+    # Hash branch name to port range 50152-51051 (non-overlapping with BT branches)
     $hash = [System.Text.Encoding]::UTF8.GetBytes($Branch) | ForEach-Object { $_ } | Measure-Object -Sum
-    $port = 10000 + ($hash.Sum % 900)
+    $port = 50152 + ($hash.Sum % 900)
     $nodeName = "beamtalk_$($Branch -replace '[^a-zA-Z0-9]', '_')@localhost"
     Write-Host "   Port: $port (derived from branch hash)" -ForegroundColor Gray
     Write-Host "   Node: $nodeName" -ForegroundColor Gray
