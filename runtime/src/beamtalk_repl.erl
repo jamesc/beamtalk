@@ -229,6 +229,21 @@ handle_info({client_request, Request, ClientPid}, State) ->
                     ClientPid ! {response, beamtalk_repl_server:format_actors(Actors)},
                     {noreply, State}
             end;
+        {list_modules} ->
+            Tracker = beamtalk_repl_state:get_module_tracker(State),
+            RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+            ModulesList = beamtalk_repl_modules:list_modules(Tracker),
+            %% Enrich each module with current actor count
+            ModulesWithInfo = lists:map(
+                fun({ModuleName, _Info}) ->
+                    ActorCount = beamtalk_repl_modules:get_actor_count(ModuleName, RegistryPid, Tracker),
+                    FormattedInfo = beamtalk_repl_modules:format_module_info(_Info, ActorCount),
+                    {ModuleName, FormattedInfo}
+                end,
+                ModulesList
+            ),
+            ClientPid ! {response, beamtalk_repl_server:format_modules(ModulesWithInfo)},
+            {noreply, State};
         {kill_actor, PidStr} ->
             case beamtalk_repl_state:get_actor_registry(State) of
                 undefined ->

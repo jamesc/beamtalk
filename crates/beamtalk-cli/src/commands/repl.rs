@@ -77,6 +77,7 @@ struct ReplResponse {
     bindings: Option<serde_json::Value>,
     classes: Option<Vec<String>>,
     actors: Option<Vec<ActorInfo>>,
+    modules: Option<Vec<ModuleInfo>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +87,16 @@ struct ActorInfo {
     module: String,
     #[allow(dead_code)]
     spawned_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModuleInfo {
+    name: String,
+    source_file: String,
+    actor_count: u32,
+    #[allow(dead_code)]
+    load_time: i64,
+    time_ago: String,
 }
 
 /// REPL client state.
@@ -230,6 +241,22 @@ impl ReplClient {
             "type": "kill",
             "pid": pid_str
         });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+
+    /// List loaded modules.
+    fn list_modules(&mut self) -> Result<ReplResponse> {
+        let request = serde_json::json!({ "type": "modules" });
         let request_str = serde_json::to_string(&request).into_diagnostic()?;
 
         writeln!(self.stream, "{request_str}").into_diagnostic()?;
@@ -436,6 +463,7 @@ fn print_help() {
     println!("  :bindings     Show current variable bindings");
     println!("  :load <path>  Load a .bt file");
     println!("  :reload       Reload the last loaded file");
+    println!("  :modules      List loaded modules");
     println!("  :actors       List running actors");
     println!("  :kill <pid>   Kill an actor by PID");
     println!();
@@ -615,6 +643,43 @@ pub fn run() -> Result<()> {
                                                 println!(
                                                     "  {} - {} ({})",
                                                     actor.pid, actor.class, actor.module
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":modules" | ":m" => {
+                        match client.list_modules() {
+                            Ok(response) => {
+                                if response.response_type == "modules" {
+                                    if let Some(modules) = response.modules {
+                                        if modules.is_empty() {
+                                            println!("No modules loaded.");
+                                        } else {
+                                            println!("Loaded modules:");
+                                            for module in modules {
+                                                let actors_text = if module.actor_count == 0 {
+                                                    String::new()
+                                                } else if module.actor_count == 1 {
+                                                    " - 1 actor".to_string()
+                                                } else {
+                                                    format!(" - {} actors", module.actor_count)
+                                                };
+                                                println!(
+                                                    "  {} ({}){} - loaded {}",
+                                                    module.name,
+                                                    module.source_file,
+                                                    actors_text,
+                                                    module.time_ago
                                                 );
                                             }
                                         }

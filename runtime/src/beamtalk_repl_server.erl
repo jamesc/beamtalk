@@ -9,7 +9,7 @@
 -module(beamtalk_repl_server).
 
 -export([handle_client/2, parse_request/1, format_response/1, format_error/1,
-         format_bindings/1, format_loaded/1, format_actors/1]).
+         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1]).
 
 -define(RECV_TIMEOUT, 30000).
 
@@ -55,6 +55,7 @@ handle_client_loop(Socket, ReplPid) ->
     {load_file, string()} | 
     {list_actors} |
     {kill_actor, string()} |
+    {list_modules} |
     {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
@@ -72,6 +73,8 @@ parse_request(Data) when is_binary(Data) ->
                 {load_file, binary_to_list(Path)};
             {ok, #{<<"type">> := <<"actors">>}} ->
                 {list_actors};
+            {ok, #{<<"type">> := <<"modules">>}} ->
+                {list_modules};
             {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
                 {kill_actor, binary_to_list(PidStr)};
             {ok, _Other} ->
@@ -138,6 +141,23 @@ format_actors(Actors) ->
         Actors
     ),
     jsx:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors}).
+
+%% @doc Format a modules list response as JSON.
+-spec format_modules([{atom(), map()}]) -> binary().
+format_modules(ModulesWithInfo) ->
+    JsonModules = lists:map(
+        fun({_ModuleName, Info}) ->
+            #{
+                <<"name">> => maps:get(name, Info),
+                <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
+                <<"actor_count">> => maps:get(actor_count, Info),
+                <<"load_time">> => maps:get(load_time, Info),
+                <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
+            }
+        end,
+        ModulesWithInfo
+    ),
+    jsx:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules}).
 
 %%% JSON Parsing
 
