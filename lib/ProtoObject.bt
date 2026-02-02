@@ -132,3 +132,23 @@ ProtoObject
   // Returns true if self and other are different objects
   // Delegates to == and negates the result
   ~= other => (self == other) not
+
+  // Dynamic message dispatch (compiler intrinsic)
+  // Sends a message to an object at runtime
+  // Used by doesNotUnderstand handlers to forward messages
+  //
+  // Arguments:
+  // - selector: Symbol/atom representing the message name (e.g., #increment)
+  // - arguments: List of arguments to pass with the message
+  //
+  // Returns: Future (for async message sends to actors)
+  //
+  // Example:
+  // ```beamtalk
+  // Proxy
+  //   state: target
+  //
+  //   doesNotUnderstand: selector args: arguments =>
+  //     target perform: selector withArguments: arguments
+  // ```
+  perform: selector withArguments: arguments => // implemented by compiler
