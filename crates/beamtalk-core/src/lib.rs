@@ -20,7 +20,7 @@ pub mod codegen;
 pub mod erlang;
 pub mod language_service;
 pub mod parse;
-mod queries;
+pub mod queries;
 
 /// Re-export commonly used types.
 pub mod prelude {

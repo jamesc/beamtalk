@@ -24,6 +24,7 @@ Every issue **must** have:
 
 | Type | Description |
 |------|-------------|
+| `Epic` | Large initiatives that group 5+ related issues (use size XL) |
 | `Feature` | A chunk of customer visible work |
 | `Bug` | Bugs, broken tests, broken code |
 | `Improvement` | Incremental work on top of a feature |
@@ -33,6 +34,8 @@ Every issue **must** have:
 | `Refactor` | Code cleanups, tech debt |
 | `Research` | Research projects, code spikes |
 | `Samples` | Code, examples, things to help devs get started |
+
+**Note:** Use `Epic` type only for large initiatives. Epic titles should use `Epic:` prefix (e.g., "Epic: Feature Name"). See AGENTS.md "Epics" section for full guidelines.
 
 ## Item Area Labels
 

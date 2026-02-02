@@ -110,8 +110,7 @@ send(X, Selector, Args) when is_integer(X) ->
     %% Primitive: static dispatch to class module
     beamtalk_integer:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_binary(X) ->
-    %% TODO(BT-167): Implement beamtalk_string module
-    error({not_implemented, {beamtalk_string, dispatch, [Selector, Args, X]}});
+    beamtalk_string:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_float(X) ->
     %% TODO(BT-168): Implement beamtalk_float module
     error({not_implemented, {beamtalk_float, dispatch, [Selector, Args, X]}});
@@ -140,9 +139,8 @@ responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
     erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
 responds_to(X, Selector) when is_integer(X) ->
     beamtalk_integer:has_method(Selector);
-responds_to(_X, _Selector) when is_binary(_X) ->
-    %% TODO(BT-167): Implement beamtalk_string:has_method/1
-    false;
+responds_to(X, Selector) when is_binary(X) ->
+    beamtalk_string:has_method(Selector);
 responds_to(_X, _Selector) when is_float(_X) ->
     %% TODO(BT-168): Implement beamtalk_float:has_method/1
     false;
