@@ -34,10 +34,23 @@ use crate::parse::Diagnostic;
 /// A list of all diagnostics (errors and warnings).
 #[must_use]
 pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    compute_diagnostics_with_known_vars(module, parse_diagnostics, &[])
+}
+
+/// Computes diagnostics with pre-defined REPL variables.
+///
+/// Variables in `known_vars` are treated as already defined, preventing
+/// "Undefined variable" errors for REPL session variables.
+#[must_use]
+pub fn compute_diagnostics_with_known_vars(
+    module: &Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
 
-    // Run semantic analysis
-    let analysis_result = analyse::analyse(module);
+    // Run semantic analysis with known variables
+    let analysis_result = analyse::analyse_with_known_vars(module, known_vars);
     all_diagnostics.extend(analysis_result.diagnostics);
 
     all_diagnostics

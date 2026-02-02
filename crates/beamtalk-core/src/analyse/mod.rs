@@ -227,7 +227,21 @@ fn extract_pattern_bindings_impl(
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
+    analyse_with_known_vars(module, &[])
+}
+
+/// Analyse a module with pre-defined variables (for REPL context).
+///
+/// Variables passed in `known_vars` are treated as already defined,
+/// preventing "Undefined variable" errors for REPL session variables.
+pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
     let mut analyser = Analyser::new();
+
+    // Pre-define known REPL variables so they don't produce undefined errors
+    for var_name in known_vars {
+        analyser.scope.define(var_name, module.span);
+    }
+
     analyser.analyse_module(module);
     analyser.result
 }

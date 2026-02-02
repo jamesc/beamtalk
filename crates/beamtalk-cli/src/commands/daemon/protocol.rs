@@ -397,6 +397,10 @@ struct CompileExpressionParams {
     source: String,
     /// Unique module name for this evaluation.
     module_name: String,
+    /// Known variable names from REPL session bindings.
+    /// These are treated as pre-defined to avoid "Undefined variable" errors.
+    #[serde(default)]
+    known_variables: Vec<String>,
 }
 
 /// Result of the `compile_expression` method.
@@ -426,9 +430,15 @@ fn handle_compile_expression(
     let tokens = beamtalk_core::parse::lex_with_eof(&params.source);
     let (module, parse_diagnostics) = beamtalk_core::parse::parse(tokens);
 
-    // Run semantic analysis to get full diagnostics (parse + semantic)
-    let all_diagnostics =
-        beamtalk_core::queries::diagnostics::compute_diagnostics(&module, parse_diagnostics);
+    // Convert known_variables to &str references for the diagnostics function
+    let known_vars: Vec<&str> = params.known_variables.iter().map(String::as_str).collect();
+
+    // Run semantic analysis with known REPL variables to avoid false "Undefined variable" errors
+    let all_diagnostics = beamtalk_core::queries::diagnostics::compute_diagnostics_with_known_vars(
+        &module,
+        parse_diagnostics,
+        &known_vars,
+    );
 
     // Convert diagnostics
     let diagnostics: Vec<DiagnosticInfo> = all_diagnostics
