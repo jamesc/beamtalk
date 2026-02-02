@@ -69,7 +69,7 @@
   //        setx GIT_USER_EMAIL "you@example.com"
   //
   //    OPTIONAL: SSH commit signing (requires manual setup inside container)
-  //        setx GIT_SIGNING_KEY "id_rsa.pub"  # filename in ~/.ssh
+  //        setx GIT_SIGNING_KEY "id_rsa"  (optional, private key name in ~/.ssh)
   //      Then inside container, manually copy:
   //        mkdir -p ~/.ssh && cp /mnt/c/Users/you/.ssh/id_rsa.pub ~/.ssh/
   //      (Automated mounting not supported due to Docker volume limitations)
@@ -79,7 +79,7 @@
   //        export GIT_USER_EMAIL="you@example.com"
   //
   //    OPTIONAL: SSH commit signing (requires manual setup inside container)
-  //        export GIT_SIGNING_KEY="id_rsa.pub"  # filename in ~/.ssh
+  //        export GIT_SIGNING_KEY="id_ed25519"  # optional, private key name in ~/.ssh
   //      Then inside container, manually copy:
   //        mkdir -p ~/.ssh && cp ~/.ssh/id_rsa.pub ~/.ssh/ (if .ssh is mounted)
   //
