@@ -111,8 +111,27 @@ send(X, Selector, Args) when is_integer(X) ->
     beamtalk_integer:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_binary(X) ->
     beamtalk_string:dispatch(Selector, Args, X);
+send(X, Selector, Args) when X =:= true; X =:= false ->
+    beamtalk_boolean:dispatch(Selector, Args, X);
+send(nil, Selector, Args) ->
+    beamtalk_nil:dispatch(Selector, Args, nil);
+send(X, Selector, Args) when is_function(X) ->
+    beamtalk_block:dispatch(Selector, Args, X);
+send(X, Selector, Args) when is_tuple(X) ->
+    %% Check if it's a beamtalk_object (should not happen - covered by clause above)
+    %% but handle tuples that might not match the record pattern
+    case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
+        true ->
+            %% This is a beamtalk_object that didn't match the record pattern
+            %% Extract pid from the known record structure
+            Pid = element(4, X),
+            gen_server:call(Pid, {Selector, Args});
+        false ->
+            %% Regular tuple - dispatch to tuple class
+            beamtalk_tuple:dispatch(Selector, Args, X)
+    end;
 send(X, Selector, Args) when is_float(X) ->
-    %% TODO(BT-168): Implement beamtalk_float module
+    %% TODO(BT-XXX): Implement beamtalk_float module
     error({not_implemented, {beamtalk_float, dispatch, [Selector, Args, X]}});
 send(X, Selector, Args) ->
     %% Other primitives: dispatch to generic handler
@@ -141,8 +160,25 @@ responds_to(X, Selector) when is_integer(X) ->
     beamtalk_integer:has_method(Selector);
 responds_to(X, Selector) when is_binary(X) ->
     beamtalk_string:has_method(Selector);
+responds_to(X, Selector) when X =:= true; X =:= false ->
+    beamtalk_boolean:has_method(Selector);
+responds_to(nil, Selector) ->
+    beamtalk_nil:has_method(Selector);
+responds_to(X, Selector) when is_function(X) ->
+    beamtalk_block:has_method(Selector);
+responds_to(X, Selector) when is_tuple(X) ->
+    %% Check if it's a beamtalk_object (should not happen - covered by clause above)
+    case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
+        true ->
+            %% Actor object that didn't match record pattern
+            Mod = element(3, X),  % class_mod field
+            erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
+        false ->
+            %% Regular tuple
+            beamtalk_tuple:has_method(Selector)
+    end;
 responds_to(_X, _Selector) when is_float(_X) ->
-    %% TODO(BT-168): Implement beamtalk_float:has_method/1
+    %% TODO(BT-XXX): Implement beamtalk_float:has_method/1
     false;
 responds_to(_, _) ->
     %% Other primitives: no methods yet
