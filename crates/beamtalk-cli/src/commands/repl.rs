@@ -76,6 +76,16 @@ struct ReplResponse {
     message: Option<String>,
     bindings: Option<serde_json::Value>,
     classes: Option<Vec<String>>,
+    actors: Option<Vec<ActorInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActorInfo {
+    pid: String,
+    class: String,
+    module: String,
+    #[allow(dead_code)]
+    spawned_at: i64,
 }
 
 /// REPL client state.
@@ -196,6 +206,41 @@ impl ReplClient {
             .clone()
             .ok_or_else(|| miette!("No file has been loaded yet"))?;
         self.load_file(&path)
+    }
+
+    /// List running actors.
+    fn list_actors(&mut self) -> Result<ReplResponse> {
+        let request = serde_json::json!({ "type": "actors" });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+
+    /// Kill an actor by PID string.
+    fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+        let request = serde_json::json!({
+            "type": "kill",
+            "pid": pid_str
+        });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
     }
 }
 
@@ -391,6 +436,8 @@ fn print_help() {
     println!("  :bindings     Show current variable bindings");
     println!("  :load <path>  Load a .bt file");
     println!("  :reload       Reload the last loaded file");
+    println!("  :actors       List running actors");
+    println!("  :kill <pid>   Kill an actor by PID");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -545,6 +592,54 @@ pub fn run() -> Result<()> {
                                     } else {
                                         println!("Reloaded");
                                     }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":actors" | ":a" => {
+                        match client.list_actors() {
+                            Ok(response) => {
+                                if response.response_type == "actors" {
+                                    if let Some(actors) = response.actors {
+                                        if actors.is_empty() {
+                                            println!("No running actors.");
+                                        } else {
+                                            println!("Running actors:");
+                                            for actor in actors {
+                                                println!(
+                                                    "  {} - {} ({})",
+                                                    actor.pid, actor.class, actor.module
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ if line.starts_with(":kill ") => {
+                        let pid_str = line.strip_prefix(":kill ").unwrap().trim();
+                        if pid_str.is_empty() {
+                            eprintln!("Usage: :kill <pid>");
+                            continue;
+                        }
+
+                        match client.kill_actor(pid_str) {
+                            Ok(response) => {
+                                if response.response_type == "result" {
+                                    println!("Actor {} killed.", pid_str);
                                 } else if response.response_type == "error" {
                                     if let Some(msg) = response.message {
                                         eprintln!("Error: {msg}");
