@@ -24,11 +24,13 @@
 -ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
-         ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2]).
+         ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
+         strip_internal_bindings/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
 -define(DAEMON_CONNECT_TIMEOUT, 5000).
+-define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
 
 %%% Public API
 
@@ -55,33 +57,43 @@ do_eval(Expression, State) ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     %% Execute the eval function, passing registry PID in bindings
+                    %% eval/1 returns {Result, UpdatedBindings} to support mutation threading
                     try
                         %% Add registry PID to bindings so generated code can access it
                         BindingsWithRegistry = case RegistryPid of
                             undefined -> Bindings;
-                            _ -> maps:put('__repl_actor_registry__', RegistryPid, Bindings)
+                            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
                         end,
-                        RawResult = apply(ModuleName, eval, [BindingsWithRegistry]),
+                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
+                        %% Strip internal keys before persisting bindings
+                        CleanBindings = strip_internal_bindings(UpdatedBindings),
                         %% Auto-await futures for synchronous REPL experience
                         Result = maybe_await_future(RawResult),
                         %% Check if this was an assignment
                         case extract_assignment(Expression) of
                             {ok, VarName} ->
-                                NewBindings = maps:put(VarName, Result, Bindings),
+                                %% Assignment: merge updated bindings with new assignment
+                                NewBindings = maps:put(VarName, Result, CleanBindings),
                                 FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
                                 {ok, Result, FinalState};
                             none ->
-                                {ok, Result, NewState}
+                                %% No assignment: use updated bindings from mutations
+                                FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
+                                {ok, Result, FinalState}
                         end
                     catch
-                        Class:Reason ->
+                        Class:Reason:_Stacktrace ->
                             {error, {eval_error, Class, Reason}, NewState}
                     after
                         %% Only purge module if it has no living actors
                         case should_purge_module(ModuleName, RegistryPid) of
                             true ->
-                                code:purge(ModuleName),
-                                code:delete(ModuleName);
+                                %% code:purge/1 returns true if successful, false if in use
+                                %% Must purge before delete to avoid "must be purged" error
+                                case code:purge(ModuleName) of
+                                    true -> code:delete(ModuleName);
+                                    false -> ok  %% Module in use, skip deletion
+                                end;
                             false ->
                                 %% Module still has actors, keep it loaded
                                 ok
@@ -617,3 +629,10 @@ should_purge_module(ModuleName, RegistryPid) ->
     ),
     %% Purge only if no actors from this module exist
     not HasActors.
+
+%% Strip internal plumbing keys from bindings map (BT-153).
+%% The __repl_actor_registry__ key is injected for codegen to access the registry,
+%% but should not be visible to users or persisted in REPL state.
+-spec strip_internal_bindings(map()) -> map().
+strip_internal_bindings(Bindings) ->
+    maps:remove(?INTERNAL_REGISTRY_KEY, Bindings).
