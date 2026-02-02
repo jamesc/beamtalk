@@ -1,8 +1,15 @@
 # Beamtalk Development Container
-# Rust compiler + Erlang/OTP for BEAM bytecode generation
+# 
+# This Dockerfile installs all core development dependencies:
+# - Rust compiler and cargo tools
+# - Erlang/OTP and rebar3 for BEAM bytecode
+# - Node.js for build tooling
+# - GitHub CLI (gh)
+# - Debugging and networking utilities
+#
+# GitHub Copilot CLI and workspace setup are handled by devcontainer.json features.
 
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
-#FROM mcr.microsoft.com/devcontainers/rust:latest
 
 # Install Erlang/OTP, git, and networking/debugging tools
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
@@ -44,3 +51,7 @@ RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:syste
 
 # Set up Erlang paths
 ENV PATH="/usr/lib/erlang/bin:${PATH}"
+
+# Pre-create cargo registry directory with correct ownership
+# This avoids needing sudo chown in postCreateCommand
+RUN mkdir -p /usr/local/cargo/registry && chown -R vscode:vscode /usr/local/cargo
