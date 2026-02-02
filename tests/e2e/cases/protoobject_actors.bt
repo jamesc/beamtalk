@@ -8,46 +8,35 @@
 // @load tests/e2e/fixtures/simple_proxy.bt
 
 // ===========================================================================
-// VERIFY CLASSES LOAD AND SPAWN SUCCESSFULLY
+// TEST 1: ACTORS CAN BE SPAWNED AND HAVE CLASS
 // ===========================================================================
-//
-// These tests verify:
-// 1. @load directive compiles classes successfully
-// 2. Classes can be spawned without errors
-// 3. Class names are recognized
-//
-// Note: We cannot verify exact spawn return values (PIDs are non-deterministic)
-// For full proxy forwarding verification with actual values, see:
-// - runtime/test/beamtalk_actor_tests.erl::dnu_forward_to_target_test
-// - runtime/test/beamtalk_repl_integration_tests.erl::future_auto_await_test
+// Note: Variable assignment with spawn results doesn't work in REPL yet
+// For now we verify classes load and spawn succeeds
 
-// Spawn Counter - verifies class is loaded and instantiable
 Counter spawn
-
-// Spawn SimpleProxy - verifies doesNotUnderstand class compiles
 SimpleProxy spawn
 
 // ===========================================================================
-// WHAT IS VERIFIED
+// WHAT IS VERIFIED IN THESE E2E TESTS  
 // ===========================================================================
 //
-// ✅ Counter class loads from fixture
-// ✅ SimpleProxy class loads from fixture  
-// ✅ Both classes can be spawned (no compilation errors)
-// ✅ doesNotUnderstand method in SimpleProxy compiles correctly
-// ✅ perform:withArguments: compiles correctly
+// ✅ Counter and SimpleProxy classes load from @load fixtures
+// ✅ Actors can be spawned without errors
+// ✅ doesNotUnderstand:args: and perform:withArguments: compile correctly
 //
-// For response value verification, see runtime tests where we have:
+// LIMITATION: Variable assignment from spawn doesn't work in REPL yet
+// Cannot test: counter := Counter spawn; counter getValue
 //
-// ```erlang
-// {ok, Counter} = test_counter:start_link(10),
-// {ok, Proxy} = test_proxy:start_link(Counter),
-// Result = gen_server:call(Proxy, {getValue, []}),
-// ?assertEqual(10, Result),  % ✅ Verifies forwarding works!
-// ```
+// For complete behavioral verification including:
+// - State initialization and mutations
+// - Transparent proxy forwarding  
+// - Message dispatch through doesNotUnderstand
+// - Actor identity and equality
 //
-// The runtime tests prove that:
-// - doesNotUnderstand catches unknown messages
-// - perform:withArguments: forwards them correctly
-// - Results match direct calls (transparent proxy pattern)
-// - REPL auto-awaits futures (beamtalk_repl_integration_tests.erl)
+// See: runtime/test/beamtalk_actor_tests.erl
+//      - dnu_forward_to_target_test (proxy forwarding)
+//      - counter_test (state mutations)
+//      - equality tests
+//
+// These runtime tests prove the proxy pattern works correctly by directly
+// exercising gen_server protocol with real Erlang values.
