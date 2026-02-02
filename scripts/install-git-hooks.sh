@@ -35,8 +35,12 @@ cat > "$HOOK_FILE" << 'EOF'
 echo "🔧 Running cargo fmt --all..."
 cargo fmt --all
 
-# Re-add any files that were formatted
-git diff --name-only --cached | grep '\.rs$' | xargs -r git add
+# Re-add any Rust files that were formatted
+changed_rs_files=$(git diff --name-only --cached | grep '\.rs$' || true)
+
+if [ -n "$changed_rs_files" ]; then
+    echo "$changed_rs_files" | xargs git add
+fi
 
 echo "✅ Code formatted"
 exit 0

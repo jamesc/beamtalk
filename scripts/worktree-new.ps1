@@ -214,7 +214,8 @@ $envPath = Join-Path $worktreePath ".env"
 # Port ranges: BT branches 49152-50151 (capped at issue 999), hash-based 50152-51051
 $port = 49152
 $nodeName = "beamtalk@localhost"
-$daemonSocket = "$env:USERPROFILE\.beamtalk\daemon.sock"
+# Use container path (remoteUser: vscode), not Windows host path
+$daemonSocket = "/home/vscode/.beamtalk/daemon.sock"
 
 if ($Branch -match "^BT-(\d+)") {
     $issueNum = [int]$matches[1]
@@ -225,7 +226,7 @@ if ($Branch -match "^BT-(\d+)") {
     }
     $port = 49152 + $issueNum
     $nodeName = "beamtalk_bt${issueNum}@localhost"
-    $daemonSocket = "$env:USERPROFILE\.beamtalk\daemon-bt${issueNum}.sock"
+    $daemonSocket = "/home/vscode/.beamtalk/daemon-bt${issueNum}.sock"
     Write-Host "   Port: $port (derived from $Branch)" -ForegroundColor Gray
     Write-Host "   Node: $nodeName" -ForegroundColor Gray
     Write-Host "   Daemon: daemon-bt${issueNum}.sock" -ForegroundColor Gray
@@ -240,8 +241,14 @@ else {
     $hash = [System.Text.Encoding]::UTF8.GetBytes($Branch) | ForEach-Object { $_ } | Measure-Object -Sum
     $port = 50152 + ($hash.Sum % 900)
     $sanitizedBranch = $Branch -replace '[^a-zA-Z0-9]', '_'
+    # Truncate sanitized branch name to prevent Unix socket path length issues (~108 bytes)
+    # Keep first 20 chars + hash suffix to ensure uniqueness while staying under limit
+    if ($sanitizedBranch.Length -gt 20) {
+        $branchHash = ($hash.Sum % 10000).ToString("D4")
+        $sanitizedBranch = $sanitizedBranch.Substring(0, 20) + "_" + $branchHash
+    }
     $nodeName = "beamtalk_${sanitizedBranch}@localhost"
-    $daemonSocket = "$env:USERPROFILE\.beamtalk\daemon-${sanitizedBranch}.sock"
+    $daemonSocket = "/home/vscode/.beamtalk/daemon-${sanitizedBranch}.sock"
     Write-Host "   Port: $port (derived from branch hash)" -ForegroundColor Gray
     Write-Host "   Node: $nodeName" -ForegroundColor Gray
     Write-Host "   Daemon: daemon-${sanitizedBranch}.sock" -ForegroundColor Gray
