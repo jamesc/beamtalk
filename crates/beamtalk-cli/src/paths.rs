@@ -41,7 +41,7 @@ pub fn lockfile_path() -> Result<PathBuf> {
 /// Path to the Unix socket.
 ///
 /// Priority order:
-/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (if set)
+/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (if set and non-empty)
 /// 2. Default: `~/.beamtalk/daemon.sock`
 ///
 /// This allows per-worktree daemon isolation when working on multiple
@@ -52,7 +52,9 @@ pub fn lockfile_path() -> Result<PathBuf> {
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn socket_path() -> Result<PathBuf> {
     if let Ok(socket_path) = std::env::var("BEAMTALK_DAEMON_SOCKET") {
-        return Ok(PathBuf::from(socket_path));
+        if !socket_path.is_empty() {
+            return Ok(PathBuf::from(socket_path));
+        }
     }
     Ok(beamtalk_dir()?.join("daemon.sock"))
 }
@@ -141,6 +143,20 @@ mod tests {
         }
         let socket = socket_path().expect("Failed to get socket_path");
         assert_eq!(socket, PathBuf::from("/tmp/test-daemon.sock"));
+        // SAFETY: Cleaning up test state
+        unsafe {
+            std::env::remove_var("BEAMTALK_DAEMON_SOCKET");
+        }
+    }
+
+    #[test]
+    fn socket_path_ignores_empty_env_var() {
+        // SAFETY: This test runs in isolation and only modifies the environment temporarily
+        unsafe {
+            std::env::set_var("BEAMTALK_DAEMON_SOCKET", "");
+        }
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert!(socket.ends_with(".beamtalk/daemon.sock"), "Empty env var should use default");
         // SAFETY: Cleaning up test state
         unsafe {
             std::env::remove_var("BEAMTALK_DAEMON_SOCKET");
