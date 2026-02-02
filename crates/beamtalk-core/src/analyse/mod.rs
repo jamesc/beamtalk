@@ -118,7 +118,8 @@ pub enum MutationKind {
 /// Extract variable bindings from a pattern.
 ///
 /// Recursively traverses the pattern and collects all variable identifiers
-/// that will be bound when the pattern matches.
+/// that will be bound when the pattern matches. Returns diagnostics for
+/// duplicate pattern variables.
 ///
 /// # Examples
 ///
@@ -128,48 +129,70 @@ pub enum MutationKind {
 /// # use beamtalk_core::parse::Span;
 /// # use ecow::EcoString;
 /// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
-/// let bindings = extract_pattern_bindings(&pattern);
+/// let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 /// assert_eq!(bindings.len(), 1);
 /// assert_eq!(bindings[0].name, EcoString::from("x"));
+/// assert!(diagnostics.is_empty());
 /// ```
-pub fn extract_pattern_bindings(pattern: &Pattern) -> Vec<Identifier> {
+pub fn extract_pattern_bindings(
+    pattern: &Pattern,
+) -> (Vec<Identifier>, Vec<crate::parse::Diagnostic>) {
     let mut bindings = Vec::new();
-    extract_pattern_bindings_impl(pattern, &mut bindings);
-    bindings
+    let mut diagnostics = Vec::new();
+    let mut seen = std::collections::HashMap::new();
+    extract_pattern_bindings_impl(pattern, &mut bindings, &mut seen, &mut diagnostics);
+    (bindings, diagnostics)
 }
 
 /// Internal implementation of pattern binding extraction.
 ///
+/// Detects duplicate pattern variables and emits diagnostics. Beamtalk follows
+/// Rust-style semantics: duplicate variables in patterns are an error.
+///
 /// # Note
 ///
-/// This function collects all variable bindings without duplicate detection.
-/// Duplicate variables like `{X, X}` will bind `X` twice, with the second
-/// overwriting the first span in the scope. Erlang allows this as an equality
-/// constraint, but validation is not yet implemented.
-///
-/// TODO(BT-183): Add duplicate pattern variable detection and validation.
-/// Either emit diagnostic for duplicates or implement Erlang-style equality checks.
-fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifier>) {
+/// Erlang allows duplicates as equality constraints ({X, X} means both must be equal),
+/// but for MVP we disallow this for simplicity. Can be relaxed in future with codegen
+/// for equality checks.
+fn extract_pattern_bindings_impl(
+    pattern: &Pattern,
+    bindings: &mut Vec<Identifier>,
+    seen: &mut std::collections::HashMap<EcoString, Span>,
+    diagnostics: &mut Vec<crate::parse::Diagnostic>,
+) {
     match pattern {
         // Variable patterns bind the identifier
         Pattern::Variable(id) => {
+            if let Some(first_span) = seen.get(&id.name) {
+                // Duplicate variable - emit diagnostic
+                diagnostics.push(crate::parse::Diagnostic::error(
+                    format!(
+                        "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
+                        id.name,
+                        first_span.start()
+                    ),
+                    id.span,
+                ));
+            } else {
+                seen.insert(id.name.clone(), id.span);
+            }
             bindings.push(id.clone());
         }
 
         // Tuple patterns: recursively extract from all elements
         Pattern::Tuple { elements, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings);
+                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
             }
         }
 
         // List patterns: recursively extract from elements and tail
         Pattern::List { elements, tail, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings);
+                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
             }
             if let Some(tail_pattern) = tail {
-                extract_pattern_bindings_impl(tail_pattern, bindings);
+                extract_pattern_bindings_impl(tail_pattern, bindings, seen, diagnostics);
             }
         }
 
@@ -177,7 +200,7 @@ fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifie
         Pattern::Binary { segments, .. } => {
             for segment in segments {
                 // Binary segments may have value patterns that bind variables
-                extract_pattern_bindings_impl(&segment.value, bindings);
+                extract_pattern_bindings_impl(&segment.value, bindings, seen, diagnostics);
             }
         }
 
@@ -480,8 +503,10 @@ impl Analyser {
         // Create a new scope for this match arm
         self.scope.push();
 
-        // Extract and define all pattern variables
-        let bindings = extract_pattern_bindings(&arm.pattern);
+        // Extract and define all pattern variables, collect duplicate diagnostics
+        let (bindings, pattern_diagnostics) = extract_pattern_bindings(&arm.pattern);
+        self.result.diagnostics.extend(pattern_diagnostics);
+
         for binding in bindings {
             self.scope.define(&binding.name, binding.span);
         }
@@ -683,26 +708,29 @@ mod tests {
     #[test]
     fn test_extract_pattern_bindings_variable() {
         let pattern = Pattern::Variable(Identifier::new("x", test_span()));
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].name, "x");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn test_extract_pattern_bindings_wildcard() {
         let pattern = Pattern::Wildcard(test_span());
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 0);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn test_extract_pattern_bindings_literal() {
         let pattern = Pattern::Literal(Literal::Integer(42), test_span());
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 0);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -714,11 +742,12 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "x");
         assert_eq!(bindings[1].name, "y");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -736,12 +765,13 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 3);
         assert_eq!(bindings[0].name, "status");
         assert_eq!(bindings[1].name, "x");
         assert_eq!(bindings[2].name, "y");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -757,12 +787,13 @@ mod tests {
             )))),
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 3);
         assert_eq!(bindings[0].name, "head");
         assert_eq!(bindings[1].name, "second");
         assert_eq!(bindings[2].name, "tail");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -775,11 +806,12 @@ mod tests {
             tail: None,
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "a");
         assert_eq!(bindings[1].name, "b");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -807,11 +839,95 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "version");
         assert_eq!(bindings[1].name, "data");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_in_tuple() {
+        // Pattern {x, x} should error
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("x", test_span())),
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        // Both bindings collected
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "x");
+        assert_eq!(bindings[1].name, "x");
+
+        // Diagnostic emitted for duplicate
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("bound multiple times"));
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_nested() {
+        // Pattern {x, {x, y}} should error on second x
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Variable(Identifier::new("x", test_span())),
+                        Pattern::Variable(Identifier::new("y", test_span())),
+                    ],
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_in_list() {
+        // Pattern [x, x | tail] should error
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("x", test_span())),
+            ],
+            tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                "tail",
+                test_span(),
+            )))),
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_no_duplicate_different_names() {
+        // Pattern {x, y} should be fine
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("y", test_span())),
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -829,11 +945,12 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "first");
         assert_eq!(bindings[1].name, "value");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
