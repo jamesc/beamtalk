@@ -55,9 +55,6 @@ use serde::Deserialize;
 
 use crate::paths::{beamtalk_dir, is_daemon_running};
 
-/// Default port for the REPL backend.
-const REPL_PORT: u16 = 9000;
-
 /// Connection timeout in milliseconds.
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
@@ -374,7 +371,7 @@ fn start_daemon() -> Result<()> {
 }
 
 /// Start the BEAM node with REPL backend.
-fn start_beam_node(port: u16) -> Result<Child> {
+fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let runtime_dir = find_runtime_dir()?;
     eprintln!("Using runtime at: {}", runtime_dir.display());
@@ -400,6 +397,25 @@ fn start_beam_node(port: u16) -> Result<Child> {
 
     eprintln!("Starting BEAM node with REPL backend on port {port}...");
 
+    // Build the eval command that configures the runtime via application:set_env
+    // This allows runtime to read port from application environment
+    let eval_cmd = if let Some(name) = node_name {
+        format!(
+            "application:set_env(beamtalk_runtime, repl_port, {port}), \
+             application:set_env(beamtalk_runtime, node_name, '{name}'), \
+             {{ok, _}} = beamtalk_repl:start_link(), \
+             io:format(\"REPL backend started on port {port} (node: {name})~n\"), \
+             receive stop -> ok end."
+        )
+    } else {
+        format!(
+            "application:set_env(beamtalk_runtime, repl_port, {port}), \
+             {{ok, _}} = beamtalk_repl:start_link(), \
+             io:format(\"REPL backend started on port {port}~n\"), \
+             receive stop -> ok end."
+        )
+    };
+
     // Start erl with beamtalk_repl running
     // The receive loop keeps the BEAM VM alive while REPL is running
     let child = Command::new("erl")
@@ -410,9 +426,7 @@ fn start_beam_node(port: u16) -> Result<Child> {
             "-pa",
             jsx_beam_dir.to_str().unwrap_or(""),
             "-eval",
-            &format!(
-                "{{ok, _}} = beamtalk_repl:start_link({port}), io:format(\"REPL backend started on port {port}~n\"), receive stop -> ok end."
-            ),
+            &eval_cmd,
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -518,7 +532,22 @@ impl Drop for BeamChildGuard {
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
 )]
-pub fn run() -> Result<()> {
+pub fn run(port_arg: u16, node_arg: Option<String>) -> Result<()> {
+    // Priority: CLI flag > environment variable > default
+    // Port: CLI --port > BEAMTALK_REPL_PORT > 9000
+    let port = if port_arg != 9000 {
+        port_arg
+    } else if let Ok(env_port) = std::env::var("BEAMTALK_REPL_PORT") {
+        env_port
+            .parse()
+            .map_err(|_| miette!("Invalid BEAMTALK_REPL_PORT: {env_port}"))?
+    } else {
+        port_arg
+    };
+
+    // Node name: CLI --node > BEAMTALK_NODE_NAME > None
+    let node_name = node_arg.or_else(|| std::env::var("BEAMTALK_NODE_NAME").ok());
+
     println!("Beamtalk v{}", env!("CARGO_PKG_VERSION"));
     println!("Type :help for available commands, :exit to quit.");
     println!();
@@ -531,11 +560,11 @@ pub fn run() -> Result<()> {
     // Start BEAM node with REPL backend
     // Use a guard to ensure cleanup on any exit path
     let beam_guard = BeamChildGuard {
-        child: start_beam_node(REPL_PORT)?,
+        child: start_beam_node(port, node_name.as_ref())?,
     };
 
     // Connect to REPL backend
-    let mut client = connect_with_retries(REPL_PORT)?;
+    let mut client = connect_with_retries(port)?;
 
     println!("Connected to REPL backend.");
     println!();

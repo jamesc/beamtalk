@@ -247,7 +247,35 @@ Helper scripts are in `scripts/`:
 This will:
 1. Create a worktree at `../BT-99-feature-name/` (sibling to main repo)
 2. Check out the branch (creating it from main if needed)
-3. Start a devcontainer for that worktree
+3. Create a `.env` file with auto-derived port and node name
+4. Start a devcontainer for that worktree
+5. Connect you to a shell inside the container
+
+### Port and Node Name Auto-Assignment
+
+Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts:
+
+**Port derivation:**
+- `BT-190` branch → port `9190` (9000 + issue number)
+- `BT-64` branch → port `9064`
+- `main` branch → port `9000` (default)
+- Other branches → port `9100-9999` (hash-based)
+
+**Node name derivation:**
+- `BT-190` branch → `beamtalk_bt190@localhost`
+- `BT-64` branch → `beamtalk_bt64@localhost`
+- `main` branch → `beamtalk@localhost` (default)
+- Other branches → `beamtalk_<sanitized_name>@localhost`
+
+**Priority order** (highest to lowest):
+1. CLI flag: `beamtalk repl --port 9001 --node mynode@localhost`
+2. Environment variable: `BEAMTALK_REPL_PORT`, `BEAMTALK_NODE_NAME`
+3. Application config: `runtime/config/sys.config`
+4. Default: port `9000`, node `beamtalk@localhost`
+
+The worktree scripts automatically set `BEAMTALK_REPL_PORT` and `BEAMTALK_NODE_NAME` in a `.env` file, which is loaded by the devcontainer. This file is in `.gitignore` and cleaned up when the worktree is removed.
+
+
 4. Connect you to a shell inside the container
 
 ### Removing a Worktree

@@ -161,6 +161,14 @@ try {
     # Stop devcontainer FIRST (before removing worktree to release file locks)
     Remove-DevContainer -WorktreePath $worktreePath
     
+    # Remove .env file if it exists
+    $envPath = Join-Path $worktreePath ".env"
+    if (Test-Path $envPath) {
+        Write-Host "🗑️  Removing .env file..." -ForegroundColor Cyan
+        Remove-Item $envPath -Force
+        Write-Host "✅ .env file removed" -ForegroundColor Green
+    }
+    
     # Check if the .git file in the worktree needs fixing
     $gitFile = Join-Path $worktreePath ".git"
     if (Test-Path $gitFile -PathType Leaf) {

@@ -56,7 +56,7 @@
 -behaviour(gen_server).
 
 %% Public API
--export([start_link/1, start_link/2, stop/1]).
+-export([start_link/0, start_link/1, start_link/2, stop/1]).
 -export([eval/2, get_bindings/1, clear_bindings/1, get_port/1]).
 
 %% gen_server callbacks
@@ -69,6 +69,13 @@
 -define(ACCEPT_TIMEOUT, 100).
 
 %%% Public API
+
+%% @doc Start the REPL server on default port from application environment.
+%% Falls back to port 9000 if not configured.
+-spec start_link() -> {ok, pid()} | {error, term()}.
+start_link() ->
+    Port = application:get_env(beamtalk_runtime, repl_port, 9000),
+    start_link(Port, #{}).
 
 %% @doc Start the REPL server on the given port.
 %% Uses default compiler daemon socket path.
