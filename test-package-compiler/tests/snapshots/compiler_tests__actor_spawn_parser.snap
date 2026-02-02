@@ -137,15 +137,19 @@ Module {
                 },
             ),
             value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
+                receiver: ClassReference {
+                    name: Identifier {
                         name: "Counter",
                         span: Span {
                             start: 244,
                             end: 251,
                         },
                     },
-                ),
+                    span: Span {
+                        start: 244,
+                        end: 251,
+                    },
+                },
                 selector: Unary(
                     "spawn",
                 ),

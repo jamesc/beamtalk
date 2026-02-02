@@ -17,15 +17,19 @@ Module {
                 },
             ),
             value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
+                receiver: ClassReference {
+                    name: Identifier {
                         name: "Set",
                         span: Span {
                             start: 148,
                             end: 151,
                         },
                     },
-                ),
+                    span: Span {
+                        start: 148,
+                        end: 151,
+                    },
+                },
                 selector: Keyword(
                     [
                         KeywordPart {

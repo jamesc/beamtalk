@@ -17,6 +17,7 @@
 //! Must respond in <50ms for typical file sizes.
 
 use crate::ast::{Expression, Literal, MessageSelector, Module};
+use crate::codegen::core_erlang::to_module_name;
 use crate::language_service::{HoverInfo, Position};
 use crate::parse::Span;
 
@@ -80,6 +81,21 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 Some(HoverInfo::new(
                     format!("Identifier: `{}`", ident.name),
                     ident.span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::ClassReference { name, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Use proper CamelCase → snake_case conversion
+                let module_name = to_module_name(&name.name);
+                Some(HoverInfo::new(
+                    format!(
+                        "Class: `{}` (resolves to module `{}`)",
+                        name.name, module_name
+                    ),
+                    *span,
                 ))
             } else {
                 None
@@ -337,5 +353,36 @@ mod tests {
         let hover = hover.unwrap();
         assert!(hover.contents.contains("Unary message"));
         assert!(hover.contents.contains("size"));
+    }
+
+    #[test]
+    fn compute_hover_on_class_reference() {
+        let source = "Counter spawn";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        // Position 0 is at "Counter"
+        let hover = compute_hover(&module, source, Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("Class: `Counter`"));
+        assert!(hover.contents.contains("module `counter`"));
+    }
+
+    #[test]
+    fn compute_hover_on_class_reference_camelcase() {
+        let source = "MyCounterActor spawn";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+
+        // Position 0 is at "MyCounterActor"
+        let hover = compute_hover(&module, source, Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("Class: `MyCounterActor`"));
+        // Verify proper CamelCase → snake_case conversion
+        assert!(hover.contents.contains("module `my_counter_actor`"));
+        // Ensure it's NOT using naive to_lowercase
+        assert!(!hover.contents.contains("module `mycounteractor`"));
     }
 }

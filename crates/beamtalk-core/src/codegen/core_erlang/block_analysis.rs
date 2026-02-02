@@ -93,8 +93,11 @@ fn analyze_expression(
     ctx: &mut AnalysisContext,
 ) {
     match expr {
-        Expression::Literal(..) | Expression::Error { .. } | Expression::Super(_) => {
-            // No variable access
+        Expression::Literal(..)
+        | Expression::Error { .. }
+        | Expression::Super(_)
+        | Expression::ClassReference { .. } => {
+            // No variable access (ClassReference resolves at compile time)
         }
 
         Expression::Identifier(id) => {

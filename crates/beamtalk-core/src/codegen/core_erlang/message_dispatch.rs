@@ -37,7 +37,7 @@
 //! - **Arguments**: Parameters for keyword messages
 //! - **Future**: Asynchronous result container
 
-use super::{CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
@@ -118,12 +118,16 @@ impl CoreErlangGenerator {
         // This creates a new actor instance via gen_server:start_link
         if let MessageSelector::Unary(name) = selector {
             if name == "spawn" && arguments.is_empty() {
-                if let Expression::Identifier(id) = receiver {
-                    // Generate: call 'module':'spawn'()
-                    // Convert class name to module name (CamelCase -> snake_case)
-                    let module_name = Self::to_module_name(&id.name);
-                    write!(self.output, "call '{module_name}':'spawn'()")?;
-                    return Ok(());
+                // Handle both ClassReference and Identifier (for backwards compat)
+                match receiver {
+                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
+                        // Generate: call 'module':'spawn'()
+                        // Convert class name to module name (CamelCase -> snake_case)
+                        let module_name = to_module_name(&name.name);
+                        write!(self.output, "call '{module_name}':'spawn'()")?;
+                        return Ok(());
+                    }
+                    _ => {}
                 }
             }
 
@@ -137,13 +141,17 @@ impl CoreErlangGenerator {
         // This creates a new actor instance with initialization arguments
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if let Expression::Identifier(id) = receiver {
-                    // Generate: call 'module':'spawn'(InitArgs)
-                    let module_name = Self::to_module_name(&id.name);
-                    write!(self.output, "call '{module_name}':'spawn'(")?;
-                    self.generate_expression(&arguments[0])?;
-                    write!(self.output, ")")?;
-                    return Ok(());
+                // Handle both ClassReference and Identifier (for backwards compat)
+                match receiver {
+                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
+                        // Generate: call 'module':'spawn'(InitArgs)
+                        let module_name = to_module_name(&name.name);
+                        write!(self.output, "call '{module_name}':'spawn'(")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, ")")?;
+                        return Ok(());
+                    }
+                    _ => {}
                 }
             }
         }

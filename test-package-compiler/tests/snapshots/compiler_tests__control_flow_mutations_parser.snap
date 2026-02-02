@@ -1301,110 +1301,18 @@ Module {
                 end: 2406,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "Counter",
-                    span: Span {
-                        start: 2586,
-                        end: 2593,
-                    },
-                },
-            ),
-            value: Identifier(
-                Identifier {
-                    name: "class",
-                    span: Span {
-                        start: 2597,
-                        end: 2602,
-                    },
-                },
-            ),
+        Error {
+            message: "Invalid assignment target",
             span: Span {
                 start: 2586,
-                end: 2602,
+                end: 2593,
             },
         },
-        Block(
-            Block {
-                parameters: [],
-                body: [
-                    MessageSend {
-                        receiver: Error {
-                            message: "Unexpected token: expected expression, found state:",
-                            span: Span {
-                                start: 2609,
-                                end: 2615,
-                            },
-                        },
-                        selector: Keyword(
-                            [
-                                KeywordPart {
-                                    keyword: "value:",
-                                    span: Span {
-                                        start: 2616,
-                                        end: 2622,
-                                    },
-                                },
-                            ],
-                        ),
-                        arguments: [
-                            MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "Integer",
-                                        span: Span {
-                                            start: 2623,
-                                            end: 2630,
-                                        },
-                                    },
-                                ),
-                                selector: Binary(
-                                    "=",
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            0,
-                                        ),
-                                        Span {
-                                            start: 2633,
-                                            end: 2634,
-                                        },
-                                    ),
-                                ],
-                                span: Span {
-                                    start: 2623,
-                                    end: 2634,
-                                },
-                            },
-                        ],
-                        span: Span {
-                            start: 2609,
-                            end: 2634,
-                        },
-                    },
-                    Identifier(
-                        Identifier {
-                            name: "increment",
-                            span: Span {
-                                start: 2645,
-                                end: 2654,
-                            },
-                        },
-                    ),
-                ],
-                span: Span {
-                    start: 2603,
-                    end: 2604,
-                },
-            },
-        ),
         Error {
-            message: "Unexpected token: expected expression, found =>",
+            message: "Unexpected token: expected expression, found .",
             span: Span {
-                start: 2655,
-                end: 2657,
+                start: 2634,
+                end: 2635,
             },
         },
         MessageSend {
@@ -2108,15 +2016,19 @@ Module {
             ),
             arguments: [
                 MessageSend {
-                    receiver: Identifier(
-                        Identifier {
+                    receiver: ClassReference {
+                        name: Identifier {
                             name: "Integer",
                             span: Span {
                                 start: 3345,
                                 end: 3352,
                             },
                         },
-                    ),
+                        span: Span {
+                            start: 3345,
+                            end: 3352,
+                        },
+                    },
                     selector: Binary(
                         "=",
                     ),
@@ -2396,9 +2308,8 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2223, end: 2224 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2231, end: 2232 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2240, end: 2241 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 2609, end: 2615 } }
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 2655, end: 2657 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2655, end: 2657 } }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2586, end: 2593 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2634, end: 2635 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2671, end: 2672 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2682, end: 2683 } }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found incrementBy:", span: Span { start: 2779, end: 2791 } }
