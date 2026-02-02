@@ -258,6 +258,18 @@ BEAMTALK_DAEMON_SOCKET=$daemonSocket
 
 Write-Host "✅ Created .env file" -ForegroundColor Green
 
+# Install git hooks (pre-commit for auto-formatting)
+Write-Host "🪝 Installing git hooks..." -ForegroundColor Cyan
+$installHooksScript = Join-Path $mainRepo "scripts" "install-git-hooks.sh"
+if (Test-Path $installHooksScript) {
+    Push-Location $worktreePath
+    bash $installHooksScript
+    Pop-Location
+    Write-Host "✅ Git hooks installed" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  install-git-hooks.sh not found, skipping hook installation" -ForegroundColor Yellow
+}
+
 # Sync devcontainer config from main repo (worktrees may be created from old commits)
 Write-Host "📋 Syncing devcontainer config..." -ForegroundColor Cyan
 $mainDevcontainer = Join-Path $mainRepo ".devcontainer"
