@@ -272,6 +272,10 @@ impl Analyser {
             Match { value, arms, .. } => {
                 self.analyse_expression(value, None);
                 for arm in arms {
+                    // Analyze guard if present
+                    if let Some(guard) = &arm.guard {
+                        self.analyse_expression(guard, None);
+                    }
                     self.analyse_expression(&arm.body, None);
                 }
             }
@@ -456,6 +460,10 @@ impl Analyser {
             Match { value, arms, .. } => {
                 self.collect_captures_and_mutations(value, captures, mutations);
                 for arm in arms {
+                    // Analyze guard if present
+                    if let Some(guard) = &arm.guard {
+                        self.collect_captures_and_mutations(guard, captures, mutations);
+                    }
                     self.collect_captures_and_mutations(&arm.body, captures, mutations);
                 }
             }
