@@ -50,10 +50,10 @@ The semantic analysis module structure exists with type definitions:
 
 ### What's Missing
 
-The infrastructure is complete, but the actual analysis logic needs to be implemented:
+The infrastructure is complete, and block context detection is implemented. Remaining work:
 
 1. ❌ AST traversal to populate scope and detect blocks
-2. ❌ Block context classification (control flow vs stored vs passed)
+2. ✅ Block context classification (control flow vs stored vs passed) - **DONE (BT-148)**
 3. ❌ Capture and mutation detection
 4. ❌ Diagnostic generation from analysis errors
 5. ❌ Integration with `compute_diagnostics()`
@@ -100,12 +100,12 @@ crates/beamtalk-core/src/
 ├── analyse/
 │   ├── mod.rs           # ✅ Public API types and analyse() stub
 │   ├── scope.rs         # ✅ Scope tracking with full tests
-│   ├── block_context.rs # ❌ TODO: Block mutation analysis  
+│   ├── block_context.rs # ✅ Block context classification (BT-148)
 │   ├── visitor.rs       # ❌ TODO: AST visitor trait
 │   └── error.rs         # ✅ Semantic error types
 ```
 
-**Status**: Types and scope tracking implemented. Need to add visitor and block analysis.
+**Status**: Types, scope tracking, and block context detection implemented. Need to add visitor for full analysis.
 
 ## Key Types
 
@@ -197,6 +197,10 @@ fn is_control_flow_position(receiver: &Expr, selector: &str, arg_index: usize) -
 
 #### Block Classification
 
+**Status: ✅ IMPLEMENTED (BT-148)**
+
+The `classify_block()` function in `block_context.rs` classifies blocks based on their AST position:
+
 ```rust
 enum BlockContext {
     /// Literal block in control flow: `10 timesRepeat: [x := x + 1]`
@@ -209,6 +213,49 @@ enum BlockContext {
     Other,
     /// Could not determine context (error recovery)
     Unknown,
+}
+```
+
+**Key Implementation Details:**
+
+1. **Literal vs Variable Distinction**: Only literal blocks (`[...]`) in control flow positions are `ControlFlow`. Block variables in any position are always `Passed`.
+
+2. **Control Flow Selectors**: Implemented via `is_control_flow_selector()`:
+   - Loops: `whileTrue:`, `whileFalse:`, `timesRepeat:`, `do:`, `collect:`, `select:`, `reject:` (arg 0)
+   - Range iteration: `to:do:`, `inject:into:` (arg 1)
+   - Conditionals: `ifTrue:`, `ifFalse:`, `ifNil:`, `ifNotNil:`, `ifTrue:ifFalse:`, `ifNil:ifNotNil:` (all args)
+
+3. **Special Cases**:
+   - `whileTrue:`/`whileFalse:` receiver must also be a literal block for `ControlFlow`
+   - Block variables in control flow positions are classified as `Passed`, not `ControlFlow`
+
+4. **Test Coverage**: 22 tests covering all context types and edge cases
+
+**Remaining Work:**
+- Integration with AST visitor (Phase 1.3)
+- Mutation detection within blocks (Phase 1.4)
+- Diagnostic emission (Phase 1.5)
+
+#### Control Flow Detection (Legacy Example)
+
+The following shows the original design concept. The actual implementation is in `block_context.rs`:
+
+```rust
+fn is_control_flow_position(receiver: &Expr, selector: &str, arg_index: usize) -> bool {
+    match selector {
+        "whileTrue:" | "whileFalse:" => 
+            // Receiver must be literal block, arg must be literal block
+            arg_index == 0,
+        "timesRepeat:" | "do:" | "collect:" | "select:" | "reject:" => 
+            arg_index == 0,
+        "to:do:" => 
+            arg_index == 1,  // Second arg is the block
+        "inject:into:" => 
+            arg_index == 1,
+        "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNil:" | "ifNotNil:" =>
+            true,  // All block args are control flow
+        _ => false
+    }
 }
 ```
 
