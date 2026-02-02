@@ -417,6 +417,14 @@ impl Analyser {
             self.analyse_expression(expr, None);
         }
 
+        // Store block info before emitting diagnostics (avoids unnecessary clones)
+        let block_info = BlockInfo {
+            context,
+            captures,
+            mutations: mutations.clone(), // Clone only mutations (needed for diagnostics below)
+        };
+        self.result.block_info.insert(block.span, block_info);
+
         // Emit diagnostics for mutations based on block context
         for mutation in &mutations {
             match &mutation.kind {
@@ -458,14 +466,6 @@ impl Analyser {
                 }
             }
         }
-
-        // Store block info
-        let block_info = BlockInfo {
-            context,
-            captures: captures.clone(),
-            mutations: mutations.clone(),
-        };
-        self.result.block_info.insert(block.span, block_info);
 
         self.scope.pop(); // Exit block scope
     }
