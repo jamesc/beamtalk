@@ -35,7 +35,7 @@ Every issue **must** have:
 | `Research` | Research projects, code spikes |
 | `Samples` | Code, examples, things to help devs get started |
 
-**Note:** Use `Epic` type only for large initiatives. See AGENTS.md "Epics" section for Epic creation guidelines.
+**Note:** Use `Epic` type only for large initiatives. Epic titles should use `Epic:` prefix (e.g., "Epic: Feature Name"). See AGENTS.md "Epics" section for full guidelines.
 
 ## Item Area Labels
 

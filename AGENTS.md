@@ -132,9 +132,10 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 
 When creating an Epic:
 
-1. **Use Epic label** - Always add `Epic` label to Epic issues
-2. **Size as XL or L** - Epics are large by definition
-3. **Write comprehensive description** with:
+1. **Title prefix** - Always use `Epic:` prefix in title (e.g., `Epic: Standard Library Core Classes`)
+2. **Use Epic label** - Always add `Epic` label to Epic issues
+3. **Size as XL or L** - Epics are large by definition
+4. **Write comprehensive description** with:
    - Overview of initiative
    - Goals (3-5 high-level outcomes)
    - Status summary (progress percentage, completed/in-progress/planned)
@@ -144,6 +145,13 @@ When creating an Epic:
 4. **Link child issues** - Use Linear's "blocks" relationship to connect Epic to child issues
 5. **Track progress** - Update Epic description with progress as child issues complete
 6. **Include completion criteria** - Checklist of what defines "done" for the Epic
+
+**Example Epic Titles:**
+```
+Epic: Block Semantics and Control Flow
+Epic: Standard Library Core Classes
+Epic: REPL and Interactive Development
+```
 
 **Example Epic Structure:**
 ```markdown
