@@ -11,9 +11,9 @@
 
 // Actor - Base class for all actors in Beamtalk
 //
-// Every object in Beamtalk is an actor (BEAM process). This is the root
-// of the class hierarchy, providing core message protocols for spawning,
-// introspection, and debugging.
+// Actor inherits from Object and adds process-based concurrency. Every actor
+// runs in its own BEAM process and communicates via asynchronous messages.
+// This is the base class for most application code in Beamtalk.
 //
 // ## Core Messages
 //
@@ -61,15 +61,10 @@
 // All other actors should inherit from Actor and override `describe`
 // to provide meaningful debugging output.
 
-Actor
-  // Returns the actor's class (compiler intrinsic)
-  class => self.__class__
-
-  // Show this actor's description on the Transcript
-  inspect => Transcript show: self describe
-
+Object subclass: Actor
   // Returns a textual description of this actor
   // Subclasses should override to provide detailed info
+  // (Overrides Object>>describe to provide actor-specific description)
   describe => 'an Actor'
 
   // Spawn a new instance with default state (compiler primitive)
@@ -81,34 +76,3 @@ Actor
   // Example: Counter spawnWith: #{value => 10}
   // Generated code: gen_server:start_link(ClassName, InitArgs, [])
   spawnWith: initArgs => // implemented by compiler
-
-  // ## Nil Testing Protocol
-  //
-  // These messages allow nil-safe control flow. All objects (except Nil) return
-  // false for `isNil` and true for `notNil`.
-  //
-  // Examples:
-  // ```beamtalk
-  // 42 isNil        // => false
-  // 42 notNil       // => true
-  // 42 ifNil: [0]   // => 42
-  // 42 ifNotNil: [:v | v + 1]  // => 43
-  // ```
-
-  // Returns false for all objects except Nil
-  isNil => false
-
-  // Returns true for all objects except Nil
-  notNil => true
-
-  // Returns self without evaluating the block (non-nil objects)
-  ifNil: nilBlock => self
-
-  // Evaluates the block passing the receiver as argument (non-nil objects)
-  ifNotNil: notNilBlock => notNilBlock value: self
-
-  // Evaluates notNilBlock with receiver (non-nil objects)
-  ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
-
-  // Evaluates notNilBlock with receiver (non-nil objects, reversed order)
-  ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
