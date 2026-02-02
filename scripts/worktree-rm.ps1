@@ -90,12 +90,24 @@ function Remove-DevContainer {
     
     $folderName = Split-Path $WorktreePath -Leaf
     
-    # Normalize path: git returns forward slashes, Docker labels have backslashes
-    $normalizedPath = $WorktreePath -replace "/", "\"
-    
-    # Find containers by devcontainer.local_folder label
-    # This is more reliable than matching container names
-    $containers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null | Where-Object { $_ -match [regex]::Escape($normalizedPath) }
+    # Find containers by matching the folder name in devcontainer.local_folder label
+    # This handles cross-platform paths where:
+    # - Host sees: C:\Users\james\source\worktrees\BT-137 or /workspaces/BT-137
+    # - Container label: /workspaces/BT-137
+    # We compare just the folder names (e.g., BT-137 == BT-137)
+    $allContainers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null
+    $containers = @()
+    foreach ($line in $allContainers) {
+        if (-not $line) { continue }
+        $parts = $line -split "\t"
+        if ($parts.Count -ge 3) {
+            $labelPath = $parts[2]
+            $labelFolderName = Split-Path $labelPath -Leaf
+            if ($labelFolderName -eq $folderName) {
+                $containers += $line
+            }
+        }
+    }
     
     if ($containers) {
         Write-Host "🐳 Found devcontainer(s) for $folderName" -ForegroundColor Cyan
