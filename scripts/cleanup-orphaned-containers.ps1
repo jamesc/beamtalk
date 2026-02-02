@@ -89,12 +89,26 @@ foreach ($line in $allContainers) {
             $labelJson = docker inspect --format '{{index .Config.Labels "devcontainer.local_folder"}}' $id 2>$null
             
             $isOrphaned = $true
-            if ($labelJson) {
+            
+            # Safety: Never consider a running container as orphaned unless -All is specified
+            # Running containers are actively being used
+            if ($status -match "^Up") {
+                $isOrphaned = $false
+            }
+            elseif ($labelJson) {
                 foreach ($worktree in $activeWorktrees) {
-                    # Normalize both paths: git returns forward slashes, Docker uses backslashes
-                    $normalizedWorktree = $worktree -replace "/", "\"
-                    $normalizedLabel = $labelJson -replace "/", "\"
-                    if ($normalizedLabel -match [regex]::Escape($normalizedWorktree)) {
+                    # Extract just the branch/worktree name for comparison
+                    # This handles cross-platform paths where:
+                    # - Host sees: C:\Users\james\source\worktrees\BT-137 or /workspaces/BT-137
+                    # - Container label: /workspaces/BT-137
+                    $worktreeName = Split-Path -Leaf $worktree
+                    $labelName = Split-Path -Leaf $labelJson
+                    
+                    # Also check if worktree path appears anywhere in label (for main repo)
+                    $normalizedWorktree = $worktree -replace "\\", "/"
+                    $normalizedLabel = $labelJson -replace "\\", "/"
+                    
+                    if ($worktreeName -eq $labelName -or $normalizedLabel -match [regex]::Escape($normalizedWorktree)) {
                         $isOrphaned = $false
                         break
                     }
