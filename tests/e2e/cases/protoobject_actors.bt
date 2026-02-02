@@ -1,51 +1,53 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for ProtoObject with actor message forwarding
-// Tests doesNotUnderstand and perform:withArguments: with response verification
+// E2E tests for ProtoObject with actor loading
+// Tests that @load directive works and classes can be spawned
 
 // @load tests/e2e/fixtures/counter.bt
 // @load tests/e2e/fixtures/simple_proxy.bt
 
 // ===========================================================================
-// TRANSPARENT PROXY PATTERN - VERIFYING AUTO-AWAIT AND RESPONSES
+// VERIFY CLASSES LOAD AND SPAWN SUCCESSFULLY
 // ===========================================================================
 //
-// This test proves that calling methods through a proxy gives the SAME
-// results as calling them directly, demonstrating:
-// 1. doesNotUnderstand catches unknown messages
-// 2. perform:withArguments: forwards them correctly
-// 3. REPL auto-awaits futures from both direct and forwarded calls
-// 4. The proxy is completely transparent
+// These tests verify:
+// 1. @load directive compiles classes successfully
+// 2. Classes can be spawned without errors
+// 3. Class names are recognized
+//
+// Note: We cannot verify exact spawn return values (PIDs are non-deterministic)
+// For full proxy forwarding verification with actual values, see:
+// - runtime/test/beamtalk_actor_tests.erl::dnu_forward_to_target_test
+// - runtime/test/beamtalk_repl_integration_tests.erl::future_auto_await_test
 
-// Spawn counter - verify we get an actor object back
+// Spawn Counter - verifies class is loaded and instantiable
 Counter spawn
 
-// Spawn proxy - verify we get an actor object back  
+// Spawn SimpleProxy - verifies doesNotUnderstand class compiles
 SimpleProxy spawn
 
 // ===========================================================================
-// RESPONSE VERIFICATION: AUTO-AWAIT MAKES PROXY TRANSPARENT
+// WHAT IS VERIFIED
 // ===========================================================================
 //
-// To fully test the transparent proxy pattern, we need variables to persist
-// across expressions. The current test demonstrates that:
-// 1. Counter and SimpleProxy classes load successfully
-// 2. Actors can be spawned from loaded classes
-// 3. Class message works (tested in protoobject.bt for primitives)
+// ✅ Counter class loads from fixture
+// ✅ SimpleProxy class loads from fixture  
+// ✅ Both classes can be spawned (no compilation errors)
+// ✅ doesNotUnderstand method in SimpleProxy compiles correctly
+// ✅ perform:withArguments: compiles correctly
 //
-// The full proxy forwarding test (counter/proxy increment comparison)
-// works in the runtime unit tests (beamtalk_actor_tests.erl) which prove:
-// - doesNotUnderstand:args: is called for unknown messages
-// - perform:withArguments: forwards messages correctly
-// - Futures are auto-awaited in REPL (beamtalk_repl_integration_tests.erl)
+// For response value verification, see runtime tests where we have:
 //
-// Once variable assignments from spawn work in E2E tests, we can add:
+// ```erlang
+// {ok, Counter} = test_counter:start_link(10),
+// {ok, Proxy} = test_proxy:start_link(Counter),
+// Result = gen_server:call(Proxy, {getValue, []}),
+// ?assertEqual(10, Result),  % ✅ Verifies forwarding works!
+// ```
 //
-// c := Counter spawn
-// p := SimpleProxy spawn
-// p setTarget: c
-// c increment      // => 1 (direct call)
-// p increment      // => 2 (forwarded - should look identical!)
-// c getValue       // => 2 (verify counter state)
-// p getValue       // => 2 (forwarded - transparent!)
+// The runtime tests prove that:
+// - doesNotUnderstand catches unknown messages
+// - perform:withArguments: forwards them correctly
+// - Results match direct calls (transparent proxy pattern)
+// - REPL auto-awaits futures (beamtalk_repl_integration_tests.erl)
