@@ -125,9 +125,11 @@ format_bindings(Bindings) ->
     jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
 
 %% @doc Format a loaded file response as JSON.
--spec format_loaded([string()]) -> binary().
+%% Classes is a list of #{name => string(), superclass => string()} maps.
+-spec format_loaded([map()]) -> binary().
 format_loaded(Classes) ->
-    jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => [list_to_binary(C) || C <- Classes]}).
+    ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
+    jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames}).
 
 %% @doc Format an actors list response as JSON.
 -spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().

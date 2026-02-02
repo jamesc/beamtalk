@@ -42,7 +42,7 @@
 //!       <{Selector, Args, FuturePid}> when 'true' ->
 //!         case call 'counter':'dispatch'(Selector, Args, State) of
 //!           <{'reply', Result, NewState}> when 'true' ->
-//!             let _ = call 'erlang':'!'(FuturePid, {'resolved', Result})
+//!             let _ = call 'erlang':'!'(FuturePid, {'resolve', Result})
 //!             in {'noreply', NewState}
 //!         end
 //!     end

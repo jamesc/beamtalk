@@ -3,9 +3,6 @@
 
 // Manual test demonstrating ProtoObject behavior
 
-// TEMPORARILY DISABLED: BT-189 regression blocks @load for actor classes
-// Re-enable when BT-189 is fixed.
-
 // Test 1: class message returns atoms (not futures)
 42 class
 // => Integer

@@ -185,12 +185,14 @@ add_after(ClassPid, Selector, Fun) ->
 %% This is used when compiling `super` sends in methods. The State map
 %% must contain a `'__class__'` field indicating the current class.
 %%
+%% Returns `{reply, Result, NewState}` to match the actor dispatch protocol.
+%%
 %% Example generated code:
 %% ```erlang
 %% %% In subclass method:
-%% beamtalk_class:super_dispatch(State, 'methodName', [arg1, arg2])
+%% {reply, Result, NewState} = beamtalk_class:super_dispatch(State, 'methodName', [arg1, arg2])
 %% ```
--spec super_dispatch(map(), selector(), list()) -> {term(), map()} | {error, term()}.
+-spec super_dispatch(map(), selector(), list()) -> {reply, term(), map()} | {error, term()}.
 super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state
     case maps:find('__class__', State) of
@@ -218,6 +220,9 @@ super_dispatch(State, Selector, Args) ->
 %%====================================================================
 
 init({ClassName, ClassInfo}) ->
+    %% Ensure pg is started (needed for class registry)
+    ensure_pg_started(),
+    
     %% Register with well-known name for lookup FIRST
     %% (do this before pg:join to avoid brief membership if registration fails)
     RegName = registry_name(ClassName),
@@ -326,6 +331,20 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal functions
 %%====================================================================
 
+%% Ensure pg (process groups) is started.
+%% pg is used for tracking all class processes.
+ensure_pg_started() ->
+    case whereis(pg) of
+        undefined ->
+            %% pg not running - start it
+            case pg:start_link() of
+                {ok, _Pid} -> ok;
+                {error, {already_started, _}} -> ok
+            end;
+        _Pid ->
+            ok
+    end.
+
 registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
 
@@ -338,8 +357,9 @@ notify_instances(_ClassName, _NewMethods) ->
 %% @private
 %% Find and invoke a method in the superclass chain.
 %% Recursively walks up the inheritance hierarchy until the method is found.
+%% Returns {reply, Result, NewState} matching the actor dispatch protocol.
 -spec find_and_invoke_super_method(class_name(), selector(), list(), map()) ->
-    {term(), map()} | {error, term()}.
+    {reply, term(), map()} | {error, term()}.
 find_and_invoke_super_method(ClassName, Selector, Args, State) ->
     case whereis_class(ClassName) of
         undefined ->
@@ -348,7 +368,7 @@ find_and_invoke_super_method(ClassName, Selector, Args, State) ->
             %% Get class info via API calls
             case get_class_method_info(ClassPid, Selector) of
                 {ok, Module, MethodInfo} ->
-                    %% Found the method - invoke it
+                    %% Found the method - invoke it (returns {reply, Result, NewState})
                     invoke_super_method(Module, Selector, MethodInfo, Args, State);
                 method_not_found ->
                     %% Method not found in this class, try superclass
@@ -381,18 +401,21 @@ get_class_method_info(ClassPid, Selector) ->
 
 %% @private
 %% Invoke a method found in the superclass.
+%% Returns {reply, Result, NewState} matching the actor dispatch protocol.
 -spec invoke_super_method(atom(), selector(), method_info(), list(), map()) ->
-    {term(), map()}.
+    {reply, term(), map()}.
 invoke_super_method(Module, Selector, MethodInfo, Args, State) ->
     case maps:find(block, MethodInfo) of
         {ok, Block} ->
             %% Runtime block available (from live development) - call it
-            apply(Block, Args);
+            %% Blocks don't have state, so return state unchanged
+            Result = apply(Block, Args),
+            {reply, Result, State};
         error ->
             %% No runtime block, must call the compiled module
             %% Construct Self object reference for dispatch/4 (BT-161)
             Self = beamtalk_actor:make_self(State),
             %% Call the module's dispatch function with the selector
-            %% This maintains the actor protocol (returns {reply, Result, NewState})
+            %% This returns {reply, Result, NewState} - pass through as-is
             Module:dispatch(Selector, Args, Self, State)
     end.

@@ -134,16 +134,27 @@ set_module_tracker(Tracker, State) ->
 %%% Internal functions
 
 %% @private
-%% Determine daemon socket path (default: ~/.beamtalk/daemon.sock)
+%% Determine daemon socket path
+%% Priority:
+%%   1. BEAMTALK_DAEMON_SOCKET environment variable (if set)
+%%   2. Default: ~/.beamtalk/daemon.sock
 %% If HOME is unset, fail explicitly so behavior matches the daemon
 %% (which requires HOME to be set).
 default_daemon_socket_path() ->
+    case os:getenv("BEAMTALK_DAEMON_SOCKET") of
+        false -> default_daemon_socket_from_home();
+        "" -> default_daemon_socket_from_home();
+        SocketPath -> SocketPath
+    end.
+
+%% Get default socket path from HOME directory
+default_daemon_socket_from_home() ->
     case os:getenv("HOME") of
         false ->
             erlang:error({missing_env_var,
                          "HOME",
                          "Beamtalk REPL requires HOME to be set to locate the compiler daemon "
-                         "socket. Either set HOME or pass daemon_socket_path in Options."});
+                         "socket. Either set HOME, BEAMTALK_DAEMON_SOCKET, or pass daemon_socket_path in Options."});
         Home ->
             filename:join([Home, ".beamtalk", "daemon.sock"])
     end.

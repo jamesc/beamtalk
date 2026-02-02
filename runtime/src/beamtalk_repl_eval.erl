@@ -527,28 +527,40 @@ parse_file_compile_result(Result, ModuleName) ->
             {error, {compile_error, format_daemon_diagnostics(Messages)}}
     end.
 
-%% Extract class names from compile result.
--spec extract_class_names(map()) -> [string()].
+%% Extract class info from compile result.
+%% Returns list of #{name => string(), superclass => string()} maps.
+-spec extract_class_names(map()) -> [map()].
 extract_class_names(Result) ->
     case maps:get(<<"classes">>, Result, undefined) of
         undefined ->
             [];
-        ClassesBinList ->
-            [binary_to_list(C) || C <- ClassesBinList]
+        ClassInfoList when is_list(ClassInfoList) ->
+            [#{
+                name => binary_to_list(maps:get(<<"name">>, C, <<"">>)),
+                superclass => binary_to_list(maps:get(<<"superclass">>, C, <<"Object">>))
+            } || C <- ClassInfoList]
     end.
 
 %% Register loaded classes by spawning per-class gen_server processes.
--spec register_classes([string()], atom()) -> ok.
+%% ClassInfoList is a list of #{name => string(), superclass => string()} maps.
+-spec register_classes([map()], atom()) -> ok.
 register_classes([], _ModuleName) ->
     ok;
-register_classes(ClassNames, ModuleName) ->
+register_classes(ClassInfoList, ModuleName) ->
     lists:foreach(
-        fun(ClassName) ->
+        fun(ClassInfoMap) ->
+            ClassName = maps:get(name, ClassInfoMap, ""),
+            Superclass = maps:get(superclass, ClassInfoMap, "Object"),
             ClassAtom = list_to_atom(ClassName),
+            SuperclassAtom = case Superclass of
+                "" -> none;
+                "Object" -> none;  % Object has no superclass
+                _ -> list_to_atom(Superclass)
+            end,
             ClassInfo = #{
                 name => ClassAtom,
                 module => ModuleName,
-                superclass => none,
+                superclass => SuperclassAtom,
                 instance_methods => #{},
                 instance_variables => [],
                 class_variables => #{},
@@ -570,7 +582,7 @@ register_classes(ClassNames, ModuleName) ->
                     ok
             end
         end,
-        ClassNames
+        ClassInfoList
     ).
 
 %% Auto-await a Future if the result is a Future PID.

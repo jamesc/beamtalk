@@ -129,9 +129,18 @@ extract_class_names_no_classes_test() ->
 extract_class_names_with_classes_test() ->
     Result = #{
         <<"success">> => true,
-        <<"classes">> => [<<"Counter">>, <<"Point">>, <<"Actor">>]
+        <<"classes">> => [
+            #{<<"name">> => <<"Counter">>, <<"superclass">> => <<"Actor">>},
+            #{<<"name">> => <<"Point">>, <<"superclass">> => <<"Object">>},
+            #{<<"name">> => <<"Actor">>, <<"superclass">> => <<"Object">>}
+        ]
     },
-    ?assertEqual(["Counter", "Point", "Actor"], beamtalk_repl_eval:extract_class_names(Result)).
+    Expected = [
+        #{name => "Counter", superclass => "Actor"},
+        #{name => "Point", superclass => "Object"},
+        #{name => "Actor", superclass => "Object"}
+    ],
+    ?assertEqual(Expected, beamtalk_repl_eval:extract_class_names(Result)).
 
 extract_class_names_empty_list_test() ->
     Result = #{<<"success">> => true, <<"classes">> => []},

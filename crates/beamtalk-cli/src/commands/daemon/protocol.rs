@@ -224,7 +224,14 @@ struct CompileResult {
     beam_path: Option<String>,
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
-    classes: Vec<String>,
+    classes: Vec<ClassInfo>,
+}
+
+/// Class metadata extracted from compiled source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClassInfo {
+    name: String,
+    superclass: String,
 }
 
 /// Diagnostic information for responses.
@@ -479,12 +486,17 @@ fn handle_compile_expression(
     }
 }
 
-/// Extract class names from a parsed module.
-/// Returns empty vec for now - will be populated when class definitions are added to AST.
-fn extract_class_names(_module: &beamtalk_core::ast::Module) -> Vec<String> {
-    // TODO: When class definitions are added to the AST, extract them here
-    // For now, return empty vec
-    vec![]
+/// Extract class information from a parsed module.
+/// Returns class name and superclass for each class definition.
+fn extract_class_names(module: &beamtalk_core::ast::Module) -> Vec<ClassInfo> {
+    module
+        .classes
+        .iter()
+        .map(|class| ClassInfo {
+            name: class.name.name.to_string(),
+            superclass: class.superclass.name.to_string(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -869,9 +881,29 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn extract_class_names_returns_empty_for_now() {
+    fn extract_class_names_returns_empty_for_module_without_classes() {
         let module = beamtalk_core::ast::Module::new(vec![], beamtalk_core::parse::Span::new(0, 0));
         let classes = extract_class_names(&module);
         assert!(classes.is_empty());
+    }
+
+    #[test]
+    fn extract_class_names_returns_class_info_with_superclass() {
+        use beamtalk_core::ast::{ClassDefinition, Identifier};
+        use beamtalk_core::parse::Span;
+
+        let class = ClassDefinition::new(
+            Identifier::new("Counter", Span::new(0, 7)),
+            Identifier::new("Actor", Span::new(18, 23)),
+            vec![],
+            vec![],
+            Span::new(0, 50),
+        );
+        let module = beamtalk_core::ast::Module::with_classes(vec![class], Span::new(0, 50));
+        let classes = extract_class_names(&module);
+
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].name, "Counter");
+        assert_eq!(classes[0].superclass, "Actor");
     }
 }

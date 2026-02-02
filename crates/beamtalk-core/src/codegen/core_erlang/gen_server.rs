@@ -195,7 +195,7 @@ impl CoreErlangGenerator {
     /// Generates the `handle_cast/2` callback for async message sends.
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
-    /// sends `{resolved, Result}` or `{rejected, Error}` to the `FuturePid`.
+    /// sends `{resolve, Result}` or `{reject, Error}` to the `FuturePid`.
     pub(super) fn generate_handle_cast(&mut self) -> Result<()> {
         writeln!(self.output, "'handle_cast'/2 = fun (Msg, State) ->")?;
         self.indent += 1;
@@ -224,9 +224,10 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
+        // Send {resolve, Result} to match beamtalk_future protocol
         writeln!(
             self.output,
-            "let _Ignored = call 'erlang':'!'(FuturePid, {{'resolved', Result}})"
+            "let _Ignored = call 'erlang':'!'(FuturePid, {{'resolve', Result}})"
         )?;
         self.write_indent()?;
         writeln!(self.output, "in {{'noreply', NewState}}")?;
@@ -236,9 +237,10 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'error', Error, NewState}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
+        // Send {reject, Error} to match beamtalk_future protocol
         writeln!(
             self.output,
-            "let _Ignored = call 'erlang':'!'(FuturePid, {{'rejected', Error}})"
+            "let _Ignored = call 'erlang':'!'(FuturePid, {{'reject', Error}})"
         )?;
         self.write_indent()?;
         writeln!(self.output, "in {{'noreply', NewState}}")?;

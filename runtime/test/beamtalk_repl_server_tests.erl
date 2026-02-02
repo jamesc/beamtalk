@@ -186,12 +186,16 @@ format_loaded_empty_test() ->
     ?assertEqual([], maps:get(<<"classes">>, Decoded)).
 
 format_loaded_single_test() ->
-    Response = beamtalk_repl_server:format_loaded(["Counter"]),
+    Response = beamtalk_repl_server:format_loaded([#{name => "Counter", superclass => "Actor"}]),
     Decoded = jsx:decode(Response, [return_maps]),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)).
 
 format_loaded_multiple_test() ->
-    Response = beamtalk_repl_server:format_loaded(["Counter", "Point", "Actor"]),
+    Response = beamtalk_repl_server:format_loaded([
+        #{name => "Counter", superclass => "Actor"},
+        #{name => "Point", superclass => "Object"},
+        #{name => "Actor", superclass => "Object"}
+    ]),
     Decoded = jsx:decode(Response, [return_maps]),
     Classes = maps:get(<<"classes">>, Decoded),
     ?assertEqual(3, length(Classes)),
@@ -302,7 +306,11 @@ format_bindings_with_special_characters_test() ->
 
 format_loaded_preserves_order_test() ->
     %% Verify that loaded classes are returned in the same order
-    Classes = ["Zebra", "Alpha", "Middle"],
+    Classes = [
+        #{name => "Zebra", superclass => "Object"},
+        #{name => "Alpha", superclass => "Object"},
+        #{name => "Middle", superclass => "Object"}
+    ],
     Response = beamtalk_repl_server:format_loaded(Classes),
     Decoded = jsx:decode(Response, [return_maps]),
     Result = maps:get(<<"classes">>, Decoded),
