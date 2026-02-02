@@ -204,11 +204,21 @@ impl Analyser {
             }
 
             Assignment { target, value, .. } => {
-                // Define variable if assigning to identifier
-                if let Identifier(id) = target.as_ref() {
-                    self.scope.define(&id.name, id.span);
+                // Handle assignment target
+                match target.as_ref() {
+                    Identifier(id) => {
+                        // Only define if not already in an outer scope
+                        if self.scope.lookup(&id.name).is_none() {
+                            self.scope.define(&id.name, id.span);
+                        }
+                    }
+                    _ => {
+                        // For field access, analyze the target (especially the receiver)
+                        self.analyse_expression(target, None);
+                    }
                 }
-                self.analyse_expression(value, None);
+                // Pass Assignment context so blocks know they're being stored
+                self.analyse_expression(value, Some(ExprContext::Assignment));
             }
 
             Block(block) => {
@@ -245,8 +255,17 @@ impl Analyser {
             } => {
                 self.analyse_expression(receiver, None);
                 for msg in messages {
-                    for arg in &msg.arguments {
-                        self.analyse_expression(arg, None);
+                    // Apply selector-based context detection for cascade messages
+                    let selector_str = block_context::selector_to_string(&msg.selector);
+                    for (i, arg) in msg.arguments.iter().enumerate() {
+                        let is_control_flow =
+                            block_context::is_control_flow_selector(&selector_str, i);
+                        let context = if is_control_flow {
+                            Some(ExprContext::ControlFlowArg)
+                        } else {
+                            Some(ExprContext::MessageArg)
+                        };
+                        self.analyse_expression(arg, context);
                     }
                 }
             }
@@ -280,7 +299,15 @@ impl Analyser {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | MapLiteral { .. } => {
+            MapLiteral { pairs, .. } => {
+                // Analyze key and value expressions in map literals
+                for pair in pairs {
+                    self.analyse_expression(&pair.key, None);
+                    self.analyse_expression(&pair.value, None);
+                }
+            }
+
+            Literal(..) | Super(..) | Error { .. } => {
                 // No analysis needed
             }
         }
@@ -292,7 +319,7 @@ impl Analyser {
         // Determine block context
         let context = match parent_context {
             Some(ExprContext::ControlFlowArg) => BlockContext::ControlFlow,
-            Some(ExprContext::MessageArg) => BlockContext::Other,
+            Some(ExprContext::MessageArg) => BlockContext::Passed,
             Some(ExprContext::Assignment) => BlockContext::Stored,
             None => BlockContext::Unknown,
         };
@@ -411,11 +438,10 @@ impl Analyser {
                 self.collect_captures_and_mutations(value, captures, mutations);
             }
 
-            Block(block) => {
-                // Recurse into nested blocks
-                for expr in &block.body {
-                    self.collect_captures_and_mutations(expr, captures, mutations);
-                }
+            Block(_block) => {
+                // Do not recurse into nested blocks here.
+                // Nested blocks are analyzed separately via `analyse_block`
+                // which handles proper scoping and parameter definitions.
             }
 
             MessageSend {
@@ -468,7 +494,15 @@ impl Analyser {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | MapLiteral { .. } => {
+            MapLiteral { pairs, .. } => {
+                // Collect captures and mutations from map literal pairs
+                for pair in pairs {
+                    self.collect_captures_and_mutations(&pair.key, captures, mutations);
+                    self.collect_captures_and_mutations(&pair.value, captures, mutations);
+                }
+            }
+
+            Literal(..) | Super(..) | Error { .. } => {
                 // No captures or mutations
             }
         }
@@ -477,7 +511,6 @@ impl Analyser {
 
 /// Context in which an expression appears.
 #[derive(Debug, Clone, Copy)]
-#[expect(dead_code, reason = "Assignment context will be used in BT-90")]
 enum ExprContext {
     /// Expression is an argument to a control flow message.
     ControlFlowArg,
@@ -758,5 +791,76 @@ mod tests {
         let block_span = Span::new(20, 30);
         let block_info = result.block_info.get(&block_span).unwrap();
         assert_eq!(block_info.context, BlockContext::ControlFlow);
+    }
+
+    // PR Review Comment Tests
+
+    #[test]
+    fn test_block_assigned_to_variable_gets_stored_context() {
+        // Comment 7: Block assigned to variable should get Stored context
+        // Code: myBlock := [:x | x + 1]
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(15, 16))],
+            vec![Expression::Identifier(Identifier::new(
+                "x",
+                Span::new(19, 20),
+            ))],
+            Span::new(12, 25),
+        );
+
+        let assignment = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "myBlock",
+                Span::new(0, 7),
+            ))),
+            value: Box::new(Expression::Block(block)),
+            span: Span::new(0, 25),
+        };
+
+        let module = Module::new(vec![assignment], Span::new(0, 25));
+        let result = analyse(&module);
+
+        // Block should have Stored context
+        let block_span = Span::new(12, 25);
+        let block_info = result.block_info.get(&block_span).unwrap();
+        assert_eq!(block_info.context, BlockContext::Stored);
+    }
+
+    #[test]
+    fn test_block_passed_as_argument_gets_passed_context() {
+        // Comment 8: Block passed as non-control-flow argument should get Passed context
+        // Code: array at: 1 put: [:x | x + 1]
+        let block = Block::new(
+            vec![BlockParameter::new("x", Span::new(23, 24))],
+            vec![Expression::Identifier(Identifier::new(
+                "x",
+                Span::new(27, 28),
+            ))],
+            Span::new(20, 33),
+        );
+
+        let message = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "array",
+                Span::new(0, 5),
+            ))),
+            selector: MessageSelector::Keyword(vec![
+                crate::ast::KeywordPart::new("at:", Span::new(6, 9)),
+                crate::ast::KeywordPart::new("put:", Span::new(12, 16)),
+            ]),
+            arguments: vec![
+                Expression::Literal(crate::ast::Literal::Integer(1), Span::new(10, 11)),
+                Expression::Block(block),
+            ],
+            span: Span::new(0, 33),
+        };
+
+        let module = Module::new(vec![message], Span::new(0, 33));
+        let result = analyse(&module);
+
+        // Block should have Passed context
+        let block_span = Span::new(20, 33);
+        let block_info = result.block_info.get(&block_span).unwrap();
+        assert_eq!(block_info.context, BlockContext::Passed);
     }
 }
