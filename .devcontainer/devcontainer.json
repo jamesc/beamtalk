@@ -68,7 +68,8 @@
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
   },
   "runArgs": [
-    "--env-file=${localWorkspaceFolder}/.env"
+    "--env-file=${localWorkspaceFolder}/.env",
+    "--label=git.worktree=${localWorkspaceFolderBasename}"
   ],
   "remoteEnv": {
     "LINEAR_API_TOKEN": "${localEnv:LINEAR_API_TOKEN}",
