@@ -208,12 +208,24 @@ if (-not $env:BEAMTALK_MAIN_GIT_PATH) {
 Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
 Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
 
-# Build and start the container
-devcontainer up --workspace-folder $worktreePath
+# Build and start the container - capture output to get container ID
+$devcontainerOutput = devcontainer up --workspace-folder $worktreePath 2>&1 | Tee-Object -Variable output
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n❌ Failed to start devcontainer" -ForegroundColor Red
     exit 1
+}
+
+# Extract container ID from output JSON (last line)
+$containerIdFromOutput = $null
+try {
+    $lastLine = ($output | Select-Object -Last 1) -replace '\x1b\[[0-9;]*m', ''  # Strip ANSI codes
+    $jsonOutput = $lastLine | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if ($jsonOutput.containerId) {
+        $containerIdFromOutput = $jsonOutput.containerId
+    }
+} catch {
+    # Ignore JSON parse errors
 }
 
 Write-Host "`n✨ Container ready!" -ForegroundColor Green
@@ -224,24 +236,8 @@ if ($env:GIT_SIGNING_KEY) {
     if (Test-Path $sshKeyPath) {
         Write-Host "🔑 Copying SSH signing key..." -ForegroundColor Cyan
         
-        # Wait a moment for container to fully initialize
-        Start-Sleep -Seconds 2
-        
-        # Get container ID - try multiple methods
-        # Method 1: Try with normalized path (forward slashes)
-        $normalizedPath = $worktreePath -replace '\\', '/'
-        $containerInfo = docker ps --filter "label=devcontainer.local_folder=$normalizedPath" --format "{{.ID}}" 2>$null
-        
-        # Method 2: Try with exact workspace folder
-        if (-not $containerInfo) {
-            $containerInfo = docker ps --filter "label=devcontainer.local_folder=$worktreePath" --format "{{.ID}}" 2>$null
-        }
-        
-        # Method 3: Find most recent container with vscode user
-        if (-not $containerInfo) {
-            Write-Host "   Trying alternate container detection..." -ForegroundColor Gray
-            $containerInfo = docker ps --format "{{.ID}}" --filter "status=running" | Select-Object -First 1
-        }
+        # Use container ID from devcontainer up output
+        $containerInfo = $containerIdFromOutput
         
         if ($containerInfo) {
             Write-Host "   Container ID: $containerInfo" -ForegroundColor Gray
