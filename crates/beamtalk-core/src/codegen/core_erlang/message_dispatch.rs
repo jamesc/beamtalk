@@ -358,12 +358,12 @@ impl CoreErlangGenerator {
     ///   <'undefined'> when 'true' ->
     ///     call 'counter':'spawn'()
     ///   <RegistryPid> when 'true' ->
-    ///     call 'beamtalk_actor':'spawn_with_registry'(
-    ///       RegistryPid,
-    ///       'counter',
-    ///       [],
-    ///       'Counter'
-    ///     )
+    ///     case call 'beamtalk_actor':'spawn_with_registry'(RegistryPid, 'counter', ~{}~, 'Counter') of
+    ///       <{'ok', Pid}> when 'true' ->
+    ///         {'beamtalk_object', 'Counter', 'counter', Pid}
+    ///       <{'error', Reason}> when 'true' ->
+    ///         call 'erlang':'error'({'spawn_failed', Reason})
+    ///     end
     /// end
     /// ```
     ///
