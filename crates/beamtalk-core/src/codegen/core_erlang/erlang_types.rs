@@ -36,6 +36,26 @@
 //! let temp = ErlangVar::from_beamtalk_ident("myVar");
 //! assert_eq!(temp.to_string(), "MyVar");
 //! ```
+//!
+//! ## `ModuleName`
+//!
+//! Represents a Beamtalk/Erlang module name with proper naming conventions:
+//!
+//! ```
+//! use beamtalk_core::codegen::core_erlang::erlang_types::ModuleName;
+//!
+//! // Instance module for a class
+//! let instance = ModuleName::instance("Counter");
+//! assert_eq!(instance.to_string(), "'beamtalk_counter'");
+//!
+//! // Class module (metadata)
+//! let class = ModuleName::class("Counter");
+//! assert_eq!(class.to_string(), "'beamtalk_counter_class'");
+//!
+//! // Raw module (stdlib)
+//! let stdlib = ModuleName::raw("erlang");
+//! assert_eq!(stdlib.to_string(), "'erlang'");
+//! ```
 
 use std::fmt;
 
@@ -205,6 +225,128 @@ impl fmt::Display for ErlangVar {
     }
 }
 
+/// A Beamtalk module name value object.
+///
+/// Encapsulates the naming convention for Beamtalk modules:
+/// - Instance modules: `beamtalk_<class>` (e.g., `beamtalk_counter`)
+/// - Class modules: `beamtalk_<class>_class` (e.g., `beamtalk_counter_class`)
+/// - Raw modules: Direct Erlang module names (e.g., `erlang`, `maps`)
+///
+/// # DDD: Value Object
+///
+/// `ModuleName` is a value object in the Code Generation bounded context.
+/// It encapsulates the Two-Module Pattern from the Flavors architecture
+/// where each Beamtalk class generates two Erlang modules.
+///
+/// # Invariants
+///
+/// - Module names are valid Erlang atoms (lowercase, alphanumeric + underscore)
+/// - Instance and class modules always have `beamtalk_` prefix
+/// - Class names are converted from `CamelCase` to `snake_case`
+///
+/// # Example
+///
+/// ```
+/// use beamtalk_core::codegen::core_erlang::erlang_types::ModuleName;
+///
+/// let instance = ModuleName::instance("Counter");
+/// assert_eq!(instance.name(), "beamtalk_counter");
+/// assert_eq!(instance.to_string(), "'beamtalk_counter'");
+///
+/// let class = ModuleName::class("Counter");
+/// assert_eq!(class.name(), "beamtalk_counter_class");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ModuleName {
+    name: String,
+}
+
+impl ModuleName {
+    /// Creates a module name for a Beamtalk class instance module.
+    ///
+    /// Converts the class name from `CamelCase` to `snake_case` and adds
+    /// the `beamtalk_` prefix.
+    ///
+    /// - `"Counter"` → `"beamtalk_counter"`
+    /// - `"HttpRouter"` → `"beamtalk_http_router"`
+    #[must_use]
+    pub fn instance(class_name: &str) -> Self {
+        let snake = camel_to_snake(class_name);
+        Self {
+            name: format!("beamtalk_{snake}"),
+        }
+    }
+
+    /// Creates a module name for a Beamtalk class metadata module.
+    ///
+    /// Like `instance()` but adds `_class` suffix for the class-level module.
+    ///
+    /// - `"Counter"` → `"beamtalk_counter_class"`
+    /// - `"HttpRouter"` → `"beamtalk_http_router_class"`
+    #[must_use]
+    pub fn class(class_name: &str) -> Self {
+        let snake = camel_to_snake(class_name);
+        Self {
+            name: format!("beamtalk_{snake}_class"),
+        }
+    }
+
+    /// Creates a raw module name without any transformation.
+    ///
+    /// Use this for Erlang stdlib modules or other external modules.
+    ///
+    /// - `"erlang"` → `"erlang"`
+    /// - `"gen_server"` → `"gen_server"`
+    #[must_use]
+    pub fn raw(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+
+    /// Returns the raw module name without quotes.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Converts this module name to an `ErlangAtom`.
+    #[must_use]
+    pub fn as_atom(&self) -> ErlangAtom {
+        ErlangAtom::new(&self.name)
+    }
+}
+
+impl fmt::Display for ModuleName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Module names are atoms in Core Erlang
+        write!(f, "'{}'", self.name)
+    }
+}
+
+/// Converts `CamelCase` to `snake_case`.
+///
+/// - `"Counter"` → `"counter"`
+/// - `"HttpRouter"` → `"http_router"`
+/// - `"HTTPRouter"` → `"httprouter"` (acronyms stay together)
+fn camel_to_snake(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_was_lowercase = false;
+
+    for ch in s.chars() {
+        if ch.is_uppercase() {
+            if prev_was_lowercase {
+                result.push('_');
+            }
+            result.extend(ch.to_lowercase());
+            prev_was_lowercase = false;
+        } else {
+            result.push(ch);
+            prev_was_lowercase = ch.is_lowercase();
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +465,82 @@ mod tests {
     #[cfg(debug_assertions)]
     fn var_invalid_panics_in_debug() {
         let _ = ErlangVar::new("lowercase");
+    }
+
+    // ModuleName tests
+
+    #[test]
+    fn module_name_instance() {
+        let m = ModuleName::instance("Counter");
+        assert_eq!(m.name(), "beamtalk_counter");
+        assert_eq!(m.to_string(), "'beamtalk_counter'");
+    }
+
+    #[test]
+    fn module_name_instance_camel_case() {
+        let m = ModuleName::instance("HttpRouter");
+        assert_eq!(m.name(), "beamtalk_http_router");
+    }
+
+    #[test]
+    fn module_name_class() {
+        let m = ModuleName::class("Counter");
+        assert_eq!(m.name(), "beamtalk_counter_class");
+        assert_eq!(m.to_string(), "'beamtalk_counter_class'");
+    }
+
+    #[test]
+    fn module_name_class_camel_case() {
+        let m = ModuleName::class("MyCounterActor");
+        assert_eq!(m.name(), "beamtalk_my_counter_actor_class");
+    }
+
+    #[test]
+    fn module_name_raw() {
+        let m = ModuleName::raw("erlang");
+        assert_eq!(m.name(), "erlang");
+        assert_eq!(m.to_string(), "'erlang'");
+    }
+
+    #[test]
+    fn module_name_raw_gen_server() {
+        let m = ModuleName::raw("gen_server");
+        assert_eq!(m.name(), "gen_server");
+    }
+
+    #[test]
+    fn module_name_as_atom() {
+        let m = ModuleName::instance("Counter");
+        let atom = m.as_atom();
+        assert_eq!(atom.name(), "beamtalk_counter");
+    }
+
+    #[test]
+    fn module_name_equality() {
+        let a = ModuleName::instance("Counter");
+        let b = ModuleName::instance("Counter");
+        let c = ModuleName::class("Counter");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn camel_to_snake_simple() {
+        assert_eq!(camel_to_snake("Counter"), "counter");
+        assert_eq!(camel_to_snake("HttpRouter"), "http_router");
+        assert_eq!(camel_to_snake("MyCounterActor"), "my_counter_actor");
+    }
+
+    #[test]
+    fn camel_to_snake_acronym() {
+        // Acronyms don't get underscores within them
+        assert_eq!(camel_to_snake("HTTPRouter"), "httprouter");
+        assert_eq!(camel_to_snake("XMLParser"), "xmlparser");
+    }
+
+    #[test]
+    fn camel_to_snake_single_word() {
+        assert_eq!(camel_to_snake("actor"), "actor");
+        assert_eq!(camel_to_snake("Actor"), "actor");
     }
 }
