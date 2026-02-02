@@ -684,19 +684,19 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Tries to generate code for ProtoObject methods.
+    /// Tries to generate code for `ProtoObject` methods.
     ///
-    /// ProtoObject methods are fundamental operations available on all objects:
+    /// `ProtoObject` methods are fundamental operations available on all objects:
     ///
     /// - `class` - Returns the class name (atom) of the receiver
     /// - `perform:withArguments:` - Dynamic message dispatch
     ///
     /// This function:
-    /// - Returns `Ok(Some(()))` if the message was a ProtoObject method and code was generated
-    /// - Returns `Ok(None)` if the message is NOT a ProtoObject method (caller should continue)
+    /// - Returns `Ok(Some(()))` if the message was a `ProtoObject` method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a `ProtoObject` method (caller should continue)
     /// - Returns `Err(...)` on error
     ///
-    /// # ProtoObject Methods
+    /// # `ProtoObject` Methods
     ///
     /// ## class
     ///
@@ -741,7 +741,7 @@ impl CoreErlangGenerator {
                     let int_var = self.fresh_temp_var("I");
                     let str_var = self.fresh_temp_var("S");
                     let obj_var = self.fresh_temp_var("O");
-                    
+
                     write!(self.output, "let {recv_var} = ")?;
                     self.generate_expression(receiver)?;
                     write!(
@@ -761,7 +761,7 @@ impl CoreErlangGenerator {
             },
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                
+
                 match selector_name.as_str() {
                     "perform:withArguments:" if arguments.len() == 2 => {
                         // Dynamic message dispatch: receiver perform: selector withArguments: args
@@ -813,7 +813,7 @@ impl CoreErlangGenerator {
                     _ => Ok(None),
                 }
             }
-            _ => Ok(None),
+            MessageSelector::Binary(_) => Ok(None),
         }
     }
 }

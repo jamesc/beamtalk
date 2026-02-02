@@ -52,7 +52,7 @@ impl CoreErlangGenerator {
     ///
     /// 1. **Super sends** → `generate_super_send`
     /// 2. **Binary operators** → `generate_binary_op` (synchronous)
-    /// 3. **ProtoObject messages** → `try_generate_protoobject_message` (synchronous)
+    /// 3. **`ProtoObject` messages** → `try_generate_protoobject_message` (synchronous)
     /// 4. **Block messages** → `try_generate_block_message` (synchronous)
     /// 5. **String messages** → `try_generate_string_message` (synchronous)
     /// 6. **Dictionary messages** → `try_generate_dictionary_message` (synchronous)
@@ -81,7 +81,9 @@ impl CoreErlangGenerator {
 
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
-        if let Some(result) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
+        if let Some(result) =
+            self.try_generate_protoobject_message(receiver, selector, arguments)?
+        {
             return Ok(result);
         }
 
