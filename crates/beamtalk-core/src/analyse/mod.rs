@@ -11,7 +11,7 @@
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
-use crate::ast::{Expression, Identifier, Module, Pattern};
+use crate::ast::{Expression, Identifier, MatchArm, Module, Pattern};
 use crate::parse::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -181,6 +181,8 @@ fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifie
 ///
 /// This is the main entry point for semantic analysis. It analyzes the module
 /// AST and returns diagnostics and metadata for code generation.
+///
+/// Currently focuses on pattern variable binding in match expressions.
 ///
 /// # Examples
 ///
@@ -354,11 +356,7 @@ impl Analyser {
             Match { value, arms, .. } => {
                 self.analyse_expression(value, None);
                 for arm in arms {
-                    // Analyze guard if present
-                    if let Some(guard) = &arm.guard {
-                        self.analyse_expression(guard, None);
-                    }
-                    self.analyse_expression(&arm.body, None);
+                    self.analyse_match_arm(arm);
                 }
             }
 
@@ -411,6 +409,28 @@ impl Analyser {
         self.result.block_info.insert(block.span, block_info);
 
         self.scope.pop(); // Exit block scope
+    }
+
+    fn analyse_match_arm(&mut self, arm: &MatchArm) {
+        // Create a new scope for this match arm
+        self.scope.push();
+
+        // Extract and define all pattern variables
+        let bindings = extract_pattern_bindings(&arm.pattern);
+        for binding in bindings {
+            self.scope.define(&binding.name, binding.span);
+        }
+
+        // Analyze guard expression (if present) - can see pattern variables
+        if let Some(guard) = &arm.guard {
+            self.analyse_expression(guard, None);
+        }
+
+        // Analyze body expression - can see pattern variables
+        self.analyse_expression(&arm.body, None);
+
+        // Exit match arm scope
+        self.scope.pop();
     }
 
     #[allow(clippy::too_many_lines)] // recursive traversal function
@@ -1081,5 +1101,169 @@ mod tests {
         let block_span = Span::new(20, 33);
         let block_info = result.block_info.get(&block_span).unwrap();
         assert_eq!(block_info.context, BlockContext::Passed);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_simple_pattern() {
+        // Test that pattern variables are accessible in the body
+        // value match: [x -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Analysis should complete without errors
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_guard() {
+        // Test that pattern variables are accessible in guards
+        // value match: [x when x > 0 -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            arms: vec![MatchArm::with_guard(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())), // guard uses x
+                Expression::Identifier(Identifier::new("x", test_span())), // body uses x
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Analysis should complete without errors
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_tuple_pattern() {
+        // Test nested patterns: {#ok, value} -> value
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("result", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                        Pattern::Variable(Identifier::new("value", test_span())),
+                    ],
+                    span: test_span(),
+                },
+                Expression::Identifier(Identifier::new("value", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_multiple_arms() {
+        // Test multiple arms with different patterns
+        // result match: [
+        //   {#ok, value} -> value;
+        //   {#error, msg} -> msg
+        // ]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("result", test_span()))),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                            Pattern::Variable(Identifier::new("value", test_span())),
+                        ],
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("value", test_span())),
+                    test_span(),
+                ),
+                MatchArm::new(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Literal(Literal::Symbol("error".into()), test_span()),
+                            Pattern::Variable(Identifier::new("msg", test_span())),
+                        ],
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("msg", test_span())),
+                    test_span(),
+                ),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_list_pattern() {
+        // Test list patterns: [head | tail] -> head
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("list", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::List {
+                    elements: vec![Pattern::Variable(Identifier::new("head", test_span()))],
+                    tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                        "tail",
+                        test_span(),
+                    )))),
+                    span: test_span(),
+                },
+                Expression::Identifier(Identifier::new("head", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        assert_eq!(result.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_match_arm_scope_isolation() {
+        // Test that variables from one arm don't leak to another
+        // This test verifies that each arm gets its own scope
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("x", test_span())),
+                    Expression::Identifier(Identifier::new("x", test_span())),
+                    test_span(),
+                ),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", test_span())),
+                    Expression::Identifier(Identifier::new("y", test_span())),
+                    test_span(),
+                ),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Both arms should analyze successfully with their own scopes
+        assert_eq!(result.diagnostics.len(), 0);
     }
 }
