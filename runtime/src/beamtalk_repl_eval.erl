@@ -84,8 +84,12 @@ do_eval(Expression, State) ->
                         %% Only purge module if it has no living actors
                         case should_purge_module(ModuleName, RegistryPid) of
                             true ->
-                                code:purge(ModuleName),
-                                code:delete(ModuleName);
+                                %% code:purge/1 returns true if successful, false if in use
+                                %% Must purge before delete to avoid "must be purged" error
+                                case code:purge(ModuleName) of
+                                    true -> code:delete(ModuleName);
+                                    false -> ok  %% Module in use, skip deletion
+                                end;
                             false ->
                                 %% Module still has actors, keep it loaded
                                 ok
