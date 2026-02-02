@@ -1506,6 +1506,88 @@ end
             code.contains("{'nil', Result}"),
             "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
         );
+
+        // Verify mutation threading details
+        assert!(
+            code.contains("letrec 'repeat'/2"),
+            "Should use arity-2 repeat function (I, StateAcc). Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('count'"),
+            "Should update 'count' in StateAcc. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_to_do_mutation() {
+        use crate::ast::BlockParameter;
+
+        // BT-153: REPL with to:do: mutation should return updated state
+        // Expression: 1 to: 5 do: [:n | total := total + n]
+
+        // Build the block: [:n | total := total + n]
+        let total_id = Expression::Identifier(Identifier::new("total", Span::new(0, 5)));
+        let n_id = Expression::Identifier(Identifier::new("n", Span::new(0, 1)));
+        let add = Expression::MessageSend {
+            receiver: Box::new(total_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![n_id],
+            span: Span::new(0, 15),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(total_id),
+            value: Box::new(add),
+            span: Span::new(0, 20),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "n".into(),
+                span: Span::new(0, 1),
+            }],
+            body: vec![assignment],
+            span: Span::new(0, 25),
+        });
+
+        // Build: 1 to: 5 do: [...]
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let to_do = Expression::MessageSend {
+            receiver: Box::new(one),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart {
+                    keyword: "to:".into(),
+                    span: Span::new(2, 5),
+                },
+                KeywordPart {
+                    keyword: "do:".into(),
+                    span: Span::new(8, 11),
+                },
+            ]),
+            arguments: vec![five, body],
+            span: Span::new(0, 40),
+        };
+
+        let code =
+            generate_repl_expression(&to_do, "repl_to_do_test").expect("codegen should work");
+
+        eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
+        eprintln!("{code}");
+
+        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        assert!(
+            code.contains("{'nil', Result}"),
+            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+        );
+
+        // Verify to:do: mutation threading
+        assert!(
+            code.contains("letrec 'loop'/2"),
+            "Should use arity-2 loop function (I, StateAcc). Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('total'"),
+            "Should update 'total' in StateAcc. Got:\n{code}"
+        );
     }
 
     #[test]
