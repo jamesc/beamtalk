@@ -11,19 +11,23 @@
 %%%
 %%% | Selector | Args | Description |
 %%% |----------|------|-------------|
-%%% | `+`      | [Y]  | Addition    |
-%%% | `-`      | [Y]  | Subtraction |
-%%% | `*`      | [Y]  | Multiplication |
-%%% | `/`      | [Y]  | Division    |
-%%% | `=`      | [Y]  | Equality    |
-%%% | `<`      | [Y]  | Less than   |
-%%% | `>`      | [Y]  | Greater than |
-%%% | `<=`     | [Y]  | Less than or equal |
-%%% | `>=`     | [Y]  | Greater than or equal |
+%%% | `+`      | [Y]  | Addition (accepts numbers) |
+%%% | `-`      | [Y]  | Subtraction (accepts numbers) |
+%%% | `*`      | [Y]  | Multiplication (accepts numbers) |
+%%% | `/`      | [Y]  | Division (accepts numbers, Y ≠ 0) |
+%%% | `=`      | [Y]  | Equality (strict =:=) |
+%%% | `<`      | [Y]  | Less than (accepts numbers) |
+%%% | `>`      | [Y]  | Greater than (accepts numbers) |
+%%% | `<=`     | [Y]  | Less than or equal (accepts numbers) |
+%%% | `>=`     | [Y]  | Greater than or equal (accepts numbers) |
 %%% | `class`  | []   | Returns `'Integer'` |
 %%% | `asString` | [] | Binary representation |
 %%% | `abs`    | []   | Absolute value |
 %%% | `negated` | []  | Negation (-X) |
+%%%
+%%% **Note:** Arithmetic and comparison operations accept both integers and floats.
+%%% Mixed integer/float operations follow Erlang's numeric tower (result type depends
+%%% on operation). Equality uses strict equality (=:=), so `42 = 42.0` returns false.
 %%%
 %%% ## Usage Examples
 %%%
