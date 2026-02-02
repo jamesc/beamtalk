@@ -80,7 +80,7 @@ class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'Array';
 class_of(X) when is_map(X) -> 'Dictionary';
-class_of(X) when is_tuple(X), element(1, X) =:= beamtalk_object ->
+class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     element(2, X);  % Extract class field from #beamtalk_object{}
 class_of(X) when is_tuple(X) -> 'Tuple';
 class_of(X) when is_pid(X) -> 'Pid';
@@ -136,13 +136,13 @@ send(X, Selector, Args) ->
 responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
     %% Actor: check if module exports has_method/1
     erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
-responds_to(X, Selector) when is_integer(X) ->
+responds_to(_X, _Selector) when is_integer(_X) ->
     %% TODO(BT-166): Implement beamtalk_integer:has_method/1
     false;
-responds_to(X, Selector) when is_binary(X) ->
+responds_to(_X, _Selector) when is_binary(_X) ->
     %% TODO(BT-167): Implement beamtalk_string:has_method/1
     false;
-responds_to(X, Selector) when is_float(X) ->
+responds_to(_X, _Selector) when is_float(_X) ->
     %% TODO(BT-168): Implement beamtalk_float:has_method/1
     false;
 responds_to(_, _) ->

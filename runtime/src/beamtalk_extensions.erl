@@ -20,12 +20,12 @@
 %%% Table: `beamtalk_extensions`
 %%% - Type: set (unique keys)
 %%% - Key: `{Class, Selector}`
-%%% - Value: `{Class, Selector, Fun, Owner}`
+%%% - Value: `{{Class, Selector}, Fun, Owner}`
 %%%
 %%% Conflicts table: `beamtalk_extension_conflicts`
 %%% - Type: bag (multiple values per key)
 %%% - Key: `{Class, Selector}`
-%%% - Value: `{Class, Selector, Owner, Timestamp}`
+%%% - Value: `{{Class, Selector}, Owner, Timestamp}`
 %%%
 %%% ## Usage Examples
 %%%
@@ -216,6 +216,7 @@ has(Class, Selector) when is_atom(Class), is_atom(Selector) ->
 %%% ============================================================================
 
 %% @private Group conflict records by class and selector
+-spec group_conflicts(list()) -> [{term(), [atom()]}].
 group_conflicts(Conflicts) ->
     Dict = lists:foldl(
         fun({{Class, Selector}, Owner, _Timestamp}, Acc) ->
