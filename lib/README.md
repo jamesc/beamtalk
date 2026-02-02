@@ -13,7 +13,46 @@ Even primitive operations like arithmetic, boolean logic, and control flow are i
 3. **Live debugging** - All operations can be traced and inspected
 4. **Extensibility** - Users can extend primitives by adding methods
 
+## Class Hierarchy
+
+Beamtalk follows a three-level class hierarchy inspired by Pharo Smalltalk:
+
+```
+ProtoObject (true root, minimal behavior)
+  └─ Object (common messages, reflection, nil testing)
+       └─ Actor (async-first process-based objects)
+```
+
+Most user code should inherit from **Actor** (for stateful objects) or **Object** (for simple values). Inherit from ProtoObject only when implementing proxies or custom message dispatch.
+
 ## Core Classes
+
+### ProtoObject (`ProtoObject.bt`)
+
+Absolute root of the class hierarchy providing only essential messages.
+
+**Key messages:**
+- `class` - Returns the object's class (fundamental reflection)
+- `doesNotUnderstand:args:` - Fallback for unknown messages (enables proxies)
+- `==` - Object identity test (reference equality)
+- `~=` - Object inequality test (delegates to `==`)
+
+**When to use:**
+- Implementing proxy objects with custom message forwarding
+- Wrapping foreign objects or external resources
+- Building minimal wrappers with custom dispatch
+
+**Usage:**
+```beamtalk
+// Proxy that forwards all messages to a delegate
+ProtoObject subclass: Proxy
+  state: target
+
+  doesNotUnderstand: selector args: arguments =>
+    target perform: selector withArguments: arguments
+```
+
+For normal classes, inherit from Object or Actor instead.
 
 ### Actor (`Actor.bt`)
 
@@ -294,6 +333,7 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 
 | Beamtalk | Erlang/BEAM | Notes |
 |----------|-------------|-------|
+| `ProtoObject` | Abstract root class | No instances created; root of inheritance |
 | `Actor` | `gen_server` process with state map | Each actor is a separate process |
 | `True` / `False` | Atoms `true` / `false` | Optimized by compiler |
 | `Nil` | Atom `nil` | Follows Elixir convention |
@@ -309,6 +349,7 @@ Each Beamtalk class maps to BEAM/Erlang concepts:
 
 | Class | Status | Notes |
 |-------|--------|-------|
+| `ProtoObject` | ✅ Defined | Root class, no instances |
 | `Actor` | ✅ Defined | Needs compiler spawn support |
 | `True` / `False` | ✅ Defined | Needs compiler optimization |
 | `Nil` | ✅ Defined | Needs compiler nil handling |

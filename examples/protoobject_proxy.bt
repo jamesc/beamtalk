@@ -1,0 +1,194 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// =============================================================================
+// ProtoObject Example: Transparent Proxy Pattern
+// =============================================================================
+//
+// This example demonstrates ProtoObject's fundamental methods working together
+// to implement a transparent proxy that forwards unknown messages to a target.
+//
+// ## What This Demonstrates
+//
+// 1. **ProtoObject.class** - Every object can report its class
+// 2. **ProtoObject.doesNotUnderstand:args:** - Catch unknown messages
+// 3. **ProtoObject.perform:withArguments:** - Dynamic message dispatch
+// 4. **ProtoObject.== and ~=** - Identity comparison
+// 5. **Transparent proxy pattern** - Proxy is indistinguishable from target
+//
+// ## How to Run
+//
+// ```bash
+// $ cargo run -- repl
+// > :load examples/protoobject_proxy.bt
+// > :load tests/e2e/fixtures/counter.bt
+// 
+// # Create a counter and increment it
+// > counter := Counter spawn
+// > counter increment
+// => 1
+//
+// # Create a proxy and forward messages through it
+// > proxy := TransparentProxy spawn
+// > proxy setTarget: counter
+// > proxy increment              # Forwarded to counter!
+// => 2
+//
+// # Verify the counter was incremented
+// > counter getValue
+// => 2
+//
+// # The proxy looks just like the real object
+// > counter class
+// => Counter
+// > proxy targetClass
+// => Counter
+// ```
+//
+// ## Key Insight: Auto-Await in REPL
+//
+// Notice that both `counter increment` and `proxy increment` return the same
+// thing: `=> 2`. They both generate async futures, but the REPL automatically
+// awaits them (via `beamtalk_repl_eval:maybe_await_future/1`), making the
+// proxy completely transparent to the user.
+//
+// =============================================================================
+
+// TransparentProxy - Forwards all unknown messages to a target object
+//
+// This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:
+// working together to create a proxy that's indistinguishable from the target.
+Actor subclass: TransparentProxy
+  state: target = nil
+  
+  // Set the target object that receives forwarded messages
+  setTarget: newTarget =>
+    self.target := newTarget
+  
+  // Get the class of the target (for debugging)
+  targetClass =>
+    self.target class
+  
+  // ProtoObject's doesNotUnderstand:args: catches unknown messages
+  // This is called when TransparentProxy receives a message it doesn't have
+  doesNotUnderstand: selector args: arguments =>
+    // Use ProtoObject's perform:withArguments: for dynamic dispatch
+    // This sends the message to the target as if we called it directly
+    self.target perform: selector withArguments: arguments
+
+// =============================================================================
+// What Happens When You Call: proxy increment
+// =============================================================================
+//
+// 1. Message Send: User types `proxy increment`
+//
+// 2. Compiler Generates:
+//    ```erlang
+//    let Pid = element(4, Proxy) in  % Extract pid from proxy object
+//    let Future = beamtalk_future:new() in
+//    gen_server:cast(Pid, {'increment', [], Future})
+//    Future  % Returns future
+//    ```
+//
+// 3. Runtime Dispatch:
+//    - TransparentProxy's gen_server receives {'increment', [], Future}
+//    - Looks for 'increment' in method table → NOT FOUND
+//    - Checks for 'doesNotUnderstand:args:' → FOUND!
+//    - Calls: doesNotUnderstand('increment', [])
+//
+// 4. doesNotUnderstand Executes:
+//    ```beamtalk
+//    self.target perform: 'increment' withArguments: []
+//    ```
+//
+// 5. perform:withArguments: Generates:
+//    ```erlang
+//    let TargetPid = element(4, Target) in  % Extract counter's pid
+//    let Future2 = beamtalk_future:new() in
+//    gen_server:cast(TargetPid, {'increment', [], Future2})
+//    Future2  % Returns NEW future
+//    ```
+//
+// 6. Counter Receives Message:
+//    - Counter's 'increment' method executes
+//    - Counter's value increments: 1 → 2
+//    - Counter resolves Future2 with result (2)
+//
+// 7. TransparentProxy Returns:
+//    - doesNotUnderstand returns Future2
+//    - Original Future (from step 2) gets resolved with Future2's value
+//
+// 8. REPL Auto-Awaits:
+//    ```erlang
+//    RawResult = Future,  % PID of future from step 2
+//    Result = maybe_await_future(RawResult),  % Awaits and gets: 2
+//    ```
+//
+// 9. User Sees:
+//    ```beamtalk
+//    > proxy increment
+//    => 2          # Exactly like calling counter directly!
+//    ```
+//
+// =============================================================================
+// Why This Works: The Magic of Auto-Await
+// =============================================================================
+//
+// Both calls look IDENTICAL to the user:
+//
+// | User Action        | Generated Code | Runtime             | REPL Shows |
+// |--------------------|----------------|---------------------|------------|
+// | counter increment  | Future         | Executes increment  | => 2       |
+// | proxy increment    | Future         | Forwards to counter | => 2       |
+//
+// The proxy is completely transparent because:
+// 1. Both return futures (PIDs of asynchronous operations)
+// 2. REPL awaits both automatically before displaying
+// 3. User sees the actual result value, not future objects
+//
+// This is the power of ProtoObject's doesNotUnderstand:args: and
+// perform:withArguments: - you can intercept and forward messages
+// while maintaining complete transparency.
+//
+// =============================================================================
+// Testing ProtoObject Methods Directly
+// =============================================================================
+//
+// You can also test ProtoObject methods on primitives:
+//
+// ```beamtalk
+// # class works on all types
+// > 42 class
+// => Integer
+//
+// > 'hello' class
+// => String
+//
+// > true class
+// => True
+//
+// # Identity comparison
+// > 42 == 42
+// => true
+//
+// > 42 ~= 43
+// => true
+//
+// > 'hello' == 'hello'
+// => true
+// ```
+//
+// ProtoObject.class uses pattern matching in the compiler:
+//
+// ```erlang
+// case Receiver of
+//   <I> when is_integer(I) -> 'Integer'
+//   <S> when is_binary(S) -> 'String'
+//   <'true'> when 'true' -> 'True'
+//   <'false'> when 'true' -> 'False'
+//   <'nil'> when 'true' -> 'Nil'
+//   <Obj> when 'true' -> element(2, Obj)  % Extract class from actor record
+// end
+// ```
+//
+// This allows every object - primitive or actor - to respond to the class message.

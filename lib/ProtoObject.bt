@@ -1,0 +1,156 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ProtoObject - Absolute root of the Beamtalk class hierarchy
+//
+// ProtoObject is the minimal root class providing only the most fundamental
+// messages that every object must understand. It exists to support special
+// objects that don't need the full protocol of Object (like proxies, foreign
+// objects, or minimal wrappers).
+//
+// ## Design Philosophy
+//
+// ProtoObject provides ONLY what is absolutely essential:
+// - Reflection: `class` (what kind of object am I?)
+// - Fallback: `doesNotUnderstand:args:` (handle unknown messages)
+// - Identity: `==` and `~=` (am I the same object?)
+//
+// All other functionality (nil testing, copying, description, comparison)
+// lives in Object, which inherits from ProtoObject. Most user code should
+// inherit from Object or Actor, not ProtoObject.
+//
+// ## Class Hierarchy
+//
+// ```
+// ProtoObject (true root, minimal behavior)
+//   └─ Object (common messages, reflection, nil testing)
+//        └─ Actor (async-first process-based objects)
+// ```
+//
+// ## When to Inherit from ProtoObject
+//
+// Only use ProtoObject directly for:
+// - **Proxy objects** that forward all messages to a delegate
+// - **Foreign objects** wrapping external resources
+// - **Minimal wrappers** that need custom message handling
+//
+// For normal user classes, inherit from Object or Actor instead.
+//
+// ## Core Messages
+//
+// ### class
+// Returns the class of the receiver. This is fundamental for reflection
+// and type checking.
+//
+// ```beamtalk
+// 42 class          // => Integer
+// 'hello' class     // => String
+// myActor class     // => MyActor
+// ```
+//
+// ### doesNotUnderstand: args:
+// Called when an object receives a message it doesn't understand. This is
+// the foundation for proxies, method_missing-style metaprogramming, and
+// error handling.
+//
+// Default behavior is to raise a MessageNotUnderstood error. Subclasses
+// can override to implement custom message handling:
+//
+// ```beamtalk
+// Proxy
+//   state: target
+//
+//   doesNotUnderstand: selector args: arguments =>
+//     // Forward all unknown messages to the target
+//     target perform: selector withArguments: arguments
+// ```
+//
+// ### ==
+// Tests object identity (reference equality). Returns true if both
+// references point to the exact same object, false otherwise.
+//
+// ```beamtalk
+// a := Object spawn
+// b := a
+// c := Object spawn
+//
+// a == b   // => true (same object)
+// a == c   // => false (different objects)
+// ```
+//
+// For value equality (comparing contents), use Object's `=` method.
+//
+// ### ~=
+// Tests object inequality (not identical). Returns the negation of `==`.
+//
+// ```beamtalk
+// a ~= b   // equivalent to: (a == b) not
+// ```
+//
+// ## BEAM Mapping
+//
+// - `class` returns the `__class__` field from the object's state map
+// - `==` compiles to Erlang's `=:=` operator (exact equality)
+// - `doesNotUnderstand:args:` is called by gen_server dispatch when no method matches
+//
+// ## Implementation Notes
+//
+// ProtoObject is a root class with NO superclass. The compiler must
+// handle ProtoObject specially:
+// - Method lookup terminates at ProtoObject
+// - ProtoObject has no `super` (calling super is an error)
+// - All other classes inherit from ProtoObject (directly or indirectly)
+
+ProtoObject
+  // Returns the class of this object (compiler intrinsic)
+  // Implementation: reads self.__class__ from state map
+  class => // implemented by compiler
+
+  // Called when object receives unknown message (compiler intrinsic)
+  // Default: raises MessageNotUnderstood error
+  // Subclasses can override for custom dispatch or proxying
+  //
+  // Arguments:
+  // - selector: Symbol representing the message name (e.g., #at:put:)
+  // - args: Array of arguments passed with the message
+  doesNotUnderstand: selector args: arguments => // implemented by compiler
+
+  // Object equality test (compiler intrinsic)
+  // Returns true if self and other have equal values
+  // Note: Currently uses value equality (1.0 == 1 is true)
+  // TODO: Consider strict identity semantics for Smalltalk compatibility
+  // Implementation: compiles to erlang:'=='(Self, Other)
+  == other => // implemented by compiler
+
+  // Object inequality test
+  // Returns true if self and other are different objects
+  // Delegates to == and negates the result
+  ~= other => (self == other) not
+
+  // Dynamic message dispatch (compiler intrinsic)
+  // Sends a message to an object at runtime
+  // Used by doesNotUnderstand handlers to forward messages
+  //
+  // Arguments:
+  // - selector: Symbol/atom representing the message name (e.g., #increment)
+  // - arguments: List of arguments to pass with the message
+  //
+  // Returns: Future (for async message sends to actors)
+  //
+  // Example:
+  // ```beamtalk
+  // Proxy
+  //   state: target
+  //
+  //   doesNotUnderstand: selector args: arguments =>
+  //     target perform: selector withArguments: arguments
+  // ```
+  perform: selector withArguments: arguments => // implemented by compiler
