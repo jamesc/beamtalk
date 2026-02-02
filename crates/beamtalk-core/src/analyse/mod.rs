@@ -118,7 +118,8 @@ pub enum MutationKind {
 /// Extract variable bindings from a pattern.
 ///
 /// Recursively traverses the pattern and collects all variable identifiers
-/// that will be bound when the pattern matches.
+/// that will be bound when the pattern matches. Returns diagnostics for
+/// duplicate pattern variables.
 ///
 /// # Examples
 ///
@@ -128,48 +129,70 @@ pub enum MutationKind {
 /// # use beamtalk_core::parse::Span;
 /// # use ecow::EcoString;
 /// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
-/// let bindings = extract_pattern_bindings(&pattern);
+/// let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 /// assert_eq!(bindings.len(), 1);
 /// assert_eq!(bindings[0].name, EcoString::from("x"));
+/// assert!(diagnostics.is_empty());
 /// ```
-pub fn extract_pattern_bindings(pattern: &Pattern) -> Vec<Identifier> {
+pub fn extract_pattern_bindings(
+    pattern: &Pattern,
+) -> (Vec<Identifier>, Vec<crate::parse::Diagnostic>) {
     let mut bindings = Vec::new();
-    extract_pattern_bindings_impl(pattern, &mut bindings);
-    bindings
+    let mut diagnostics = Vec::new();
+    let mut seen = std::collections::HashMap::new();
+    extract_pattern_bindings_impl(pattern, &mut bindings, &mut seen, &mut diagnostics);
+    (bindings, diagnostics)
 }
 
 /// Internal implementation of pattern binding extraction.
 ///
+/// Detects duplicate pattern variables and emits diagnostics. Beamtalk follows
+/// Rust-style semantics: duplicate variables in patterns are an error.
+///
 /// # Note
 ///
-/// This function collects all variable bindings without duplicate detection.
-/// Duplicate variables like `{X, X}` will bind `X` twice, with the second
-/// overwriting the first span in the scope. Erlang allows this as an equality
-/// constraint, but validation is not yet implemented.
-///
-/// TODO(BT-183): Add duplicate pattern variable detection and validation.
-/// Either emit diagnostic for duplicates or implement Erlang-style equality checks.
-fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifier>) {
+/// Erlang allows duplicates as equality constraints ({X, X} means both must be equal),
+/// but for MVP we disallow this for simplicity. Can be relaxed in future with codegen
+/// for equality checks.
+fn extract_pattern_bindings_impl(
+    pattern: &Pattern,
+    bindings: &mut Vec<Identifier>,
+    seen: &mut std::collections::HashMap<EcoString, Span>,
+    diagnostics: &mut Vec<crate::parse::Diagnostic>,
+) {
     match pattern {
         // Variable patterns bind the identifier
         Pattern::Variable(id) => {
+            if let Some(first_span) = seen.get(&id.name) {
+                // Duplicate variable - emit diagnostic
+                diagnostics.push(crate::parse::Diagnostic::error(
+                    format!(
+                        "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
+                        id.name,
+                        first_span.start()
+                    ),
+                    id.span,
+                ));
+            } else {
+                seen.insert(id.name.clone(), id.span);
+            }
             bindings.push(id.clone());
         }
 
         // Tuple patterns: recursively extract from all elements
         Pattern::Tuple { elements, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings);
+                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
             }
         }
 
         // List patterns: recursively extract from elements and tail
         Pattern::List { elements, tail, .. } => {
             for element in elements {
-                extract_pattern_bindings_impl(element, bindings);
+                extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
             }
             if let Some(tail_pattern) = tail {
-                extract_pattern_bindings_impl(tail_pattern, bindings);
+                extract_pattern_bindings_impl(tail_pattern, bindings, seen, diagnostics);
             }
         }
 
@@ -177,7 +200,7 @@ fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifie
         Pattern::Binary { segments, .. } => {
             for segment in segments {
                 // Binary segments may have value patterns that bind variables
-                extract_pattern_bindings_impl(&segment.value, bindings);
+                extract_pattern_bindings_impl(&segment.value, bindings, seen, diagnostics);
             }
         }
 
@@ -224,6 +247,12 @@ impl Analyser {
     }
 
     fn analyse_module(&mut self, module: &Module) {
+        // Define built-in identifiers that are always available
+        // These are special values in Beamtalk (true, false, nil)
+        self.scope.define("true", module.span);
+        self.scope.define("false", module.span);
+        self.scope.define("nil", module.span);
+
         // Analyse top-level expressions
         for expr in &module.expressions {
             self.analyse_expression(expr, None);
@@ -417,13 +446,55 @@ impl Analyser {
             self.analyse_expression(expr, None);
         }
 
-        // Store block info
+        // Store block info before emitting diagnostics (avoids unnecessary clones)
         let block_info = BlockInfo {
             context,
             captures,
-            mutations,
+            mutations: mutations.clone(), // Clone only mutations (needed for diagnostics below)
         };
         self.result.block_info.insert(block.span, block_info);
+
+        // Emit diagnostics for mutations based on block context
+        for mutation in &mutations {
+            match &mutation.kind {
+                MutationKind::Field { name } => {
+                    // Error: Field assignment in Stored or Passed blocks
+                    if matches!(context, BlockContext::Stored | BlockContext::Passed) {
+                        let context_str = match context {
+                            BlockContext::Stored => "stored",
+                            BlockContext::Passed => "passed",
+                            _ => "stored or passed",
+                        };
+                        self.result.diagnostics.push(Diagnostic::error(
+                            format!(
+                                "cannot assign to field '{name}' inside a {context_str} closure\n\
+                                 \n\
+                                 = help: field assignments require immediate execution context\n\
+                                 = help: use control flow directly: `items do: [:item | self.{name} := value]`"
+                            ),
+                            mutation.span,
+                        ));
+                    }
+                }
+                MutationKind::CapturedVariable { name } => {
+                    // Warning: Captured variable mutation in Stored blocks
+                    if matches!(context, BlockContext::Stored) {
+                        self.result.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "assignment to '{name}' has no effect on outer scope\n\
+                                 \n\
+                                 = help: closures capture variables by value\n\
+                                 = help: use control flow directly: `10 timesRepeat: [{name} := {name} + 1]`"
+                            ),
+                            mutation.span,
+                        ));
+                    }
+                }
+                MutationKind::LocalVariable { .. } => {
+                    // Local variable mutations are always allowed
+                }
+            }
+        }
 
         self.scope.pop(); // Exit block scope
     }
@@ -432,8 +503,10 @@ impl Analyser {
         // Create a new scope for this match arm
         self.scope.push();
 
-        // Extract and define all pattern variables
-        let bindings = extract_pattern_bindings(&arm.pattern);
+        // Extract and define all pattern variables, collect duplicate diagnostics
+        let (bindings, pattern_diagnostics) = extract_pattern_bindings(&arm.pattern);
+        self.result.diagnostics.extend(pattern_diagnostics);
+
         for binding in bindings {
             self.scope.define(&binding.name, binding.span);
         }
@@ -635,26 +708,29 @@ mod tests {
     #[test]
     fn test_extract_pattern_bindings_variable() {
         let pattern = Pattern::Variable(Identifier::new("x", test_span()));
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].name, "x");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn test_extract_pattern_bindings_wildcard() {
         let pattern = Pattern::Wildcard(test_span());
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 0);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
     fn test_extract_pattern_bindings_literal() {
         let pattern = Pattern::Literal(Literal::Integer(42), test_span());
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 0);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -666,11 +742,12 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "x");
         assert_eq!(bindings[1].name, "y");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -688,12 +765,13 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 3);
         assert_eq!(bindings[0].name, "status");
         assert_eq!(bindings[1].name, "x");
         assert_eq!(bindings[2].name, "y");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -709,12 +787,13 @@ mod tests {
             )))),
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 3);
         assert_eq!(bindings[0].name, "head");
         assert_eq!(bindings[1].name, "second");
         assert_eq!(bindings[2].name, "tail");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -727,11 +806,12 @@ mod tests {
             tail: None,
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "a");
         assert_eq!(bindings[1].name, "b");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -759,11 +839,95 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "version");
         assert_eq!(bindings[1].name, "data");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_in_tuple() {
+        // Pattern {x, x} should error
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("x", test_span())),
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        // Both bindings collected
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "x");
+        assert_eq!(bindings[1].name, "x");
+
+        // Diagnostic emitted for duplicate
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("bound multiple times"));
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_nested() {
+        // Pattern {x, {x, y}} should error on second x
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Variable(Identifier::new("x", test_span())),
+                        Pattern::Variable(Identifier::new("y", test_span())),
+                    ],
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_duplicate_in_list() {
+        // Pattern [x, x | tail] should error
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("x", test_span())),
+            ],
+            tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                "tail",
+                test_span(),
+            )))),
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("'x'"));
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_no_duplicate_different_names() {
+        // Pattern {x, y} should be fine
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("y", test_span())),
+            ],
+            span: test_span(),
+        };
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -781,11 +945,12 @@ mod tests {
             ],
             span: test_span(),
         };
-        let bindings = extract_pattern_bindings(&pattern);
+        let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
 
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].name, "first");
         assert_eq!(bindings[1].name, "value");
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -1520,5 +1685,252 @@ mod tests {
             "Expected no diagnostics, but got: {:?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn test_field_assignment_in_stored_block_emits_error() {
+        // Test: myBlock := [self.sum := 0] should emit error
+
+        let field_assignment = Expression::Assignment {
+            target: Box::new(Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+                field: Identifier::new("sum", test_span()),
+                span: test_span(),
+            }),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let block = Expression::Block(crate::ast::Block {
+            parameters: vec![],
+            body: vec![field_assignment],
+            span: test_span(),
+        });
+
+        // Assign block to variable (Stored context)
+        let assignment = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "myBlock",
+                test_span(),
+            ))),
+            value: Box::new(block),
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![assignment], test_span());
+        let result = analyse(&module);
+
+        // Should have at least 1 error diagnostic for field assignment in stored block
+        // (may have additional errors for undefined 'self', which is expected)
+        assert!(!result.diagnostics.is_empty());
+        let has_field_error = result.diagnostics.iter().any(|d| {
+            d.message.contains("cannot assign to field 'sum'")
+                && d.message.contains("stored closure")
+        });
+        assert!(
+            has_field_error,
+            "Expected field assignment error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_field_assignment_in_passed_block_emits_error() {
+        // Test: obj callWith: [:x | self.sum := 0] should emit error
+        // "callWith:" is not a control flow selector, so block is Passed
+        let field_assignment = Expression::Assignment {
+            target: Box::new(Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+                field: Identifier::new("sum", test_span()),
+                span: test_span(),
+            }),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let block = Expression::Block(crate::ast::Block {
+            parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
+            body: vec![field_assignment],
+            span: test_span(),
+        });
+
+        // Pass block to a message send with a non-control-flow selector
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new("obj", test_span()))),
+            selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "callWith:",
+                test_span(),
+            )]),
+            arguments: vec![block],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![message_send], test_span());
+        let result = analyse(&module);
+
+        // Should have at least 1 error diagnostic for field assignment in passed block
+        // (may have additional errors for undefined variables, which is expected)
+        assert!(!result.diagnostics.is_empty());
+        let has_field_error = result.diagnostics.iter().any(|d| {
+            d.message.contains("cannot assign to field 'sum'")
+                && d.message.contains("passed closure")
+        });
+        assert!(
+            has_field_error,
+            "Expected field assignment error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_captured_variable_mutation_in_stored_block_emits_warning() {
+        // Test: count := 0. myBlock := [count := count + 1] should emit warning
+        let count_def = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "count",
+                test_span(),
+            ))),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let count_mutation = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "count",
+                test_span(),
+            ))),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "count",
+                    test_span(),
+                ))),
+                selector: crate::ast::MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                span: test_span(),
+            }),
+            span: test_span(),
+        };
+
+        let block = Expression::Block(crate::ast::Block {
+            parameters: vec![],
+            body: vec![count_mutation],
+            span: test_span(),
+        });
+
+        // Assign block to variable (Stored context)
+        let block_assignment = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "myBlock",
+                test_span(),
+            ))),
+            value: Box::new(block),
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![count_def, block_assignment], test_span());
+        let result = analyse(&module);
+
+        // Should have 1 warning diagnostic for captured variable mutation
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("assignment to 'count' has no effect on outer scope")
+        );
+        // Verify it's a warning, not an error
+        assert_eq!(
+            result.diagnostics[0].severity,
+            crate::parse::Severity::Warning
+        );
+    }
+
+    #[test]
+    fn test_field_assignment_in_control_flow_block_no_diagnostic() {
+        // Test: 10 timesRepeat: [self.sum := 0] should NOT emit error
+        let field_assignment = Expression::Assignment {
+            target: Box::new(Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+                field: Identifier::new("sum", test_span()),
+                span: test_span(),
+            }),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let block = Expression::Block(crate::ast::Block {
+            parameters: vec![],
+            body: vec![field_assignment],
+            span: test_span(),
+        });
+
+        // Use in control flow position
+        let message_send = Expression::MessageSend {
+            receiver: Box::new(Expression::Literal(Literal::Integer(10), test_span())),
+            selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "timesRepeat:",
+                test_span(),
+            )]),
+            arguments: vec![block],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![message_send], test_span());
+        let result = analyse(&module);
+
+        // Should have NO diagnostics for field assignment in control flow blocks
+        // (may have errors for undefined 'self', but no mutation warnings)
+        let has_field_error = result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("cannot assign to field"));
+        assert!(
+            !has_field_error,
+            "Should not have field assignment error for control flow, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_local_variable_mutation_in_stored_block_no_diagnostic() {
+        // Test: myBlock := [x := 0. x := x + 1] should NOT emit warning
+        // (only captured variable mutations get warnings)
+        let x_def = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let x_mutation = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+                selector: crate::ast::MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                span: test_span(),
+            }),
+            span: test_span(),
+        };
+
+        let block = Expression::Block(crate::ast::Block {
+            parameters: vec![],
+            body: vec![x_def, x_mutation],
+            span: test_span(),
+        });
+
+        // Assign block to variable (Stored context)
+        let block_assignment = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "myBlock",
+                test_span(),
+            ))),
+            value: Box::new(block),
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![block_assignment], test_span());
+        let result = analyse(&module);
+
+        // Should have NO diagnostics - local variables can be mutated
+        assert_eq!(result.diagnostics.len(), 0);
     }
 }

@@ -87,7 +87,9 @@ For each issue found, determine what's missing:
 
 **Item Area:** Must have one of `class-system`, `stdlib`, `repl`, `cli`, `codegen`, `runtime`, `parser`
 
-**Issue Type:** Must have one of `Feature`, `Bug`, `Improvement`, `Documentation`, `Infra`, `Language Feature`, `Refactor`, `Research`, `Samples`
+**Issue Type:** Must have one of `Epic`, `Feature`, `Bug`, `Improvement`, `Documentation`, `Infra`, `Language Feature`, `Refactor`, `Research`, `Samples`
+
+**Note:** `Epic` label is for large initiatives grouping 5+ related issues. Most issues should use other types.
 
 **Size:** Must have one of `S`, `M`, `L`, `XL`
 

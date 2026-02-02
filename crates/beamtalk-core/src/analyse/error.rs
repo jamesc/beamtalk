@@ -30,6 +30,9 @@ pub enum SemanticErrorKind {
 
     /// Multiple assignments to same immutable variable.
     MultipleAssignment { name: EcoString },
+
+    /// Variable bound multiple times in the same pattern.
+    DuplicatePatternVariable { name: EcoString, first_span: Span },
 }
 
 impl SemanticError {
