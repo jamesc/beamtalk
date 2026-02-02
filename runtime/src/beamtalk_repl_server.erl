@@ -9,7 +9,7 @@
 -module(beamtalk_repl_server).
 
 -export([handle_client/2, parse_request/1, format_response/1, format_error/1,
-         format_bindings/1, format_loaded/1]).
+         format_bindings/1, format_loaded/1, format_actors/1]).
 
 -define(RECV_TIMEOUT, 30000).
 
@@ -48,7 +48,14 @@ handle_client_loop(Socket, ReplPid) ->
 
 %% @doc Parse a request from the CLI.
 %% Expected format: JSON with "type" field.
--spec parse_request(binary()) -> {eval, string()} | {clear_bindings} | {get_bindings} | {load_file, string()} | {error, term()}.
+-spec parse_request(binary()) -> 
+    {eval, string()} | 
+    {clear_bindings} | 
+    {get_bindings} | 
+    {load_file, string()} | 
+    {list_actors} |
+    {kill_actor, string()} |
+    {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
         %% Remove trailing newline if present
@@ -63,6 +70,10 @@ parse_request(Data) when is_binary(Data) ->
                 {get_bindings};
             {ok, #{<<"type">> := <<"load">>, <<"path">> := Path}} ->
                 {load_file, binary_to_list(Path)};
+            {ok, #{<<"type">> := <<"actors">>}} ->
+                {list_actors};
+            {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
+                {kill_actor, binary_to_list(PidStr)};
             {ok, _Other} ->
                 {error, {invalid_request, unknown_type}};
             {error, _Reason} ->
@@ -111,6 +122,22 @@ format_bindings(Bindings) ->
 -spec format_loaded([string()]) -> binary().
 format_loaded(Classes) ->
     jsx:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => [list_to_binary(C) || C <- Classes]}).
+
+%% @doc Format an actors list response as JSON.
+-spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().
+format_actors(Actors) ->
+    JsonActors = lists:map(
+        fun(#{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt}) ->
+            #{
+                <<"pid">> => list_to_binary(pid_to_list(Pid)),
+                <<"class">> => atom_to_binary(Class, utf8),
+                <<"module">> => atom_to_binary(Module, utf8),
+                <<"spawned_at">> => SpawnedAt
+            }
+        end,
+        Actors
+    ),
+    jsx:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors}).
 
 %%% JSON Parsing
 
