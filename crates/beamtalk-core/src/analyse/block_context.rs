@@ -76,6 +76,14 @@ pub fn selector_to_string(selector: &MessageSelector) -> String {
 /// This function determines whether a block is used for control flow, stored in
 /// a variable, passed as an argument, or used in some other context.
 ///
+/// # Key Distinctions
+///
+/// - **Literal vs Variable**: Only *literal* blocks (`[...]`) in control flow
+///   positions are classified as `ControlFlow`. Block *variables* in any position
+///   are always `Passed`.
+/// - **Control Flow Selectors**: Includes whileTrue:, ifTrue:, timesRepeat:, do:,
+///   to:do:, inject:into:, and conditional messages.
+///
 /// # Parameters
 ///
 /// - `block_span`: The span of the block being classified
@@ -84,8 +92,14 @@ pub fn selector_to_string(selector: &MessageSelector) -> String {
 ///
 /// # Returns
 ///
-/// The `BlockContext` for this block, or `BlockContext::Unknown` if context
-/// cannot be determined.
+/// The `BlockContext` for this block:
+/// - `ControlFlow`: Literal block in control flow selector position
+/// - `Stored`: Block on RHS of assignment
+/// - `Passed`: Block variable passed as argument
+/// - `Other`: Valid context that doesn't match above (e.g., return value)
+///
+/// Note: `BlockContext::Unknown` is reserved for error recovery in the caller
+/// and is not returned by this function.
 ///
 /// # Examples
 ///
