@@ -126,38 +126,38 @@ Loaded: SimpleProxy
 - `~=` compiles to: `call 'erlang':'not'(call 'erlang':'=:='(Self, Other))`
 - These were already implemented in binary operators
 
-### 5. Direct Method Calls
+### 5. Direct Method Calls (Auto-Awaited in REPL)
 
 ```beamtalk
-> fut1 := counter increment
-=> #Future<0.127.0>
+> counter increment
+=> 1                    // REPL auto-awaits the future!
 
-> fut1 await
-=> 1
-
-> fut2 := counter getValue  
-=> #Future<0.129.0>
-
-> fut2 await
-=> 1
+> counter getValue  
+=> 1                    // Returns the current value
 ```
 
 **What's happening:**
-- Message sends to actors are async and return futures
-- `await` blocks until the future resolves
-- The counter's state was incremented from 0 to 1
+- `counter increment` generates an async message send that returns a Future (PID)
+- The REPL automatically calls `maybe_await_future/1` (line 58 in `beamtalk_repl_eval.erl`)
+- The future is awaited and the actual result (1) is displayed
+- This makes the REPL feel synchronous even though messages are async
 
-### 6. doesNotUnderstand with Message Forwarding
+### 6. doesNotUnderstand with Message Forwarding (TRANSPARENT!)
 
 This is the key ProtoObject feature demonstration!
 
 ```beamtalk
 > proxy setTarget: counter
-=> #Future<0.131.0>
+=> 1                    // REPL auto-awaits - returns whatever setTarget returns
 
-> proxy increment
-=> #Future<0.133.0>
+> proxy increment       // ← SimpleProxy doesn't have 'increment'!
+=> 2                    // ← Looks EXACTLY like calling counter directly!
+
+> counter getValue
+=> 2                    // ← Confirmed: counter was incremented via proxy
 ```
+
+**The proxy is completely transparent!** Both calls return the same type of result:
 
 **What's happening step by step:**
 
