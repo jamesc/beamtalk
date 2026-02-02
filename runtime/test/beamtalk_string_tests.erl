@@ -176,6 +176,109 @@ includes_type_safety_test_() ->
     ]}.
 
 %%% ============================================================================
+%%% startsWith / endsWith Tests
+%%% ============================================================================
+
+starts_with_test() ->
+    ?assertEqual(true, beamtalk_string:dispatch('startsWith:', [<<"hel">>], <<"hello">>)),
+    ?assertEqual(true, beamtalk_string:dispatch('startsWith:', [<<"hello">>], <<"hello">>)),
+    ?assertEqual(false, beamtalk_string:dispatch('startsWith:', [<<"ello">>], <<"hello">>)),
+    ?assertEqual(true, beamtalk_string:dispatch('startsWith:', [<<>>], <<"hello">>)),
+    ?assertEqual(false, beamtalk_string:dispatch('startsWith:', [<<"hello world">>], <<"hello">>)).
+
+starts_with_utf8_test() ->
+    ?assertEqual(true, beamtalk_string:dispatch('startsWith:', [<<"こん"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(false, beamtalk_string:dispatch('startsWith:', [<<"にち"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(true, beamtalk_string:dispatch('startsWith:', [<<"👋"/utf8>>], <<"👋🌍"/utf8>>)).
+
+ends_with_test() ->
+    ?assertEqual(true, beamtalk_string:dispatch('endsWith:', [<<"llo">>], <<"hello">>)),
+    ?assertEqual(true, beamtalk_string:dispatch('endsWith:', [<<"hello">>], <<"hello">>)),
+    ?assertEqual(false, beamtalk_string:dispatch('endsWith:', [<<"hell">>], <<"hello">>)),
+    ?assertEqual(true, beamtalk_string:dispatch('endsWith:', [<<>>], <<"hello">>)),
+    ?assertEqual(false, beamtalk_string:dispatch('endsWith:', [<<"hello world">>], <<"world">>)).
+
+ends_with_utf8_test() ->
+    ?assertEqual(true, beamtalk_string:dispatch('endsWith:', [<<"ちは"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(false, beamtalk_string:dispatch('endsWith:', [<<"こん"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(true, beamtalk_string:dispatch('endsWith:', [<<"🌍"/utf8>>], <<"👋🌍"/utf8>>)).
+
+%%% ============================================================================
+%%% indexOf Tests
+%%% ============================================================================
+
+index_of_test() ->
+    ?assertEqual(1, beamtalk_string:dispatch('indexOf:', [<<"h">>], <<"hello">>)),
+    ?assertEqual(2, beamtalk_string:dispatch('indexOf:', [<<"e">>], <<"hello">>)),
+    ?assertEqual(3, beamtalk_string:dispatch('indexOf:', [<<"ll">>], <<"hello">>)),
+    ?assertEqual(1, beamtalk_string:dispatch('indexOf:', [<<"hello">>], <<"hello">>)),
+    ?assertEqual(nil, beamtalk_string:dispatch('indexOf:', [<<"xyz">>], <<"hello">>)),
+    ?assertEqual(nil, beamtalk_string:dispatch('indexOf:', [<<>>], <<"hello">>)).
+
+index_of_utf8_test() ->
+    ?assertEqual(1, beamtalk_string:dispatch('indexOf:', [<<"こ"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(3, beamtalk_string:dispatch('indexOf:', [<<"に"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(2, beamtalk_string:dispatch('indexOf:', [<<"んに"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(nil, beamtalk_string:dispatch('indexOf:', [<<"xyz">>], <<"こんにちは"/utf8>>)).
+
+%%% ============================================================================
+%%% replace Tests
+%%% ============================================================================
+
+replace_test() ->
+    ?assertEqual(<<"hi world">>, beamtalk_string:dispatch('replace:with:', [<<"hello">>, <<"hi">>], <<"hello world">>)),
+    ?assertEqual(<<"he11o">>, beamtalk_string:dispatch('replace:with:', [<<"l">>, <<"1">>], <<"hello">>)),
+    ?assertEqual(<<"abc abc abc">>, beamtalk_string:dispatch('replace:with:', [<<"x">>, <<"abc">>], <<"x x x">>)),
+    ?assertEqual(<<"hello">>, beamtalk_string:dispatch('replace:with:', [<<"xyz">>, <<"abc">>], <<"hello">>)),
+    ?assertEqual(<<"">>, beamtalk_string:dispatch('replace:with:', [<<"hello">>, <<>>], <<"hello">>)).
+
+replace_utf8_test() ->
+    ?assertEqual(<<"さようならにちは"/utf8>>, 
+                 beamtalk_string:dispatch('replace:with:', [<<"こん"/utf8>>, <<"さようなら"/utf8>>], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"🎉🎉"/utf8>>, 
+                 beamtalk_string:dispatch('replace:with:', [<<"👋"/utf8>>, <<"🎉"/utf8>>], <<"👋👋"/utf8>>)).
+
+replace_empty_pattern_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Empty pattern raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'String', 'replace:with:', 2},
+                         beamtalk_string:dispatch('replace:with:', [<<>>, <<"x">>], <<"hello">>))
+        end}
+    ]}.
+
+%%% ============================================================================
+%%% substring Tests
+%%% ============================================================================
+
+substring_test() ->
+    ?assertEqual(<<"hel">>, beamtalk_string:dispatch('substring:to:', [1, 3], <<"hello">>)),
+    ?assertEqual(<<"ell">>, beamtalk_string:dispatch('substring:to:', [2, 4], <<"hello">>)),
+    ?assertEqual(<<"hello">>, beamtalk_string:dispatch('substring:to:', [1, 5], <<"hello">>)),
+    ?assertEqual(<<"o">>, beamtalk_string:dispatch('substring:to:', [5, 5], <<"hello">>)),
+    ?assertEqual(<<>>, beamtalk_string:dispatch('substring:to:', [3, 2], <<"hello">>)).
+
+substring_bounds_test() ->
+    %% End beyond string length should be capped
+    ?assertEqual(<<"hello">>, beamtalk_string:dispatch('substring:to:', [1, 100], <<"hello">>)),
+    ?assertEqual(<<"llo">>, beamtalk_string:dispatch('substring:to:', [3, 100], <<"hello">>)).
+
+substring_utf8_test() ->
+    ?assertEqual(<<"こん"/utf8>>, beamtalk_string:dispatch('substring:to:', [1, 2], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"んに"/utf8>>, beamtalk_string:dispatch('substring:to:', [2, 3], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"は"/utf8>>, beamtalk_string:dispatch('substring:to:', [5, 5], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"👋"/utf8>>, beamtalk_string:dispatch('substring:to:', [1, 1], <<"👋🌍"/utf8>>)).
+
+substring_invalid_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Invalid range raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'String', 'substring:to:', 2},
+                         beamtalk_string:dispatch('substring:to:', [0, 3], <<"hello">>)),
+            ?assertError({does_not_understand, 'String', 'substring:to:', 2},
+                         beamtalk_string:dispatch('substring:to:', [10, 20], <<"hello">>))
+        end}
+    ]}.
+
+%%% ============================================================================
 %%% Split Tests
 %%% ============================================================================
 

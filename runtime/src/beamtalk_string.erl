@@ -22,6 +22,11 @@
 %%% | `concat:` | [Str] | Concatenate (keyword form) |
 %%% | `at:`    | [Idx] | Character at index (1-based) |
 %%% | `includes:` | [Substr] | Check if contains substring |
+%%% | `startsWith:` | [Prefix] | Check if string starts with prefix |
+%%% | `endsWith:` | [Suffix] | Check if string ends with suffix |
+%%% | `indexOf:` | [Substr] | Find first occurrence (1-based index or nil) |
+%%% | `replace:with:` | [Old, New] | Replace all occurrences |
+%%% | `substring:to:` | [Start, End] | Extract substring (1-based, inclusive) |
 %%% | `split:` | [Delim] | Split by delimiter |
 %%% | `asInteger` | [] | Parse as integer (error if invalid) |
 %%%
@@ -112,6 +117,11 @@ is_builtin('++') -> true;
 is_builtin('concat:') -> true;
 is_builtin('at:') -> true;
 is_builtin('includes:') -> true;
+is_builtin('startsWith:') -> true;
+is_builtin('endsWith:') -> true;
+is_builtin('indexOf:') -> true;
+is_builtin('replace:with:') -> true;
+is_builtin('substring:to:') -> true;
 is_builtin('split:') -> true;
 is_builtin('asInteger') -> true;
 is_builtin(_) -> false.
@@ -164,6 +174,69 @@ builtin_dispatch('includes:', [Substr], X) when is_binary(Substr) ->
         _ -> {ok, binary:match(X, Substr) =/= nomatch}
     end;
 
+builtin_dispatch('startsWith:', [Prefix], X) when is_binary(Prefix) ->
+    PrefixSize = byte_size(Prefix),
+    case X of
+        <<Prefix:PrefixSize/binary, _Rest/binary>> -> {ok, true};
+        _ when Prefix =:= <<>> -> {ok, true};  % Empty prefix always matches
+        _ -> {ok, false}
+    end;
+
+builtin_dispatch('endsWith:', [Suffix], X) when is_binary(Suffix) ->
+    SuffixSize = byte_size(Suffix),
+    StringSize = byte_size(X),
+    case SuffixSize =< StringSize of
+        true ->
+            PrefixSize = StringSize - SuffixSize,
+            case X of
+                <<_Prefix:PrefixSize/binary, Suffix:SuffixSize/binary>> -> {ok, true};
+                _ -> {ok, false}
+            end;
+        false when Suffix =:= <<>> -> {ok, true};  % Empty suffix always matches
+        false -> {ok, false}
+    end;
+
+builtin_dispatch('indexOf:', [Substr], X) when is_binary(Substr) ->
+    case Substr of
+        <<>> -> {ok, nil};  % Empty substring has no position
+        _ ->
+            case binary:match(X, Substr) of
+                nomatch -> {ok, nil};
+                {BytePos, _Length} ->
+                    %% Convert byte position to grapheme position (1-based)
+                    <<Before:BytePos/binary, _Rest/binary>> = X,
+                    GraphemePos = string:length(Before) + 1,
+                    {ok, GraphemePos}
+            end
+    end;
+
+builtin_dispatch('replace:with:', [Old, New], X) when is_binary(Old), is_binary(New) ->
+    case Old of
+        <<>> -> not_found;  % Cannot replace empty string
+        _ -> {ok, binary:replace(X, Old, New, [global])}
+    end;
+
+builtin_dispatch('substring:to:', [Start, End], X) when is_integer(Start), is_integer(End), Start >= 1 ->
+    Length = string:length(X),
+    case Start =< Length of
+        true ->
+            case End < Start of
+                true -> {ok, <<>>};  % Invalid range returns empty string
+                false ->
+                    ActualEnd = min(End, Length),
+                    SubLength = ActualEnd - Start + 1,
+                    case SubLength > 0 of
+                        true ->
+                            case get_substring_graphemes(X, Start, SubLength) of
+                                {ok, Substring} -> {ok, Substring};
+                                error -> not_found
+                            end;
+                        false -> {ok, <<>>}
+                    end
+            end;
+        false -> not_found  % Start beyond string length
+    end;
+
 %% Split
 builtin_dispatch('split:', [Delim], X) when is_binary(Delim) ->
     case Delim of
@@ -208,4 +281,39 @@ get_nth_grapheme(Str, N, Current) ->
     case string:next_grapheme(Str) of
         [_Grapheme | Rest] -> get_nth_grapheme(Rest, N, Current + 1);
         [] -> error
+    end.
+
+%% @doc Helper to extract a substring by grapheme range.
+-spec get_substring_graphemes(binary(), pos_integer(), pos_integer()) -> {ok, binary()} | error.
+get_substring_graphemes(Str, Start, Length) ->
+    %% Skip to Start position
+    SkipCount = Start - 1,
+    case skip_graphemes(Str, SkipCount) of
+        {ok, Rest} ->
+            %% Take Length graphemes
+            take_graphemes(Rest, Length);
+        error -> error
+    end.
+
+skip_graphemes(Str, 0) -> {ok, Str};
+skip_graphemes(<<>>, _N) -> error;
+skip_graphemes(Str, N) ->
+    case string:next_grapheme(Str) of
+        [_Grapheme | Rest] -> skip_graphemes(Rest, N - 1);
+        [] -> error
+    end.
+
+take_graphemes(Str, Length) ->
+    take_graphemes(Str, Length, []).
+
+take_graphemes(_Str, 0, Acc) ->
+    {ok, unicode:characters_to_binary(lists:reverse(Acc))};
+take_graphemes(<<>>, _Length, Acc) ->
+    {ok, unicode:characters_to_binary(lists:reverse(Acc))};
+take_graphemes(Str, Length, Acc) ->
+    case string:next_grapheme(Str) of
+        [Grapheme | Rest] ->
+            take_graphemes(Rest, Length - 1, [Grapheme | Acc]);
+        [] ->
+            {ok, unicode:characters_to_binary(lists:reverse(Acc))}
     end.
