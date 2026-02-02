@@ -242,13 +242,18 @@ if ($env:GIT_SIGNING_KEY) {
         if ($containerInfo) {
             Write-Host "   Container ID: $containerInfo" -ForegroundColor Gray
             
-            # Ensure .ssh directory exists in container
+            # Ensure .ssh directory exists in container with correct ownership
             docker exec $containerInfo mkdir -p /home/vscode/.ssh 2>$null
+            docker exec $containerInfo chown -R vscode:vscode /home/vscode/.ssh 2>$null
             docker exec $containerInfo chmod 700 /home/vscode/.ssh 2>$null
             
             # Copy the key
             docker cp $sshKeyPath "${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" 2>$null
             if ($LASTEXITCODE -eq 0) {
+                # Fix ownership of the copied key
+                docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
+                docker exec $containerInfo chmod 644 /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
+                
                 Write-Host "✅ SSH key copied, re-running setup..." -ForegroundColor Green
                 devcontainer exec --workspace-folder $worktreePath bash .devcontainer/setup-ssh-signing.sh
             }
