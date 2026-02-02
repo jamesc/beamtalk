@@ -639,7 +639,7 @@ pub fn run() -> Result<()> {
                         match client.kill_actor(pid_str) {
                             Ok(response) => {
                                 if response.response_type == "result" {
-                                    println!("Actor {} killed.", pid_str);
+                                    println!("Actor {pid_str} killed.");
                                 } else if response.response_type == "error" {
                                     if let Some(msg) = response.message {
                                         eprintln!("Error: {msg}");

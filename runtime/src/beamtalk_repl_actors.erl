@@ -113,7 +113,11 @@ handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
 handle_call({unregister, ActorPid}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
     
-    %% Remove monitor if it exists
+    %% Find and demonitor all references for this actor
+    MonitorRefs = [Ref || {Ref, Pid} <- maps:to_list(Monitors), Pid =:= ActorPid],
+    lists:foreach(fun erlang:demonitor/1, MonitorRefs),
+    
+    %% Remove monitor references
     NewMonitors = maps:filter(
         fun(_Ref, Pid) -> Pid =/= ActorPid end,
         Monitors
