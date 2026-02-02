@@ -1947,4 +1947,66 @@ mod tests {
         // Should have NO diagnostics - local variables can be mutated
         assert_eq!(result.diagnostics.len(), 0);
     }
+
+    #[test]
+    fn test_analyse_with_known_vars_suppresses_undefined() {
+        // Test: x + 1 where 'x' is a known REPL variable
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            selector: crate::ast::MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+
+        // Without known vars - should report undefined
+        let result_without = analyse(&module);
+        assert!(
+            result_without
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: x")),
+            "Should report undefined variable without known vars"
+        );
+
+        // With 'x' in known vars - should NOT report undefined
+        let result_with = analyse_with_known_vars(&module, &["x"]);
+        assert!(
+            !result_with
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: x")),
+            "Should not report undefined variable when in known_vars, got: {:?}",
+            result_with.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_analyse_with_known_vars_handles_reassignment() {
+        // Test: x := x + 1 where 'x' is a known REPL variable (reassignment)
+        let expr = Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
+                selector: crate::ast::MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                span: test_span(),
+            }),
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+
+        // With 'x' known, the RHS reference should not report undefined
+        let result = analyse_with_known_vars(&module, &["x"]);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Undefined variable")),
+            "Should not report undefined for known REPL variable reassignment, got: {:?}",
+            result.diagnostics
+        );
+    }
 }

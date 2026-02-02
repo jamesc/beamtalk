@@ -141,4 +141,50 @@ mod tests {
             "Should not have field assignment error for control flow, got: {diagnostics:?}"
         );
     }
+
+    #[test]
+    fn compute_diagnostics_with_known_vars_suppresses_undefined_error() {
+        // Without known vars, 'x' would be undefined
+        let source = "x + 1";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        // With empty known_vars, should report undefined variable
+        let diags_without = compute_diagnostics_with_known_vars(&module, parse_diags.clone(), &[]);
+        assert!(
+            diags_without
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: x")),
+            "Should report undefined variable without known vars"
+        );
+
+        // With 'x' in known_vars, should NOT report undefined
+        let diags_with = compute_diagnostics_with_known_vars(&module, parse_diags, &["x"]);
+        assert!(
+            !diags_with
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: x")),
+            "Should not report undefined variable when in known_vars, got: {diags_with:?}"
+        );
+    }
+
+    #[test]
+    fn compute_diagnostics_with_known_vars_handles_multiple_vars() {
+        // Expression using multiple REPL variables
+        let source = "x + y * z";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        // All three should be recognized as known
+        let diagnostics =
+            compute_diagnostics_with_known_vars(&module, parse_diags, &["x", "y", "z"]);
+
+        let has_undefined = diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined variable"));
+        assert!(
+            !has_undefined,
+            "Should not report any undefined variables, got: {diagnostics:?}"
+        );
+    }
 }
