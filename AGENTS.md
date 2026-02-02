@@ -80,6 +80,7 @@ Identifies which component of the codebase the issue affects:
 
 Categorizes the kind of work:
 
+- `Epic` - **Large initiatives that group related issues (5+ child issues)**
 - `Feature` - A chunk of customer visible work
 - `Bug` - Bugs, broken tests, broken code
 - `Improvement` - Incremental work on top of a feature
@@ -99,6 +100,108 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 2. An **Item Area** label (what part of codebase)
 3. An **Issue Type** label (what kind of work)
 4. An **Item Size** label (how big)
+
+### Epics
+
+**Epics** are large initiatives that group 5+ related issues. Use Epics to organize complex features that span multiple components or require sequential implementation.
+
+#### Current Active Epics
+
+| Epic ID | Name | Child Issues | Progress | Priority |
+|---------|------|--------------|----------|----------|
+| **BT-204** | Block Semantics and Control Flow | 13 issues | ~80% | High |
+| **BT-205** | Standard Library Core Classes | 8 issues | ~60% | High |
+| **BT-206** | REPL and Interactive Development | 14 issues | ~55% | High |
+| **BT-207** | Actor Runtime and Messaging | 8 issues | ~50% | High |
+| **BT-208** | Parser and Language Syntax | 8 issues | ~70% | Medium |
+| **BT-209** | Code Quality and Infrastructure | 24 issues | ~75% | Medium |
+| **BT-197** | DDD Architecture Refactoring | 4 issues | ~50% | Medium |
+| **BT-162** | Self-as-Object and Reflection API | 10 issues | ~70% | High |
+| **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
+| **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
+| **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |
+
+#### Epic Completed
+
+| Epic ID | Name | Child Issues | Completion Date |
+|---------|------|--------------|-----------------|
+| **BT-134** | Improve Erlang Test Coverage | 5 issues | 2026-01-31 |
+| **BT-128** | Improve Test Coverage to >80% | 6 issues | 2026-02-01 |
+
+#### Creating Epics
+
+When creating an Epic:
+
+1. **Use Epic label** - Always add `Epic` label to Epic issues
+2. **Size as XL or L** - Epics are large by definition
+3. **Write comprehensive description** with:
+   - Overview of initiative
+   - Goals (3-5 high-level outcomes)
+   - Status summary (progress percentage, completed/in-progress/planned)
+   - List of child issues with status indicators
+   - References to design docs
+   - Next steps
+4. **Link child issues** - Use Linear's "blocks" relationship to connect Epic to child issues
+5. **Track progress** - Update Epic description with progress as child issues complete
+6. **Include completion criteria** - Checklist of what defines "done" for the Epic
+
+**Example Epic Structure:**
+```markdown
+## Overview
+Brief description of the initiative and why it matters.
+
+## Goals
+1. Goal 1 - Specific outcome
+2. Goal 2 - Specific outcome
+3. Goal 3 - Specific outcome
+
+## Status
+**Progress:** ~60% complete (6/10 issues done)
+
+**Completed:**
+- ✅ BT-X: Issue description
+- ✅ BT-Y: Issue description
+
+**In Progress:**
+- 🔄 BT-Z: Issue description
+
+**Planned:**
+- ⏳ BT-A: Issue description
+
+## Child Issues
+- BT-X - Issue title ✅
+- BT-Y - Issue title ✅
+- BT-Z - Issue title (In Progress)
+- BT-A - Issue title
+
+## References
+- Design doc: `docs/...`
+- Related Epic: BT-XXX
+
+## Next Steps
+1. Complete BT-Z (in progress)
+2. Start BT-A
+3. Write documentation
+```
+
+#### Epic Guidelines
+
+**When to create an Epic:**
+- Feature requires 5+ related issues
+- Work spans multiple components (parser + codegen + runtime)
+- Implementation requires sequential phases
+- High-level initiative needs progress tracking
+
+**When NOT to create an Epic:**
+- Single feature with 1-3 issues (just use issue dependencies)
+- Small refactoring with <5 files
+- Bug fixes (even if touching multiple areas)
+
+**Epic Maintenance:**
+- Update progress percentage monthly or when child issues complete
+- Close Epic when all child issues are Done
+- Add new child issues as scope clarifies
+- Keep "Current Active Epics" table in AGENTS.md up to date
 
 ### Writing Agent-Ready Issues
 
