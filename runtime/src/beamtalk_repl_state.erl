@@ -10,7 +10,7 @@
 
 -export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
          get_eval_counter/1, increment_eval_counter/1,
-         get_loaded_modules/1, add_loaded_module/2,
+         get_loaded_modules/1, add_loaded_module/2, set_loaded_modules/2,
          get_daemon_socket_path/1, get_listen_socket/1, get_port/1,
          get_actor_registry/1, set_actor_registry/2,
          get_module_tracker/1, set_module_tracker/2]).
@@ -90,6 +90,11 @@ get_loaded_modules(#state{loaded_modules = Modules}) ->
 -spec add_loaded_module(atom(), state()) -> state().
 add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
     State#state{loaded_modules = [Module | Modules]}.
+
+%% @doc Set the loaded modules list.
+-spec set_loaded_modules([atom()], state()) -> state().
+set_loaded_modules(Modules, State) ->
+    State#state{loaded_modules = Modules}.
 
 %% @doc Get daemon socket path.
 -spec get_daemon_socket_path(state()) -> string().

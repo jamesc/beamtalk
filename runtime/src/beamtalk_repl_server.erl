@@ -56,6 +56,7 @@ handle_client_loop(Socket, ReplPid) ->
     {list_actors} |
     {kill_actor, string()} |
     {list_modules} |
+    {unload_module, string()} |
     {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
@@ -75,6 +76,8 @@ parse_request(Data) when is_binary(Data) ->
                 {list_actors};
             {ok, #{<<"type">> := <<"modules">>}} ->
                 {list_modules};
+            {ok, #{<<"type">> := <<"unload">>, <<"module">> := ModuleName}} ->
+                {unload_module, binary_to_list(ModuleName)};
             {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
                 {kill_actor, binary_to_list(PidStr)};
             {ok, _Other} ->
@@ -383,6 +386,17 @@ format_error_message({read_error, Reason}) ->
     iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]);
 format_error_message(daemon_unavailable) ->
     <<"Unable to connect to compiler daemon. Start with: beamtalk daemon start --foreground">>;
+format_error_message({module_not_found, ModuleName}) ->
+    iolist_to_binary([<<"Module not loaded: ">>, ModuleName]);
+format_error_message({invalid_module_name, ModuleName}) ->
+    iolist_to_binary([<<"Invalid module name: ">>, ModuleName]);
+format_error_message({actors_exist, ModuleName, Count}) ->
+    CountStr = integer_to_list(Count),
+    ActorWord = if Count == 1 -> <<"actor">>; true -> <<"actors">> end,
+    iolist_to_binary([
+        <<"Cannot unload ">>, atom_to_binary(ModuleName, utf8), 
+        <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
+    ]);
 format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 

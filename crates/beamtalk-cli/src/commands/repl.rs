@@ -269,6 +269,25 @@ impl ReplClient {
 
         serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
     }
+
+    /// Unload a module by name.
+    fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
+        let request = serde_json::json!({
+            "type": "unload",
+            "module": module_name
+        });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
 }
 
 /// Path to REPL history file.
@@ -457,15 +476,16 @@ fn format_value(value: &serde_json::Value) -> String {
 fn print_help() {
     println!("Beamtalk REPL Commands:");
     println!();
-    println!("  :help, :h     Show this help message");
-    println!("  :exit, :q     Exit the REPL");
-    println!("  :clear        Clear all variable bindings");
-    println!("  :bindings     Show current variable bindings");
-    println!("  :load <path>  Load a .bt file");
-    println!("  :reload       Reload the last loaded file");
-    println!("  :modules      List loaded modules");
-    println!("  :actors       List running actors");
-    println!("  :kill <pid>   Kill an actor by PID");
+    println!("  :help, :h       Show this help message");
+    println!("  :exit, :q       Exit the REPL");
+    println!("  :clear          Clear all variable bindings");
+    println!("  :bindings       Show current variable bindings");
+    println!("  :load <path>    Load a .bt file");
+    println!("  :reload         Reload the last loaded file");
+    println!("  :modules        List loaded modules");
+    println!("  :unload <name>  Unload a module (fails if actors exist)");
+    println!("  :actors         List running actors");
+    println!("  :kill <pid>     Kill an actor by PID");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -684,6 +704,27 @@ pub fn run() -> Result<()> {
                                             }
                                         }
                                     }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ if line.starts_with(":unload ") => {
+                        let module_name = line.strip_prefix(":unload ").unwrap().trim();
+                        if module_name.is_empty() {
+                            eprintln!("Usage: :unload <module>");
+                            continue;
+                        }
+
+                        match client.unload_module(module_name) {
+                            Ok(response) => {
+                                if response.response_type == "result" {
+                                    println!("Module {module_name} unloaded.");
                                 } else if response.response_type == "error" {
                                     if let Some(msg) = response.message {
                                         eprintln!("Error: {msg}");
