@@ -343,6 +343,7 @@ impl Parser {
 - `NameResolver`: Resolves identifiers to bindings
 - `TypeChecker`: Validates type constraints
 - `SemanticValidator`: Validates message send arity, undefined names
+- `BlockContextClassifier`: Determines block context (ControlFlow/Stored/Passed/Other)
 
 **Key Patterns:**
 - **Scope Chain:** Walk parent scopes for name resolution
@@ -360,6 +361,19 @@ impl NameResolver {
         }
         // Walk parent chain
         scope.parent.as_ref().and_then(|p| self.resolve(name, p))
+    }
+}
+
+impl BlockContextClassifier {
+    fn classify(&self, block_span: Span, parent: &Expression, in_assignment: bool) -> BlockContext {
+        // Stored: block on RHS of assignment
+        if in_assignment {
+            return BlockContext::Stored;
+        }
+        // ControlFlow: literal block in control flow selector
+        // Passed: block variable in any argument position
+        // Other: return value, nested blocks, etc.
+        // (see block_context.rs for full implementation)
     }
 }
 ```
