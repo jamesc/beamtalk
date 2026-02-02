@@ -239,15 +239,16 @@ jobs:
       - name: Prepare PR Comment
         if: github.event_name == 'pull_request'
         run: |
-          cat > pr-comment.md << 'EOF'
-          ## 📊 Code Coverage Report
+          # Get short commit hash
+          COMMIT_HASH=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
+          
+          cat > pr-comment.md << EOF
+          ## 📊 Code Coverage Report (${COMMIT_HASH})
           
           ### Rust Coverage
           EOF
           if [ -f rust-coverage-results.md ]; then
             cat rust-coverage-results.md >> pr-comment.md
-            echo "" >> pr-comment.md
-            echo "![Rust Coverage](${{ steps.rust_coverage.outputs.badge }})" >> pr-comment.md
           else
             echo "⚠️ WARNING: Rust coverage report not generated" >> pr-comment.md
           fi
@@ -255,8 +256,6 @@ jobs:
           echo "### Erlang Coverage" >> pr-comment.md
           if [ -f erlang-coverage-results.md ]; then
             cat erlang-coverage-results.md >> pr-comment.md
-            echo "" >> pr-comment.md
-            echo "![Erlang Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> pr-comment.md
           else
             echo "⚠️ WARNING: Erlang coverage report not generated" >> pr-comment.md
           fi
