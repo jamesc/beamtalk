@@ -9,8 +9,8 @@ Counter subclass: LoggingCounter
   state: logCount = 0
 
   // Override increment to add logging, then call super
-  increment => 
-    self.logCount := self.logCount + 1
+  increment =>
+    self.logCount := self.logCount + 1.
     super increment
 
   // New method to get log count

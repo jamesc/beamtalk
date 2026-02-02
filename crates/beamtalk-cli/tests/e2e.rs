@@ -99,6 +99,21 @@ fn test_cases_dir() -> PathBuf {
     workspace_root().join("tests/e2e/cases")
 }
 
+/// Get the daemon socket path.
+///
+/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation,
+/// falling back to the default `~/.beamtalk/daemon.sock`.
+fn daemon_socket_path() -> PathBuf {
+    if let Ok(socket_path) = env::var("BEAMTALK_DAEMON_SOCKET") {
+        if !socket_path.is_empty() {
+            return PathBuf::from(socket_path);
+        }
+    }
+    dirs::home_dir()
+        .map(|h| h.join(".beamtalk/daemon.sock"))
+        .unwrap_or_default()
+}
+
 /// A test case parsed from a `.bt` file.
 #[derive(Debug)]
 struct TestCase {
@@ -127,10 +142,14 @@ struct ParsedTestFile {
 ///
 /// expression
 /// // => expected_result
+///
+/// spawn_expression
+/// // => _
 /// ```
 ///
 /// Directives:
 /// - `// @load <path>` - Load a file before running tests (relative to workspace root)
+/// - `// => _` - Wildcard: run expression but don't check result (useful for spawn, side effects)
 fn parse_test_file(content: &str) -> ParsedTestFile {
     let mut cases = Vec::new();
     let mut load_files = Vec::new();
@@ -227,9 +246,7 @@ impl DaemonManager {
             .expect("Failed to start daemon");
 
         // Poll for daemon socket instead of fixed sleep
-        let daemon_socket = dirs::home_dir()
-            .map(|h| h.join(".beamtalk/daemon.sock"))
-            .unwrap_or_default();
+        let daemon_socket = daemon_socket_path();
         let mut daemon_retries = 20;
         while daemon_retries > 0 && !daemon_socket.exists() {
             std::thread::sleep(Duration::from_millis(100));
@@ -549,7 +566,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     for case in &test_file.cases {
         match client.eval(&case.expression) {
             Ok(result) => {
-                if result == case.expected {
+                // Wildcard "_" means run but don't check result
+                if case.expected == "_" || result == case.expected {
                     pass_count += 1;
                 } else {
                     failures.push(format!(
@@ -570,6 +588,12 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_error, e
                         ));
                     }
+                } else if case.expected == "_" {
+                    // Even errors pass with wildcard - just means "execute this"
+                    failures.push(format!(
+                        "{file_name}:{}: `{}` (wildcard) failed with error: {}",
+                        case.line, case.expression, e
+                    ));
                 } else {
                     failures.push(format!(
                         "{file_name}:{}: `{}` failed with error: {}",
