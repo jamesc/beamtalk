@@ -479,7 +479,18 @@ impl Parser {
         let mut expr = if name.as_str() == "super" {
             Expression::Super(span)
         } else {
-            Expression::Identifier(Identifier::new(name.clone(), span))
+            // Distinguish class references (uppercase) from regular identifiers
+            let first_char = name.chars().next();
+            if first_char.is_some_and(char::is_uppercase) {
+                // Class reference (e.g., Counter, Array, MyClass)
+                Expression::ClassReference {
+                    name: Identifier::new(name.clone(), span),
+                    span,
+                }
+            } else {
+                // Regular identifier (variable)
+                Expression::Identifier(Identifier::new(name.clone(), span))
+            }
         };
 
         // Check for field access: identifier.field

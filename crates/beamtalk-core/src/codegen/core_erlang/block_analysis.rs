@@ -103,6 +103,11 @@ fn analyze_expression(
             analysis.local_reads.insert(id.name.to_string());
         }
 
+        Expression::ClassReference { .. } => {
+            // Class references are global - no variable access tracking needed
+            // They resolve at compile time to module names
+        }
+
         Expression::FieldAccess {
             receiver, field, ..
         } => {

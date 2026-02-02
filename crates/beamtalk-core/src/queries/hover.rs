@@ -85,6 +85,20 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 None
             }
         }
+        Expression::ClassReference { name, span } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    format!(
+                        "Class: `{}` (resolves to module `{}`)",
+                        name.name,
+                        name.name.to_lowercase()
+                    ),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Super(span) => {
             if offset >= span.start() && offset < span.end() {
                 Some(HoverInfo::new(

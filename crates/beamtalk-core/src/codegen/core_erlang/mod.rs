@@ -485,6 +485,17 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
+            Expression::ClassReference { name, .. } => {
+                // Class references by themselves aren't valid expressions
+                // They must be used with message sends (e.g., `Counter spawn`)
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: format!(
+                        "standalone class reference '{}' - use with a message like 'spawn'",
+                        name.name
+                    ),
+                    location: format!("{:?}", expr.span()),
+                })
+            }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`)
