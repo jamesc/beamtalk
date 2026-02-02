@@ -252,13 +252,13 @@ Git worktrees enable **multiple Copilot agents working in parallel** on differen
 │   └── ...
 │
 ├── BT-99-feature/          # Worktree #1 (sibling directory)
-│   ├── .git → ../.beamtalk-git/worktrees/BT-99-feature
+│   ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-99-feature
 │   ├── .env                # Auto-generated: REPL port, node name
 │   ├── crates/
 │   └── ...
 │
 └── BT-123-another/         # Worktree #2 (sibling directory)
-    ├── .git → ../.beamtalk-git/worktrees/BT-123-another
+    ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-123-another
     ├── .env
     ├── crates/
     └── ...
@@ -295,21 +295,26 @@ Git worktrees enable **multiple Copilot agents working in parallel** on differen
 setx BEAMTALK_MAIN_GIT_PATH "C:\Users\you\source\beamtalk\.git"
 
 # Optional: GitHub/Linear integration
-setx GH_TOKEN "ghp_your_token_here"
-setx LINEAR_API_TOKEN "lin_api_your_token_here"
 setx GIT_USER_NAME "Your Name"
 setx GIT_USER_EMAIL "you@example.com"
+
+# For tokens, use secure methods instead of setx:
+# - GitHub: Use `gh auth login` (recommended)
+# - Linear: Store in password manager, retrieve at runtime
 ```
 
 **Linux/Mac (bash):**
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
 echo 'export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"' >> ~/.bashrc
-echo 'export GH_TOKEN="ghp_your_token_here"' >> ~/.bashrc
-echo 'export LINEAR_API_TOKEN="lin_api_your_token_here"' >> ~/.bashrc
 echo 'export GIT_USER_NAME="Your Name"' >> ~/.bashrc
 echo 'export GIT_USER_EMAIL="you@example.com"' >> ~/.bashrc
 source ~/.bashrc
+
+# For tokens, use secure methods:
+# - GitHub: Use `gh auth login` (recommended)
+# - Linear: Store in password manager or use `pass`/`1password` CLI
+# Avoid storing long-lived tokens in plaintext shell profiles
 ```
 
 #### Creating a Worktree
@@ -324,12 +329,14 @@ source ~/.bashrc
 ```
 
 **Linux/Mac:**
-```bash
-# From main repo directory
-./scripts/linux/worktree-new.sh BT-99-feature
 
-# Create new branch from main
-./scripts/linux/worktree-new.sh BT-99 main
+> **Note:** Linux/Mac scripts are planned but not yet implemented. You can use the standard `git worktree` commands directly:
+
+```bash
+# Create worktree manually
+git worktree add ../BT-99-feature BT-99-feature
+cd ../BT-99-feature
+code .
 ```
 
 **What happens:**
@@ -356,11 +363,13 @@ source ~/.bashrc
 ```
 
 **Linux/Mac:**
-```bash
-./scripts/linux/worktree-rm.sh BT-99-feature
 
-# Force remove
-./scripts/linux/worktree-rm.sh BT-99 --force
+> **Note:** Linux/Mac scripts are planned but not yet implemented. Use standard `git worktree` commands:
+
+```bash
+# Remove worktree manually
+cd ~/source/beamtalk  # Return to main repo
+git worktree remove ../BT-99-feature
 ```
 
 **What happens:**
@@ -382,9 +391,15 @@ If you deleted worktree directories manually, clean up leftover containers:
 ```
 
 **Linux/Mac:**
+
+> **Note:** Automated cleanup script for Linux/Mac is not yet implemented. Remove containers manually:
+
 ```bash
-./scripts/linux/cleanup-orphaned-containers.sh         # Interactive
-./scripts/linux/cleanup-orphaned-containers.sh --dry-run # Preview only
+# List containers
+docker ps -a --filter "name=beamtalk"
+
+# Remove specific container
+docker rm -f <container-id>
 ```
 
 See [scripts/README.md](scripts/README.md) for detailed documentation.
@@ -446,7 +461,7 @@ cat ~/.ssh/id_ed25519_signing.pub
 **3. Configure git (inside container):**
 ```bash
 git config --global gpg.format ssh
-git config --global user.signingkey ~/.ssh/id_ed25519_signing.pub
+git config --global user.signingkey ~/.ssh/id_ed25519_signing
 git config --global commit.gpgsign true
 ```
 
@@ -456,7 +471,7 @@ eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519_signing
 ```
 
-For worktrees, the `worktree-new` scripts handle SSH agent setup automatically.
+> **Note:** For worktrees, the `worktree-new.ps1` script copies the signing key into the container and configures git if `GIT_SIGNING_KEY` environment variable is set. It does not automatically start or configure `ssh-agent`.
 
 ### Installed Tools & Extensions
 
@@ -518,7 +533,7 @@ gh auth login
 
 #### Worktree `.git` file corruption
 
-```bash
+```powershell
 # If `.git` file points to container paths, fix it:
 .\scripts\worktree-rm.ps1 BT-99 -Force  # Will auto-fix before removal
 ```
