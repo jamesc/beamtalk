@@ -236,9 +236,14 @@ Write-Host "`n✨ Container ready!" -ForegroundColor Green
 
 # Copy SSH signing key if configured
 if ($env:GIT_SIGNING_KEY) {
-    $sshKeyPath = Join-Path $env:USERPROFILE ".ssh\$env:GIT_SIGNING_KEY"
-    if (Test-Path $sshKeyPath) {
-        Write-Host "🔑 Copying SSH signing key..." -ForegroundColor Cyan
+    # For signing, we need the private key (not .pub)
+    # If user specified id_rsa.pub, use id_rsa instead
+    $keyName = $env:GIT_SIGNING_KEY -replace '\.pub$', ''
+    $privateKeyPath = Join-Path $env:USERPROFILE ".ssh\$keyName"
+    $publicKeyPath = Join-Path $env:USERPROFILE ".ssh\$keyName.pub"
+    
+    if ((Test-Path $privateKeyPath) -and (Test-Path $publicKeyPath)) {
+        Write-Host "🔑 Copying SSH signing keys..." -ForegroundColor Cyan
         
         # Use container ID from devcontainer up output
         $containerInfo = $containerIdFromOutput
@@ -251,25 +256,37 @@ if ($env:GIT_SIGNING_KEY) {
             docker exec $containerInfo chown -R vscode:vscode /home/vscode/.ssh 2>$null
             docker exec $containerInfo chmod 700 /home/vscode/.ssh 2>$null
             
-            # Copy the key using stdin to avoid docker cp path issues
-            Write-Host "   Copying: $sshKeyPath" -ForegroundColor Gray
-            Write-Host "   To: ${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" -ForegroundColor Gray
-            
-            # Read the key content and pipe it into the container
-            $keyContent = Get-Content $sshKeyPath -Raw
-            $copyResult = $keyContent | docker exec -i $containerInfo tee /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>&1 | Out-Null
+            # Copy private key
+            Write-Host "   Copying private key: $privateKeyPath" -ForegroundColor Gray
+            $privateKeyContent = Get-Content $privateKeyPath -Raw
+            $privateKeyContent | docker exec -i $containerInfo tee /home/vscode/.ssh/$keyName 2>&1 | Out-Null
             
             if ($LASTEXITCODE -eq 0) {
-                # Fix ownership and permissions of the copied key
-                docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
-                docker exec $containerInfo chmod 644 /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
+                # Set correct permissions for private key (600)
+                docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$keyName 2>$null
+                docker exec $containerInfo chmod 600 /home/vscode/.ssh/$keyName 2>$null
                 
-                Write-Host "✅ SSH key copied, re-running setup..." -ForegroundColor Green
-                devcontainer exec --workspace-folder $worktreePath bash .devcontainer/setup-ssh-signing.sh
+                # Copy public key
+                Write-Host "   Copying public key: $publicKeyPath" -ForegroundColor Gray
+                $publicKeyContent = Get-Content $publicKeyPath -Raw
+                $publicKeyContent | docker exec -i $containerInfo tee /home/vscode/.ssh/$keyName.pub 2>&1 | Out-Null
+                
+                # Set correct permissions for public key (644)
+                docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$keyName.pub 2>$null
+                docker exec $containerInfo chmod 644 /home/vscode/.ssh/$keyName.pub 2>$null
+                
+                Write-Host "✅ SSH keys copied, configuring git signing..." -ForegroundColor Green
+                
+                # Configure git to use SSH signing with the private key
+                devcontainer exec --workspace-folder $worktreePath git config --global gpg.format ssh
+                devcontainer exec --workspace-folder $worktreePath git config --global user.signingkey /home/vscode/.ssh/$keyName
+                devcontainer exec --workspace-folder $worktreePath git config --global commit.gpgsign true
+                devcontainer exec --workspace-folder $worktreePath git config --global tag.gpgsign true
+                
+                Write-Host "✅ Git signing configured" -ForegroundColor Green
             }
             else {
-                Write-Host "⚠️  Could not copy SSH key to container" -ForegroundColor Yellow
-                Write-Host "   Error: $copyResult" -ForegroundColor Red
+                Write-Host "⚠️  Could not copy SSH keys to container" -ForegroundColor Yellow
             }
         }
         else {
@@ -277,7 +294,9 @@ if ($env:GIT_SIGNING_KEY) {
         }
     }
     else {
-        Write-Host "⚠️  SSH key not found at: $sshKeyPath" -ForegroundColor Yellow
+        Write-Host "⚠️  SSH keys not found. Need both:" -ForegroundColor Yellow
+        Write-Host "     Private: $privateKeyPath" -ForegroundColor Yellow
+        Write-Host "     Public: $publicKeyPath" -ForegroundColor Yellow
     }
 }
 
