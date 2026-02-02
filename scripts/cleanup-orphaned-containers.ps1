@@ -73,30 +73,53 @@ foreach ($line in $allContainers) {
     $image = $parts[2]
     $status = $parts[3]
     
-    # Check if this is a beamtalk container (by image name)
-    if ($image -match "beamtalk|vsc-bt-") {
+    # Check if this is a beamtalk container (by image name or label)
+    $worktreeLabel = docker inspect --format '{{index .Config.Labels "git.worktree"}}' $id 2>$null
+    $isBeamtalk = $image -match "beamtalk|vsc-bt-" -or $worktreeLabel
+    
+    if ($isBeamtalk) {
         $container = @{
             Id = $id
             Name = $name
             Image = $image
             Status = $status
+            WorktreeLabel = $worktreeLabel
         }
         $beamtalkContainers += $container
         
         # Check if it's orphaned (if not running --all mode)
         if (-not $All) {
-            # Try to get the local_folder label
-            $labelJson = docker inspect --format '{{index .Config.Labels "devcontainer.local_folder"}}' $id 2>$null
-            
             $isOrphaned = $true
-            if ($labelJson) {
+            
+            # Safety: Never consider a running container as orphaned unless -All is specified
+            # Running containers are actively being used
+            if ($status -match "^Up") {
+                $isOrphaned = $false
+            }
+            # First try matching by our custom label (simplest and most reliable)
+            elseif ($worktreeLabel) {
                 foreach ($worktree in $activeWorktrees) {
-                    # Normalize both paths: git returns forward slashes, Docker uses backslashes
-                    $normalizedWorktree = $worktree -replace "/", "\"
-                    $normalizedLabel = $labelJson -replace "/", "\"
-                    if ($normalizedLabel -match [regex]::Escape($normalizedWorktree)) {
+                    $worktreeName = Split-Path -Leaf $worktree
+                    if ($worktreeName -eq $worktreeLabel) {
                         $isOrphaned = $false
                         break
+                    }
+                }
+            }
+            # Fallback to devcontainer.local_folder label for containers created before label was added
+            else {
+                $labelJson = docker inspect --format '{{index .Config.Labels "devcontainer.local_folder"}}' $id 2>$null
+                if ($labelJson) {
+                    foreach ($worktree in $activeWorktrees) {
+                        $worktreeName = Split-Path -Leaf $worktree
+                        $labelName = Split-Path -Leaf $labelJson
+                        $normalizedWorktree = $worktree -replace "\\", "/"
+                        $normalizedLabel = $labelJson -replace "\\", "/"
+                        
+                        if ($worktreeName -eq $labelName -or $normalizedLabel -match [regex]::Escape($normalizedWorktree)) {
+                            $isOrphaned = $false
+                            break
+                        }
                     }
                 }
             }
