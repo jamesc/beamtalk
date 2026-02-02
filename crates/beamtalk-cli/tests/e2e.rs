@@ -589,7 +589,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                         ));
                     }
                 } else if case.expected == "_" {
-                    // Even errors pass with wildcard - just means "execute this"
+                    // Wildcard means "run but don't check result" - errors are still failures
+                    // because we want to know if spawn or other side-effect operations fail
                     failures.push(format!(
                         "{file_name}:{}: `{}` (wildcard) failed with error: {}",
                         case.line, case.expression, e
