@@ -218,6 +218,9 @@ super_dispatch(State, Selector, Args) ->
 %%====================================================================
 
 init({ClassName, ClassInfo}) ->
+    %% Ensure pg is started (needed for class registry)
+    ensure_pg_started(),
+    
     %% Register with well-known name for lookup FIRST
     %% (do this before pg:join to avoid brief membership if registration fails)
     RegName = registry_name(ClassName),
@@ -325,6 +328,20 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% Ensure pg (process groups) is started.
+%% pg is used for tracking all class processes.
+ensure_pg_started() ->
+    case whereis(pg) of
+        undefined ->
+            %% pg not running - start it
+            case pg:start_link() of
+                {ok, _Pid} -> ok;
+                {error, {already_started, _}} -> ok
+            end;
+        _Pid ->
+            ok
+    end.
 
 registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
