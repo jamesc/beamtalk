@@ -224,6 +224,12 @@ impl Analyser {
     }
 
     fn analyse_module(&mut self, module: &Module) {
+        // Define built-in identifiers that are always available
+        // These are special values in Beamtalk (true, false, nil)
+        self.scope.define("true", module.span);
+        self.scope.define("false", module.span);
+        self.scope.define("nil", module.span);
+
         // Analyse top-level expressions
         for expr in &module.expressions {
             self.analyse_expression(expr, None);
