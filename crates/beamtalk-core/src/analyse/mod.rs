@@ -153,9 +153,7 @@ fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifie
         }
 
         // List patterns: recursively extract from elements and tail
-        Pattern::List {
-            elements, tail, ..
-        } => {
+        Pattern::List { elements, tail, .. } => {
             for element in elements {
                 extract_pattern_bindings_impl(element, bindings);
             }
@@ -1108,7 +1106,10 @@ mod tests {
         // Test that pattern variables are accessible in the body
         // value match: [x -> x]
         let match_expr = Expression::Match {
-            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
             arms: vec![MatchArm::new(
                 Pattern::Variable(Identifier::new("x", test_span())),
                 Expression::Identifier(Identifier::new("x", test_span())),
@@ -1129,7 +1130,10 @@ mod tests {
         // Test that pattern variables are accessible in guards
         // value match: [x when x > 0 -> x]
         let match_expr = Expression::Match {
-            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
             arms: vec![MatchArm::with_guard(
                 Pattern::Variable(Identifier::new("x", test_span())),
                 Expression::Identifier(Identifier::new("x", test_span())), // guard uses x
@@ -1150,7 +1154,10 @@ mod tests {
     fn test_match_arm_analysis_with_tuple_pattern() {
         // Test nested patterns: {#ok, value} -> value
         let match_expr = Expression::Match {
-            value: Box::new(Expression::Identifier(Identifier::new("result", test_span()))),
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "result",
+                test_span(),
+            ))),
             arms: vec![MatchArm::new(
                 Pattern::Tuple {
                     elements: vec![
@@ -1179,7 +1186,10 @@ mod tests {
         //   {#error, msg} -> msg
         // ]
         let match_expr = Expression::Match {
-            value: Box::new(Expression::Identifier(Identifier::new("result", test_span()))),
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "result",
+                test_span(),
+            ))),
             arms: vec![
                 MatchArm::new(
                     Pattern::Tuple {
@@ -1244,7 +1254,10 @@ mod tests {
         // Test that variables from one arm don't leak to another
         // This test verifies that each arm gets its own scope
         let match_expr = Expression::Match {
-            value: Box::new(Expression::Identifier(Identifier::new("value", test_span()))),
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
             arms: vec![
                 MatchArm::new(
                     Pattern::Variable(Identifier::new("x", test_span())),
