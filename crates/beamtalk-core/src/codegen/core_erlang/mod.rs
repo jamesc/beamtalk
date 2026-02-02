@@ -459,6 +459,8 @@ impl CoreErlangGenerator {
         self.bind_var("__bindings__", "Bindings");
 
         // BT-153: Set REPL mode so mutations to local variables update bindings
+        // Save the previous value so generator can be reused
+        let previous_is_repl_mode = self.is_repl_mode;
         self.is_repl_mode = true;
 
         // Alias State to Bindings for identifier fallback lookup
@@ -487,6 +489,9 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
         self.indent -= 1;
+
+        // Restore REPL mode flag
+        self.is_repl_mode = previous_is_repl_mode;
 
         // Module end
         writeln!(self.output, "end")?;

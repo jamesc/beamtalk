@@ -416,7 +416,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Analyze which variables are mutated
-        // BT-153: Include both field_writes AND local_writes for REPL context
+        // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
         let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
@@ -452,7 +452,13 @@ impl CoreErlangGenerator {
         // Generate: let _CondFun = fun (StateAcc) -> <condition body> in case apply _CondFun (StateAcc) of
         let cond_var = self.fresh_temp_var("CondFun");
         write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+        
+        // Save and override loop/body context while generating the condition
+        let prev_in_loop_body = self.in_loop_body;
+        let prev_state_version = self.state_version();
         self.in_loop_body = true; // Enable StateAcc lookup for condition
+        self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
+        
         // Extract block body from condition expression
         if let Expression::Block(cond_block) = condition {
             self.generate_block_body(cond_block)?;
@@ -460,12 +466,20 @@ impl CoreErlangGenerator {
             // Fallback: generate as expression (shouldn't happen for whileTrue:)
             self.generate_expression(condition)?;
         }
-        self.in_loop_body = false;
+        
+        // Restore prior context so nested loops/conditions behave correctly
+        self.in_loop_body = prev_in_loop_body;
+        self.set_state_version(prev_state_version);
         write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
 
         // True case: execute body and recurse
         write!(self.output, "<'true'> when 'true' -> ")?;
-        self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{}", final_state_version)
+        };
         write!(self.output, " apply 'while'/{arity} (")?;
         for (i, param) in param_names.iter().enumerate() {
             if i > 0 {
@@ -476,7 +490,7 @@ impl CoreErlangGenerator {
         if !param_names.is_empty() {
             write!(self.output, ", ")?;
         }
-        write!(self.output, "StateAcc1) ")?;
+        write!(self.output, "{final_state_var}) ")?;
 
         // False case: return final state
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
@@ -509,12 +523,14 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         _mutated_vars: &[String],
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // Generate the body with state threading
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
         // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        // Save the previous loop-body context so nested loops don't corrupt it
+        let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
         for (i, expr) in body.body.iter().enumerate() {
@@ -538,10 +554,13 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Capture the final state version before restoring
+        let final_state_version = self.state_version();
+
         // Restore state
-        self.in_loop_body = false;
+        self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
-        Ok(())
+        Ok(final_state_version)
     }
 
     pub(super) fn generate_while_false(
@@ -601,7 +620,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Same as while_true but with false/true swapped in the case
-        // BT-153: Include both field_writes AND local_writes for REPL context
+        // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
         let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
@@ -626,18 +645,32 @@ impl CoreErlangGenerator {
         // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
         write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+        
+        // Save and override loop/body context while generating the condition
+        let prev_in_loop_body = self.in_loop_body;
+        let prev_state_version = self.state_version();
         self.in_loop_body = true; // Enable StateAcc lookup for condition
+        self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
+        
         if let Expression::Block(cond_block) = condition {
             self.generate_block_body(cond_block)?;
         } else {
             self.generate_expression(condition)?;
         }
-        self.in_loop_body = false;
+        
+        // Restore prior context so nested loops/conditions behave correctly
+        self.in_loop_body = prev_in_loop_body;
+        self.set_state_version(prev_state_version);
         write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
 
         // FALSE case: execute body and recurse
         write!(self.output, "<'false'> when 'true' -> ")?;
-        self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{}", final_state_version)
+        };
         write!(self.output, " apply 'while'/{arity} (")?;
         for (i, param) in param_names.iter().enumerate() {
             if i > 0 {
@@ -648,7 +681,7 @@ impl CoreErlangGenerator {
         if !param_names.is_empty() {
             write!(self.output, ", ")?;
         }
-        write!(self.output, "StateAcc1) ")?;
+        write!(self.output, "{final_state_var}) ")?;
 
         // TRUE case: return final state
         write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
@@ -791,7 +824,12 @@ impl CoreErlangGenerator {
         write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
         write!(self.output, "<'true'> when 'true' -> ")?;
 
-        self.generate_times_repeat_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_times_repeat_body_with_threading(body, &mutated_vars)?;
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{}", final_state_version)
+        };
 
         write!(
             self.output,
@@ -800,7 +838,7 @@ impl CoreErlangGenerator {
         for param in &param_names {
             write!(self.output, ", {param}1")?;
         }
-        write!(self.output, ", StateAcc1) ")?;
+        write!(self.output, ", {final_state_var}) ")?;
 
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
@@ -825,11 +863,13 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         _mutated_vars: &[String],
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
         // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        // Save the previous loop-body context so nested loops don't corrupt it
+        let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
         for (i, expr) in body.body.iter().enumerate() {
@@ -854,10 +894,13 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Capture the final state version before restoring
+        let final_state_version = self.state_version();
+
         // Restore state
-        self.in_loop_body = false;
+        self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
-        Ok(())
+        Ok(final_state_version)
     }
 
     /// Generate a local variable assignment inside a loop body with state threading (BT-153).
@@ -964,7 +1007,7 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // Analyze which variables are mutated
-        // BT-153: Include both field_writes AND local_writes for REPL context
+        // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
         let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
 
@@ -1001,7 +1044,12 @@ impl CoreErlangGenerator {
         write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
         write!(self.output, "<'true'> when 'true' -> ")?;
 
-        self.generate_to_do_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_to_do_body_with_threading(body, &mutated_vars)?;
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{}", final_state_version)
+        };
 
         write!(
             self.output,
@@ -1010,7 +1058,7 @@ impl CoreErlangGenerator {
         for param in &param_names {
             write!(self.output, ", {param}1")?;
         }
-        write!(self.output, ", StateAcc1) ")?;
+        write!(self.output, ", {final_state_var}) ")?;
 
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
@@ -1038,7 +1086,7 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         mutated_vars: &[String],
-    ) -> Result<()> {
+    ) -> Result<usize> {
         // Bind the block parameter to I
         self.push_scope();
         if let Some(param) = body.parameters.first() {
@@ -1049,6 +1097,8 @@ impl CoreErlangGenerator {
         self.set_state_version(0);
 
         // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
+        // Save the previous loop-body context so nested loops don't corrupt it
+        let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
         // Track which variables are assigned in the body
@@ -1129,11 +1179,14 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Capture the final state version before restoring
+        let final_state_version = self.state_version();
+
         // Restore state
-        self.in_loop_body = false;
+        self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
         self.pop_scope();
 
-        Ok(())
+        Ok(final_state_version)
     }
 }
