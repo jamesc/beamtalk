@@ -90,21 +90,28 @@ function Remove-DevContainer {
     
     $folderName = Split-Path $WorktreePath -Leaf
     
-    # Find containers by matching the folder name in devcontainer.local_folder label
-    # This handles cross-platform paths where:
-    # - Host sees: C:\Users\james\source\worktrees\BT-137 or /workspaces/BT-137
-    # - Container label: /workspaces/BT-137
-    # We compare just the folder names (e.g., BT-137 == BT-137)
-    $allContainers = docker ps -a --format '{{.ID}}\t{{.Names}}\t{{index .Labels "devcontainer.local_folder"}}' 2>$null
+    # Find containers by our custom git.worktree label first (most reliable)
+    # Fall back to matching folder name in devcontainer.local_folder label
+    $allContainers = docker ps -a --format '{{.ID}}' 2>$null
     $containers = @()
-    foreach ($line in $allContainers) {
-        if (-not $line) { continue }
-        $parts = $line -split "\t"
-        if ($parts.Count -ge 3) {
-            $labelPath = $parts[2]
+    foreach ($id in $allContainers) {
+        if (-not $id) { continue }
+        
+        # Check our custom label first
+        $worktreeLabel = docker inspect --format '{{index .Config.Labels "git.worktree"}}' $id 2>$null
+        if ($worktreeLabel -eq $folderName) {
+            $containerName = docker inspect --format '{{.Name}}' $id 2>$null
+            $containers += "$id`t$containerName"
+            continue
+        }
+        
+        # Fallback to devcontainer.local_folder label
+        $labelPath = docker inspect --format '{{index .Config.Labels "devcontainer.local_folder"}}' $id 2>$null
+        if ($labelPath) {
             $labelFolderName = Split-Path $labelPath -Leaf
             if ($labelFolderName -eq $folderName) {
-                $containers += $line
+                $containerName = docker inspect --format '{{.Name}}' $id 2>$null
+                $containers += "$id`t$containerName"
             }
         }
     }
