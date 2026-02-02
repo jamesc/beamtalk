@@ -835,4 +835,109 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn actor_info_deserializes_correctly() {
+        let json = r#"{
+            "pid": "<0.123.0>",
+            "class": "Counter",
+            "module": "counter",
+            "spawned_at": 1234567890
+        }"#;
+
+        let info: ActorInfo = serde_json::from_str(json).expect("Failed to parse ActorInfo");
+        assert_eq!(info.pid, "<0.123.0>");
+        assert_eq!(info.class, "Counter");
+        assert_eq!(info.module, "counter");
+        assert_eq!(info.spawned_at, 1234567890);
+    }
+
+    #[test]
+    fn actors_response_deserializes_correctly() {
+        let json = r#"{
+            "type": "actors",
+            "actors": [
+                {
+                    "pid": "<0.123.0>",
+                    "class": "Counter",
+                    "module": "beamtalk_repl_eval_42",
+                    "spawned_at": 1234567890
+                },
+                {
+                    "pid": "<0.124.0>",
+                    "class": "Logger",
+                    "module": "beamtalk_repl_eval_43",
+                    "spawned_at": 1234567891
+                }
+            ]
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "actors");
+
+        let actors = response.actors.expect("actors field missing");
+        assert_eq!(actors.len(), 2);
+
+        assert_eq!(actors[0].pid, "<0.123.0>");
+        assert_eq!(actors[0].class, "Counter");
+        assert_eq!(actors[0].module, "beamtalk_repl_eval_42");
+
+        assert_eq!(actors[1].pid, "<0.124.0>");
+        assert_eq!(actors[1].class, "Logger");
+    }
+
+    #[test]
+    fn actors_response_empty_list() {
+        let json = r#"{
+            "type": "actors",
+            "actors": []
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "actors");
+
+        let actors = response.actors.expect("actors field missing");
+        assert!(actors.is_empty());
+    }
+
+    #[test]
+    fn kill_response_success() {
+        let json = r#"{
+            "type": "result",
+            "value": "ok"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "result");
+        assert!(response.value.is_some());
+    }
+
+    #[test]
+    fn kill_response_not_found() {
+        let json = r#"{
+            "type": "error",
+            "message": "not_found"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "error");
+        assert_eq!(response.message, Some("not_found".to_string()));
+    }
+
+    #[test]
+    fn kill_response_invalid_pid() {
+        let json = r#"{
+            "type": "error",
+            "message": "invalid_pid"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "error");
+        assert_eq!(response.message, Some("invalid_pid".to_string()));
+    }
 }
