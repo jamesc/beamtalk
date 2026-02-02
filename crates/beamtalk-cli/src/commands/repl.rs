@@ -571,7 +571,7 @@ pub fn run(port_arg: u16, node_arg: Option<String>) -> Result<()> {
     // Connect to REPL backend
     let mut client = connect_with_retries(port)?;
 
-    println!("Connected to REPL backend.");
+    println!("Connected to REPL backend on port {port}.");
     println!();
 
     // Set up rustyline editor
