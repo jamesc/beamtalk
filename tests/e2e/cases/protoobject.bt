@@ -172,8 +172,8 @@ nil ~= nil
 // ===========================================================================
 //
 // ✅ ProtoObject.bt defined in lib/
-// ❌ Compiler support for `class` message
-// ❌ Compiler support for `==` and `~=` operators
-// ❌ Compiler support for `doesNotUnderstand:args:`
-// ❌ Runtime dispatch for ProtoObject methods
-// ❌ Method lookup chain terminating at ProtoObject
+// ✅ Compiler support for `class` message
+// ✅ Compiler support for `==` and `~=` operators
+// ✅ Compiler support for `doesNotUnderstand:args:`
+// ✅ Runtime dispatch for ProtoObject methods
+// ✅ Method lookup chain terminating at ProtoObject

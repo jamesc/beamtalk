@@ -125,7 +125,7 @@ ProtoObject
 
   // Object identity test (compiler intrinsic)
   // Returns true if self and other are the exact same object
-  // Implementation: compiles to erlang:'=:='(Self, Other)
+  // Implementation: compiles to erlang:'=='(Self, Other)
   == other => // implemented by compiler
 
   // Object inequality test
