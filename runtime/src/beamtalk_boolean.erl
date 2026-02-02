@@ -1,0 +1,147 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc Boolean primitive class implementation.
+%%%
+%%% This module provides method dispatch for Erlang booleans (true/false atoms),
+%%% mapping them to the Beamtalk `Boolean` class. Supports control flow, logical
+%%% operations, and extension methods via the extension registry.
+%%%
+%%% ## Builtin Methods
+%%%
+%%% | Selector | Args | Description |
+%%% |----------|------|-------------|
+%%% | `class`  | []   | Returns `'Boolean'` |
+%%% | `ifTrue:` | [Block] | Evaluate block if true |
+%%% | `ifFalse:` | [Block] | Evaluate block if false |
+%%% | `ifTrue:ifFalse:` | [TrueBlock, FalseBlock] | Conditional evaluation |
+%%% | `not`    | []   | Logical negation |
+%%% | `and:`   | [Block] | Lazy AND (short-circuit) |
+%%% | `or:`    | [Block] | Lazy OR (short-circuit) |
+%%% | `asString` | [] | Convert to string |
+%%%
+%%% ## Usage Examples
+%%%
+%%% ```erlang
+%%% %% Reflection
+%%% beamtalk_boolean:dispatch('class', [], true). % => 'Boolean'
+%%%
+%%% %% Control flow
+%%% beamtalk_boolean:dispatch('ifTrue:', [fun() -> ok end], true). % => ok
+%%% beamtalk_boolean:dispatch('ifFalse:', [fun() -> ok end], false). % => ok
+%%%
+%%% %% Logical operations
+%%% beamtalk_boolean:dispatch('not', [], true). % => false
+%%% beamtalk_boolean:dispatch('and:', [fun() -> false end], true). % => false
+%%%
+%%% %% Conversion
+%%% beamtalk_boolean:dispatch('asString', [], true). % => <<"true">>
+%%% ```
+%%%
+%%% See: docs/internal/design-self-as-object.md Section 3.3
+
+-module(beamtalk_boolean).
+-export([dispatch/3, has_method/1]).
+
+%%% ============================================================================
+%%% Public API
+%%% ============================================================================
+
+%% @doc Dispatch a message to a boolean value.
+%%
+%% Tries builtin methods first, then falls back to the extension registry
+%% for user-defined methods. Raises does_not_understand error if method not found.
+-spec dispatch(atom(), list(), boolean()) -> term().
+dispatch(Selector, Args, Value) when Value =:= true; Value =:= false ->
+    case builtin_dispatch(Selector, Args, Value) of
+        {ok, Result} -> Result;
+        not_found -> does_not_understand(Selector, Args, Value)
+    end.
+
+%% @doc Check if a boolean responds to the given selector.
+-spec has_method(atom()) -> boolean().
+has_method(Selector) ->
+    is_builtin(Selector) orelse beamtalk_extensions:has('Boolean', Selector).
+
+%% @doc Check if a selector is a builtin method.
+-spec is_builtin(atom()) -> boolean().
+is_builtin('class') -> true;
+is_builtin('ifTrue:') -> true;
+is_builtin('ifFalse:') -> true;
+is_builtin('ifTrue:ifFalse:') -> true;
+is_builtin('not') -> true;
+is_builtin('and:') -> true;
+is_builtin('or:') -> true;
+is_builtin('asString') -> true;
+is_builtin(_) -> false.
+
+%%% ============================================================================
+%%% Internal Functions
+%%% ============================================================================
+
+%% @doc Dispatch to builtin boolean methods.
+-spec builtin_dispatch(atom(), list(), boolean()) -> {ok, term()} | not_found.
+
+%% Reflection
+builtin_dispatch('class', [], _X) -> {ok, 'Boolean'};
+
+%% Control flow
+builtin_dispatch('ifTrue:', [Block], true) when is_function(Block, 0) ->
+    {ok, Block()};
+builtin_dispatch('ifTrue:', [_Block], false) ->
+    {ok, nil};
+
+builtin_dispatch('ifFalse:', [Block], false) when is_function(Block, 0) ->
+    {ok, Block()};
+builtin_dispatch('ifFalse:', [_Block], true) ->
+    {ok, nil};
+
+builtin_dispatch('ifTrue:ifFalse:', [TrueBlock, _FalseBlock], true) when is_function(TrueBlock, 0) ->
+    {ok, TrueBlock()};
+builtin_dispatch('ifTrue:ifFalse:', [_TrueBlock, FalseBlock], false) when is_function(FalseBlock, 0) ->
+    {ok, FalseBlock()};
+
+%% Logical operations
+builtin_dispatch('not', [], true) -> {ok, false};
+builtin_dispatch('not', [], false) -> {ok, true};
+
+builtin_dispatch('and:', [Block], true) when is_function(Block, 0) ->
+    %% Lazy evaluation - only call block if receiver is true
+    Result = Block(),
+    case Result of
+        true -> {ok, true};
+        false -> {ok, false};
+        _ -> {ok, false}  % Non-boolean result is treated as false
+    end;
+builtin_dispatch('and:', [_Block], false) ->
+    %% Short-circuit - don't evaluate block
+    {ok, false};
+
+builtin_dispatch('or:', [Block], false) when is_function(Block, 0) ->
+    %% Lazy evaluation - only call block if receiver is false
+    Result = Block(),
+    case Result of
+        true -> {ok, true};
+        false -> {ok, false};
+        _ -> {ok, true}  % Non-boolean result is treated as true
+    end;
+builtin_dispatch('or:', [_Block], true) ->
+    %% Short-circuit - don't evaluate block
+    {ok, true};
+
+%% Conversion
+builtin_dispatch('asString', [], true) -> {ok, <<"true">>};
+builtin_dispatch('asString', [], false) -> {ok, <<"false">>};
+
+%% Not a builtin method
+builtin_dispatch(_, _, _) -> not_found.
+
+%% @doc Handle doesNotUnderstand by checking extension registry.
+-spec does_not_understand(atom(), list(), boolean()) -> term().
+does_not_understand(Selector, Args, Value) ->
+    case beamtalk_extensions:lookup('Boolean', Selector) of
+        {ok, Fun, _Owner} -> 
+            Fun(Args, Value);
+        not_found -> 
+            error({does_not_understand, 'Boolean', Selector, length(Args)})
+    end.

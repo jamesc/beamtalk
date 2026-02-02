@@ -154,9 +154,54 @@ responds_to_string_test_() ->
          ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'unknownMethod'))
      end}.
 
+responds_to_boolean_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Boolean class now implemented (BT-168)
+         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'not')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(false, 'not')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(true, 'ifTrue:')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(true, 'unknownMethod'))
+     end}.
+
+responds_to_nil_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Nil class now implemented (BT-168)
+         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'isNil')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'ifNil:')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(nil, 'unknownMethod'))
+     end}.
+
+responds_to_block_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Block class now implemented (BT-168)
+         Block = fun() -> ok end,
+         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'value')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'arity')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(Block, 'unknownMethod'))
+     end}.
+
+responds_to_tuple_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% Tuple class now implemented (BT-168)
+         ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
+         ?assertEqual(true, beamtalk_primitive:responds_to({ok, 42}, 'isOk')),
+         ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
+     end}.
+
 responds_to_other_primitives_test() ->
-    %% Other primitives not implemented yet
-    ?assertEqual(false, beamtalk_primitive:responds_to(true, 'not')),
+    %% Other primitives not yet implemented
     ?assertEqual(false, beamtalk_primitive:responds_to(3.14, '*')),
     ?assertEqual(false, beamtalk_primitive:responds_to([], 'size')).
 
