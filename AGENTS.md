@@ -278,6 +278,45 @@ with common services (PHP-FPM on 9000, Prometheus on 9090, Elasticsearch on 9200
 
 The worktree scripts automatically set `BEAMTALK_REPL_PORT` and `BEAMTALK_NODE_NAME` in a `.env` file, which is loaded by the devcontainer. This file is in `.gitignore` and cleaned up when the worktree is removed.
 
+### Compiler Daemon Isolation
+
+Each worktree also gets its own compiler daemon socket to enable parallel compiler development:
+
+**Daemon socket derivation:**
+- `BT-190` branch → `~/.beamtalk/daemon-bt190.sock`
+- `BT-64` branch → `~/.beamtalk/daemon-bt64.sock`
+- `main` branch → `~/.beamtalk/daemon.sock` (default)
+- Other branches → `~/.beamtalk/daemon-<sanitized_name>.sock`
+
+**Lockfile derivation:**
+- Automatically derived from socket path: `.sock` → `.lock`
+- `daemon-bt190.sock` → `daemon-bt190.lock`
+
+**Priority order:**
+1. Environment variable: `BEAMTALK_DAEMON_SOCKET`
+2. Default: `~/.beamtalk/daemon.sock`
+
+The worktree scripts automatically set `BEAMTALK_DAEMON_SOCKET` in the `.env` file. This means:
+- Each worktree can run its own compiler daemon
+- Test different compiler changes simultaneously
+- Daemon crashes are isolated to one worktree
+- No conflicts when using different compiler versions
+
+**Testing daemon isolation:**
+```bash
+# Terminal 1 (BT-190 worktree)
+cd ../BT-190-feature
+beamtalk daemon start --foreground
+# Uses daemon-bt190.sock
+
+# Terminal 2 (BT-200 worktree)
+cd ../BT-200-feature
+beamtalk daemon start --foreground
+# Uses daemon-bt200.sock
+
+# Both daemons run simultaneously without conflict
+```
+
 ### Removing a Worktree
 
 **Windows:**

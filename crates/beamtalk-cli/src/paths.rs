@@ -26,19 +26,34 @@ pub fn beamtalk_dir() -> Result<PathBuf> {
 
 /// Path to the lockfile containing the daemon PID.
 ///
+/// Derives the lockfile path from the socket path by replacing `.sock` with `.lock`.
+/// This ensures lockfile and socket names stay synchronized when using custom socket paths.
+///
 /// # Errors
 ///
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn lockfile_path() -> Result<PathBuf> {
-    Ok(beamtalk_dir()?.join("daemon.lock"))
+    let socket = socket_path()?;
+    let lockfile = socket.with_extension("lock");
+    Ok(lockfile)
 }
 
 /// Path to the Unix socket.
+///
+/// Priority order:
+/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (if set)
+/// 2. Default: `~/.beamtalk/daemon.sock`
+///
+/// This allows per-worktree daemon isolation when working on multiple
+/// compiler changes in parallel.
 ///
 /// # Errors
 ///
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn socket_path() -> Result<PathBuf> {
+    if let Ok(socket_path) = std::env::var("BEAMTALK_DAEMON_SOCKET") {
+        return Ok(PathBuf::from(socket_path));
+    }
     Ok(beamtalk_dir()?.join("daemon.sock"))
 }
 
@@ -116,6 +131,34 @@ mod tests {
     fn socket_path_is_in_beamtalk_dir() {
         let socket = socket_path().expect("Failed to get socket_path");
         assert!(socket.ends_with(".beamtalk/daemon.sock"));
+    }
+
+    #[test]
+    fn socket_path_respects_env_var() {
+        // SAFETY: This test runs in isolation and only modifies the environment temporarily
+        unsafe {
+            std::env::set_var("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock");
+        }
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert_eq!(socket, PathBuf::from("/tmp/test-daemon.sock"));
+        // SAFETY: Cleaning up test state
+        unsafe {
+            std::env::remove_var("BEAMTALK_DAEMON_SOCKET");
+        }
+    }
+
+    #[test]
+    fn lockfile_path_derives_from_socket_path() {
+        // SAFETY: This test runs in isolation and only modifies the environment temporarily
+        unsafe {
+            std::env::set_var("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock");
+        }
+        let lockfile = lockfile_path().expect("Failed to get lockfile_path");
+        assert_eq!(lockfile, PathBuf::from("/tmp/test-daemon.lock"));
+        // SAFETY: Cleaning up test state
+        unsafe {
+            std::env::remove_var("BEAMTALK_DAEMON_SOCKET");
+        }
     }
 
     #[test]
