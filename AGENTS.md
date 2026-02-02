@@ -256,10 +256,10 @@ This will:
 Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts:
 
 **Port derivation:**
-- `BT-190` branch → port `9190` (9000 + issue number)
+- `BT-190` branch → port `9190` (9000 + issue number, capped at 999)
 - `BT-64` branch → port `9064`
 - `main` branch → port `9000` (default)
-- Other branches → port `9100-9999` (hash-based)
+- Other branches → port `10000-10899` (hash-based, non-overlapping with BT range)
 
 **Node name derivation:**
 - `BT-190` branch → `beamtalk_bt190@localhost`
@@ -274,9 +274,6 @@ Each worktree automatically gets a unique REPL port and Erlang node name to avoi
 4. Default: port `9000`, node `beamtalk@localhost`
 
 The worktree scripts automatically set `BEAMTALK_REPL_PORT` and `BEAMTALK_NODE_NAME` in a `.env` file, which is loaded by the devcontainer. This file is in `.gitignore` and cleaned up when the worktree is removed.
-
-
-4. Connect you to a shell inside the container
 
 ### Removing a Worktree
 

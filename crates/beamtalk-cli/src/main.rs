@@ -45,11 +45,11 @@ enum Command {
 
     /// Start an interactive REPL
     Repl {
-        /// Port for the REPL backend
-        #[arg(long, default_value = "9000")]
-        port: u16,
+        /// Port for the REPL backend (default: 9000, or `BEAMTALK_REPL_PORT` env var)
+        #[arg(long)]
+        port: Option<u16>,
 
-        /// Node name for Erlang distribution
+        /// Node name for Erlang distribution (default: `BEAMTALK_NODE_NAME` env var)
         #[arg(long)]
         node: Option<String>,
     },
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
         Command::Build { path } => commands::build::build(&path),
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
-        Command::Repl { port, node } => commands::repl::run(port, node),
+        Command::Repl { port, node } => commands::repl::run(port, node.clone()),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");

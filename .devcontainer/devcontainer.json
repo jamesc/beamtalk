@@ -35,6 +35,8 @@
       }
     }
   },
+  // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
+  "initializeCommand": "test -f .env || touch .env",
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
   // postStartCommand: Set up git worktree paths, auth, SSH signing, and Copilot CLI config
   // - fix-worktree-git.sh: Fix .git file paths for worktrees (see script for details)

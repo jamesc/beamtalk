@@ -165,11 +165,17 @@ ENV_PATH="$WORKTREE_PATH/.env"
 
 # Derive port from branch name
 # BT-190 -> 9190, BT-64 -> 9064, main -> 9000
+# Port ranges: BT branches 9001-9999, hash-based 10000-10899
 PORT=9000
 NODE_NAME="beamtalk@localhost"
 
 if [[ "$BRANCH" =~ ^BT-([0-9]+) ]]; then
     ISSUE_NUM="${BASH_REMATCH[1]}"
+    # Cap issue number to keep port in valid range (max 65535, but we cap at 999 for simplicity)
+    if [ "$ISSUE_NUM" -gt 999 ]; then
+        log_warn "⚠️  Issue number $ISSUE_NUM too large, capping to 999 for port derivation"
+        ISSUE_NUM=999
+    fi
     PORT=$((9000 + ISSUE_NUM))
     NODE_NAME="beamtalk_bt${ISSUE_NUM}@localhost"
     log_gray "   Port: $PORT (derived from $BRANCH)"
@@ -178,12 +184,12 @@ elif [ "$BRANCH" = "main" ]; then
     log_gray "   Port: $PORT (main branch default)"
     log_gray "   Node: $NODE_NAME (main branch default)"
 else
-    # Hash branch name to port range 9100-9999
+    # Hash branch name to port range 10000-10899 (non-overlapping with BT branches)
     # Use md5sum and take first 8 hex chars as decimal for modulo
     HASH=$(echo -n "$BRANCH" | md5sum | cut -c1-8)
     # Convert hex to decimal: use printf %d with 0x prefix
     HASH_DEC=$(printf "%d" "0x$HASH")
-    PORT=$((9100 + (HASH_DEC % 900)))
+    PORT=$((10000 + (HASH_DEC % 900)))
     NODE_NAME="beamtalk_$(echo "$BRANCH" | tr -c '[:alnum:]' '_')@localhost"
     log_gray "   Port: $PORT (derived from branch hash)"
     log_gray "   Node: $NODE_NAME"
