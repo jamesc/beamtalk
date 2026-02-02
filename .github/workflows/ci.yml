@@ -154,7 +154,14 @@ jobs:
           filename: coverage.cobertura.xml
           badge: true
           format: markdown
-          output: file
+          output: both
+
+      - name: Preserve Rust Coverage Report
+        run: |
+          # Rename Rust coverage report before Erlang step overwrites it
+          if [ -f code-coverage-results.md ]; then
+            mv code-coverage-results.md rust-coverage-results.md
+          fi
 
       - name: Erlang Coverage Summary
         id: erlang_coverage
@@ -163,16 +170,23 @@ jobs:
         with:
           filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
           badge: true
-          format: text
-          output: console
+          format: markdown
+          output: both
+
+      - name: Preserve Erlang Coverage Report
+        run: |
+          # Rename Erlang coverage report for clarity
+          if [ -f code-coverage-results.md ]; then
+            mv code-coverage-results.md erlang-coverage-results.md
+          fi
 
       - name: Add Coverage to Job Summary
         run: |
           echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f code-coverage-results.md ]; then
-            cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY
+          if [ -f rust-coverage-results.md ]; then
+            cat rust-coverage-results.md >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "![Coverage](${{ steps.rust_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
           else
@@ -180,30 +194,28 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
-          # Extract Erlang coverage from covertool output (portable grep/awk)
-          if [ -f runtime/_build/test/covertool/beamtalk_runtime.covertool.xml ]; then
-            erlang_coverage=$(grep 'line-rate=' runtime/_build/test/covertool/beamtalk_runtime.covertool.xml | head -1 | sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' | awk '{printf "%.2f%%", $1 * 100}')
-            echo "**Overall Line Coverage:** $erlang_coverage" >> $GITHUB_STEP_SUMMARY
+          if [ -f erlang-coverage-results.md ]; then
+            cat erlang-coverage-results.md >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "![Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Overall Line Coverage:** N/A (covertool output not found)" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ WARNING: Erlang coverage report not generated" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Check Coverage Thresholds
         run: |
           # Extract Rust line coverage percentage from CodeCoverageSummary output
-          # The action outputs to code-coverage-results.md (markdown format)
-          if [ ! -f code-coverage-results.md ]; then
-            echo "⚠️ WARNING: code-coverage-results.md not found, skipping threshold check"
+          # The action outputs to rust-coverage-results.md (markdown format)
+          if [ ! -f rust-coverage-results.md ]; then
+            echo "⚠️ WARNING: rust-coverage-results.md not found, skipping threshold check"
             exit 0
           fi
           
           # Extract coverage percentages from markdown format
           # Markdown format: **Summary** | **83%** (1212 / 1460) | **69%** (262 / 378) | 682 | ✔
           # Match both integer (83%) and decimal (83.47%) percentages
-          rust_coverage=$(grep -E 'Summary.*\|.*%' code-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
-          rust_branch=$(grep -E 'Summary.*\|.*%' code-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
+          rust_coverage=$(grep -E 'Summary.*\|.*%' rust-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
+          rust_branch=$(grep -E 'Summary.*\|.*%' rust-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
           
           echo "Rust Line Coverage: ${rust_coverage}%"
           echo "Rust Branch Coverage: ${rust_branch}%"
@@ -232,8 +244,8 @@ jobs:
           
           ### Rust Coverage
           EOF
-          if [ -f code-coverage-results.md ]; then
-            cat code-coverage-results.md >> pr-comment.md
+          if [ -f rust-coverage-results.md ]; then
+            cat rust-coverage-results.md >> pr-comment.md
             echo "" >> pr-comment.md
             echo "![Rust Coverage](${{ steps.rust_coverage.outputs.badge }})" >> pr-comment.md
           else
@@ -241,14 +253,12 @@ jobs:
           fi
           echo "" >> pr-comment.md
           echo "### Erlang Coverage" >> pr-comment.md
-          # Extract Erlang coverage percentage
-          if [ -f runtime/_build/test/covertool/beamtalk_runtime.covertool.xml ]; then
-            erlang_coverage=$(grep 'line-rate=' runtime/_build/test/covertool/beamtalk_runtime.covertool.xml | head -1 | sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' | awk '{printf "%.2f%%", $1 * 100}')
-            echo "**Overall Line Coverage:** $erlang_coverage" >> pr-comment.md
+          if [ -f erlang-coverage-results.md ]; then
+            cat erlang-coverage-results.md >> pr-comment.md
             echo "" >> pr-comment.md
             echo "![Erlang Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> pr-comment.md
           else
-            echo "**Overall Line Coverage:** N/A (covertool output not found)" >> pr-comment.md
+            echo "⚠️ WARNING: Erlang coverage report not generated" >> pr-comment.md
           fi
 
       - name: Add PR Comment
