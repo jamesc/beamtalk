@@ -123,8 +123,10 @@ ProtoObject
   // - args: Array of arguments passed with the message
   doesNotUnderstand: selector args: arguments => // implemented by compiler
 
-  // Object identity test (compiler intrinsic)
-  // Returns true if self and other are the exact same object
+  // Object equality test (compiler intrinsic)
+  // Returns true if self and other have equal values
+  // Note: Currently uses value equality (1.0 == 1 is true)
+  // TODO: Consider strict identity semantics for Smalltalk compatibility
   // Implementation: compiles to erlang:'=='(Self, Other)
   == other => // implemented by compiler
 
