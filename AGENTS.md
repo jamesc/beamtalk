@@ -339,20 +339,14 @@ Helper scripts are in `scripts/`:
 
 | Script | Purpose |
 |--------|--------|
-| `worktree-new.ps1` / `linux/worktree-new.sh` | Create a worktree and start a devcontainer |
-| `worktree-rm.ps1` / `linux/worktree-rm.sh` | Clean up a worktree and stop its devcontainer |
-| `cleanup-orphaned-containers.ps1` / `linux/cleanup-orphaned-containers.sh` | Remove containers for deleted worktrees |
+| `worktree-new.ps1` | Create a worktree and start a devcontainer |
+| `worktree-rm.ps1` | Clean up a worktree and stop its devcontainer |
+| `cleanup-orphaned-containers.ps1` | Remove containers for deleted worktrees |
 
 ### Creating a Worktree
 
-**Windows:**
 ```powershell
 .\scripts\worktree-new.ps1 BT-99-feature-name
-```
-
-**Linux/Mac:**
-```bash
-./scripts/linux/worktree-new.sh BT-99-feature-name
 ```
 
 This will:
@@ -430,14 +424,8 @@ beamtalk daemon start --foreground
 
 ### Removing a Worktree
 
-**Windows:**
 ```powershell
 .\scripts\worktree-rm.ps1 BT-99-feature-name
-```
-
-**Linux/Mac:**
-```bash
-./scripts/linux/worktree-rm.sh BT-99-feature-name
 ```
 
 This will:
@@ -451,17 +439,10 @@ This will:
 
 If you have containers from worktrees that were deleted without using `worktree-rm`, use the cleanup script:
 
-**Windows:**
 ```powershell
 .\scripts\cleanup-orphaned-containers.ps1        # Interactive
 .\scripts\cleanup-orphaned-containers.ps1 -DryRun # Preview only
 .\scripts\cleanup-orphaned-containers.ps1 -NoConfirm # Auto-confirm
-```
-
-**Linux/Mac:**
-```bash
-./scripts/linux/cleanup-orphaned-containers.sh         # Interactive
-./scripts/linux/cleanup-orphaned-containers.sh --dry-run # Preview only
 ```
 
 This handles a special case: when a worktree has been used with devcontainers, the `.git` file gets modified to point to container paths (`/workspaces/...`). The script fixes this before removal.
