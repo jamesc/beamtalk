@@ -13,23 +13,76 @@ Even primitive operations like arithmetic, boolean logic, and control flow are i
 3. **Live debugging** - All operations can be traced and inspected
 4. **Extensibility** - Users can extend primitives by adding methods
 
+## The Uniform Message-Sending Illusion
+
+From the programmer's perspective, all objects respond to messages the same way:
+
+```beamtalk
+// These LOOK identical:
+42 + 3              // message send to Integer
+'hello' size        // message send to String  
+counter increment   // message send to Actor
+
+// Same syntax. Same mental model. Different machinery.
+```
+
+But the implementation differs:
+
+| What you write | What actually happens |
+|----------------|----------------------|
+| `42 + 3` | Compiled to `erlang:'+'(42, 3)` — inline function call |
+| `'hello' size` | Compiled to `erlang:byte_size(...)` — function call |
+| `counter increment` | Compiled to `gen_server:call(Pid, increment)` — process message |
+
+**The programmer doesn't care** — the abstraction is uniform.
+
 ## Class Hierarchy
 
-Beamtalk follows a three-level class hierarchy inspired by Pharo Smalltalk:
+Beamtalk's class hierarchy distinguishes **value types** from **actors**, similar to Swift's `struct` vs `actor`:
 
 ```
-ProtoObject (true root, minimal behavior)
-  └─ Object (reflection, nil testing, debugging)
-       └─ Actor (async-first process-based objects)
-            └─ (user classes: Counter, Worker, etc.)
+ProtoObject (minimal - identity, DNU)
+  └─ Object (common behavior - nil testing, printing, reflection)
+       ├─ Integer, String, etc. (primitives - sealed value types)
+       ├─ Point, Color, etc.    (user value types - no process)
+       └─ Actor                 (process-based)
+            └─ Counter, MyService, etc. (user actors)
 ```
 
-The hierarchy serves different purposes at each level:
-- **ProtoObject** - Absolute minimum (identity, fallback dispatch)
-- **Object** - Common protocol most classes need (nil testing, introspection)
-- **Actor** - Process-based concurrency (spawn, async messaging)
+### Value Types vs Actors
 
-Most user code should inherit from **Actor** (for stateful concurrent objects) or **Object** (for simple non-concurrent values). Inherit from ProtoObject only when implementing proxies or custom message dispatch.
+| | Value Type (`Object subclass:`) | Actor (`Actor subclass:`) |
+|---|---|---|
+| **Process** | ❌ No | ✅ Yes (BEAM process) |
+| **Instantiate** | `Point new` | `Counter spawn` |
+| **State** | In caller's heap | In own process |
+| **Pass between actors** | Copied | Send pid reference |
+| **Thread safety** | Caller's responsibility | Mailbox serializes |
+| **`new` method** | ✅ Creates instance | ❌ Error (use `spawn`) |
+
+**Value types** are great for: Point, Rectangle, Color, Config, DTOs
+**Actors** are great for: Services, Agents, Stateful entities
+
+```beamtalk
+// Value type - no process, uses new
+Object subclass: Point
+  state: x, y
+  + other => Point new x: (self.x + other x) y: (self.y + other y)
+
+p := Point new x: 3 y: 4   // ✅ Value type uses new
+
+// Actor - has process, uses spawn  
+Actor subclass: Counter
+  state: count = 0
+  increment => self.count := self.count + 1
+
+c := Counter spawn         // ✅ Actor uses spawn
+c := Counter new           // ❌ Error: Actors must use spawn
+```
+
+Both use the same message-sending syntax — the difference is in state management.
+
+See [beamtalk-object-model.md](../docs/beamtalk-object-model.md) for the full design rationale.
 
 ### Metaclass Hierarchy
 
@@ -37,18 +90,17 @@ Just as in Smalltalk, the metaclass hierarchy mirrors the instance hierarchy:
 
 ```
 Instance Hierarchy:          Metaclass Hierarchy:
-ProtoObject           <---   ProtoObject class (none)
-  └─ Object          <---     └─ Object class (ProtoObject class)
-       └─ Actor     <---        └─ Actor class (Object class)
-            └─ Counter <---        └─ Counter class (Actor class)
+ProtoObject           <---   ProtoObject class
+  └─ Object          <---     └─ Object class
+       ├─ Integer   <---          ├─ Integer class
+       └─ Actor     <---          └─ Actor class
+            └─ Counter <---            └─ Counter class
 ```
 
 Each class is itself an object - a process holding metadata (methods, superclass, instance variables). This enables:
 - Runtime class introspection (`Counter methods`, `Counter superclass`)
 - Hot patching methods (`Counter >> #increment put: [...]`)
 - Factory methods (`Counter spawnWith: #{value => 10}`)
-
-The three classes are bootstrapped at runtime startup via `beamtalk_bootstrap.erl`.
 
 ## Core Classes
 
@@ -77,55 +129,53 @@ ProtoObject subclass: Proxy
     target perform: selector withArguments: arguments
 ```
 
-For normal classes, inherit from Object or Actor instead.
+For normal classes, inherit from Object (value types) or Actor (processes).
 
 ### Object (`Object.bt`)
 
-Practical root class for most classes, inheriting from ProtoObject and adding common protocols.
+Base class for value types in Beamtalk. Object instances are plain data (no process).
 
 **Key messages:**
-- `isNil`, `notNil` - Nil testing (always false for non-nil objects)
-- `ifNil:`, `ifNotNil:` - Conditional execution based on nil
-- `inspect`, `describe` - Debugging and inspection
-- Inherits: `class`, `==`, `~=`, `doesNotUnderstand:args:` from ProtoObject
-
-**When to use:**
-- Non-concurrent utility classes (rare in Beamtalk)
-- Value objects that don't need process isolation
-- Data structures shared across processes
+- `new` - Create new instance
+- `class` - Get object's class name
+- `isNil`, `notNil` - Nil testing
+- `inspect` - Show description on Transcript
+- `describe` - Return string description
 
 **Usage:**
 ```beamtalk
 Object subclass: Point
-  state: x = 0, y = 0
+  state: x, y
   
-  isOrigin => (self.x == 0) and: [self.y == 0]
-  describe => "Point({self.x}, {self.y})"
-```
+  + other => Point new x: (self.x + other x) y: (self.y + other y)
+  distance => (self.x squared + self.y squared) sqrt
 
-For concurrent stateful objects, inherit from Actor instead.
+p := Point new x: 3 y: 4
+p distance  // => 5.0
+```
 
 ### Actor (`Actor.bt`)
 
-Base class for all actors in Beamtalk. Inherits from Object and adds process-based concurrency.
+Base class for process-based objects. Every Actor instance is a BEAM process with its own mailbox.
 
 **Key messages:**
-- `spawn` - Create new instance (compiler primitive)
-- `spawnWith:` - Create with init args
-- `describe` - Return string description (overrides Object)
-- Inherits: nil testing, `inspect`, `class`, etc. from Object and ProtoObject
+- `spawn` - Create new instance (NOT `new`)
+- `spawnWith:` - Create with initialization arguments
+- All Object messages (inherited)
 
 **Usage:**
 ```beamtalk
-Actor subclass: MyActor
+Actor subclass: Counter
   state: count = 0
   
-  increment => self.count += 1
-  getValue => ^self.count
+  increment => self.count := self.count + 1
+  getValue => self.count
 
-counter := MyActor spawn
+counter := Counter spawn   // ✅ Actors use spawn
 counter increment
 value := counter getValue
+
+counter := Counter new     // ❌ Error: Actors must use spawn
 ```
 
 ### Boolean (`True.bt`, `False.bt`)
@@ -148,8 +198,6 @@ valid := enabled not
 ```
 
 ### Nil Testing Protocol (`Nil.bt`, `Object.bt`)
-
-All objects (except Nil) inherit nil testing methods from **Object**:
 
 All objects respond to nil-testing messages, enabling nil-safe control flow. Nil represents the absence of a value, equivalent to Smalltalk's UndefinedObject.
 
@@ -187,7 +235,7 @@ userName ifNil: ['Guest'] ifNotNil: [:name | 'Hello, ' + name + '!']
 
 **Implementation:**
 - Nil defines `isNil => ^true` and overrides the default behavior
-- All other objects inherit `isNil => ^false` and `notNil => ^true` from Actor
+- All other objects inherit `isNil => ^false` and `notNil => ^true` from Object
 - `ifNotNil:` passes the receiver to the block: `notNilBlock value: self`
 
 ### Block (`Block.bt`)
@@ -384,37 +432,43 @@ This allows the compiler to optimize primitive operations while maintaining the 
 
 Each Beamtalk class maps to BEAM/Erlang concepts:
 
-| Beamtalk | Erlang/BEAM | Notes |
-|----------|-------------|-------|
-| `ProtoObject` | Abstract root class | No instances created; root of inheritance |
-| `Actor` | `gen_server` process with state map | Each actor is a separate process |
-| `True` / `False` | Atoms `true` / `false` | Optimized by compiler |
-| `Nil` | Atom `nil` | Follows Elixir convention |
-| `Block` | Anonymous fun (closure) | Captures lexical scope |
-| `Integer` | Erlang integer (bignum support) | Arbitrary precision |
-| `String` | Binary `<<"UTF-8">>` | UTF-8 encoded, not charlist |
-| `Array` | Erlang tuple `{...}` | O(1) access, O(n) update |
-| `List` | Erlang list `[...]` | O(1) prepend, O(n) access |
-| `Set` | `ordsets` (sorted list) | O(log n) membership |
-| `Dictionary` | Erlang map `#{...}` | O(log n) key access |
+| Beamtalk | Erlang/BEAM | Has Process? | Notes |
+|----------|-------------|--------------|-------|
+| `ProtoObject` | Abstract root | — | Root of hierarchy; not instantiated |
+| `Object` | Erlang map/record | ❌ No | Value type; plain data |
+| `Actor` | `gen_server` process | ✅ Yes | Each instance is a separate process |
+| `Integer` | Erlang integer | ❌ No | Immediate value; arbitrary precision |
+| `Float` | Erlang float | ❌ No | Boxed value; IEEE 754 |
+| `True` / `False` | Atoms `true` / `false` | ❌ No | Immediate atoms |
+| `Nil` | Atom `nil` | ❌ No | Follows Elixir convention |
+| `Atom` | Erlang atom | ❌ No | Immediate value |
+| `Block` | Anonymous fun (closure) | ❌ No | Captures lexical scope |
+| `String` | Binary `<<"UTF-8">>` | ❌ No | Boxed; UTF-8 encoded |
+| `Array` | Erlang tuple `{...}` | ❌ No | Boxed; O(1) access |
+| `List` | Erlang list `[...]` | ❌ No | Boxed; O(1) prepend |
+| `Set` | `ordsets` (sorted list) | ❌ No | Boxed; O(log n) membership |
+| `Dictionary` | Erlang map `#{...}` | ❌ No | Boxed; O(log n) key access |
+
+**Key distinction:** Value types (Object subclasses) have no process — they're BEAM terms. Actor subclasses are processes with their own mailbox.
 
 ## Implementation Status
 
 | Class | Status | Notes |
 |-------|--------|-------|
 | `ProtoObject` | ✅ Defined | Root class, no instances |
-| `Actor` | ✅ Defined | Needs compiler spawn support |
-| `True` / `False` | ✅ Defined | Needs compiler optimization |
-| `Nil` | ✅ Defined | Needs compiler nil handling |
-| `Block` | ✅ Defined | Needs compiler closure codegen |
-| `Integer` | ✅ Defined | Needs compiler operator codegen |
-| `String` | ✅ Defined | Needs compiler string ops |
+| `Object` | ✅ Defined | Value type root; needs `new` method |
+| `Actor` | ✅ Defined | Actor root; needs `new` error override |
+| `True` / `False` | ✅ Defined | Primitive; needs compiler optimization |
+| `Nil` | ✅ Defined | Primitive; needs compiler nil handling |
+| `Block` | ✅ Defined | Primitive; needs compiler closure codegen |
+| `Integer` | ✅ Defined | Primitive; needs compiler operator codegen |
+| `String` | ✅ Defined | Primitive; needs compiler string ops |
 | `Collection` | ✅ Defined | Abstract base protocol |
 | `SequenceableCollection` | ✅ Defined | Ordered collection protocol |
-| `Array` | ✅ Defined | Needs compiler tuple ops |
-| `List` | ✅ Defined | Needs compiler list ops |
-| `Set` | ✅ Defined | Needs compiler ordsets ops |
-| `Dictionary` | ✅ Defined | Needs compiler map ops |
+| `Array` | ✅ Defined | Primitive; needs compiler tuple ops |
+| `List` | ✅ Defined | Primitive; needs compiler list ops |
+| `Set` | ✅ Defined | Primitive; needs compiler ordsets ops |
+| `Dictionary` | ✅ Defined | Primitive; needs compiler map ops |
 
 ## Testing
 

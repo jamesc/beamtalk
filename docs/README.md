@@ -99,7 +99,7 @@ The foundational classes implementing Smalltalk's "everything is a message" phil
 
 | Class | Description |
 |-------|-------------|
-| [Actor](../lib/Actor.bt) | Base class for all actors (BEAM processes) |
+| [Object](../lib/Object.bt) | Base class for all user-defined classes (actors/BEAM processes) |
 | [Block](../lib/Block.bt) | First-class closures |
 | [True](../lib/True.bt) / [False](../lib/False.bt) | Boolean control flow via messages |
 | [Nil](../lib/Nil.bt) | Null object pattern |
