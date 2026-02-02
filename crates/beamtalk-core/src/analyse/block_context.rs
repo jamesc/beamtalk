@@ -447,4 +447,30 @@ mod tests {
         let context = classify_block(Span::new(1, 8), &return_expr, false);
         assert!(matches!(context, BlockContext::Other));
     }
+
+    #[test]
+    fn test_classify_block_variable_in_control_flow() {
+        use crate::ast::KeywordPart;
+
+        // condition ifTrue: myBlock (block variable in control flow)
+        // Should be classified as Passed, not ControlFlow
+        let block_var = Identifier::new("myBlock", Span::new(18, 25));
+        let block_var_expr = Expression::Identifier(block_var);
+        let msg = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "condition",
+                Span::new(0, 9),
+            ))),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                "ifTrue:",
+                Span::new(10, 17),
+            )]),
+            arguments: vec![block_var_expr],
+            span: Span::new(0, 25),
+        };
+
+        // Block variable is Passed even in control flow position
+        let context = classify_block(Span::new(18, 25), &msg, false);
+        assert!(matches!(context, BlockContext::Passed));
+    }
 }
