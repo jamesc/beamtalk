@@ -40,6 +40,14 @@ length_test() ->
     ?assertEqual(5, beamtalk_string:dispatch('length', [], <<"hello">>)),
     ?assertEqual(0, beamtalk_string:dispatch('length', [], <<>>)).
 
+length_utf8_test() ->
+    %% length returns grapheme count, not byte count
+    ?assertEqual(5, beamtalk_string:dispatch('length', [], <<"こんにちは"/utf8>>)),
+    ?assertEqual(11, beamtalk_string:dispatch('size', [], <<"hello world">>)),
+    ?assertEqual(15, beamtalk_string:dispatch('size', [], <<"こんにちは"/utf8>>)),  % 15 bytes for 5 characters
+    ?assertEqual(2, beamtalk_string:dispatch('length', [], <<"👋🌍"/utf8>>)),
+    ?assertEqual(8, beamtalk_string:dispatch('size', [], <<"👋🌍"/utf8>>)).  % 8 bytes for 2 emoji
+
 is_empty_test() ->
     ?assertEqual(true, beamtalk_string:dispatch('isEmpty', [], <<>>)),
     ?assertEqual(false, beamtalk_string:dispatch('isEmpty', [], <<"hello">>)),
@@ -112,6 +120,15 @@ at_test() ->
     ?assertEqual(<<"e">>, beamtalk_string:dispatch('at:', [2], <<"hello">>)),
     ?assertEqual(<<"o">>, beamtalk_string:dispatch('at:', [5], <<"hello">>)),
     ?assertEqual(<<" ">>, beamtalk_string:dispatch('at:', [6], <<"hello world">>)).
+
+at_utf8_test() ->
+    %% Test UTF-8 grapheme handling
+    ?assertEqual(<<"こ"/utf8>>, beamtalk_string:dispatch('at:', [1], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"ん"/utf8>>, beamtalk_string:dispatch('at:', [2], <<"こんにちは"/utf8>>)),
+    ?assertEqual(<<"は"/utf8>>, beamtalk_string:dispatch('at:', [5], <<"こんにちは"/utf8>>)),
+    %% Test emoji (multi-byte grapheme)
+    ?assertEqual(<<"👋"/utf8>>, beamtalk_string:dispatch('at:', [1], <<"👋🌍"/utf8>>)),
+    ?assertEqual(<<"🌍"/utf8>>, beamtalk_string:dispatch('at:', [2], <<"👋🌍"/utf8>>)).
 
 at_out_of_bounds_test_() ->
     {setup, fun setup/0, fun cleanup/1, [

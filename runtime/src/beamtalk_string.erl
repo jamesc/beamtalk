@@ -13,7 +13,7 @@
 %%% |----------|------|-------------|
 %%% | `class`  | []   | Returns `'String'` |
 %%% | `size`   | []   | Byte size of string |
-%%% | `length` | []   | Byte size (alias for size) |
+%%% | `length` | []   | Character count (grapheme count) |
 %%% | `isEmpty` | []  | True if empty string |
 %%% | `uppercase` | [] | Convert to uppercase |
 %%% | `lowercase` | [] | Convert to lowercase |
@@ -130,7 +130,7 @@ builtin_dispatch('class', [], _X) -> {ok, 'String'};
 
 %% Size operations
 builtin_dispatch('size', [], X) -> {ok, byte_size(X)};
-builtin_dispatch('length', [], X) -> {ok, byte_size(X)};
+builtin_dispatch('length', [], X) -> {ok, string:length(X)};  % Grapheme count
 builtin_dispatch('isEmpty', [], X) -> {ok, byte_size(X) =:= 0};
 
 %% Case conversion
@@ -145,11 +145,17 @@ builtin_dispatch('++', [Y], X) when is_binary(Y) -> {ok, <<X/binary, Y/binary>>}
 builtin_dispatch('concat:', [Y], X) when is_binary(Y) -> {ok, <<X/binary, Y/binary>>};
 
 %% Access
-builtin_dispatch('at:', [Idx], X) when is_integer(Idx), Idx >= 1, Idx =< byte_size(X) ->
-    %% 1-based indexing
-    ByteIdx = Idx - 1,
-    <<_:ByteIdx/binary, Char:8, _/binary>> = X,
-    {ok, <<Char:8>>};
+builtin_dispatch('at:', [Idx], X) when is_integer(Idx), Idx >= 1 ->
+    %% 1-based indexing with UTF-8 grapheme support
+    case string:next_grapheme(X) of
+        [] when Idx =:= 1 andalso X =:= <<>> ->
+            not_found;  % Empty string
+        _ ->
+            case get_nth_grapheme(X, Idx) of
+                {ok, Grapheme} -> {ok, Grapheme};
+                error -> not_found
+            end
+    end;
 
 %% Search
 builtin_dispatch('includes:', [Substr], X) when is_binary(Substr) ->
@@ -184,4 +190,22 @@ does_not_understand(Selector, Args, Value) ->
             Fun(Args, Value);
         not_found -> 
             error({does_not_understand, 'String', Selector, length(Args)})
+    end.
+
+%% @doc Helper to get the Nth grapheme from a string.
+-spec get_nth_grapheme(binary(), pos_integer()) -> {ok, binary()} | error.
+get_nth_grapheme(Str, N) ->
+    get_nth_grapheme(Str, N, 1).
+
+get_nth_grapheme(<<>>, _N, _Current) ->
+    error;
+get_nth_grapheme(Str, N, Current) when Current =:= N ->
+    case string:next_grapheme(Str) of
+        [Grapheme | _Rest] -> {ok, unicode:characters_to_binary([Grapheme])};
+        [] -> error
+    end;
+get_nth_grapheme(Str, N, Current) ->
+    case string:next_grapheme(Str) of
+        [_Grapheme | Rest] -> get_nth_grapheme(Rest, N, Current + 1);
+        [] -> error
     end.
