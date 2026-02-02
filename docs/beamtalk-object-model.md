@@ -42,15 +42,143 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |---
 |
-|## The Class Hierarchy: ProtoObject, Object, and Actor
+|## The Class Hierarchy: Primitives and Actors
 |
-|Following Smalltalk tradition, Beamtalk has a three-level class hierarchy rather than starting with Actor as the root. This design choice provides clarity, flexibility, and developer ergonomics.
+|Beamtalk's class hierarchy reflects a key insight: **all values are objects, but not all objects are actors**. This mirrors how the BEAM actually works and provides a uniform message-sending interface while leveraging different implementation strategies.
 |
-|### Traditional Smalltalk Hierarchy
+|### The Uniform Message-Sending Illusion
+|
+|From the programmer's perspective, everything looks the same:
+|
+|```beamtalk
+|// These LOOK identical:
+|42 + 3              // message send to Integer
+|counter increment   // message send to Actor
+|
+|// Same syntax. Same mental model. Different machinery.
+|```
+|
+|But the implementation differs:
+|
+|| What you write | What you think | What actually happens |
+||----------------|----------------|----------------------|
+|| `42 + 3` | "Send `+` to 42" | Compiled to `erlang:'+'(42, 3)` — inline function call |
+|| `'hello' size` | "Send `size` to string" | Compiled to `erlang:byte_size(...)` — function call |
+|| `counter increment` | "Send `increment` to counter" | Compiled to `gen_server:call(Pid, increment)` — process message |
+|
+|**The programmer doesn't care about the implementation** — the abstraction is uniform. This is Smalltalk's genius, and it works even better on BEAM.
+|
+|### BEAM Value Categories
+|
+|The BEAM has three categories of values, and Beamtalk's class hierarchy reflects this:
+|
+|| Category | Has PID? | Heap Allocated? | Examples |
+||----------|----------|-----------------|----------|
+|| **Immediate** | No | No | SmallInteger, atoms (`true`, `false`, `nil`) |
+|| **Boxed value** | No | Yes | Float, Binary (strings), Tuple, List, BigInteger |
+|| **Actor** | Yes | Yes | Any `spawn`ed object with state |
+|
+|### Beamtalk Class Hierarchy
+|
+|```
+|ProtoObject (minimal - identity, DNU)
+|  └─ Object (common behavior - nil testing, printing, reflection)
+|       ├─ Integer      (primitive - sealed, no process)
+|       ├─ Float        (primitive - sealed, no process)
+|       ├─ String       (primitive - sealed, no process)
+|       ├─ Boolean      (primitive - sealed, no process)
+|       ├─ Array, List  (primitive - sealed, no process)
+|       ├─ Point, Color (user value types - no process)
+|       └─ Actor        (process-based - has pid, mailbox)
+|            └─ Counter, MyService (user actors)
+|```
+|
+|### Value Types vs Actors
+|
+|Beamtalk distinguishes between **value types** and **actors**, similar to Swift's `struct` vs `actor`:
+|
+|| | Value Type (Object subclass) | Actor |
+||---|---|---|
+|| **Process** | ❌ No | ✅ Yes (BEAM process) |
+|| **Instantiate** | `Point new` | `Counter spawn` |
+|| **State lives** | In caller's heap | In own process |
+|| **Message send** | Direct call | Through mailbox |
+|| **Pass between processes** | Copied (like Erlang terms) | Send pid reference |
+|| **Thread safety** | Caller's responsibility | Mailbox serializes |
+|| **`new` method** | ✅ Creates instance | ❌ Error (use `spawn`) |
+|
+|**Value types** inherit from Object directly:
+|```beamtalk
+|// Value type - no process, copied when sent between actors
+|Object subclass: Point
+|  state: x, y
+|  
+|  + other => Point new x: (self.x + other x) y: (self.y + other y)
+|  distance => (self.x squared + self.y squared) sqrt
+|
+|p := Point new x: 3 y: 4    // ✅ Value types use new
+|p distance  // => 5.0
+|```
+|
+|**Actors** inherit from Actor:
+|```beamtalk
+|// Actor - has process, state protected by mailbox
+|Actor subclass: Counter
+|  state: count = 0
+|  
+|  increment => self.count := self.count + 1
+|  value => self.count
+|
+|c := Counter spawn          // ✅ Actors use spawn
+|c increment
+|c value  // => 1
+|
+|c := Counter new            // ❌ Error: Actors must use spawn, not new
+|```
+|
+|**Key insight:** Both use the same message-sending syntax. The difference is in how state is managed and how messages are dispatched.
+|
+|### Primitives Are Sealed Value Types
+|
+|Primitives (Integer, String, etc.) are **sealed value types** — they inherit from Object but cannot be subclassed. They **can be extended** with new methods via the extension registry.
+|
+|```beamtalk
+|// ❌ Cannot subclass primitives — they are sealed
+|Integer subclass: MyInteger  // ERROR: Integer is sealed
+|
+|// ✅ CAN add new methods via extension
+|Integer extend
+|  factorial => 
+|    self <= 1 ifTrue: [1] ifFalse: [self * (self - 1) factorial]
+|
+|5 factorial  // => 120
+|```
+|
+|**Why sealed (no subclassing)?** Primitives require support at multiple layers:
+|
+|| Layer | What's needed | Who controls it |
+||-------|---------------|-----------------|
+|| BEAM VM | Tag bits, memory layout, GC handling | Erlang/OTP team |
+|| Compiler | Recognize type, emit optimized code | Beamtalk compiler |
+|| Runtime | Message dispatch for that type | Beamtalk runtime |
+|
+|**Why extensible (new methods)?** The extension registry (`beamtalk_extensions.erl`) allows adding methods at runtime:
+|
+|1. Compiler emits optimized code for known messages (`+`, `size`, etc.)
+|2. Unknown messages fall through to `doesNotUnderstand:`
+|3. DNU handler checks extension registry for user-defined methods
+|4. If found, calls the extension; otherwise, raises error
+|
+|This gives you Smalltalk-style flexibility while keeping primitive operations fast.
+|
+|**Sealed types in Beamtalk:**
+|- `Integer`, `Float`, `String`, `Boolean`, `Atom`, `Block`
+|- `Array`, `List`, `Set`, `Dictionary`
+|- `Nil`
+|
+|### Traditional Smalltalk Hierarchy (for comparison)
 |
 |<cite index="2-4,2-5,2-6">In Smalltalk, the root of the inheritance hierarchy is traditionally the class Object. In modern Smalltalk (e.g., Pharo), ProtoObject is the true root, but you will normally not pay attention to this class. ProtoObject encapsulates the minimal set of messages that all objects must have.</cite>
-|
-|The actual hierarchy is:
 |
 |```
 |ProtoObject (true root, minimal behavior)
@@ -58,66 +186,70 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |       └─ (user-defined classes...)
 |```
 |
-|### Beamtalk's Adaptation
+|Beamtalk adapts this by adding **Actor** as the process-based layer, with primitives and user value types inheriting from Object.
 |
-|Beamtalk follows this same pattern, with **Actor** inserted as the practical root for concurrent process-based objects:
+|### Key Points
 |
-|```
-|ProtoObject (true root, minimal behavior)
-|  └─ Object (reflection, nil testing, describes)
-|       └─ Actor (async-first process-based objects, spawn, supervision)
-|            └─ (user-defined actors: Counter, Worker, etc.)
-|```
-|
-|**Key points:**
-|
-|1. **ProtoObject** — The absolute root, defined in the standard library. Provides only the most essential messages that every object must understand. Rarely used directly by application code.
+|1. **ProtoObject** — The absolute root for ALL objects. Provides only the most essential messages that every object must understand.
 |   - `class` — Returns the object's class (fundamental for reflection)
 |   - `doesNotUnderstand:args:` — Fallback for unknown messages
 |   - `==` / `~=` — Object identity and equality
 |
-|2. **Object** — The practical root for most classes. <cite index="2-7,2-8">Most classes inherit from Object, which defines many additional messages that almost all objects ought to understand and respond to. Unless you have a very good reason to do otherwise, when creating application classes you should normally subclass Object, or one of its subclasses.</cite>
-|   - Reflection: `class`, `respondsTo:`, `instVarNames`, `instVarAt:`
+|2. **Object** — Common behavior for all non-minimal objects. Provides:
+|   - `new` — Create a new instance (for value types)
 |   - Nil testing: `isNil`, `notNil`, `ifNil:ifNotNil:`
+|   - Reflection: `respondsTo:`, `instVarNames`, `instVarAt:`
 |   - Debugging: `inspect`, `describe`
-|   - Introspection: `allInstances`, `instanceCount`
 |
-|3. **Actor** — The root for all concurrent, process-based objects in Beamtalk. Inherits from Object and adds:
-|   - `spawn` — Create a new instance (compiler primitive)
+|3. **Primitives** (Integer, Float, String, Boolean, Atom, Array, List) — Sealed subclasses of Object. BEAM values that respond to messages via compiled function calls. No process, no pid.
+|
+|4. **Actor** — Process-based objects. Each Actor instance is a BEAM process with:
+|   - `spawn` — Create a new instance (NOT `new`)
 |   - `spawnWith:` — Create with initialization arguments
 |   - Supervision: `start_link`, restart strategies
-|   - Async messaging: All message sends return futures
+|   - Async messaging: All message sends go through the process mailbox
+|   - Overrides `new` to raise error ("must use spawn")
 |
 |### When to Use Each
 |
+|**Primitives (built-in):**
+|- Integer, Float, String, Boolean, Atom — you don't inherit from these, you use them
+|- Array, List, Dictionary, Set — collection types for data
+|
 |**Inherit from Object** when:
-|- You're defining a non-concurrent utility class (rare in Beamtalk)
-|- You want minimal BEAM runtime overhead (e.g., a stateless helper)
+|- You're defining a **value type** (Point, Color, Config)
+|- No process needed — data lives in caller's heap
+|- Instantiate with `new`
 |
 |**Inherit from Actor** when:
-|- You're defining an agent or service (99% of application code)
-|- You need state, supervision, or message-based interaction
-|- You want async-first semantics
+|- You're defining a **stateful service, agent, or entity**
+|- Need concurrent message handling and process isolation
+|- Instantiate with `spawn`
 |
 |**Inherit from ProtoObject** when:
 |- You need absolute minimal behavior (extremely rare)
-|- You're implementing a special meta-object (framework code only)
+|- You're implementing a proxy with custom `doesNotUnderstand:` handling
+|- You're building framework-level meta-objects
 |
-|### Why Not Just "Everything is an Actor"?
+|### Why This Design?
 |
-|A common question: why not make Actor the root and skip Object and ProtoObject?
+|The key insight is that **primitives and actors both respond to messages**, but they use different machinery:
 |
-|**Reasons for the three-level hierarchy:**
+|1. **Primitives** — Compiled to direct function calls. No process overhead. `42 + 3` becomes `erlang:'+'(42, 3)`.
 |
-|1. **Conceptual clarity** — Distinguishes between reified objects (Object) and concurrent agents (Actor). Makes the model easier to explain and reason about.
+|2. **Actors** — Each instance is a BEAM process. Messages go through the mailbox. `counter increment` becomes `gen_server:call(Pid, increment)`.
 |
-|2. **Room for growth** — If Beamtalk later supports non-concurrent object types (e.g., immutable value objects), they can inherit from Object directly without conflating them with actors.
+|**Benefits of this design:**
 |
-|3. **Standard terminology** — Developers familiar with Smalltalk immediately understand the hierarchy. "Object" is what you subclass for non-concurrent things; "Actor" is what you subclass for concurrent agents.
+|1. **Uniform syntax** — Programmers use the same `receiver message` syntax for everything. No special cases.
 |
-|4. **Framework extensibility** — Libraries can define abstract classes that inherit from Object but not Actor, useful for data structures and utilities that might be shared across processes.
+|2. **Matches BEAM reality** — BEAM already distinguishes terms (values) from processes. We embrace this rather than fight it.
 |
-|5. **Metaclass alignment** — <cite index="1-10,1-16">In Smalltalk, every class eventually inherits from Object, and every metaclass inherits from Class and Behavior.</cite> Beamtalk follows the same metaclass hierarchy, with proper parallel inheritance chains.
+|3. **Zero overhead for primitives** — `42 + 3` is just arithmetic, not a process message. Fast.
+|
+|4. **Full actor power when needed** — Actor subclasses get processes, supervision, fault tolerance.
+|
+|5. **Clear mental model** — "Value types use `new`. Actors use `spawn`." Simple to explain.
 |
 |### Metaclass Hierarchy
 |
@@ -126,22 +258,24 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |```
 |Instance Side:          Metaclass Side:
 |ProtoObject      <---  ProtoObject class
-|  └─ Object     <---    └─ Object class  
-|      └─ Actor <---        └─ Actor class
+|  └─ Object     <---    └─ Object class
+|       ├─ Integer <---       ├─ Integer class
+|       └─ Actor   <---       └─ Actor class
+|            └─ Counter <---       └─ Counter class
 |```
 |
 |When you define a class, a metaclass is automatically created. For example:
 |
 |```beamtalk
-Actor subclass: Counter
-  state: value = 0
-  
-  // Instance methods
-  increment => self.value += 1
-  
-  // Class methods (defined on the metaclass automatically)
-  class >> create: initialValue => ^self spawnWith: #{value => initialValue}
-```
+|Actor subclass: Counter
+|  state: value = 0
+|  
+|  // Instance methods
+|  increment => self.value += 1
+|  
+|  // Class methods (defined on the metaclass automatically)
+|  class >> create: initialValue => self spawnWith: #{value => initialValue}
+|```
 |
 |The compiler generates both:
 |- `beamtalk_counter` — Instance behavior (handles messages to instances)
@@ -161,7 +295,7 @@ Smalltalk's objects have identity, state, and behavior. BEAM processes have exac
 
 **Beamtalk:**
 ```
-Actor subclass: Counter
+Object subclass: Counter
   state: value = 0
   
   increment => self.value += 1
@@ -339,7 +473,7 @@ Unknown messages can be intercepted for proxying, method synthesis, and metaprog
 
 **Beamtalk:**
 ```
-Actor subclass: Proxy
+Object subclass: Proxy
   state: target = nil
   
   // Catch-all for unknown messages
@@ -550,7 +684,7 @@ This is used for:
 
 ```
 // Instead of become:, use explicit delegation
-Actor subclass: MigratableCounter
+Object subclass: MigratableCounter
   state:
     delegate = nil
     value = 0
@@ -802,7 +936,7 @@ Smalltalk snapshot: true andQuit: false.
 
 ```
 // Persist actor state explicitly
-Actor subclass: PersistentCounter
+Object subclass: PersistentCounter
   state:
     value = 0
     
@@ -817,7 +951,7 @@ Actor subclass: PersistentCounter
 **Or use Mnesia for distributed persistence:**
 
 ```
-Actor subclass: DistributedCounter
+Object subclass: DistributedCounter
   state: value = 0
   
   persist: #mnesia  // Declarative: state backed by Mnesia
@@ -851,7 +985,7 @@ A process's behavior is determined by its code module. You can't change what mod
 
 ```
 // Option 1: State pattern - embed class in state
-Actor subclass: Evolvable
+Object subclass: Evolvable
   state:
     currentClass = nil
     data = {}
@@ -1137,7 +1271,7 @@ Type sealing (from Dylan) enables compile-time optimizations that reduce generat
 
 ```
 // Abstract class: never directly instantiated
-abstract Actor subclass: Collection
+abstract Object subclass: Collection
   // Methods defined for inheritance only
   
   size => self subclassResponsibility
@@ -1154,7 +1288,7 @@ This matches Flavors' behavior where mixin modules are never generated.
 
 ```
 // Sealed class: no subclasses allowed
-sealed Actor subclass: Point
+sealed Object subclass: Point
   state: x: Float, y: Float
   
   distanceTo: other =>
@@ -1170,7 +1304,7 @@ For sealed classes, the compiler can:
 
 ```
 // Sealed method: subclasses cannot override
-Actor subclass: Counter
+Object subclass: Counter
   sealed getValue => ^self.value  // Can be inlined at call sites
 ```
 
