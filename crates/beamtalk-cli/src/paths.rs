@@ -26,19 +26,36 @@ pub fn beamtalk_dir() -> Result<PathBuf> {
 
 /// Path to the lockfile containing the daemon PID.
 ///
+/// Derives the lockfile path from the socket path by setting its extension to `.lock`.
+/// This ensures lockfile and socket names stay synchronized when using custom socket paths.
+///
 /// # Errors
 ///
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn lockfile_path() -> Result<PathBuf> {
-    Ok(beamtalk_dir()?.join("daemon.lock"))
+    let socket = socket_path()?;
+    let lockfile = socket.with_extension("lock");
+    Ok(lockfile)
 }
 
 /// Path to the Unix socket.
+///
+/// Priority order:
+/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (if set and non-empty)
+/// 2. Default: `~/.beamtalk/daemon.sock`
+///
+/// This allows per-worktree daemon isolation when working on multiple
+/// compiler changes in parallel.
 ///
 /// # Errors
 ///
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn socket_path() -> Result<PathBuf> {
+    if let Ok(socket_path) = std::env::var("BEAMTALK_DAEMON_SOCKET") {
+        if !socket_path.is_empty() {
+            return Ok(PathBuf::from(socket_path));
+        }
+    }
     Ok(beamtalk_dir()?.join("daemon.sock"))
 }
 
@@ -99,6 +116,39 @@ pub fn is_daemon_running() -> Result<Option<u32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    /// RAII guard to safely manipulate environment variables in tests.
+    /// Automatically restores the previous value (or removes if unset) on drop.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        /// Set an environment variable and save its previous value.
+        /// SAFETY: Caller must ensure tests using this are serialized with `#[serial(env_var)]`.
+        unsafe fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            // SAFETY: Caller ensures tests are serialized
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: Test cleanup - restore previous env var state
+            unsafe {
+                match &self.prev {
+                    Some(val) => std::env::set_var(self.key, val),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn beamtalk_dir_returns_home_subdirectory() {
@@ -116,6 +166,39 @@ mod tests {
     fn socket_path_is_in_beamtalk_dir() {
         let socket = socket_path().expect("Failed to get socket_path");
         assert!(socket.ends_with(".beamtalk/daemon.sock"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn socket_path_respects_env_var() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert_eq!(socket, PathBuf::from("/tmp/test-daemon.sock"));
+        // Guard automatically restores previous value on drop
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn socket_path_ignores_empty_env_var() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "") };
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert!(
+            socket.ends_with(".beamtalk/daemon.sock"),
+            "Empty env var should use default"
+        );
+        // Guard automatically restores previous value on drop
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn lockfile_path_derives_from_socket_path() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
+        let lockfile = lockfile_path().expect("Failed to get lockfile_path");
+        assert_eq!(lockfile, PathBuf::from("/tmp/test-daemon.lock"));
+        // Guard automatically restores previous value on drop
     }
 
     #[test]
