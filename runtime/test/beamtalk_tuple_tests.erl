@@ -191,3 +191,15 @@ extension_method_test_() ->
                          beamtalk_tuple:dispatch('unknownMethod', [], {a, b}))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Type Safety Tests
+%%% ============================================================================
+
+type_safety_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Non-function argument to unwrapOrElse: raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'Tuple', 'unwrapOrElse:', 1},
+                         beamtalk_tuple:dispatch('unwrapOrElse:', [42], {error, reason}))
+        end}
+    ]}.

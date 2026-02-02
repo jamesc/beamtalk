@@ -158,3 +158,19 @@ extension_method_test_() ->
                          beamtalk_boolean:dispatch('unknownMethod', [], true))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Type Safety Tests
+%%% ============================================================================
+
+type_safety_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Non-function argument to ifTrue: raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'Boolean', 'ifTrue:', 1},
+                         beamtalk_boolean:dispatch('ifTrue:', [42], true))
+        end},
+        {"Non-function argument to and: raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'Boolean', 'and:', 1},
+                         beamtalk_boolean:dispatch('and:', [42], true))
+        end}
+    ]}.

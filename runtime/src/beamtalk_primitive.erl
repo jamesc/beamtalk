@@ -118,14 +118,16 @@ send(nil, Selector, Args) ->
 send(X, Selector, Args) when is_function(X) ->
     beamtalk_block:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_tuple(X) ->
-    %% Check if it's a beamtalk_object first
-    case is_tuple(X) andalso tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
+    %% Check if it's a beamtalk_object (should not happen - covered by clause above)
+    %% but handle tuples that might not match the record pattern
+    case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
         true ->
-            %% Actor: use gen_server
+            %% This is a beamtalk_object that didn't match the record pattern
+            %% Extract pid from the known record structure
             Pid = element(4, X),
             gen_server:call(Pid, {Selector, Args});
         false ->
-            %% Regular tuple
+            %% Regular tuple - dispatch to tuple class
             beamtalk_tuple:dispatch(Selector, Args, X)
     end;
 send(X, Selector, Args) when is_float(X) ->
@@ -165,10 +167,10 @@ responds_to(nil, Selector) ->
 responds_to(X, Selector) when is_function(X) ->
     beamtalk_block:has_method(Selector);
 responds_to(X, Selector) when is_tuple(X) ->
-    %% Check if it's a beamtalk_object first
-    case is_tuple(X) andalso tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
+    %% Check if it's a beamtalk_object (should not happen - covered by clause above)
+    case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
         true ->
-            %% Actor object
+            %% Actor object that didn't match record pattern
             Mod = element(3, X),  % class_mod field
             erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
         false ->

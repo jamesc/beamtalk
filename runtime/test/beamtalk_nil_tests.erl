@@ -123,3 +123,19 @@ extension_method_test_() ->
                          beamtalk_nil:dispatch('unknownMethod', [], nil))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Type Safety Tests
+%%% ============================================================================
+
+type_safety_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"Non-function argument to ifNil: raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'UndefinedObject', 'ifNil:', 1},
+                         beamtalk_nil:dispatch('ifNil:', [42], nil))
+        end},
+        {"Non-function argument to ifNil:ifNotNil: raises does_not_understand", fun() ->
+            ?assertError({does_not_understand, 'UndefinedObject', 'ifNil:ifNotNil:', 2},
+                         beamtalk_nil:dispatch('ifNil:ifNotNil:', [42, fun() -> ok end], nil))
+        end}
+    ]}.
