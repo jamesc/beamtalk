@@ -405,11 +405,11 @@ impl CoreErlangGenerator {
                 "case call 'beamtalk_actor':'spawn_with_registry'(RegistryPid, '{module_name}', "
             )?;
 
-            // Args - use empty list if no init args
+            // Args - use empty map if no init args (consistent with spawn/0)
             if let Some(args) = init_args {
                 self.generate_expression(args)?;
             } else {
-                write!(self.output, "[]")?;
+                write!(self.output, "~{{}}~")?;
             }
 
             // Class name for display
