@@ -251,14 +251,16 @@ if ($env:GIT_SIGNING_KEY) {
             docker exec $containerInfo chown -R vscode:vscode /home/vscode/.ssh 2>$null
             docker exec $containerInfo chmod 700 /home/vscode/.ssh 2>$null
             
-            # Copy the key
+            # Copy the key using stdin to avoid docker cp path issues
             Write-Host "   Copying: $sshKeyPath" -ForegroundColor Gray
             Write-Host "   To: ${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" -ForegroundColor Gray
             
-            $copyResult = docker cp $sshKeyPath "${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" 2>&1
+            # Read the key content and pipe it into the container
+            $keyContent = Get-Content $sshKeyPath -Raw
+            $copyResult = $keyContent | docker exec -i $containerInfo tee /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>&1 | Out-Null
             
             if ($LASTEXITCODE -eq 0) {
-                # Fix ownership of the copied key
+                # Fix ownership and permissions of the copied key
                 docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
                 docker exec $containerInfo chmod 644 /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
                 
