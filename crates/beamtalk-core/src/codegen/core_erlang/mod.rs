@@ -262,6 +262,11 @@ pub(super) struct CoreErlangGenerator {
     var_context: VariableContext,
     /// State threading for field assignments.
     state_threading: StateThreading,
+    /// BT-153: Whether we're inside a loop body (use `StateAcc` instead of `State`)
+    in_loop_body: bool,
+    /// BT-153: Whether we're generating REPL code (vs module code).
+    /// In REPL mode, local variable assignments should update bindings.
+    is_repl_mode: bool,
 }
 
 impl CoreErlangGenerator {
@@ -273,6 +278,8 @@ impl CoreErlangGenerator {
             indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
+            in_loop_body: false,
+            is_repl_mode: false,
         }
     }
 
@@ -319,6 +326,22 @@ impl CoreErlangGenerator {
     /// Sets the state version.
     pub(super) fn set_state_version(&mut self, version: usize) {
         self.state_threading.set_version(version);
+    }
+
+    /// BT-153: Check if mutation threading should be used for a block.
+    /// In REPL mode, local variable mutations trigger threading.
+    /// In module mode, only field writes trigger threading.
+    pub(super) fn needs_mutation_threading(
+        &self,
+        analysis: &block_analysis::BlockMutationAnalysis,
+    ) -> bool {
+        if self.is_repl_mode {
+            // REPL: both local vars and fields need threading
+            analysis.has_mutations()
+        } else {
+            // Module: only field writes need threading
+            !analysis.field_writes.is_empty()
+        }
     }
 
     /// Generates a full module with `gen_server` behaviour.
@@ -427,7 +450,7 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         // Generate eval/1 function
-        // Alias State = Bindings so identifier lookup works (it falls back to State)
+        // Returns {Result, UpdatedBindings} to support mutation threading
         writeln!(self.output, "'eval'/1 = fun (Bindings) ->")?;
         self.indent += 1;
 
@@ -435,17 +458,40 @@ impl CoreErlangGenerator {
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
 
+        // BT-153: Set REPL mode so mutations to local variables update bindings
+        // Save the previous value so generator can be reused
+        let previous_is_repl_mode = self.is_repl_mode;
+        self.is_repl_mode = true;
+
         // Alias State to Bindings for identifier fallback lookup
         self.write_indent()?;
         writeln!(self.output, "let State = Bindings in")?;
 
-        // Generate the expression
+        // Generate the expression, capturing intermediate result
         self.write_indent()?;
+        write!(self.output, "let Result = ")?;
         self.generate_expression(expression)?;
-        writeln!(self.output)?;
+        writeln!(self.output, " in")?;
+
+        // Return tuple {ResultValue, UpdatedBindings}
+        // BT-153: For mutation-threaded loops, Result IS the updated state.
+        // For simple expressions, Result is the value and State is unchanged.
+        let final_state = self.current_state_var();
+        self.write_indent()?;
+        if final_state == "State" {
+            // No mutation - Result is the value, State is unchanged bindings
+            writeln!(self.output, "{{Result, State}}")?;
+        } else {
+            // Mutation occurred - Result is the updated state
+            // Return {nil, Result} since loops return nil but state was updated
+            writeln!(self.output, "{{'nil', Result}}")?;
+        }
 
         self.pop_scope();
         self.indent -= 1;
+
+        // Restore REPL mode flag
+        self.is_repl_mode = previous_is_repl_mode;
 
         // Module end
         writeln!(self.output, "end")?;
@@ -1398,6 +1444,233 @@ end
             "Should alias State to Bindings"
         );
         assert!(code.contains("apply"), "Should use apply for block call");
+    }
+
+    #[test]
+    fn test_generate_repl_module_returns_tuple_with_state() {
+        // BT-153: REPL eval/1 should return {Result, UpdatedBindings}
+        let expression = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
+        let code =
+            generate_repl_expression(&expression, "repl_tuple_test").expect("codegen should work");
+
+        eprintln!("Generated code for literal 42:");
+        eprintln!("{code}");
+
+        // Check that the result is wrapped in a tuple with State
+        assert!(
+            code.contains("let Result ="),
+            "Should bind the result to Result variable. Got:\n{code}"
+        );
+        assert!(
+            code.contains("{Result, State}"),
+            "Should return tuple {{Result, State}}. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_times_repeat_mutation() {
+        // BT-153: REPL with mutation should return updated state
+        // Expression: 5 timesRepeat: [count := count + 1]
+
+        // Build the block: [count := count + 1]
+        let count_id = Expression::Identifier(Identifier::new("count", Span::new(0, 5)));
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let add = Expression::MessageSend {
+            receiver: Box::new(count_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            span: Span::new(0, 15),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(count_id),
+            value: Box::new(add),
+            span: Span::new(0, 20),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![assignment],
+            span: Span::new(0, 25),
+        });
+
+        // Build: 5 timesRepeat: [...]
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let times_repeat = Expression::MessageSend {
+            receiver: Box::new(five),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "timesRepeat:".into(),
+                span: Span::new(2, 14),
+            }]),
+            arguments: vec![body],
+            span: Span::new(0, 40),
+        };
+
+        let code = generate_repl_expression(&times_repeat, "repl_times_test")
+            .expect("codegen should work");
+
+        eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
+        eprintln!("{code}");
+
+        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        // where Result is the updated state (the loop returns the final StateAcc)
+        assert!(
+            code.contains("{'nil', Result}"),
+            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+        );
+
+        // Verify mutation threading details
+        assert!(
+            code.contains("letrec 'repeat'/2"),
+            "Should use arity-2 repeat function (I, StateAcc). Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('count'"),
+            "Should update 'count' in StateAcc. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_to_do_mutation() {
+        use crate::ast::BlockParameter;
+
+        // BT-153: REPL with to:do: mutation should return updated state
+        // Expression: 1 to: 5 do: [:n | total := total + n]
+
+        // Build the block: [:n | total := total + n]
+        let total_id = Expression::Identifier(Identifier::new("total", Span::new(0, 5)));
+        let n_id = Expression::Identifier(Identifier::new("n", Span::new(0, 1)));
+        let add = Expression::MessageSend {
+            receiver: Box::new(total_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![n_id],
+            span: Span::new(0, 15),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(total_id),
+            value: Box::new(add),
+            span: Span::new(0, 20),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![BlockParameter {
+                name: "n".into(),
+                span: Span::new(0, 1),
+            }],
+            body: vec![assignment],
+            span: Span::new(0, 25),
+        });
+
+        // Build: 1 to: 5 do: [...]
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let to_do = Expression::MessageSend {
+            receiver: Box::new(one),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart {
+                    keyword: "to:".into(),
+                    span: Span::new(2, 5),
+                },
+                KeywordPart {
+                    keyword: "do:".into(),
+                    span: Span::new(8, 11),
+                },
+            ]),
+            arguments: vec![five, body],
+            span: Span::new(0, 40),
+        };
+
+        let code =
+            generate_repl_expression(&to_do, "repl_to_do_test").expect("codegen should work");
+
+        eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
+        eprintln!("{code}");
+
+        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        assert!(
+            code.contains("{'nil', Result}"),
+            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+        );
+
+        // Verify to:do: mutation threading
+        assert!(
+            code.contains("letrec 'loop'/2"),
+            "Should use arity-2 loop function (I, StateAcc). Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('total'"),
+            "Should update 'total' in StateAcc. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_repl_module_with_while_true_mutation() {
+        // BT-181: REPL with whileTrue: mutation should read condition from StateAcc
+        // Expression: [x < 5] whileTrue: [x := x + 1]
+
+        // Build the condition: [x < 5]
+        let x_id = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+        let five = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
+        let compare = Expression::MessageSend {
+            receiver: Box::new(x_id.clone()),
+            selector: MessageSelector::Binary("<".into()),
+            arguments: vec![five],
+            span: Span::new(0, 10),
+        };
+        let condition = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![compare],
+            span: Span::new(0, 12),
+        });
+
+        // Build the body: [x := x + 1]
+        let one = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let add = Expression::MessageSend {
+            receiver: Box::new(x_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            span: Span::new(0, 10),
+        };
+        let assignment = Expression::Assignment {
+            target: Box::new(x_id),
+            value: Box::new(add),
+            span: Span::new(0, 15),
+        };
+        let body = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![assignment],
+            span: Span::new(0, 17),
+        });
+
+        // Build: [x < 5] whileTrue: [x := x + 1]
+        let while_true = Expression::MessageSend {
+            receiver: Box::new(condition),
+            selector: MessageSelector::Keyword(vec![KeywordPart {
+                keyword: "whileTrue:".into(),
+                span: Span::new(10, 20),
+            }]),
+            arguments: vec![body],
+            span: Span::new(0, 40),
+        };
+
+        let code =
+            generate_repl_expression(&while_true, "repl_while_test").expect("codegen should work");
+
+        eprintln!("Generated code for [x < 5] whileTrue: [x := x + 1]:");
+        eprintln!("{code}");
+
+        // BT-181: Condition lambda should take StateAcc parameter
+        assert!(
+            code.contains("fun (StateAcc) ->"),
+            "Condition lambda should accept StateAcc parameter. Got:\n{code}"
+        );
+        // BT-181: Condition should read x from StateAcc, not outer scope
+        assert!(
+            code.contains("maps':'get'('x', StateAcc)"),
+            "Condition should read x from StateAcc. Got:\n{code}"
+        );
+        // BT-181: Condition should be applied with StateAcc argument
+        assert!(
+            code.contains("apply") && code.contains("(StateAcc)"),
+            "Condition should be applied with StateAcc argument. Got:\n{code}"
+        );
     }
 
     #[test]
