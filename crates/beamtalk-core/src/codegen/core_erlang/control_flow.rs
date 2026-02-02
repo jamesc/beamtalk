@@ -13,7 +13,7 @@
 //!
 //! - **List iteration**: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`
 //! - **While loops**: `whileTrue:`, `whileFalse:`
-//! - **Counted loops**: `repeat`, `timesRepeat:`, `to:do:`
+//! - **Counted loops**: `repeat`, `timesRepeat:`, `to:do:`, `to:by:do:`
 //!
 //! # State Threading
 //!
@@ -1189,5 +1189,212 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         Ok(final_state_version)
+    }
+
+    /// Generates code for `to:by:do:` iteration with custom step.
+    ///
+    /// Handles both positive and negative steps:
+    /// - Positive step: iterate while I <= End
+    /// - Negative step: iterate while I >= End
+    /// - Step of 0: Returns 'nil' immediately (prevents infinite loop)
+    ///
+    /// # Safety
+    ///
+    /// The generated condition ensures that a step of 0 will not execute,
+    /// preventing infinite loops.
+    pub(super) fn generate_to_by_do(
+        &mut self,
+        receiver: &Expression,
+        limit: &Expression,
+        step: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        // Check if body is a literal block (enables mutation analysis)
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return self.generate_to_by_do_with_mutations(receiver, limit, step, body_block);
+            }
+        }
+
+        // Simple case: no mutations
+        self.generate_to_by_do_simple(receiver, limit, step, body)
+    }
+
+    pub(super) fn generate_to_by_do_simple(
+        &mut self,
+        receiver: &Expression,
+        limit: &Expression,
+        step: &Expression,
+        body: &Expression,
+    ) -> Result<()> {
+        // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
+        //           letrec 'loop'/1 = fun (I) ->
+        //               case (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End) of
+        //                 'true' -> let _ = apply <body>/1 (I) in
+        //                          apply 'loop'/1 (I + Step)
+        //                 'false' -> 'nil'
+        //               end
+        //           in apply 'loop'/1 (Start)
+
+        write!(self.output, "let ")?;
+        let start_var = self.fresh_temp_var("temp");
+        write!(self.output, "{start_var} = ")?;
+        self.generate_expression(receiver)?;
+
+        write!(self.output, " in let ")?;
+        let end_var = self.fresh_temp_var("temp");
+        write!(self.output, "{end_var} = ")?;
+        self.generate_expression(limit)?;
+
+        write!(self.output, " in let ")?;
+        let step_var = self.fresh_temp_var("temp");
+        write!(self.output, "{step_var} = ")?;
+        self.generate_expression(step)?;
+
+        write!(self.output, " in let ")?;
+        let body_var = self.fresh_temp_var("temp");
+        write!(self.output, "{body_var} = ")?;
+        self.generate_expression(body)?;
+
+        write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
+
+        // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
+        // Use nested case statements since andalso/orelse aren't BIFs
+        write!(
+            self.output,
+            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
+        )?;
+        write!(
+            self.output,
+            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> ")?;
+        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
+        write!(
+            self.output,
+            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
+        write!(self.output, "end ")?;
+        write!(self.output, "end in case Continue of ")?;
+
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(self.output, "let _ = apply {body_var} (I) in ")?;
+        write!(
+            self.output,
+            "apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
+        write!(self.output, "end ")?;
+        write!(self.output, "in apply 'loop'/1 ({start_var})")?;
+
+        Ok(())
+    }
+
+    pub(super) fn generate_to_by_do_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        limit: &Expression,
+        step: &Expression,
+        body: &Block,
+    ) -> Result<()> {
+        // Analyze which variables are mutated
+        let analysis = block_analysis::analyze_block(body);
+        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+
+        // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
+        //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->
+        //               case (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End) of
+        //                 'true' -> <body with I parameter and state threading>
+        //                          apply 'loop'/N+2 (I+Step, Var1', Var2', ..., StateAcc')
+        //                 'false' -> StateAcc
+        //               end
+        //           in apply 'loop'/N+2 (Start, InitVar1, InitVar2, ..., State)
+
+        write!(self.output, "let ")?;
+        let start_var = self.fresh_temp_var("temp");
+        write!(self.output, "{start_var} = ")?;
+        self.generate_expression(receiver)?;
+
+        write!(self.output, " in let ")?;
+        let end_var = self.fresh_temp_var("temp");
+        write!(self.output, "{end_var} = ")?;
+        self.generate_expression(limit)?;
+
+        write!(self.output, " in let ")?;
+        let step_var = self.fresh_temp_var("temp");
+        write!(self.output, "{step_var} = ")?;
+        self.generate_expression(step)?;
+
+        let arity = mutated_vars.len() + 2; // +1 for I, +1 for StateAcc
+        write!(self.output, " in letrec 'loop'/{arity} = fun (I")?;
+
+        let mut param_names = Vec::new();
+        for var in &mutated_vars {
+            let param = Self::to_core_erlang_var(var);
+            write!(self.output, ", {param}")?;
+            param_names.push(param);
+        }
+        write!(self.output, ", StateAcc) -> ")?;
+
+        // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
+        // Use nested case statements since andalso/orelse aren't BIFs
+        write!(
+            self.output,
+            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
+        )?;
+        write!(
+            self.output,
+            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> ")?;
+        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
+        write!(
+            self.output,
+            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
+        )?;
+        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
+        write!(self.output, "end ")?;
+        write!(self.output, "end in case Continue of ")?;
+
+        write!(self.output, "<'true'> when 'true' -> ")?;
+
+        let final_state_version = self.generate_to_do_body_with_threading(body, &mutated_vars)?;
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{final_state_version}")
+        };
+
+        write!(
+            self.output,
+            " apply 'loop'/{arity} (call 'erlang':'+'(I, {step_var})"
+        )?;
+        for param in &param_names {
+            write!(self.output, ", {param}1")?;
+        }
+        write!(self.output, ", {final_state_var}) ")?;
+
+        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
+        write!(self.output, "end ")?;
+
+        // Initial call - capture current state BEFORE incrementing
+        let prev_state = self.current_state_var();
+        write!(self.output, " in let ")?;
+        let new_state = self.next_state_var();
+        write!(
+            self.output,
+            "{new_state} = apply 'loop'/{arity} ({start_var}"
+        )?;
+        for var in &mutated_vars {
+            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
+        }
+        write!(self.output, ", {prev_state})")?;
+
+        // Close the let by returning the new state
+        write!(self.output, " in {new_state}")?;
+
+        Ok(())
     }
 }

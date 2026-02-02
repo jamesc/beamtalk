@@ -30,3 +30,11 @@ sum := 0
 isEven := 4 isEven
 isOdd := 7 isOdd
 isZero := 0 isZero
+
+// Custom step iteration - positive step (odd numbers)
+oddSum := 0
+1 to: 10 by: 2 do: [:n | oddSum := oddSum + n]
+
+// Custom step iteration - negative step (countdown)
+countdown := 0
+10 to: 1 by: -1 do: [:n | countdown := countdown + 1]
