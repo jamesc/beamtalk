@@ -849,7 +849,7 @@ mod tests {
         assert_eq!(info.pid, "<0.123.0>");
         assert_eq!(info.class, "Counter");
         assert_eq!(info.module, "counter");
-        assert_eq!(info.spawned_at, 1234567890);
+        assert_eq!(info.spawned_at, 1_234_567_890);
     }
 
     #[test]
