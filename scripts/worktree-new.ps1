@@ -209,7 +209,11 @@ Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
 Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
 
 # Build and start the container - capture output to get container ID
-$devcontainerOutput = devcontainer up --workspace-folder $worktreePath 2>&1 | Tee-Object -Variable output
+Write-Host "Running: devcontainer up --workspace-folder $worktreePath" -ForegroundColor Gray
+$output = devcontainer up --workspace-folder $worktreePath 2>&1 | ForEach-Object {
+    Write-Host $_  # Display output in real-time
+    $_  # Pass through to capture
+}
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n❌ Failed to start devcontainer" -ForegroundColor Red
