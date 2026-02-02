@@ -8,63 +8,71 @@
 // Tests the 'super' keyword for calling parent class implementations.
 // This is a critical feature for object-oriented programming.
 //
-// Related: BT-95 (beamtalk_class:super_dispatch/3)
+// Related: BT-95 (beamtalk_class:super_dispatch/3), BT-203 (class hierarchy)
 
 // @load tests/e2e/fixtures/counter.bt
 // @load tests/e2e/fixtures/logging_counter.bt
 
 // ===========================================================================
-// @LOAD VERIFICATION
+// @LOAD VERIFICATION - FIXED IN BT-195
 // ===========================================================================
 // BT-195 fixed: @load now works with actor classes that use 'self'
 // The above @load directives successfully compile counter.bt and logging_counter.bt
 // without "Undefined variable: self" errors.
 
 // ===========================================================================
-// SUPER SEND TESTS - TEMPORARILY DISABLED (BT-XXX)
+// SUPER SEND TESTS - DISABLED PENDING BT-211
 // ===========================================================================
 //
-// Super dispatch tests timeout when awaiting futures. This appears to be a 
-// separate issue with super method dispatch runtime behavior, not @load.
+// Super dispatch E2E tests fail with badarg because subclass init doesn't
+// include inherited state fields from parent classes.
 //
-// The tests below work in isolation but timeout in E2E:
-//   - Future created correctly (spawn works)
-//   - Method sends work (increment, getLogCount, getValue)
-//   - But super dispatch times out after 5 seconds
+// Root cause (BT-211):
+//   - LoggingCounter extends Counter
+//   - Counter has `state: value = 0`
+//   - LoggingCounter has `state: logCount = 0`
+//   - When LoggingCounter spawns, its state ONLY has logCount, NOT value
+//   - When `super increment` calls Counter's increment, it does maps:get(value, State)
+//   - This fails with badarg because value doesn't exist in state
 //
-// For working super dispatch verification, see:
-//   runtime/test/beamtalk_codegen_simulation_tests.erl:
-//   - super_calls_parent_method_test
-//   - super_multiple_calls_test
-//   - super_with_different_method_test
-//   - super_maintains_state_test
-//   - super_with_init_args_test
+// The simulation tests pass because they manually set instance_variables
+// to include both parent and child fields. See:
+//   runtime/test/beamtalk_codegen_simulation_tests.erl line 1553:
+//   instance_variables => [value, logCount]  %% manually includes parent's field
 //
-// All simulation tests pass, confirming super dispatch code generation is correct.
-// The E2E timeout issue needs separate investigation.
+// Fix required: Codegen needs to include inherited fields in subclass init.
+// See BT-211 for proposed solutions.
 
-// Basic test to verify spawn works (not super dispatch)
+// Basic test to verify spawn and class work
 c := Counter spawn
 // => _
 
-// Verify spawn returns an actor object
 c class
 // => Counter
+
+// Counter methods work (no super involved)
+c increment await
+// => 1
+
+c getValue await
+// => 1
 
 // ===========================================================================
 // IMPLEMENTATION NOTES
 // ===========================================================================
 //
-// Super dispatch flow:
+// Super dispatch flow (BT-203):
 // 1. Compiler generates: call 'beamtalk_class':'super_dispatch'(State, Selector, Args)
 // 2. Runtime looks up current class from State.__class__
-// 3. Queries class process for superclass
+// 3. Queries class process for superclass via beamtalk_class:superclass/1
 // 4. Walks inheritance chain until method found
 // 5. Invokes method with current instance state
+// 6. Returns {reply, Result, NewState} matching actor protocol
 //
-// Critical: Uses beamtalk_class:super_dispatch/3 (not beamtalk_classes)
-// This was fixed in BT-95 code review (commit 8e3b912).
+// Class hierarchy is correctly registered:
+//   Counter -> Actor (superclass)
+//   LoggingCounter -> Counter (superclass)
 //
-// Without this fix, all super sends would fail at runtime with:
-//   ** exception error: undefined function beamtalk_classes:super_dispatch/3
+// The super_dispatch protocol and class registry work correctly.
+// The remaining issue is inherited state fields (BT-211).
 
