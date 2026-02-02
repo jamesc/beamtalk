@@ -7,15 +7,19 @@ Module {
     classes: [],
     expressions: [
         MessageSend {
-            receiver: Identifier(
-                Identifier {
+            receiver: ClassReference {
+                name: Identifier {
                     name: "Transcript",
                     span: Span {
                         start: 133,
                         end: 143,
                     },
                 },
-            ),
+                span: Span {
+                    start: 133,
+                    end: 143,
+                },
+            },
             selector: Keyword(
                 [
                     KeywordPart {

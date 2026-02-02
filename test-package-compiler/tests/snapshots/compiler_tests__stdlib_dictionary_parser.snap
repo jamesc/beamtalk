@@ -742,15 +742,19 @@ Module {
                         ],
                         body: [
                             MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
+                                receiver: ClassReference {
+                                    name: Identifier {
                                         name: "Transcript",
                                         span: Span {
                                             start: 782,
                                             end: 792,
                                         },
                                     },
-                                ),
+                                    span: Span {
+                                        start: 782,
+                                        end: 792,
+                                    },
+                                },
                                 selector: Keyword(
                                     [
                                         KeywordPart {
@@ -792,15 +796,19 @@ Module {
             },
         },
         MessageSend {
-            receiver: Identifier(
-                Identifier {
+            receiver: ClassReference {
+                name: Identifier {
                     name: "Transcript",
                     span: Span {
                         start: 803,
                         end: 813,
                     },
                 },
-            ),
+                span: Span {
+                    start: 803,
+                    end: 813,
+                },
+            },
             selector: Keyword(
                 [
                     KeywordPart {
