@@ -156,7 +156,10 @@ mod tests {
             std::env::set_var("BEAMTALK_DAEMON_SOCKET", "");
         }
         let socket = socket_path().expect("Failed to get socket_path");
-        assert!(socket.ends_with(".beamtalk/daemon.sock"), "Empty env var should use default");
+        assert!(
+            socket.ends_with(".beamtalk/daemon.sock"),
+            "Empty env var should use default"
+        );
         // SAFETY: Cleaning up test state
         unsafe {
             std::env::remove_var("BEAMTALK_DAEMON_SOCKET");

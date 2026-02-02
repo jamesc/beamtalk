@@ -502,6 +502,44 @@ cargo test --all-targets
 
 **Common mistake:** Running `cargo fmt` without `--all` only formats the current crate, missing workspace members. Always use `cargo fmt --all`.
 
+### Pre-Commit Hooks (Recommended)
+
+**Problem:** CI format checks frequently fail because developers forget to run `cargo fmt --all` before committing.
+
+**Solution:** Install a git pre-commit hook to automatically format code before each commit.
+
+**Setup (one-time per repository):**
+```bash
+cat > .git/hooks/pre-commit << 'EOF'
+#!/bin/bash
+# Pre-commit hook: auto-format Rust code
+
+echo "Running cargo fmt --all..."
+cargo fmt --all
+
+# Re-add any files that were formatted
+git diff --name-only --cached | grep '\.rs$' | xargs git add
+
+exit 0
+EOF
+
+chmod +x .git/hooks/pre-commit
+```
+
+**How it works:**
+- Runs `cargo fmt --all` before every commit
+- Re-adds formatted files to the staging area
+- Ensures all commits pass CI format checks
+
+**Alternative: Manual check before push:**
+If you prefer manual control, create a git alias:
+```bash
+git config alias.pre-push '!cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test --all-targets'
+```
+Then run `git pre-push` before pushing to verify all CI checks locally.
+
+**For worktrees:** Each worktree needs its own hook. Consider creating a `scripts/install-hooks.sh` script to automate this.
+
 Use `#[expect(...)]` instead of `#[allow(...)]` for lint overrides — it warns when the override becomes unnecessary:
 ```rust
 #[expect(clippy::unused_async, reason = "will add I/O later")]
