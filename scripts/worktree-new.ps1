@@ -250,16 +250,54 @@ BEAMTALK_NODE_NAME=$nodeName
 
 Write-Host "✅ Created .env file" -ForegroundColor Green
 
+# Sync devcontainer config from main repo (worktrees may be created from old commits)
+Write-Host "📋 Syncing devcontainer config..." -ForegroundColor Cyan
+$mainDevcontainer = Join-Path $mainRepo ".devcontainer"
+$worktreeDevcontainer = Join-Path $worktreePath ".devcontainer"
+if (Test-Path $mainDevcontainer) {
+    Copy-Item -Path "$mainDevcontainer\*" -Destination $worktreeDevcontainer -Force -Recurse
+    Write-Host "✅ Synced .devcontainer from main repo" -ForegroundColor Green
+}
+
+# Pre-fix worktree .git file for container paths BEFORE starting container
+# This prevents "fatal: not a git repository" errors during postStartCommand
+Write-Host "🔧 Pre-fixing .git paths for container..." -ForegroundColor Cyan
+$worktreeGitFile = Join-Path $worktreePath ".git"
+$worktreeName = Split-Path $worktreePath -Leaf
+$containerGitPath = "/workspaces/.beamtalk-git/worktrees/$worktreeName"
+Set-Content -Path $worktreeGitFile -Value "gitdir: $containerGitPath" -NoNewline
+Write-Host "   Set .git to: $containerGitPath" -ForegroundColor Gray
+
+# Also fix the gitdir file in the main repo's worktree metadata
+$worktreeMetaGitdir = Join-Path $env:BEAMTALK_MAIN_GIT_PATH "worktrees" $worktreeName "gitdir"
+if (Test-Path $worktreeMetaGitdir) {
+    Set-Content -Path $worktreeMetaGitdir -Value "/workspaces/$worktreeName" -NoNewline
+    Write-Host "   Set gitdir to: /workspaces/$worktreeName" -ForegroundColor Gray
+}
+Write-Host "✅ Git paths pre-configured for container" -ForegroundColor Green
 
 # Start devcontainer
 Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
 Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
 
+# Suppress Docker CLI hints (e.g., "Try Docker Debug...")
+$env:DOCKER_CLI_HINTS = "false"
+
 # Build and start the container - capture output to get container ID
-Write-Host "Running: devcontainer up --workspace-folder $worktreePath" -ForegroundColor Gray
-$output = devcontainer up --workspace-folder $worktreePath 2>&1 | ForEach-Object {
-    Write-Host $_  # Display output in real-time
-    $_  # Pass through to capture
+# Explicitly mount the main .git directory since ${localEnv:...} doesn't work reliably
+$mountArg = "--mount=type=bind,source=$($env:BEAMTALK_MAIN_GIT_PATH),target=/workspaces/.beamtalk-git"
+Write-Host "Running: devcontainer up --workspace-folder $worktreePath $mountArg" -ForegroundColor Gray
+$output = devcontainer up --workspace-folder $worktreePath $mountArg 2>&1 | ForEach-Object {
+    # Filter out PowerShell's stderr wrapper noise and Docker hints
+    if ($_ -is [System.Management.Automation.ErrorRecord]) {
+        $line = $_.Exception.Message
+    } else {
+        $line = $_
+    }
+    if ($line -and $line -notmatch '^System\.Management\.Automation\.RemoteException' -and $line -notmatch "What's next:|Try Docker Debug|Learn more at https://docs\.docker\.com") {
+        Write-Host $line
+    }
+    $line  # Pass through to capture
 }
 
 if ($LASTEXITCODE -ne 0) {
@@ -280,16 +318,6 @@ try {
 }
 
 Write-Host "`n✨ Container ready!" -ForegroundColor Green
-
-# Fix worktree .git paths (critical for worktrees to work)
-Write-Host "🔧 Fixing worktree git paths..." -ForegroundColor Cyan
-devcontainer exec --workspace-folder $worktreePath bash .devcontainer/fix-worktree-git.sh 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "✅ Git worktree paths fixed" -ForegroundColor Green
-}
-else {
-    Write-Host "⚠️  Could not fix git paths (may not be needed)" -ForegroundColor Yellow
-}
 
 # Set up Copilot CLI config
 Write-Host "🤖 Setting up Copilot CLI config..." -ForegroundColor Cyan

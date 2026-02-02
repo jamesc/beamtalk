@@ -74,6 +74,15 @@ if [ -f "$GIT_FILE" ]; then
             echo "gitdir: $NEW_PATH" > "$GIT_FILE"
             log "SUCCESS: Fixed .git to point to: $NEW_PATH"
             
+            # Also fix the gitdir file inside the worktree metadata
+            # This file points back to the worktree directory
+            GITDIR_FILE="$NEW_PATH/gitdir"
+            if [ -f "$GITDIR_FILE" ]; then
+                CONTAINER_WORKSPACE="/workspaces/$WORKTREE_NAME"
+                echo "$CONTAINER_WORKSPACE" > "$GITDIR_FILE"
+                log "Fixed gitdir to point to: $CONTAINER_WORKSPACE"
+            fi
+            
             # Verify git works
             if git status >/dev/null 2>&1; then
                 log "Verified: git commands work"

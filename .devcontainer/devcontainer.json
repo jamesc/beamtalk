@@ -40,11 +40,13 @@
     }
   },
   // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
-  "initializeCommand": "test -f .env || touch .env",
+  "initializeCommand": "powershell -Command \"if (-not (Test-Path .env)) { New-Item -ItemType File -Path .env -Force | Out-Null }\"",
   "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
   // Cargo caching for faster builds
+  // NOTE: For worktrees, the main .git mount is added via CLI --mount argument in worktree-new.ps1
+  // because ${localEnv:...} variable substitution doesn't work reliably with devcontainer CLI
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
     "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
