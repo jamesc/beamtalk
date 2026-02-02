@@ -109,9 +109,10 @@ send_to_integer_test() ->
     ?assertEqual(50, beamtalk_primitive:send(42, '+', [8])),
     ?assertEqual('Integer', beamtalk_primitive:send(42, 'class', [])).
 
-send_to_string_not_implemented_test() ->
-    %% String dispatch not yet implemented (BT-167)
-    ?assertError({not_implemented, _}, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])).
+send_to_string_test() ->
+    %% String dispatch now implemented (BT-167)
+    ?assertEqual(<<"helloworld">>, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
+    ?assertEqual('String', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
 send_to_float_not_implemented_test() ->
     %% Float dispatch not yet implemented (BT-168)
@@ -141,10 +142,17 @@ responds_to_integer_test_() ->
          ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
      end}.
 
-responds_to_string_test() ->
-    %% String class not implemented yet (BT-167)
-    ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, '++')),
-    ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'length')).
+responds_to_string_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% String class now implemented (BT-167)
+         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, '++')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'unknownMethod'))
+     end}.
 
 responds_to_other_primitives_test() ->
     %% Other primitives not implemented yet
