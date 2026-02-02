@@ -229,6 +229,60 @@ handle_info({client_request, Request, ClientPid}, State) ->
                     ClientPid ! {response, beamtalk_repl_server:format_actors(Actors)},
                     {noreply, State}
             end;
+        {list_modules} ->
+            Tracker = beamtalk_repl_state:get_module_tracker(State),
+            RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+            ModulesList = beamtalk_repl_modules:list_modules(Tracker),
+            %% Enrich each module with current actor count
+            ModulesWithInfo = lists:map(
+                fun({ModuleName, _Info}) ->
+                    ActorCount = beamtalk_repl_modules:get_actor_count(ModuleName, RegistryPid, Tracker),
+                    FormattedInfo = beamtalk_repl_modules:format_module_info(_Info, ActorCount),
+                    {ModuleName, FormattedInfo}
+                end,
+                ModulesList
+            ),
+            ClientPid ! {response, beamtalk_repl_server:format_modules(ModulesWithInfo)},
+            {noreply, State};
+        {unload_module, ModuleNameStr} ->
+            %% Convert module name string to atom
+            try list_to_existing_atom(ModuleNameStr) of
+                ModuleName ->
+                    Tracker = beamtalk_repl_state:get_module_tracker(State),
+                    case beamtalk_repl_modules:module_exists(ModuleName, Tracker) of
+                        false ->
+                            ClientPid ! {response, beamtalk_repl_server:format_error({module_not_found, ModuleNameStr})},
+                            {noreply, State};
+                        true ->
+                            %% Check if module has actors
+                            RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+                            ActorCount = beamtalk_repl_modules:get_actor_count(ModuleName, RegistryPid, Tracker),
+                            if
+                                ActorCount > 0 ->
+                                    %% Refuse to unload if actors exist
+                                    ClientPid ! {response, beamtalk_repl_server:format_error({actors_exist, ModuleName, ActorCount})},
+                                    {noreply, State};
+                                true ->
+                                    %% Safe to unload - no actors
+                                    %% Purge and delete module
+                                    code:purge(ModuleName),
+                                    code:delete(ModuleName),
+                                    %% Remove from tracker
+                                    NewTracker = beamtalk_repl_modules:remove_module(ModuleName, Tracker),
+                                    NewState1 = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+                                    %% Remove from loaded modules list
+                                    LoadedModules = beamtalk_repl_state:get_loaded_modules(NewState1),
+                                    NewLoadedModules = lists:delete(ModuleName, LoadedModules),
+                                    NewState2 = beamtalk_repl_state:set_loaded_modules(NewLoadedModules, NewState1),
+                                    ClientPid ! {response, beamtalk_repl_server:format_response(ok)},
+                                    {noreply, NewState2}
+                            end
+                    end
+            catch
+                error:badarg ->
+                    ClientPid ! {response, beamtalk_repl_server:format_error({invalid_module_name, ModuleNameStr})},
+                    {noreply, State}
+            end;
         {kill_actor, PidStr} ->
             case beamtalk_repl_state:get_actor_registry(State) of
                 undefined ->

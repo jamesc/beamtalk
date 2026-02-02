@@ -30,7 +30,7 @@
 
 %% Public API
 -export([start_link/0, register_actor/4, unregister_actor/2, 
-         list_actors/1, kill_actor/2, get_actor/2]).
+         list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -84,6 +84,12 @@ kill_actor(RegistryPid, ActorPid) ->
 -spec get_actor(pid(), pid()) -> {ok, actor_metadata()} | {error, not_found}.
 get_actor(RegistryPid, ActorPid) ->
     gen_server:call(RegistryPid, {get_actor, ActorPid}).
+
+%% @doc Count how many actors are using a specific module.
+%% Returns {ok, Count} where Count is the number of actors from that module.
+-spec count_actors_for_module(pid(), atom()) -> {ok, non_neg_integer()} | {error, term()}.
+count_actors_for_module(RegistryPid, ModuleName) ->
+    gen_server:call(RegistryPid, {count_for_module, ModuleName}).
 
 %%% gen_server callbacks
 
@@ -150,6 +156,20 @@ handle_call({get_actor, ActorPid}, _From, State) ->
         error ->
             {reply, {error, not_found}, State}
     end;
+
+handle_call({count_for_module, ModuleName}, _From, State) ->
+    #state{actors = Actors} = State,
+    Count = maps:fold(
+        fun(_Pid, #{module := Module}, Acc) ->
+            case Module of
+                ModuleName -> Acc + 1;
+                _ -> Acc
+            end
+        end,
+        0,
+        Actors
+    ),
+    {reply, {ok, Count}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
