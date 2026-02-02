@@ -155,6 +155,14 @@ log_gray "📂 Worktree path: $WORKTREE_PATH"
 # Stop devcontainer FIRST (before removing worktree to release file locks)
 remove_devcontainer "$WORKTREE_PATH"
 
+# Remove .env file if it exists
+ENV_PATH="$WORKTREE_PATH/.env"
+if [ -f "$ENV_PATH" ]; then
+    log_info "🗑️  Removing .env file..."
+    rm -f "$ENV_PATH"
+    log_success "✅ .env file removed"
+fi
+
 # Check if the .git file in the worktree needs fixing
 GIT_FILE="$WORKTREE_PATH/.git"
 if [ -f "$GIT_FILE" ]; then

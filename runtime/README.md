@@ -100,6 +100,56 @@ rebar3 shell
 ```
 
 
+## Configuration
+
+The Beamtalk runtime supports standard OTP application configuration for production deployments and development.
+
+### REPL Port Configuration
+
+The REPL backend TCP port can be configured via:
+
+**Priority order** (highest to lowest):
+1. CLI flag: `beamtalk repl --port 9001`
+2. Environment variable: `BEAMTALK_REPL_PORT`
+3. Application config: `application:get_env(beamtalk_runtime, repl_port, 9000)`
+4. Default: `9000`
+
+**Example sys.config for OTP releases:**
+```erlang
+[
+    {beamtalk_runtime, [
+        {repl_port, 9001}
+    ]}
+].
+```
+
+**Example environment variable (devcontainer):**
+```bash
+export BEAMTALK_REPL_PORT=9190
+```
+
+### Node Name Configuration
+
+For Erlang distribution, node names can be configured:
+
+**Priority order** (highest to lowest):
+1. CLI flag: `beamtalk repl --node beamtalk_dev@localhost`
+2. Environment variable: `BEAMTALK_NODE_NAME`
+3. Application config: `application:get_env(beamtalk_runtime, node_name, 'beamtalk@localhost')`
+4. Default: `beamtalk@localhost`
+
+### Parallel Worktrees
+
+When running multiple Beamtalk instances in parallel worktrees, each instance automatically gets a unique port and node name:
+
+- Worktree scripts create `.env` files with derived values
+- `BT-190` branch → port `9190`, node `beamtalk_bt190@localhost`
+- `BT-64` branch → port `9064`, node `beamtalk_bt64@localhost`
+- `main` branch → port `9000`, node `beamtalk@localhost`
+
+See [Parallel Development with Worktrees](../AGENTS.md#parallel-development-with-worktrees) for details.
+
+
 ## Integration with Beamtalk Compiler
 
 Once BT-13 (erlc integration) is complete, the Rust compiler will:

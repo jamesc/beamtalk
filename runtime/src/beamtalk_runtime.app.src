@@ -4,5 +4,9 @@
     {modules, []},
     {registered, [beamtalk_classes]},
     {applications, [kernel, stdlib]},
-    {mod, {beamtalk_runtime_app, []}}
+    {mod, {beamtalk_runtime_app, []}},
+    {env, [
+        {repl_port, 9000},
+        {node_name, 'beamtalk@localhost'}
+    ]}
 ]}.
