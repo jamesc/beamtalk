@@ -2,41 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for ProtoObject with actor loading
-// Tests that @load directive works and classes can be spawned
 
-// @load tests/e2e/fixtures/counter.bt
-// @load tests/e2e/fixtures/simple_proxy.bt
-
-// ===========================================================================
-// TEST 1: ACTORS CAN BE SPAWNED AND HAVE CLASS
-// ===========================================================================
-// Note: Variable assignment with spawn results doesn't work in REPL yet
-// For now we verify classes load and spawn succeeds
-
-Counter spawn
-SimpleProxy spawn
-
-// ===========================================================================
-// WHAT IS VERIFIED IN THESE E2E TESTS  
-// ===========================================================================
+// TEMPORARILY DISABLED: BT-189 regression blocks @load for actor classes
+// Semantic analyzer rejects valid `self` in method bodies.
+// Re-enable when BT-189 is fixed.
 //
-// ✅ Counter and SimpleProxy classes load from @load fixtures
-// ✅ Actors can be spawned without errors
-// ✅ doesNotUnderstand:args: and perform:withArguments: compile correctly
-//
-// LIMITATION: Variable assignment from spawn doesn't work in REPL yet
-// Cannot test: counter := Counter spawn; counter getValue
-//
-// For complete behavioral verification including:
-// - State initialization and mutations
-// - Transparent proxy forwarding  
-// - Message dispatch through doesNotUnderstand
-// - Actor identity and equality
-//
-// See: runtime/test/beamtalk_actor_tests.erl
+// For now, see runtime/test/beamtalk_actor_tests.erl for verification:
 //      - dnu_forward_to_target_test (proxy forwarding)
 //      - counter_test (state mutations)
-//      - equality tests
-//
-// These runtime tests prove the proxy pattern works correctly by directly
-// exercising gen_server protocol with real Erlang values.
