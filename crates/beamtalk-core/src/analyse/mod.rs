@@ -5,6 +5,7 @@
 //!
 //! This module performs semantic analysis on the AST, including:
 //! - Variable scope and lifetime analysis (via `scope` module)
+//! - Pattern variable binding in match expressions
 //! - Block context determination (control flow, stored, passed)
 //! - Capture analysis for blocks
 //! - Mutation tracking for captured variables in blocks
