@@ -297,7 +297,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for a super message send.
     ///
-    /// Super calls use `beamtalk_classes:super_dispatch/3` to invoke the superclass
+    /// Super calls use `beamtalk_class:super_dispatch/3` to invoke the superclass
     /// implementation. This is case #1 in the message dispatch strategy - super sends
     /// are handled before any other message type.
     ///
@@ -312,9 +312,9 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'increment', [])
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'getValue', [])
-    /// call 'beamtalk_classes':'super_dispatch'(State, 'at:put:', [1, Value])
+    /// call 'beamtalk_class':'super_dispatch'(State, 'increment', [])
+    /// call 'beamtalk_class':'super_dispatch'(State, 'getValue', [])
+    /// call 'beamtalk_class':'super_dispatch'(State, 'at:put:', [1, Value])
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
@@ -330,10 +330,10 @@ impl CoreErlangGenerator {
             }
         };
 
-        // Generate: call 'beamtalk_classes':'super_dispatch'(State, 'selector', [Args])
+        // Generate: call 'beamtalk_class':'super_dispatch'(State, 'selector', [Args])
         write!(
             self.output,
-            "call 'beamtalk_classes':'super_dispatch'({}, '{selector_atom}', [",
+            "call 'beamtalk_class':'super_dispatch'({}, '{selector_atom}', [",
             self.current_state_var()
         )?;
 

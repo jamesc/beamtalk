@@ -987,7 +987,7 @@ impl CoreErlangGenerator {
                     };
                     write!(
                         self.output,
-                        "let {super_result_var} = call 'beamtalk_classes':'super_dispatch'({current_state}, '{selector_atom}', ["
+                        "let {super_result_var} = call 'beamtalk_class':'super_dispatch'({current_state}, '{selector_atom}', ["
                     )?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
