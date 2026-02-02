@@ -1510,62 +1510,54 @@ chained_binary_operators_test() ->
 
 %% Setup helper for super tests
 setup_super_test_classes() ->
-    %% Start beamtalk_classes if not running
-    case whereis(beamtalk_classes) of
+    %% Ensure pg is started
+    case whereis(pg) of
+        undefined -> {ok, _} = pg:start_link();
+        _ -> ok
+    end,
+    
+    %% Start Counter class process if not already running
+    case beamtalk_class:whereis_class('Counter') of
         undefined ->
-            {ok, _Pid} = beamtalk_classes:start_link(),
-            %% Register Counter class (parent)
-            beamtalk_classes:register_class('Counter', #{
+            {ok, _CounterPid} = beamtalk_class:start_link('Counter', #{
+                name => 'Counter',
                 module => counter,
                 superclass => 'Actor',
-                methods => #{
+                instance_methods => #{
                     increment => #{arity => 0},
                     getValue => #{arity => 0},
                     decrement => #{arity => 0}
                 },
                 instance_variables => [value],
                 class_variables => #{},
+                method_source => #{},
                 source_file => "tests/fixtures/counter.bt"
             }),
-            %% Register LoggingCounter class (child)
-            beamtalk_classes:register_class('LoggingCounter', #{
+            ok;
+        _ExistingPid1 ->
+            ok
+    end,
+    
+    %% Start LoggingCounter class process if not already running
+    case beamtalk_class:whereis_class('LoggingCounter') of
+        undefined ->
+            {ok, _LoggingPid} = beamtalk_class:start_link('LoggingCounter', #{
+                name => 'LoggingCounter',
                 module => logging_counter,
                 superclass => 'Counter',
-                methods => #{
+                instance_methods => #{
                     increment => #{arity => 0},
                     getValue => #{arity => 0},
                     getLogCount => #{arity => 0}
                 },
                 instance_variables => [value, logCount],
                 class_variables => #{},
+                method_source => #{},
                 source_file => "tests/fixtures/logging_counter.bt"
-            });
-        _Pid ->
-            %% Already running, just register classes (idempotent)
-            beamtalk_classes:register_class('Counter', #{
-                module => counter,
-                superclass => 'Actor',
-                methods => #{
-                    increment => #{arity => 0},
-                    getValue => #{arity => 0},
-                    decrement => #{arity => 0}
-                },
-                instance_variables => [value],
-                class_variables => #{},
-                source_file => "tests/fixtures/counter.bt"
             }),
-            beamtalk_classes:register_class('LoggingCounter', #{
-                module => logging_counter,
-                superclass => 'Counter',
-                methods => #{
-                    increment => #{arity => 0},
-                    getValue => #{arity => 0},
-                    getLogCount => #{arity => 0}
-                },
-                instance_variables => [value, logCount],
-                class_variables => #{},
-                source_file => "tests/fixtures/logging_counter.bt"
-            })
+            ok;
+        _ExistingPid2 ->
+            ok
     end,
     ok.
 
