@@ -354,22 +354,15 @@ impl CoreErlangGenerator {
                     "let _ = call 'gen_server':'cast'({pid_var}, {{"
                 )?;
 
-                // Selector
-                write!(self.output, "'")?;
-                match selector {
-                    MessageSelector::Unary(name) => write!(self.output, "{name}")?,
-                    MessageSelector::Keyword(parts) => {
-                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
-                        write!(self.output, "{name}")?;
-                    }
-                    MessageSelector::Binary(_) => {
-                        return Err(CodeGenError::UnsupportedFeature {
-                            feature: "binary selectors in cascades".to_string(),
-                            location: "cascade message with binary selector".to_string(),
-                        });
-                    }
+                // Selector (using domain service)
+                let selector_atom = selector.to_erlang_atom();
+                if matches!(selector, MessageSelector::Binary(_)) {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "binary selectors in cascades".to_string(),
+                        location: "cascade message with binary selector".to_string(),
+                    });
                 }
-                write!(self.output, "', [")?;
+                write!(self.output, "'{selector_atom}', [")?;
 
                 // Arguments
                 for (j, arg) in arguments.iter().enumerate() {
@@ -423,22 +416,15 @@ impl CoreErlangGenerator {
                     "let _ = call 'gen_server':'cast'({pid_var}, {{"
                 )?;
 
-                // Selector
-                write!(self.output, "'")?;
-                match &message.selector {
-                    MessageSelector::Unary(name) => write!(self.output, "{name}")?,
-                    MessageSelector::Keyword(parts) => {
-                        let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
-                        write!(self.output, "{name}")?;
-                    }
-                    MessageSelector::Binary(_) => {
-                        return Err(CodeGenError::UnsupportedFeature {
-                            feature: "binary selectors in cascades".to_string(),
-                            location: "cascade message with binary selector".to_string(),
-                        });
-                    }
+                // Selector (using domain service)
+                let selector_atom = message.selector.to_erlang_atom();
+                if matches!(message.selector, MessageSelector::Binary(_)) {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: "binary selectors in cascades".to_string(),
+                        location: "cascade message with binary selector".to_string(),
+                    });
                 }
-                write!(self.output, "', [")?;
+                write!(self.output, "'{selector_atom}', [")?;
 
                 // Arguments
                 for (j, arg) in message.arguments.iter().enumerate() {
