@@ -254,6 +254,9 @@ impl Analyser {
     fn analyse_method(&mut self, method: &crate::ast::MethodDefinition) {
         self.scope.push(); // Enter method scope (depth 2)
 
+        // Define 'self' - implicitly available in all method bodies
+        self.scope.define("self", method.span);
+
         // Define method parameters
         for param in &method.parameters {
             self.scope.define(&param.name, param.span);
@@ -1458,6 +1461,64 @@ mod tests {
             result.diagnostics[0]
                 .message
                 .contains("Undefined variable: result")
+        );
+    }
+
+    #[test]
+    fn test_self_available_in_method_bodies() {
+        // Test that 'self' is implicitly available in method bodies
+        // Simple method that uses self:
+        //   getValue => self.value
+
+        use crate::ast::{
+            ClassDefinition, MessageSelector, MethodDefinition, MethodKind, StateDeclaration,
+        };
+
+        let get_value_method = MethodDefinition {
+            selector: MessageSelector::Unary("getValue".into()),
+            parameters: vec![],
+            body: vec![Expression::FieldAccess {
+                receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+                field: Identifier::new("value", test_span()),
+                span: test_span(),
+            }],
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            span: test_span(),
+        };
+
+        let state_decl = StateDeclaration {
+            name: Identifier::new("value", test_span()),
+            type_annotation: None,
+            default_value: Some(Expression::Literal(Literal::Integer(0), test_span())),
+            span: test_span(),
+        };
+
+        let class_def = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![state_decl],
+            methods: vec![get_value_method],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class_def],
+            expressions: vec![],
+            leading_comments: vec![],
+            span: test_span(),
+        };
+        let result = analyse(&module);
+
+        // Should have NO diagnostics - 'self' should be recognized
+        assert_eq!(
+            result.diagnostics.len(),
+            0,
+            "Expected no diagnostics, but got: {:?}",
+            result.diagnostics
         );
     }
 }
