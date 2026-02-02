@@ -108,8 +108,7 @@ send(#beamtalk_object{pid = Pid}, Selector, Args) ->
     gen_server:call(Pid, {Selector, Args});
 send(X, Selector, Args) when is_integer(X) ->
     %% Primitive: static dispatch to class module
-    %% TODO(BT-166): Implement beamtalk_integer module
-    error({not_implemented, {beamtalk_integer, dispatch, [Selector, Args, X]}});
+    beamtalk_integer:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_binary(X) ->
     %% TODO(BT-167): Implement beamtalk_string module
     error({not_implemented, {beamtalk_string, dispatch, [Selector, Args, X]}});
@@ -139,9 +138,8 @@ send(X, Selector, Args) ->
 responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
     %% Actor: check if module exports has_method/1
     erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
-responds_to(_X, _Selector) when is_integer(_X) ->
-    %% TODO(BT-166): Implement beamtalk_integer:has_method/1
-    false;
+responds_to(X, Selector) when is_integer(X) ->
+    beamtalk_integer:has_method(Selector);
 responds_to(_X, _Selector) when is_binary(_X) ->
     %% TODO(BT-167): Implement beamtalk_string:has_method/1
     false;

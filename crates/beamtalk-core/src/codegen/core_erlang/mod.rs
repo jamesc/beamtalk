@@ -88,9 +88,11 @@
 mod block_analysis;
 mod builtins;
 mod control_flow;
+pub mod erlang_types;
 mod expressions;
 mod gen_server;
 mod message_dispatch;
+pub mod selector_mangler;
 mod state_threading;
 mod util;
 mod variable_context;

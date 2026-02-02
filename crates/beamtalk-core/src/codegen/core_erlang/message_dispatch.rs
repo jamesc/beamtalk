@@ -193,22 +193,14 @@ impl CoreErlangGenerator {
             "let _ = call 'gen_server':'cast'({pid_var}, {{"
         )?;
 
-        // First element: the selector name as an atom
-        write!(self.output, "'")?;
-        match selector {
-            MessageSelector::Unary(name) => write!(self.output, "{name}")?,
-            MessageSelector::Keyword(parts) => {
-                let name = parts.iter().map(|p| p.keyword.as_str()).collect::<String>();
-                write!(self.output, "{name}")?;
-            }
-            // Binary selectors are handled above and should not reach here.
-            MessageSelector::Binary(op) => {
-                return Err(CodeGenError::Internal(format!(
-                    "unexpected binary selector in generate_message_send: {op}"
-                )));
-            }
+        // First element: the selector name as an atom (using domain service)
+        let selector_atom = selector.to_erlang_atom();
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return Err(CodeGenError::Internal(format!(
+                "unexpected binary selector in generate_message_send: {selector_atom}"
+            )));
         }
-        write!(self.output, "', [")?;
+        write!(self.output, "'{selector_atom}', [")?;
 
         // Second element: list of message arguments
         for (i, arg) in arguments.iter().enumerate() {
@@ -321,14 +313,8 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        // Build the selector atom
-        let selector_atom = match selector {
-            MessageSelector::Unary(name) => name.to_string(),
-            MessageSelector::Binary(op) => op.to_string(),
-            MessageSelector::Keyword(parts) => {
-                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-            }
-        };
+        // Use the domain service method for selector-to-atom conversion
+        let selector_atom = selector.to_erlang_atom();
 
         // Generate: call 'beamtalk_class':'super_dispatch'(State, 'selector', [Args])
         write!(
