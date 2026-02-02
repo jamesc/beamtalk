@@ -121,11 +121,7 @@ impl CoreErlangGenerator {
                 // Handle both ClassReference and Identifier (for backwards compat)
                 match receiver {
                     Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        // Generate: call 'module':'spawn'()
-                        // Convert class name to module name (CamelCase -> snake_case)
-                        let module_name = to_module_name(&name.name);
-                        write!(self.output, "call '{module_name}':'spawn'()")?;
-                        return Ok(());
+                        return self.generate_actor_spawn(&name.name, None);
                     }
                     _ => {}
                 }
@@ -144,12 +140,7 @@ impl CoreErlangGenerator {
                 // Handle both ClassReference and Identifier (for backwards compat)
                 match receiver {
                     Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        // Generate: call 'module':'spawn'(InitArgs)
-                        let module_name = to_module_name(&name.name);
-                        write!(self.output, "call '{module_name}':'spawn'(")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, ")")?;
-                        return Ok(());
+                        return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
                     }
                     _ => {}
                 }
@@ -346,6 +337,109 @@ impl CoreErlangGenerator {
         }
 
         write!(self.output, "])")?;
+        Ok(())
+    }
+
+    /// Generates code for actor spawn with conditional REPL registry integration.
+    ///
+    /// When spawning an actor in the REPL, check for `__repl_actor_registry__` in
+    /// bindings and use `beamtalk_actor:spawn_with_registry` to register it. In
+    /// non-REPL contexts (regular code, tests), fall back to normal `module:spawn`.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_name` - The Beamtalk class name (e.g., "Counter")
+    /// * `init_args` - Optional initialization arguments for spawnWith:
+    ///
+    /// # Generated Code (REPL context)
+    ///
+    /// ```erlang
+    /// case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of
+    ///   <'undefined'> when 'true' ->
+    ///     call 'counter':'spawn'()
+    ///   <RegistryPid> when 'true' ->
+    ///     call 'beamtalk_actor':'spawn_with_registry'(
+    ///       RegistryPid,
+    ///       'counter',
+    ///       [],
+    ///       'Counter'
+    ///     )
+    /// end
+    /// ```
+    ///
+    /// # Generated Code (non-REPL context)
+    ///
+    /// ```erlang
+    /// call 'counter':'spawn'()
+    /// ```
+    pub(super) fn generate_actor_spawn(
+        &mut self,
+        class_name: &str,
+        init_args: Option<&Expression>,
+    ) -> Result<()> {
+        let module_name = to_module_name(class_name);
+
+        // Check if we're in REPL context by looking for __bindings__ in scope
+        let in_repl_context = self.lookup_var("__bindings__").is_some();
+
+        if in_repl_context {
+            // REPL context - generate conditional code checking for actor registry
+            // Both branches must return the same #beamtalk_object{} record type
+            write!(
+                self.output,
+                "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of "
+            )?;
+
+            // Pattern 1: No registry (undefined) - call module:spawn() directly
+            write!(self.output, "<'undefined'> when 'true' -> ")?;
+            write!(self.output, "call '{module_name}':'spawn'(")?;
+            if let Some(args) = init_args {
+                self.generate_expression(args)?;
+            }
+            write!(self.output, ") ")?;
+
+            // Pattern 2: Registry present - call spawn_with_registry and wrap result
+            write!(self.output, "<RegistryPid> when 'true' -> ")?;
+            write!(
+                self.output,
+                "case call 'beamtalk_actor':'spawn_with_registry'(RegistryPid, '{module_name}', "
+            )?;
+
+            // Args - use empty list if no init args
+            if let Some(args) = init_args {
+                self.generate_expression(args)?;
+            } else {
+                write!(self.output, "[]")?;
+            }
+
+            // Class name for display
+            write!(self.output, ", '{class_name}') of ")?;
+
+            // Wrap the {ok, Pid} result in #beamtalk_object{} record
+            write!(self.output, "<{{'ok', Pid}}> when 'true' -> ")?;
+            write!(
+                self.output,
+                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}} "
+            )?;
+
+            // Handle error case
+            write!(self.output, "<{{'error', Reason}}> when 'true' -> ")?;
+            write!(
+                self.output,
+                "call 'erlang':'error'({{'spawn_failed', Reason}}) "
+            )?;
+
+            write!(self.output, "end ")?; // end inner case
+            write!(self.output, "end")?; // end outer case
+        } else {
+            // Non-REPL context (normal compilation) - direct module spawn call
+            write!(self.output, "call '{module_name}':'spawn'(")?;
+            if let Some(args) = init_args {
+                self.generate_expression(args)?;
+            }
+            write!(self.output, ")")?;
+        }
+
         Ok(())
     }
 }
