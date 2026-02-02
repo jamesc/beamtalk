@@ -287,9 +287,8 @@ Git worktrees enable **multiple Copilot agents working in parallel** on differen
 | `GIT_USER_NAME` | Git commit author name | Host environment or `.env` |
 | `GIT_USER_EMAIL` | Git commit author email | Host environment or `.env` |
 
-**Setting environment variables permanently:**
+**Setting environment variables permanently (Windows):**
 
-**Windows (PowerShell):**
 ```powershell
 # Required for worktrees
 setx BEAMTALK_MAIN_GIT_PATH "C:\Users\you\source\beamtalk\.git"
@@ -303,40 +302,16 @@ setx GIT_USER_EMAIL "you@example.com"
 # - Linear: Store in password manager, retrieve at runtime
 ```
 
-**Linux/Mac (bash):**
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-echo 'export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"' >> ~/.bashrc
-echo 'export GIT_USER_NAME="Your Name"' >> ~/.bashrc
-echo 'export GIT_USER_EMAIL="you@example.com"' >> ~/.bashrc
-source ~/.bashrc
-
-# For tokens, use secure methods:
-# - GitHub: Use `gh auth login` (recommended)
-# - Linear: Store in password manager or use `pass`/`1password` CLI
-# Avoid storing long-lived tokens in plaintext shell profiles
-```
+> **Note:** Linux/Mac instructions will be added once the scripts are tested.
 
 #### Creating a Worktree
 
-**Windows (PowerShell):**
 ```powershell
 # From main repo directory
 .\scripts\worktree-new.ps1 BT-99-feature
 
 # Create new branch from main
 .\scripts\worktree-new.ps1 -Branch BT-99 -BaseBranch main
-```
-
-**Linux/Mac:**
-
-> **Note:** Linux/Mac scripts are planned but not yet implemented. You can use the standard `git worktree` commands directly:
-
-```bash
-# Create worktree manually
-git worktree add ../BT-99-feature BT-99-feature
-cd ../BT-99-feature
-code .
 ```
 
 **What happens:**
@@ -354,22 +329,11 @@ code .
 
 #### Removing a Worktree
 
-**Windows (PowerShell):**
 ```powershell
 .\scripts\worktree-rm.ps1 BT-99-feature
 
 # Force remove (discard uncommitted changes)
 .\scripts\worktree-rm.ps1 -Branch BT-99 -Force
-```
-
-**Linux/Mac:**
-
-> **Note:** Linux/Mac scripts are planned but not yet implemented. Use standard `git worktree` commands:
-
-```bash
-# Remove worktree manually
-cd ~/source/beamtalk  # Return to main repo
-git worktree remove ../BT-99-feature
 ```
 
 **What happens:**
@@ -383,23 +347,10 @@ git worktree remove ../BT-99-feature
 
 If you deleted worktree directories manually, clean up leftover containers:
 
-**Windows:**
 ```powershell
 .\scripts\cleanup-orphaned-containers.ps1        # Interactive
 .\scripts\cleanup-orphaned-containers.ps1 -DryRun # Preview only
 .\scripts\cleanup-orphaned-containers.ps1 -NoConfirm # Auto-confirm
-```
-
-**Linux/Mac:**
-
-> **Note:** Automated cleanup script for Linux/Mac is not yet implemented. Remove containers manually:
-
-```bash
-# List containers
-docker ps -a --filter "name=beamtalk"
-
-# Remove specific container
-docker rm -f <container-id>
 ```
 
 See [scripts/README.md](scripts/README.md) for detailed documentation.
