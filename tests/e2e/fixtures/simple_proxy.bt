@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SimpleProxy - Demonstrates ProtoObject subclass with doesNotUnderstand
+// This is a minimal test fixture for ProtoObject functionality
+
+Actor subclass: SimpleProxy
+  state: target = nil
+  
+  // Override class to return our class name
+  class => 'SimpleProxy'
+  
+  // Set the target for message forwarding
+  setTarget: newTarget =>
+    self.target := newTarget
+  
+  // Forward all unknown messages to target using perform:withArguments:
+  doesNotUnderstand: selector args: arguments =>
+    self.target perform: selector withArguments: arguments

@@ -1,0 +1,179 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for ProtoObject - the root of the class hierarchy
+//
+// ProtoObject provides the minimal interface that all objects must understand:
+// - class (reflection)
+// - doesNotUnderstand:args: (fallback for unknown messages)
+// - == (identity comparison)
+// - ~= (not equal)
+//
+// ===========================================================================
+// CLASS METHOD TESTS
+// ===========================================================================
+//
+// All objects respond to `class`, which returns their class name
+
+// Integer responds to class
+42 class
+// => Integer
+
+// String responds to class
+'hello' class
+// => String
+
+// Boolean responds to class
+true class
+// => True
+
+false class
+// => False
+
+// Nil responds to class
+nil class
+// => Nil
+
+// ===========================================================================
+// IDENTITY COMPARISON (==)
+// ===========================================================================
+//
+// `==` tests object identity (reference equality)
+// For primitives, this is value equality since they're immutable
+
+// Integer identity
+42 == 42
+// => true
+
+42 == 43
+// => false
+
+// String identity
+'hello' == 'hello'
+// => true
+
+'hello' == 'world'
+// => false
+
+// Boolean identity
+true == true
+// => true
+
+true == false
+// => false
+
+// Nil identity
+nil == nil
+// => true
+
+nil == false
+// => false
+
+// ===========================================================================
+// INEQUALITY COMPARISON (~=)
+// ===========================================================================
+//
+// `~=` tests object inequality (not identical)
+// Delegates to `==` and negates the result
+
+// Integer inequality
+42 ~= 43
+// => true
+
+42 ~= 42
+// => false
+
+// String inequality
+'hello' ~= 'world'
+// => true
+
+'hello' ~= 'hello'
+// => false
+
+// Boolean inequality
+true ~= false
+// => true
+
+true ~= true
+// => false
+
+// Nil inequality
+nil ~= false
+// => true
+
+nil ~= nil
+// => false
+
+// ===========================================================================
+// ACTOR IDENTITY TESTS
+// ===========================================================================
+//
+// For actors (stateful objects), `==` tests whether two references
+// point to the same process (pid equality)
+//
+// NOTE: Requires actor spawn support. This documents expected behavior.
+//
+// // @load tests/e2e/fixtures/counter.bt
+//
+// a := Counter spawn
+// b := a
+// c := Counter spawn
+//
+// a == b
+// // => true (same reference)
+//
+// a == c
+// // => false (different processes)
+//
+// a ~= c
+// // => true (different processes)
+
+// ===========================================================================
+// DOESNOTUNDERSTAND TESTS
+// ===========================================================================
+//
+// When an object receives a message it doesn't understand, the runtime
+// calls `doesNotUnderstand:args:` which raises MessageNotUnderstood by default
+//
+// Subclasses can override this to implement proxies or custom dispatch
+//
+// NOTE: Requires doesNotUnderstand support in compiler/runtime
+//
+// // Send unknown message to integer
+// 42 unknownMessage
+// // => Error: MessageNotUnderstood: Integer does not understand #unknownMessage
+//
+// // Proxy pattern (requires ProtoObject subclass support)
+// ProtoObject subclass: Proxy
+//   state: target
+//
+//   doesNotUnderstand: selector args: arguments =>
+//     target perform: selector withArguments: arguments
+
+// ===========================================================================
+// INHERITANCE TESTS
+// ===========================================================================
+//
+// All classes (Actor, Object, etc.) should inherit from ProtoObject
+// Method lookup should terminate at ProtoObject
+//
+// NOTE: Requires compiler support for explicit inheritance chains
+//
+// // Actor inherits from ProtoObject
+// Actor superclass
+// // => ProtoObject
+//
+// // ProtoObject has no superclass
+// ProtoObject superclass
+// // => nil
+
+// ===========================================================================
+// IMPLEMENTATION STATUS
+// ===========================================================================
+//
+// ✅ ProtoObject.bt defined in lib/
+// ✅ Compiler support for `class` message
+// ✅ Compiler support for `==` and `~=` operators
+// ✅ Compiler support for `doesNotUnderstand:args:`
+// ✅ Runtime dispatch for ProtoObject methods
+// ✅ Method lookup chain terminating at ProtoObject

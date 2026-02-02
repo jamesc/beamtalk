@@ -5,13 +5,14 @@
 //!
 //! This module performs semantic analysis on the AST, including:
 //! - Variable scope and lifetime analysis (via `scope` module)
+//! - Pattern variable binding in match expressions
 //! - Block context determination (control flow, stored, passed)
 //! - Capture analysis for blocks
 //! - Mutation tracking for captured variables in blocks
 //!
 //! The analysis produces diagnostics and metadata used by the code generator.
 
-use crate::ast::{Expression, Module};
+use crate::ast::{Expression, Identifier, MatchArm, Module, Pattern};
 use crate::parse::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -114,10 +115,83 @@ pub enum MutationKind {
     Field { name: EcoString },
 }
 
+/// Extract variable bindings from a pattern.
+///
+/// Recursively traverses the pattern and collects all variable identifiers
+/// that will be bound when the pattern matches.
+///
+/// # Examples
+///
+/// ```
+/// # use beamtalk_core::analyse::extract_pattern_bindings;
+/// # use beamtalk_core::ast::{Pattern, Identifier};
+/// # use beamtalk_core::parse::Span;
+/// # use ecow::EcoString;
+/// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
+/// let bindings = extract_pattern_bindings(&pattern);
+/// assert_eq!(bindings.len(), 1);
+/// assert_eq!(bindings[0].name, EcoString::from("x"));
+/// ```
+pub fn extract_pattern_bindings(pattern: &Pattern) -> Vec<Identifier> {
+    let mut bindings = Vec::new();
+    extract_pattern_bindings_impl(pattern, &mut bindings);
+    bindings
+}
+
+/// Internal implementation of pattern binding extraction.
+///
+/// # Note
+///
+/// This function collects all variable bindings without duplicate detection.
+/// Duplicate variables like `{X, X}` will bind `X` twice, with the second
+/// overwriting the first span in the scope. Erlang allows this as an equality
+/// constraint, but validation is not yet implemented.
+///
+/// TODO(BT-183): Add duplicate pattern variable detection and validation.
+/// Either emit diagnostic for duplicates or implement Erlang-style equality checks.
+fn extract_pattern_bindings_impl(pattern: &Pattern, bindings: &mut Vec<Identifier>) {
+    match pattern {
+        // Variable patterns bind the identifier
+        Pattern::Variable(id) => {
+            bindings.push(id.clone());
+        }
+
+        // Tuple patterns: recursively extract from all elements
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                extract_pattern_bindings_impl(element, bindings);
+            }
+        }
+
+        // List patterns: recursively extract from elements and tail
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                extract_pattern_bindings_impl(element, bindings);
+            }
+            if let Some(tail_pattern) = tail {
+                extract_pattern_bindings_impl(tail_pattern, bindings);
+            }
+        }
+
+        // Binary patterns: extract from segment value patterns
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                // Binary segments may have value patterns that bind variables
+                extract_pattern_bindings_impl(&segment.value, bindings);
+            }
+        }
+
+        // Wildcards and literals don't bind variables
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+    }
+}
+
 /// Perform semantic analysis on a module.
 ///
 /// This is the main entry point for semantic analysis. It analyzes the module
 /// AST and returns diagnostics and metadata for code generation.
+///
+/// Currently focuses on pattern variable binding in match expressions.
 ///
 /// # Examples
 ///
@@ -199,8 +273,13 @@ impl Analyser {
 
         match expr {
             Identifier(id) => {
-                // Track variable reference
-                let _ = self.scope.lookup(&id.name);
+                // Check if variable is defined in scope
+                if self.scope.lookup(&id.name).is_none() {
+                    self.result.diagnostics.push(Diagnostic::error(
+                        format!("Undefined variable: {}", id.name),
+                        id.span,
+                    ));
+                }
             }
 
             Assignment { target, value, .. } => {
@@ -291,11 +370,7 @@ impl Analyser {
             Match { value, arms, .. } => {
                 self.analyse_expression(value, None);
                 for arm in arms {
-                    // Analyze guard if present
-                    if let Some(guard) = &arm.guard {
-                        self.analyse_expression(guard, None);
-                    }
-                    self.analyse_expression(&arm.body, None);
+                    self.analyse_match_arm(arm);
                 }
             }
 
@@ -348,6 +423,28 @@ impl Analyser {
         self.result.block_info.insert(block.span, block_info);
 
         self.scope.pop(); // Exit block scope
+    }
+
+    fn analyse_match_arm(&mut self, arm: &MatchArm) {
+        // Create a new scope for this match arm
+        self.scope.push();
+
+        // Extract and define all pattern variables
+        let bindings = extract_pattern_bindings(&arm.pattern);
+        for binding in bindings {
+            self.scope.define(&binding.name, binding.span);
+        }
+
+        // Analyze guard expression (if present) - can see pattern variables
+        if let Some(guard) = &arm.guard {
+            self.analyse_expression(guard, None);
+        }
+
+        // Analyze body expression - can see pattern variables
+        self.analyse_expression(&arm.body, None);
+
+        // Exit match arm scope
+        self.scope.pop();
     }
 
     #[allow(clippy::too_many_lines)] // recursive traversal function
@@ -523,11 +620,169 @@ enum ExprContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Block, BlockParameter, Expression, Identifier, MessageSelector};
+    use crate::ast::{
+        BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector,
+    };
     use crate::parse::Span;
 
     fn test_span() -> Span {
         Span::new(0, 0)
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_variable() {
+        let pattern = Pattern::Variable(Identifier::new("x", test_span()));
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].name, "x");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_wildcard() {
+        let pattern = Pattern::Wildcard(test_span());
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_literal() {
+        let pattern = Pattern::Literal(Literal::Integer(42), test_span());
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_tuple() {
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Pattern::Variable(Identifier::new("y", test_span())),
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "x");
+        assert_eq!(bindings[1].name, "y");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_nested_tuple() {
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(Identifier::new("status", test_span())),
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Variable(Identifier::new("x", test_span())),
+                        Pattern::Variable(Identifier::new("y", test_span())),
+                    ],
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].name, "status");
+        assert_eq!(bindings[1].name, "x");
+        assert_eq!(bindings[2].name, "y");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_list() {
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("head", test_span())),
+                Pattern::Variable(Identifier::new("second", test_span())),
+            ],
+            tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                "tail",
+                test_span(),
+            )))),
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0].name, "head");
+        assert_eq!(bindings[1].name, "second");
+        assert_eq!(bindings[2].name, "tail");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_list_no_tail() {
+        let pattern = Pattern::List {
+            elements: vec![
+                Pattern::Variable(Identifier::new("a", test_span())),
+                Pattern::Variable(Identifier::new("b", test_span())),
+            ],
+            tail: None,
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "a");
+        assert_eq!(bindings[1].name, "b");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_binary() {
+        let pattern = Pattern::Binary {
+            segments: vec![
+                BinarySegment {
+                    value: Pattern::Variable(Identifier::new("version", test_span())),
+                    size: None,
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: test_span(),
+                },
+                BinarySegment {
+                    value: Pattern::Variable(Identifier::new("data", test_span())),
+                    size: None,
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: test_span(),
+                },
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "version");
+        assert_eq!(bindings[1].name, "data");
+    }
+
+    #[test]
+    fn test_extract_pattern_bindings_mixed() {
+        // Pattern like: {#ok, [first | _], value}
+        let pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                Pattern::List {
+                    elements: vec![Pattern::Variable(Identifier::new("first", test_span()))],
+                    tail: Some(Box::new(Pattern::Wildcard(test_span()))),
+                    span: test_span(),
+                },
+                Pattern::Variable(Identifier::new("value", test_span())),
+            ],
+            span: test_span(),
+        };
+        let bindings = extract_pattern_bindings(&pattern);
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].name, "first");
+        assert_eq!(bindings[1].name, "value");
     }
 
     #[test]
@@ -862,5 +1117,347 @@ mod tests {
         let block_span = Span::new(20, 33);
         let block_info = result.block_info.get(&block_span).unwrap();
         assert_eq!(block_info.context, BlockContext::Passed);
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_simple_pattern() {
+        // Test that pattern variables are accessible in the body
+        // value match: [x -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'value' only, not 'x'
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: value")
+        );
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_guard() {
+        // Test that pattern variables are accessible in guards
+        // value match: [x when x > 0 -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::with_guard(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())), // guard uses x
+                Expression::Identifier(Identifier::new("x", test_span())), // body uses x
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'value' only, not 'x' (used in guard and body)
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: value")
+        );
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_tuple_pattern() {
+        // Test nested patterns: {#ok, value} -> value
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "result",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::new(
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                        Pattern::Variable(Identifier::new("value", test_span())),
+                    ],
+                    span: test_span(),
+                },
+                Expression::Identifier(Identifier::new("value", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'result' only, not 'value' (pattern-bound)
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: result")
+        );
+    }
+
+    #[test]
+    fn test_match_arm_analysis_multiple_arms() {
+        // Test multiple arms with different patterns
+        // result match: [
+        //   {#ok, value} -> value;
+        //   {#error, msg} -> msg
+        // ]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "result",
+                test_span(),
+            ))),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                            Pattern::Variable(Identifier::new("value", test_span())),
+                        ],
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("value", test_span())),
+                    test_span(),
+                ),
+                MatchArm::new(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Literal(Literal::Symbol("error".into()), test_span()),
+                            Pattern::Variable(Identifier::new("msg", test_span())),
+                        ],
+                        span: test_span(),
+                    },
+                    Expression::Identifier(Identifier::new("msg", test_span())),
+                    test_span(),
+                ),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'result' only, not 'value' or 'msg' (pattern-bound)
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: result")
+        );
+    }
+
+    #[test]
+    fn test_match_arm_analysis_with_list_pattern() {
+        // Test list patterns: [head | tail] -> head
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new("list", test_span()))),
+            arms: vec![MatchArm::new(
+                Pattern::List {
+                    elements: vec![Pattern::Variable(Identifier::new("head", test_span()))],
+                    tail: Some(Box::new(Pattern::Variable(Identifier::new(
+                        "tail",
+                        test_span(),
+                    )))),
+                    span: test_span(),
+                },
+                Expression::Identifier(Identifier::new("head", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'list' only, not 'head' or 'tail' (pattern-bound)
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: list")
+        );
+    }
+
+    #[test]
+    fn test_match_arm_scope_isolation() {
+        // Test that variables from one arm don't leak to another
+        // This test verifies that each arm gets its own scope
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("x", test_span())),
+                    Expression::Identifier(Identifier::new("x", test_span())),
+                    test_span(),
+                ),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", test_span())),
+                    Expression::Identifier(Identifier::new("y", test_span())),
+                    test_span(),
+                ),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for 'value' only, not 'x' or 'y' (pattern-bound in separate arms)
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: value")
+        );
+    }
+
+    #[test]
+    fn test_undefined_variable_in_match_arm_body() {
+        // Test that undefined variables produce diagnostics
+        // value match: [x -> undefined_var]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("undefined_var", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have 2 diagnostics: value and undefined_var
+        assert_eq!(result.diagnostics.len(), 2);
+        assert!(
+            result.diagnostics[1]
+                .message
+                .contains("Undefined variable: undefined_var")
+        );
+    }
+
+    #[test]
+    fn test_undefined_variable_in_guard() {
+        // Test that undefined variables in guards produce diagnostics
+        // value match: [x when undefined_var -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::with_guard(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("undefined_var", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should have diagnostic for undefined_var in guard
+        assert_eq!(result.diagnostics.len(), 2); // value and undefined_var
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: undefined_var"))
+        );
+    }
+
+    #[test]
+    fn test_pattern_bound_variable_no_error() {
+        // Test that pattern-bound variables do NOT produce diagnostics
+        // value match: [x -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "value",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::new(
+                Pattern::Variable(Identifier::new("x", test_span())),
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should only have diagnostic for 'value', not 'x'
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: value")
+        );
+    }
+
+    #[test]
+    fn test_nested_pattern_variables_accessible() {
+        // Test nested tuple pattern variables are accessible
+        // result match: [{#ok, {x, y}} -> x]
+        let match_expr = Expression::Match {
+            value: Box::new(Expression::Identifier(Identifier::new(
+                "result",
+                test_span(),
+            ))),
+            arms: vec![MatchArm::new(
+                Pattern::Tuple {
+                    elements: vec![
+                        Pattern::Literal(Literal::Symbol("ok".into()), test_span()),
+                        Pattern::Tuple {
+                            elements: vec![
+                                Pattern::Variable(Identifier::new("x", test_span())),
+                                Pattern::Variable(Identifier::new("y", test_span())),
+                            ],
+                            span: test_span(),
+                        },
+                    ],
+                    span: test_span(),
+                },
+                Expression::Identifier(Identifier::new("x", test_span())),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![match_expr], test_span());
+        let result = analyse(&module);
+
+        // Should only error on 'result', not 'x' or 'y'
+        assert_eq!(result.diagnostics.len(), 1);
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("Undefined variable: result")
+        );
     }
 }
