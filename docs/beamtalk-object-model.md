@@ -38,11 +38,120 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 | Global reference scan | ❌ None | Manual tracking via ETS |
 | Continuations | ❌ None | Not available on BEAM |
 
-**Trade-off:** We gain massive concurrency, distribution, and fault tolerance. We lose some metaprogramming requiring global heap access and runtime stack manipulation.
-
----
-
-## Part 1: What Works Naturally
+|**Trade-off:** We gain massive concurrency, distribution, and fault tolerance. We lose some metaprogramming requiring global heap access and runtime stack manipulation.
+|
+|---
+|
+|## The Class Hierarchy: ProtoObject, Object, and Actor
+|
+|Following Smalltalk tradition, Beamtalk has a three-level class hierarchy rather than starting with Actor as the root. This design choice provides clarity, flexibility, and developer ergonomics.
+|
+|### Traditional Smalltalk Hierarchy
+|
+|<cite index="2-4,2-5,2-6">In Smalltalk, the root of the inheritance hierarchy is traditionally the class Object. In modern Smalltalk (e.g., Pharo), ProtoObject is the true root, but you will normally not pay attention to this class. ProtoObject encapsulates the minimal set of messages that all objects must have.</cite>
+|
+|The actual hierarchy is:
+|
+|```
+|ProtoObject (true root, minimal behavior)
+|  └─ Object (common messages, reflection, nil testing)
+|       └─ (user-defined classes...)
+|```
+|
+|### Beamtalk's Adaptation
+|
+|Beamtalk follows this same pattern, with **Actor** inserted as the practical root for concurrent process-based objects:
+|
+|```
+|ProtoObject (true root, minimal behavior)
+|  └─ Object (reflection, nil testing, describes)
+|       └─ Actor (async-first process-based objects, spawn, supervision)
+|            └─ (user-defined actors: Counter, Worker, etc.)
+|```
+|
+|**Key points:**
+|
+|1. **ProtoObject** — The absolute root, defined in the standard library. Provides only the most essential messages that every object must understand. Rarely used directly by application code.
+|   - `class` — Returns the object's class (fundamental for reflection)
+|   - `doesNotUnderstand:args:` — Fallback for unknown messages
+|   - `==` / `~=` — Object identity and equality
+|
+|2. **Object** — The practical root for most classes. <cite index="2-7,2-8">Most classes inherit from Object, which defines many additional messages that almost all objects ought to understand and respond to. Unless you have a very good reason to do otherwise, when creating application classes you should normally subclass Object, or one of its subclasses.</cite>
+|   - Reflection: `class`, `respondsTo:`, `instVarNames`, `instVarAt:`
+|   - Nil testing: `isNil`, `notNil`, `ifNil:ifNotNil:`
+|   - Debugging: `inspect`, `describe`
+|   - Introspection: `allInstances`, `instanceCount`
+|
+|3. **Actor** — The root for all concurrent, process-based objects in Beamtalk. Inherits from Object and adds:
+|   - `spawn` — Create a new instance (compiler primitive)
+|   - `spawnWith:` — Create with initialization arguments
+|   - Supervision: `start_link`, restart strategies
+|   - Async messaging: All message sends return futures
+|
+|### When to Use Each
+|
+|**Inherit from Object** when:
+|- You're defining a non-concurrent utility class (rare in Beamtalk)
+|- You want minimal BEAM runtime overhead (e.g., a stateless helper)
+|
+|**Inherit from Actor** when:
+|- You're defining an agent or service (99% of application code)
+|- You need state, supervision, or message-based interaction
+|- You want async-first semantics
+|
+|**Inherit from ProtoObject** when:
+|- You need absolute minimal behavior (extremely rare)
+|- You're implementing a special meta-object (framework code only)
+|
+|### Why Not Just "Everything is an Actor"?
+|
+|A common question: why not make Actor the root and skip Object and ProtoObject?
+|
+|**Reasons for the three-level hierarchy:**
+|
+|1. **Conceptual clarity** — Distinguishes between reified objects (Object) and concurrent agents (Actor). Makes the model easier to explain and reason about.
+|
+|2. **Room for growth** — If Beamtalk later supports non-concurrent object types (e.g., immutable value objects), they can inherit from Object directly without conflating them with actors.
+|
+|3. **Standard terminology** — Developers familiar with Smalltalk immediately understand the hierarchy. "Object" is what you subclass for non-concurrent things; "Actor" is what you subclass for concurrent agents.
+|
+|4. **Framework extensibility** — Libraries can define abstract classes that inherit from Object but not Actor, useful for data structures and utilities that might be shared across processes.
+|
+|5. **Metaclass alignment** — <cite index="1-10,1-16">In Smalltalk, every class eventually inherits from Object, and every metaclass inherits from Class and Behavior.</cite> Beamtalk follows the same metaclass hierarchy, with proper parallel inheritance chains.
+|
+|### Metaclass Hierarchy
+|
+|Just as in Smalltalk, Beamtalk's metaclass hierarchy mirrors the class hierarchy:
+|
+|```
+|Instance Side:          Metaclass Side:
+|ProtoObject      <---  ProtoObject class
+|  └─ Object     <---    └─ Object class  
+|      └─ Actor <---        └─ Actor class
+|```
+|
+|When you define a class, a metaclass is automatically created. For example:
+|
+|```beamtalk
+Actor subclass: Counter
+  state: value = 0
+  
+  // Instance methods
+  increment => self.value += 1
+  
+  // Class methods (defined on the metaclass automatically)
+  class >> create: initialValue => ^self spawnWith: #{value => initialValue}
+```
+|
+|The compiler generates both:
+|- `beamtalk_counter` — Instance behavior (handles messages to instances)
+|- `beamtalk_counter_class` — Class behavior (handles messages to the Counter class itself)
+|
+|See [Part 1.2](#12-classes-as-objects) for implementation details.
+|
+|---
+|
+|## Part 1: What Works Naturally
 
 These Smalltalk features map cleanly to BEAM with no semantic compromise.
 
