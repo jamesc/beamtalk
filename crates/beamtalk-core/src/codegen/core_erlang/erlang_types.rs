@@ -59,6 +59,8 @@
 
 use std::fmt;
 
+use super::util::to_module_name;
+
 /// A Core Erlang atom value object.
 ///
 /// Atoms are symbolic constants in Erlang. In Core Erlang, they are always
@@ -271,7 +273,7 @@ impl ModuleName {
     /// - `"HttpRouter"` → `"beamtalk_http_router"`
     #[must_use]
     pub fn instance(class_name: &str) -> Self {
-        let snake = camel_to_snake(class_name);
+        let snake = to_module_name(class_name);
         Self {
             name: format!("beamtalk_{snake}"),
         }
@@ -285,7 +287,7 @@ impl ModuleName {
     /// - `"HttpRouter"` → `"beamtalk_http_router_class"`
     #[must_use]
     pub fn class(class_name: &str) -> Self {
-        let snake = camel_to_snake(class_name);
+        let snake = to_module_name(class_name);
         Self {
             name: format!("beamtalk_{snake}_class"),
         }
@@ -320,31 +322,6 @@ impl fmt::Display for ModuleName {
         // Module names are atoms in Core Erlang
         write!(f, "'{}'", self.name)
     }
-}
-
-/// Converts `CamelCase` to `snake_case`.
-///
-/// - `"Counter"` → `"counter"`
-/// - `"HttpRouter"` → `"http_router"`
-/// - `"HTTPRouter"` → `"httprouter"` (acronyms stay together)
-fn camel_to_snake(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_was_lowercase = false;
-
-    for ch in s.chars() {
-        if ch.is_uppercase() {
-            if prev_was_lowercase {
-                result.push('_');
-            }
-            result.extend(ch.to_lowercase());
-            prev_was_lowercase = false;
-        } else {
-            result.push(ch);
-            prev_was_lowercase = ch.is_lowercase();
-        }
-    }
-
-    result
 }
 
 #[cfg(test)]
@@ -522,25 +499,5 @@ mod tests {
         let c = ModuleName::class("Counter");
         assert_eq!(a, b);
         assert_ne!(a, c);
-    }
-
-    #[test]
-    fn camel_to_snake_simple() {
-        assert_eq!(camel_to_snake("Counter"), "counter");
-        assert_eq!(camel_to_snake("HttpRouter"), "http_router");
-        assert_eq!(camel_to_snake("MyCounterActor"), "my_counter_actor");
-    }
-
-    #[test]
-    fn camel_to_snake_acronym() {
-        // Acronyms don't get underscores within them
-        assert_eq!(camel_to_snake("HTTPRouter"), "httprouter");
-        assert_eq!(camel_to_snake("XMLParser"), "xmlparser");
-    }
-
-    #[test]
-    fn camel_to_snake_single_word() {
-        assert_eq!(camel_to_snake("actor"), "actor");
-        assert_eq!(camel_to_snake("Actor"), "actor");
     }
 }
