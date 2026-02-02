@@ -46,10 +46,10 @@ module 'comment_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
         <{Selector, Args, FuturePid}> when 'true' ->
             case call 'comment_handling':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolved', Result})
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
                     in {'noreply', NewState}
                 <{'error', Error, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'rejected', Error})
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
                     in {'noreply', NewState}
             end
     end
