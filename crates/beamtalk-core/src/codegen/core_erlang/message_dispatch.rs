@@ -37,7 +37,7 @@
 //! - **Arguments**: Parameters for keyword messages
 //! - **Future**: Asynchronous result container
 
-use super::{CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
@@ -123,7 +123,7 @@ impl CoreErlangGenerator {
                     Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
                         // Generate: call 'module':'spawn'()
                         // Convert class name to module name (CamelCase -> snake_case)
-                        let module_name = Self::to_module_name(&name.name);
+                        let module_name = to_module_name(&name.name);
                         write!(self.output, "call '{module_name}':'spawn'()")?;
                         return Ok(());
                     }
@@ -145,7 +145,7 @@ impl CoreErlangGenerator {
                 match receiver {
                     Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
                         // Generate: call 'module':'spawn'(InitArgs)
-                        let module_name = Self::to_module_name(&name.name);
+                        let module_name = to_module_name(&name.name);
                         write!(self.output, "call '{module_name}':'spawn'(")?;
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, ")")?;

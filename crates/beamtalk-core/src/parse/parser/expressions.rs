@@ -479,7 +479,11 @@ impl Parser {
         let mut expr = if name.as_str() == "super" {
             Expression::Super(span)
         } else {
-            // Distinguish class references (uppercase) from regular identifiers
+            // Distinguish class references (uppercase) from regular identifiers.
+            // Uses Unicode-aware `char::is_uppercase()` to support international class names
+            // like `Über`, `Ñandú`, etc., following Rust's Unicode support philosophy.
+            // Class names: uppercase first letter (Counter, MyClass, Über)
+            // Variables: lowercase first letter (counter, myVar, über)
             let first_char = name.chars().next();
             if first_char.is_some_and(char::is_uppercase) {
                 // Class reference (e.g., Counter, Array, MyClass)

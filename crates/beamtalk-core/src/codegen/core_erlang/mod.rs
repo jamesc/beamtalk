@@ -95,6 +95,9 @@ mod state_threading;
 mod util;
 mod variable_context;
 
+// Re-export utility functions for IDE queries
+pub use util::to_module_name;
+
 use crate::ast::{Block, Expression, MessageSelector, Module};
 use state_threading::StateThreading;
 use std::fmt::{self, Write};
@@ -966,25 +969,16 @@ mod tests {
     #[test]
     fn test_class_name_to_module_name() {
         // Single word
-        assert_eq!(CoreErlangGenerator::to_module_name("Counter"), "counter");
+        assert_eq!(util::to_module_name("Counter"), "counter");
 
         // Multi-word CamelCase
-        assert_eq!(
-            CoreErlangGenerator::to_module_name("MyCounterActor"),
-            "my_counter_actor"
-        );
+        assert_eq!(util::to_module_name("MyCounterActor"), "my_counter_actor");
 
         // With acronyms
-        assert_eq!(
-            CoreErlangGenerator::to_module_name("HTTPRouter"),
-            "httprouter"
-        );
+        assert_eq!(util::to_module_name("HTTPRouter"), "httprouter");
 
         // Mixed case
-        assert_eq!(
-            CoreErlangGenerator::to_module_name("HTTPSConnection"),
-            "httpsconnection"
-        );
+        assert_eq!(util::to_module_name("HTTPSConnection"), "httpsconnection");
     }
 
     #[test]
