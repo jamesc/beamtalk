@@ -273,6 +273,9 @@ pub fn is_control_flow_construct(
                 // to:do: and inject:into: - literal block as second arg
                 "to:do:" | "inject:into:" => arguments.get(1).is_some_and(is_literal_block),
 
+                // to:by:do: - literal block as third arg
+                "to:by:do:" => arguments.get(2).is_some_and(is_literal_block),
+
                 // Collection iteration: do:, collect:, select:, reject: - literal block as first arg
                 "do:" | "collect:" | "select:" | "reject:" => {
                     arguments.first().is_some_and(is_literal_block)

@@ -35,6 +35,8 @@ module 'stdlib_integer' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call
         , 'intDiv' => 17
         , 'counter' => 0
         , 'sum' => 0
+        , 'oddSum' => 0
+        , 'countdown' => 0
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

@@ -722,10 +722,304 @@ Module {
                 end: 558,
             },
         },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "oddSum",
+                    span: Span {
+                        start: 615,
+                        end: 621,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    0,
+                ),
+                Span {
+                    start: 625,
+                    end: 626,
+                },
+            ),
+            span: Span {
+                start: 615,
+                end: 626,
+            },
+        },
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    1,
+                ),
+                Span {
+                    start: 627,
+                    end: 628,
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "to:",
+                        span: Span {
+                            start: 629,
+                            end: 632,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "by:",
+                        span: Span {
+                            start: 636,
+                            end: 639,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "do:",
+                        span: Span {
+                            start: 642,
+                            end: 645,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        10,
+                    ),
+                    Span {
+                        start: 633,
+                        end: 635,
+                    },
+                ),
+                Literal(
+                    Integer(
+                        2,
+                    ),
+                    Span {
+                        start: 640,
+                        end: 641,
+                    },
+                ),
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "n",
+                                span: Span {
+                                    start: 648,
+                                    end: 649,
+                                },
+                            },
+                        ],
+                        body: [
+                            Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "oddSum",
+                                        span: Span {
+                                            start: 652,
+                                            end: 658,
+                                        },
+                                    },
+                                ),
+                                value: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "oddSum",
+                                            span: Span {
+                                                start: 662,
+                                                end: 668,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Identifier(
+                                            Identifier {
+                                                name: "n",
+                                                span: Span {
+                                                    start: 671,
+                                                    end: 672,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 662,
+                                        end: 672,
+                                    },
+                                },
+                                span: Span {
+                                    start: 652,
+                                    end: 672,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 646,
+                            end: 673,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 627,
+                end: 673,
+            },
+        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "countdown",
+                    span: Span {
+                        start: 728,
+                        end: 737,
+                    },
+                },
+            ),
+            value: Literal(
+                Integer(
+                    0,
+                ),
+                Span {
+                    start: 741,
+                    end: 742,
+                },
+            ),
+            span: Span {
+                start: 728,
+                end: 742,
+            },
+        },
+        MessageSend {
+            receiver: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 743,
+                    end: 745,
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "to:",
+                        span: Span {
+                            start: 746,
+                            end: 749,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "by:",
+                        span: Span {
+                            start: 752,
+                            end: 755,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "do:",
+                        span: Span {
+                            start: 759,
+                            end: 762,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Literal(
+                    Integer(
+                        1,
+                    ),
+                    Span {
+                        start: 750,
+                        end: 751,
+                    },
+                ),
+                Literal(
+                    Integer(
+                        -1,
+                    ),
+                    Span {
+                        start: 756,
+                        end: 758,
+                    },
+                ),
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "n",
+                                span: Span {
+                                    start: 765,
+                                    end: 766,
+                                },
+                            },
+                        ],
+                        body: [
+                            Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "countdown",
+                                        span: Span {
+                                            start: 769,
+                                            end: 778,
+                                        },
+                                    },
+                                ),
+                                value: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "countdown",
+                                            span: Span {
+                                                start: 782,
+                                                end: 791,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 794,
+                                                end: 795,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 782,
+                                        end: 795,
+                                    },
+                                },
+                                span: Span {
+                                    start: 769,
+                                    end: 795,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 763,
+                            end: 796,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 743,
+                end: 796,
+            },
+        },
     ],
     span: Span {
         start: 133,
-        end: 558,
+        end: 796,
     },
     leading_comments: [
         Comment {
