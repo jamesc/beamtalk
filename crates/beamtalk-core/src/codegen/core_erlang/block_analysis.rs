@@ -93,19 +93,17 @@ fn analyze_expression(
     ctx: &mut AnalysisContext,
 ) {
     match expr {
-        Expression::Literal(..) | Expression::Error { .. } | Expression::Super(_) => {
-            // No variable access
+        Expression::Literal(..)
+        | Expression::Error { .. }
+        | Expression::Super(_)
+        | Expression::ClassReference { .. } => {
+            // No variable access (ClassReference resolves at compile time)
         }
 
         Expression::Identifier(id) => {
             // Read of a variable - track ALL reads, not just known locals
             // This is important for detecting outer scope variables that need threading
             analysis.local_reads.insert(id.name.to_string());
-        }
-
-        Expression::ClassReference { .. } => {
-            // Class references are global - no variable access tracking needed
-            // They resolve at compile time to module names
         }
 
         Expression::FieldAccess {

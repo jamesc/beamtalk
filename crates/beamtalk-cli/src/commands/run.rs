@@ -73,7 +73,7 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
         fs::write(
             src_path.join("main.bt"),
-            "main := [Transcript show: 'Hello'].",
+            "main := ['Hello, World!' length].",
         )
         .unwrap();
         project_path

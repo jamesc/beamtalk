@@ -1646,7 +1646,7 @@ Actor subclass: Rectangle
             {
                 assert_eq!(class_name.name.as_str(), "Counter");
             } else {
-                panic!("Expected ClassReference receiver, got {:?}", receiver);
+                panic!("Expected ClassReference receiver, got {receiver:?}");
             }
             assert_eq!(name.as_str(), "spawn");
             assert_eq!(arguments.len(), 0);

@@ -40,15 +40,19 @@ Module {
                         parameters: [],
                         body: [
                             MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
+                                receiver: ClassReference {
+                                    name: Identifier {
                                         name: "Transcript",
                                         span: Span {
                                             start: 168,
                                             end: 178,
                                         },
                                     },
-                                ),
+                                    span: Span {
+                                        start: 168,
+                                        end: 178,
+                                    },
+                                },
                                 selector: Keyword(
                                     [
                                         KeywordPart {
@@ -88,15 +92,19 @@ Module {
                         parameters: [],
                         body: [
                             MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
+                                receiver: ClassReference {
+                                    name: Identifier {
                                         name: "Transcript",
                                         span: Span {
                                             start: 202,
                                             end: 212,
                                         },
                                     },
-                                ),
+                                    span: Span {
+                                        start: 202,
+                                        end: 212,
+                                    },
+                                },
                                 selector: Keyword(
                                     [
                                         KeywordPart {
@@ -171,15 +179,19 @@ Module {
                         parameters: [],
                         body: [
                             MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
+                                receiver: ClassReference {
+                                    name: Identifier {
                                         name: "Transcript",
                                         span: Span {
                                             start: 276,
                                             end: 286,
                                         },
                                     },
-                                ),
+                                    span: Span {
+                                        start: 276,
+                                        end: 286,
+                                    },
+                                },
                                 selector: Keyword(
                                     [
                                         KeywordPart {
@@ -219,15 +231,19 @@ Module {
                         parameters: [],
                         body: [
                             MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
+                                receiver: ClassReference {
+                                    name: Identifier {
                                         name: "Transcript",
                                         span: Span {
                                             start: 310,
                                             end: 320,
                                         },
                                     },
-                                ),
+                                    span: Span {
+                                        start: 310,
+                                        end: 320,
+                                    },
+                                },
                                 selector: Keyword(
                                     [
                                         KeywordPart {
