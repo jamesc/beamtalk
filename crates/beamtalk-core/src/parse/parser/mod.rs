@@ -1622,4 +1622,103 @@ Actor subclass: Rectangle
             panic!("Expected cascade expression");
         }
     }
+
+    // ========================================================================
+    // Class Reference Tests
+    // ========================================================================
+
+    #[test]
+    fn parse_class_reference_spawn() {
+        let module = parse_ok("Counter spawn");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Unary(name),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            // Receiver should be ClassReference, not Identifier
+            if let Expression::ClassReference {
+                name: class_name, ..
+            } = &**receiver
+            {
+                assert_eq!(class_name.name.as_str(), "Counter");
+            } else {
+                panic!("Expected ClassReference receiver, got {receiver:?}");
+            }
+            assert_eq!(name.as_str(), "spawn");
+            assert_eq!(arguments.len(), 0);
+        } else {
+            panic!("Expected message send");
+        }
+    }
+
+    #[test]
+    fn parse_class_reference_vs_variable() {
+        // Uppercase should parse as ClassReference
+        let module1 = parse_ok("Counter");
+        if let Expression::ClassReference { name, .. } = &module1.expressions[0] {
+            assert_eq!(name.name.as_str(), "Counter");
+        } else {
+            panic!("Expected ClassReference for 'Counter'");
+        }
+
+        // Lowercase should parse as Identifier
+        let module2 = parse_ok("counter");
+        if let Expression::Identifier(id) = &module2.expressions[0] {
+            assert_eq!(id.name.as_str(), "counter");
+        } else {
+            panic!("Expected Identifier for 'counter'");
+        }
+    }
+
+    #[test]
+    fn parse_class_reference_keyword_message() {
+        let module = parse_ok("Counter spawnWith: initialState");
+        assert_eq!(module.expressions.len(), 1);
+
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = &module.expressions[0]
+        {
+            // Receiver should be ClassReference
+            if let Expression::ClassReference {
+                name: class_name, ..
+            } = &**receiver
+            {
+                assert_eq!(class_name.name.as_str(), "Counter");
+            } else {
+                panic!("Expected ClassReference receiver");
+            }
+            assert_eq!(parts.len(), 1);
+            assert_eq!(parts[0].keyword.as_str(), "spawnWith:");
+            assert_eq!(arguments.len(), 1);
+        } else {
+            panic!("Expected keyword message send");
+        }
+    }
+
+    #[test]
+    fn parse_mixed_case_identifier() {
+        // camelCase should parse as Identifier (starts with lowercase)
+        let module = parse_ok("myVariable");
+        if let Expression::Identifier(id) = &module.expressions[0] {
+            assert_eq!(id.name.as_str(), "myVariable");
+        } else {
+            panic!("Expected Identifier for 'myVariable'");
+        }
+
+        // PascalCase should parse as ClassReference (starts with uppercase)
+        let module = parse_ok("MyClass");
+        if let Expression::ClassReference { name, .. } = &module.expressions[0] {
+            assert_eq!(name.name.as_str(), "MyClass");
+        } else {
+            panic!("Expected ClassReference for 'MyClass'");
+        }
+    }
 }

@@ -10,19 +10,19 @@
 //! Diagnostics come from multiple sources:
 //! - Lexical errors (invalid tokens)
 //! - Parse errors (syntax errors)
-//! - Semantic errors (type errors, undefined references) - future work
+//! - Semantic errors (type errors, undefined references, mutations, etc.)
 //!
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
 
+use crate::analyse;
 use crate::ast::Module;
 use crate::parse::Diagnostic;
 
 /// Computes diagnostics for a module.
 ///
-/// This currently just returns the parse diagnostics, but in the future
-/// it will also include semantic analysis diagnostics.
+/// This runs both parse-time and semantic analysis diagnostics.
 ///
 /// # Arguments
 ///
@@ -33,17 +33,14 @@ use crate::parse::Diagnostic;
 ///
 /// A list of all diagnostics (errors and warnings).
 #[must_use]
-pub fn compute_diagnostics(
-    _module: &Module,
-    parse_diagnostics: Vec<Diagnostic>,
-) -> Vec<Diagnostic> {
-    // Future: Add semantic analysis diagnostics
-    // - Undefined variables
-    // - Type errors
-    // - Unused variables
-    // - etc.
+pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
 
-    parse_diagnostics
+    // Run semantic analysis
+    let analysis_result = analyse::analyse(module);
+    all_diagnostics.extend(analysis_result.diagnostics);
+
+    all_diagnostics
 }
 
 #[cfg(test)]

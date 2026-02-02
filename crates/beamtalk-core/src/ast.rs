@@ -492,8 +492,20 @@ pub enum Expression {
     /// A literal value.
     Literal(Literal, Span),
 
-    /// An identifier (variable or class name).
+    /// An identifier (variable name).
     Identifier(Identifier),
+
+    /// A class reference (uppercase identifier).
+    ///
+    /// Class references are global and resolve to module names.
+    /// Example: `Counter`, `Array`, `MyCustomClass`
+    /// Compiles to module calls: `Counter spawn` → `call 'counter':'spawn'()`
+    ClassReference {
+        /// The class name (as written in source).
+        name: Identifier,
+        /// Source location.
+        span: Span,
+    },
 
     /// The `super` keyword for superclass method dispatch.
     ///
@@ -632,6 +644,7 @@ impl Expression {
     pub const fn span(&self) -> Span {
         match self {
             Self::Literal(_, span)
+            | Self::ClassReference { span, .. }
             | Self::Super(span)
             | Self::FieldAccess { span, .. }
             | Self::MessageSend { span, .. }

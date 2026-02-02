@@ -24,7 +24,7 @@
 -ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
-         ensure_dir_with_mode/2, maybe_await_future/1]).
+         ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -45,16 +45,24 @@ do_eval(Expression, State) ->
     
     Bindings = beamtalk_repl_state:get_bindings(State),
     
+    %% Get actor registry PID to pass to eval context
+    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+    
     %% Compile expression via daemon
     case compile_expression(Expression, ModuleName, Bindings, State) of
         {ok, Binary, _ResultExpr} ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    %% Execute the eval function
-                    %% eval/1 now returns {Result, UpdatedBindings} to support mutation threading
+                    %% Execute the eval function, passing registry PID in bindings
+                    %% eval/1 returns {Result, UpdatedBindings} to support mutation threading
                     try
-                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
+                        %% Add registry PID to bindings so generated code can access it
+                        BindingsWithRegistry = case RegistryPid of
+                            undefined -> Bindings;
+                            _ -> maps:put('__repl_actor_registry__', RegistryPid, Bindings)
+                        end,
+                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
                         %% Auto-await futures for synchronous REPL experience
                         Result = maybe_await_future(RawResult),
                         %% Check if this was an assignment
@@ -73,9 +81,15 @@ do_eval(Expression, State) ->
                         Class:Reason:_Stacktrace ->
                             {error, {eval_error, Class, Reason}, NewState}
                     after
-                        %% Clean up the temporary module
-                        code:purge(ModuleName),
-                        code:delete(ModuleName)
+                        %% Only purge module if it has no living actors
+                        case should_purge_module(ModuleName, RegistryPid) of
+                            true ->
+                                code:purge(ModuleName),
+                                code:delete(ModuleName);
+                            false ->
+                                %% Module still has actors, keep it loaded
+                                ok
+                        end
                     end;
                 {error, Reason} ->
                     {error, {load_error, Reason}, NewState}
@@ -589,3 +603,21 @@ maybe_await_future({beamtalk_object, _, _, _} = Object) ->
 maybe_await_future(Value) ->
     %% Not a PID or special type, return as-is
     Value.
+
+%% Check if a module should be purged (no living actors reference it).
+-spec should_purge_module(atom(), pid() | undefined) -> boolean().
+should_purge_module(_ModuleName, undefined) ->
+    %% No registry, purge as normal
+    true;
+should_purge_module(ModuleName, RegistryPid) ->
+    %% Get all actors from registry
+    Actors = beamtalk_repl_actors:list_actors(RegistryPid),
+    %% Check if any actor belongs to this module
+    HasActors = lists:any(
+        fun(#{module := ActorModule}) ->
+            ActorModule =:= ModuleName
+        end,
+        Actors
+    ),
+    %% Purge only if no actors from this module exist
+    not HasActors.

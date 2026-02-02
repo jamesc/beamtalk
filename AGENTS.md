@@ -182,6 +182,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `done` | `/done` | Complete work, commit, push, and create PR |
 | `whats-next` | `/whats-next` | Get recommendations for what to work on next |
 | `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
+| `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
 | `worktree-start` | `/worktree-start <branch>` | Guide for creating a new worktree |
 | `worktree-stop` | `/worktree-stop <branch>` | Guide for removing a worktree |
 | `add-ast-node` | "add AST node" | Add a new AST node to the compiler |
@@ -189,6 +190,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
 | `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
+| `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, and resolve conflicts |
 
 ### Skill Locations
 

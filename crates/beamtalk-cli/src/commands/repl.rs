@@ -76,6 +76,16 @@ struct ReplResponse {
     message: Option<String>,
     bindings: Option<serde_json::Value>,
     classes: Option<Vec<String>>,
+    actors: Option<Vec<ActorInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActorInfo {
+    pid: String,
+    class: String,
+    module: String,
+    #[allow(dead_code)]
+    spawned_at: i64,
 }
 
 /// REPL client state.
@@ -196,6 +206,41 @@ impl ReplClient {
             .clone()
             .ok_or_else(|| miette!("No file has been loaded yet"))?;
         self.load_file(&path)
+    }
+
+    /// List running actors.
+    fn list_actors(&mut self) -> Result<ReplResponse> {
+        let request = serde_json::json!({ "type": "actors" });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    }
+
+    /// Kill an actor by PID string.
+    fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+        let request = serde_json::json!({
+            "type": "kill",
+            "pid": pid_str
+        });
+        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+
+        writeln!(self.stream, "{request_str}").into_diagnostic()?;
+        self.stream.flush().into_diagnostic()?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .into_diagnostic()?;
+
+        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
     }
 }
 
@@ -391,6 +436,8 @@ fn print_help() {
     println!("  :bindings     Show current variable bindings");
     println!("  :load <path>  Load a .bt file");
     println!("  :reload       Reload the last loaded file");
+    println!("  :actors       List running actors");
+    println!("  :kill <pid>   Kill an actor by PID");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -545,6 +592,54 @@ pub fn run() -> Result<()> {
                                     } else {
                                         println!("Reloaded");
                                     }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":actors" | ":a" => {
+                        match client.list_actors() {
+                            Ok(response) => {
+                                if response.response_type == "actors" {
+                                    if let Some(actors) = response.actors {
+                                        if actors.is_empty() {
+                                            println!("No running actors.");
+                                        } else {
+                                            println!("Running actors:");
+                                            for actor in actors {
+                                                println!(
+                                                    "  {} - {} ({})",
+                                                    actor.pid, actor.class, actor.module
+                                                );
+                                            }
+                                        }
+                                    }
+                                } else if response.response_type == "error" {
+                                    if let Some(msg) = response.message {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ if line.starts_with(":kill ") => {
+                        let pid_str = line.strip_prefix(":kill ").unwrap().trim();
+                        if pid_str.is_empty() {
+                            eprintln!("Usage: :kill <pid>");
+                            continue;
+                        }
+
+                        match client.kill_actor(pid_str) {
+                            Ok(response) => {
+                                if response.response_type == "result" {
+                                    println!("Actor {pid_str} killed.");
                                 } else if response.response_type == "error" {
                                     if let Some(msg) = response.message {
                                         eprintln!("Error: {msg}");
@@ -739,5 +834,110 @@ mod tests {
                 "Process should have been killed (kill -0 should fail)"
             );
         }
+    }
+
+    #[test]
+    fn actor_info_deserializes_correctly() {
+        let json = r#"{
+            "pid": "<0.123.0>",
+            "class": "Counter",
+            "module": "counter",
+            "spawned_at": 1234567890
+        }"#;
+
+        let info: ActorInfo = serde_json::from_str(json).expect("Failed to parse ActorInfo");
+        assert_eq!(info.pid, "<0.123.0>");
+        assert_eq!(info.class, "Counter");
+        assert_eq!(info.module, "counter");
+        assert_eq!(info.spawned_at, 1_234_567_890);
+    }
+
+    #[test]
+    fn actors_response_deserializes_correctly() {
+        let json = r#"{
+            "type": "actors",
+            "actors": [
+                {
+                    "pid": "<0.123.0>",
+                    "class": "Counter",
+                    "module": "beamtalk_repl_eval_42",
+                    "spawned_at": 1234567890
+                },
+                {
+                    "pid": "<0.124.0>",
+                    "class": "Logger",
+                    "module": "beamtalk_repl_eval_43",
+                    "spawned_at": 1234567891
+                }
+            ]
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "actors");
+
+        let actors = response.actors.expect("actors field missing");
+        assert_eq!(actors.len(), 2);
+
+        assert_eq!(actors[0].pid, "<0.123.0>");
+        assert_eq!(actors[0].class, "Counter");
+        assert_eq!(actors[0].module, "beamtalk_repl_eval_42");
+
+        assert_eq!(actors[1].pid, "<0.124.0>");
+        assert_eq!(actors[1].class, "Logger");
+    }
+
+    #[test]
+    fn actors_response_empty_list() {
+        let json = r#"{
+            "type": "actors",
+            "actors": []
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "actors");
+
+        let actors = response.actors.expect("actors field missing");
+        assert!(actors.is_empty());
+    }
+
+    #[test]
+    fn kill_response_success() {
+        let json = r#"{
+            "type": "result",
+            "value": "ok"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "result");
+        assert!(response.value.is_some());
+    }
+
+    #[test]
+    fn kill_response_not_found() {
+        let json = r#"{
+            "type": "error",
+            "message": "not_found"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "error");
+        assert_eq!(response.message, Some("not_found".to_string()));
+    }
+
+    #[test]
+    fn kill_response_invalid_pid() {
+        let json = r#"{
+            "type": "error",
+            "message": "invalid_pid"
+        }"#;
+
+        let response: ReplResponse =
+            serde_json::from_str(json).expect("Failed to parse ReplResponse");
+        assert_eq!(response.response_type, "error");
+        assert_eq!(response.message, Some("invalid_pid".to_string()));
     }
 }
