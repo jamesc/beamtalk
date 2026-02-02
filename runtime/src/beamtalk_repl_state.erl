@@ -10,9 +10,10 @@
 
 -export([new/2, new/3, get_bindings/1, set_bindings/2, clear_bindings/1,
          get_eval_counter/1, increment_eval_counter/1,
-         get_loaded_modules/1, add_loaded_module/2,
+         get_loaded_modules/1, add_loaded_module/2, set_loaded_modules/2,
          get_daemon_socket_path/1, get_listen_socket/1, get_port/1,
-         get_actor_registry/1, set_actor_registry/2]).
+         get_actor_registry/1, set_actor_registry/2,
+         get_module_tracker/1, set_module_tracker/2]).
 
 -export_type([state/0]).
 
@@ -23,7 +24,8 @@
     daemon_socket_path :: string(),
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
-    actor_registry :: pid() | undefined
+    actor_registry :: pid() | undefined,
+    module_tracker :: beamtalk_repl_modules:module_tracker()
 }).
 
 -opaque state() :: #state{}.
@@ -50,7 +52,8 @@ new(ListenSocket, Port, Options) ->
         daemon_socket_path = DaemonSocketPath,
         eval_counter = 0,
         loaded_modules = [],
-        actor_registry = undefined
+        actor_registry = undefined,
+        module_tracker = beamtalk_repl_modules:new()
     }.
 
 %% @doc Get current variable bindings.
@@ -88,6 +91,11 @@ get_loaded_modules(#state{loaded_modules = Modules}) ->
 add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
     State#state{loaded_modules = [Module | Modules]}.
 
+%% @doc Set the loaded modules list.
+-spec set_loaded_modules([atom()], state()) -> state().
+set_loaded_modules(Modules, State) ->
+    State#state{loaded_modules = Modules}.
+
 %% @doc Get daemon socket path.
 -spec get_daemon_socket_path(state()) -> string().
 get_daemon_socket_path(#state{daemon_socket_path = Path}) ->
@@ -112,6 +120,16 @@ get_actor_registry(#state{actor_registry = Registry}) ->
 -spec set_actor_registry(pid() | undefined, state()) -> state().
 set_actor_registry(Registry, State) ->
     State#state{actor_registry = Registry}.
+
+%% @doc Get module tracker.
+-spec get_module_tracker(state()) -> beamtalk_repl_modules:module_tracker().
+get_module_tracker(#state{module_tracker = Tracker}) ->
+    Tracker.
+
+%% @doc Set module tracker.
+-spec set_module_tracker(beamtalk_repl_modules:module_tracker(), state()) -> state().
+set_module_tracker(Tracker, State) ->
+    State#state{module_tracker = Tracker}.
 
 %%% Internal functions
 

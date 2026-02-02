@@ -173,7 +173,31 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-log_success "✨ Container ready! Starting Copilot..."
+log_success "✨ Container ready!"
+
+# Copy SSH signing key if configured
+if [ -n "$GIT_SIGNING_KEY" ]; then
+    SSH_KEY_PATH="$HOME/.ssh/$GIT_SIGNING_KEY"
+    if [ -f "$SSH_KEY_PATH" ]; then
+        log_info "🔑 Copying SSH signing key..."
+        
+        # Get container ID for this workspace
+        CONTAINER_ID=$(docker ps --filter "label=devcontainer.local_folder=$WORKTREE_PATH" --format "{{.ID}}" 2>/dev/null)
+        if [ -n "$CONTAINER_ID" ]; then
+            if docker cp "$SSH_KEY_PATH" "$CONTAINER_ID:/home/vscode/.ssh/$GIT_SIGNING_KEY" 2>/dev/null; then
+                log_success "✅ SSH key copied, re-running setup..."
+                devcontainer exec --workspace-folder "$WORKTREE_PATH" bash .devcontainer/setup-ssh-signing.sh
+            else
+                log_warn "⚠️  Could not copy SSH key (container may not be ready)"
+            fi
+        fi
+    else
+        log_warn "⚠️  SSH key not found at: $SSH_KEY_PATH"
+    fi
+fi
+
+echo ""
+log_info "Starting Copilot..."
 
 # Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
 devcontainer exec --workspace-folder "$WORKTREE_PATH" copilot --yolo --model claude-sonnet-4.5

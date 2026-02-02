@@ -133,11 +133,15 @@ handle_load(Path, State) ->
                                     register_classes(ClassNames, ModuleName),
                                     %% Track loaded module (avoid duplicates on reload)
                                     LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
-                                    NewState = case lists:member(ModuleName, LoadedModules) of
+                                    NewState1 = case lists:member(ModuleName, LoadedModules) of
                                         true -> State;
                                         false -> beamtalk_repl_state:add_loaded_module(ModuleName, State)
                                     end,
-                                    {ok, ClassNames, NewState};
+                                    %% Track module in module tracker
+                                    Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
+                                    NewTracker = beamtalk_repl_modules:add_module(ModuleName, Path, Tracker),
+                                    NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
+                                    {ok, ClassNames, NewState2};
                                 {error, Reason} ->
                                     {error, {load_error, Reason}, State}
                             end;

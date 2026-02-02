@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for ProtoObject with actor loading
+
+// TEMPORARILY DISABLED: BT-189 regression blocks @load for actor classes
+// Semantic analyzer rejects valid `self` in method bodies.
+// Re-enable when BT-189 is fixed.
+//
+// For now, see runtime/test/beamtalk_actor_tests.erl for verification:
+//      - dnu_forward_to_target_test (proxy forwarding)
+//      - counter_test (state mutations)

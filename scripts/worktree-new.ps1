@@ -208,15 +208,80 @@ if (-not $env:BEAMTALK_MAIN_GIT_PATH) {
 Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
 Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
 
-# Build and start the container
-devcontainer up --workspace-folder $worktreePath
+# Build and start the container - capture output to get container ID
+Write-Host "Running: devcontainer up --workspace-folder $worktreePath" -ForegroundColor Gray
+$output = devcontainer up --workspace-folder $worktreePath 2>&1 | ForEach-Object {
+    Write-Host $_  # Display output in real-time
+    $_  # Pass through to capture
+}
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n❌ Failed to start devcontainer" -ForegroundColor Red
     exit 1
 }
 
-Write-Host "`n✨ Container ready! Starting Copilot..." -ForegroundColor Green
+# Extract container ID from output JSON (last line)
+$containerIdFromOutput = $null
+try {
+    $lastLine = ($output | Select-Object -Last 1) -replace '\x1b\[[0-9;]*m', ''  # Strip ANSI codes
+    $jsonOutput = $lastLine | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if ($jsonOutput.containerId) {
+        $containerIdFromOutput = $jsonOutput.containerId
+    }
+} catch {
+    # Ignore JSON parse errors
+}
+
+Write-Host "`n✨ Container ready!" -ForegroundColor Green
+
+# Copy SSH signing key if configured
+if ($env:GIT_SIGNING_KEY) {
+    $sshKeyPath = Join-Path $env:USERPROFILE ".ssh\$env:GIT_SIGNING_KEY"
+    if (Test-Path $sshKeyPath) {
+        Write-Host "🔑 Copying SSH signing key..." -ForegroundColor Cyan
+        
+        # Use container ID from devcontainer up output
+        $containerInfo = $containerIdFromOutput
+        
+        if ($containerInfo) {
+            Write-Host "   Container ID: $containerInfo" -ForegroundColor Gray
+            
+            # Ensure .ssh directory exists in container with correct ownership
+            docker exec $containerInfo mkdir -p /home/vscode/.ssh 2>$null
+            docker exec $containerInfo chown -R vscode:vscode /home/vscode/.ssh 2>$null
+            docker exec $containerInfo chmod 700 /home/vscode/.ssh 2>$null
+            
+            # Copy the key using stdin to avoid docker cp path issues
+            Write-Host "   Copying: $sshKeyPath" -ForegroundColor Gray
+            Write-Host "   To: ${containerInfo}:/home/vscode/.ssh/$env:GIT_SIGNING_KEY" -ForegroundColor Gray
+            
+            # Read the key content and pipe it into the container
+            $keyContent = Get-Content $sshKeyPath -Raw
+            $copyResult = $keyContent | docker exec -i $containerInfo tee /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0) {
+                # Fix ownership and permissions of the copied key
+                docker exec $containerInfo chown vscode:vscode /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
+                docker exec $containerInfo chmod 644 /home/vscode/.ssh/$env:GIT_SIGNING_KEY 2>$null
+                
+                Write-Host "✅ SSH key copied, re-running setup..." -ForegroundColor Green
+                devcontainer exec --workspace-folder $worktreePath bash .devcontainer/setup-ssh-signing.sh
+            }
+            else {
+                Write-Host "⚠️  Could not copy SSH key to container" -ForegroundColor Yellow
+                Write-Host "   Error: $copyResult" -ForegroundColor Red
+            }
+        }
+        else {
+            Write-Host "⚠️  Could not find running container" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "⚠️  SSH key not found at: $sshKeyPath" -ForegroundColor Yellow
+    }
+}
+
+Write-Host "`nStarting Copilot..." -ForegroundColor Cyan
 
 # Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
 devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5

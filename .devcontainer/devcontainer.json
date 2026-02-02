@@ -55,7 +55,7 @@
       "source": "${localEnv:BEAMTALK_MAIN_GIT_PATH}",
       "target": "/workspaces/.beamtalk-git",
       "type": "bind"
-    },
+    }
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // GIT WORKTREES: Parallel Copilot Sessions
@@ -67,12 +67,21 @@
   //        setx BEAMTALK_MAIN_GIT_PATH "C:/Users/you/source/beamtalk/.git"
   //        setx GIT_USER_NAME "Your Name"
   //        setx GIT_USER_EMAIL "you@example.com"
-  //        setx GIT_SIGNING_KEY "id_ed25519.pub"  (optional, filename in ~/.ssh)
+  //
+  //    OPTIONAL: SSH commit signing (requires manual setup inside container)
+  //        setx GIT_SIGNING_KEY "id_rsa.pub"  # filename in ~/.ssh
+  //      Then inside container, manually copy:
+  //        mkdir -p ~/.ssh && cp /mnt/c/Users/you/.ssh/id_rsa.pub ~/.ssh/
+  //      (Automated mounting not supported due to Docker volume limitations)
   //      Linux/Mac (add to ~/.bashrc):
   //        export BEAMTALK_MAIN_GIT_PATH="$HOME/source/beamtalk/.git"
   //        export GIT_USER_NAME="Your Name"
   //        export GIT_USER_EMAIL="you@example.com"
-  //        export GIT_SIGNING_KEY="id_ed25519.pub"  # optional, filename in ~/.ssh
+  //
+  //    OPTIONAL: SSH commit signing (requires manual setup inside container)
+  //        export GIT_SIGNING_KEY="id_rsa.pub"  # filename in ~/.ssh
+  //      Then inside container, manually copy:
+  //        mkdir -p ~/.ssh && cp ~/.ssh/id_rsa.pub ~/.ssh/ (if .ssh is mounted)
   //
   // 2. Create worktrees and open each in its own container:
   //      git worktree add ../BT-99 -b BT-99-feature
@@ -80,6 +89,7 @@
   //
   // Each worktree container can run Copilot independently.
   // The fix-worktree-git.sh script auto-fixes the .git path on container start.
+  // SECURITY: Only the public key file is copied, never the entire .ssh directory.
   // ═══════════════════════════════════════════════════════════════════════════
   "containerEnv": {
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"
@@ -90,6 +100,7 @@
     "GITHUB_TOKEN": "${localEnv:GH_TOKEN}",
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
     "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}",
-    "GIT_SIGNING_KEY": "${localEnv:GIT_SIGNING_KEY}"
+    "GIT_SIGNING_KEY": "${localEnv:GIT_SIGNING_KEY}",
+    "HOST_USERNAME": "${localEnv:USERNAME}${localEnv:USER}"
   }
 }

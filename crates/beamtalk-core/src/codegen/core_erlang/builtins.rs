@@ -683,4 +683,137 @@ impl CoreErlangGenerator {
         write!(self.output, ")")?;
         Ok(())
     }
+
+    /// Tries to generate code for `ProtoObject` methods.
+    ///
+    /// `ProtoObject` methods are fundamental operations available on all objects:
+    ///
+    /// - `class` - Returns the class name (atom) of the receiver
+    /// - `perform:withArguments:` - Dynamic message dispatch
+    ///
+    /// This function:
+    /// - Returns `Ok(Some(()))` if the message was a `ProtoObject` method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT a `ProtoObject` method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # `ProtoObject` Methods
+    ///
+    /// ## class
+    ///
+    /// Returns the class name of any object. For primitives (Integer, String, Boolean),
+    /// uses pattern matching. For actors, extracts the class from the object record.
+    ///
+    /// ```core-erlang
+    /// % For primitives:
+    /// case Receiver of
+    ///   <I> when call 'erlang':'is_integer'(I) -> 'Integer'
+    ///   <S> when call 'erlang':'is_binary'(S) -> 'String'
+    ///   <'true'> when 'true' -> 'True'
+    ///   <'false'> when 'true' -> 'False'
+    ///   <'nil'> when 'true' -> 'Nil'
+    ///   <Obj> when 'true' -> call 'erlang':'element'(2, Obj)  % Extract from record
+    /// end
+    /// ```
+    ///
+    /// ## perform:withArguments:
+    ///
+    /// Performs dynamic message dispatch - sends a message to an object at runtime.
+    /// This is used by doesNotUnderstand handlers to forward messages.
+    ///
+    /// ```core-erlang
+    /// % For actors (objects):
+    /// let Pid = call 'erlang':'element'(4, Receiver) in
+    /// let Future = call 'beamtalk_future':'new'() in
+    /// let _ = call 'gen_server':'cast'(Pid, {Selector, Arguments, Future}) in
+    /// Future
+    /// ```
+    pub(super) fn try_generate_protoobject_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "class" if arguments.is_empty() => {
+                    // Generate: case Receiver of pattern matching for primitives + record extraction
+                    let recv_var = self.fresh_temp_var("Obj");
+                    let int_var = self.fresh_temp_var("I");
+                    let str_var = self.fresh_temp_var("S");
+                    let obj_var = self.fresh_temp_var("O");
+
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case {recv_var} of \
+                         <{int_var}> when call 'erlang':'is_integer'({int_var}) -> 'Integer' \
+                         <{str_var}> when call 'erlang':'is_binary'({str_var}) -> 'String' \
+                         <'true'> when 'true' -> 'True' \
+                         <'false'> when 'true' -> 'False' \
+                         <'nil'> when 'true' -> 'Nil' \
+                         <{obj_var}> when 'true' -> call 'erlang':'element'(2, {obj_var}) \
+                         end"
+                    )?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "perform:withArguments:" if arguments.len() == 2 => {
+                        // Dynamic message dispatch: receiver perform: selector withArguments: args
+                        // This generates async message send via gen_server:cast
+                        let receiver_var = self.fresh_var("Receiver");
+                        let selector_var = self.fresh_var("Selector");
+                        let args_var = self.fresh_var("Args");
+                        let pid_var = self.fresh_var("Pid");
+                        let future_var = self.fresh_var("Future");
+
+                        // Bind receiver
+                        write!(self.output, "let {receiver_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in ")?;
+
+                        // Bind selector (should be an atom)
+                        write!(self.output, "let {selector_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in ")?;
+
+                        // Bind arguments (should be a list)
+                        write!(self.output, "let {args_var} = ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, " in ")?;
+
+                        // Extract pid from object record
+                        write!(
+                            self.output,
+                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                        )?;
+
+                        // Create future
+                        write!(
+                            self.output,
+                            "let {future_var} = call 'beamtalk_future':'new'() in "
+                        )?;
+
+                        // Send async message via gen_server:cast
+                        write!(
+                            self.output,
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{{selector_var}, {args_var}, {future_var}}}) in "
+                        )?;
+
+                        // Return the future
+                        write!(self.output, "{future_var}")?;
+
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
 }
