@@ -127,7 +127,7 @@ mod tests {
 
     impl EnvVarGuard {
         /// Set an environment variable and save its previous value.
-        /// SAFETY: Caller must ensure tests using this are serialized with #[serial(env_var)].
+        /// SAFETY: Caller must ensure tests using this are serialized with `#[serial(env_var)]`.
         unsafe fn set(key: &'static str, value: &str) -> Self {
             let prev = std::env::var(key).ok();
             // SAFETY: Caller ensures tests are serialized
