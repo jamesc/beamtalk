@@ -10,21 +10,22 @@
 //
 // Related: BT-95 (beamtalk_class:super_dispatch/3)
 
-// TEMPORARILY DISABLED: BT-189 regression blocks @load for actor classes
-// Semantic analyzer rejects valid `self` in method bodies.
+// TEMPORARILY DISABLED: BT-189 blocks @load for actor classes with self
+// Even though semantic analysis isn't fully integrated, @load still fails.
 // Re-enable when BT-189 is fixed.
 //
 // For now, see runtime/test/beamtalk_codegen_simulation_tests.erl for verification:
 //   - super_calls_parent_method_test
-//   - super_multiple_calls_test
+//   - super_multiple_calls_test  
 //   - super_with_different_method_test
 //   - super_maintains_state_test
 //   - super_with_init_args_test
 // All 6 tests pass with generated code using beamtalk_class:super_dispatch/3
 
-// When BT-189 is fixed, uncomment these directives:
-// load tests/e2e/fixtures/counter.bt
-// load tests/e2e/fixtures/logging_counter.bt
+// NOTE: @load directives removed entirely (E2E harness processes them even in comments)
+// When BT-189 is fixed, add back:
+//   @load tests/e2e/fixtures/counter.bt
+//   @load tests/e2e/fixtures/logging_counter.bt
 
 // ===========================================================================
 // BASIC SUPER SEND
