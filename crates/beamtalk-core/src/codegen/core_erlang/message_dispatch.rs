@@ -62,6 +62,10 @@ impl CoreErlangGenerator {
     /// 10. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
     /// 11. **Await messages** → Blocking future resolution
     /// 12. **Default** → Async actor message with future
+    #[expect(
+        clippy::too_many_lines,
+        reason = "BT-223: Runtime dispatch for primitives adds necessary complexity"
+    )]
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -179,14 +183,12 @@ impl CoreErlangGenerator {
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
-        // Generate the async message send protocol:
-        // let Receiver1 = <receiver expression>
-        // in let Pid1 = call 'erlang':'element'(4, Receiver1)  % Extract pid from #beamtalk_object{}
-        // in let Future1 = call 'beamtalk_future':'new'()
-        // in let _ = call 'gen_server':'cast'(Pid1, {Selector, Args, Future1})
-        //    in Future1
+        // BT-223: Runtime dispatch - check if receiver is actor or primitive
         //
-        // Use fresh_var to avoid shadowing in nested message sends
+        // For actors (beamtalk_object records): Use async dispatch with futures
+        // For primitives (everything else): Use beamtalk_primitive:send/3
+        //
+        // This allows the same generated code to handle both cases correctly.
 
         let receiver_var = self.fresh_var("Receiver");
         let pid_var = self.fresh_var("Pid");
@@ -197,8 +199,45 @@ impl CoreErlangGenerator {
         self.generate_expression(receiver)?;
         write!(self.output, " in ")?;
 
-        // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
-        // Record tuple is: {'beamtalk_object', Class, ClassMod, Pid}
+        // Generate selector atom
+        let selector_atom = selector.to_erlang_atom();
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return Err(CodeGenError::Internal(format!(
+                "unexpected binary selector in generate_message_send: {selector_atom}"
+            )));
+        }
+
+        // BT-223: Runtime type check - short-circuit evaluation for actor vs primitive
+        // Use nested case expressions (like control_flow.rs) to avoid badarg on primitives
+        write!(
+            self.output,
+            "case case call 'erlang':'is_tuple'({receiver_var}) of "
+        )?;
+
+        // True branch: Receiver is a tuple, check size
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(
+            self.output,
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of "
+        )?;
+
+        // True branch: Size is 4, check first element
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(
+            self.output,
+            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') "
+        )?;
+
+        // Default branch: Size is not 4
+        write!(self.output, "<_> when 'true' -> 'false' end ")?;
+
+        // Default branch: Not a tuple
+        write!(self.output, "<_> when 'true' -> 'false' end of ")?;
+
+        // Case 1: Result is true (beamtalk_object) - use async actor dispatch
+        write!(self.output, "<'true'> when 'true' -> ")?;
+
+        // Extract PID from actor record (4th element)
         write!(
             self.output,
             "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
@@ -210,22 +249,13 @@ impl CoreErlangGenerator {
             "let {future_var} = call 'beamtalk_future':'new'() in "
         )?;
 
-        // Build the message tuple: {Selector, Args, Future}
+        // Send async message via gen_server:cast
         write!(
             self.output,
-            "let _ = call 'gen_server':'cast'({pid_var}, {{"
+            "let _ = call 'gen_server':'cast'({pid_var}, {{'{selector_atom}', ["
         )?;
 
-        // First element: the selector name as an atom (using domain service)
-        let selector_atom = selector.to_erlang_atom();
-        if matches!(selector, MessageSelector::Binary(_)) {
-            return Err(CodeGenError::Internal(format!(
-                "unexpected binary selector in generate_message_send: {selector_atom}"
-            )));
-        }
-        write!(self.output, "'{selector_atom}', [")?;
-
-        // Second element: list of message arguments
+        // Generate argument list
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -233,8 +263,24 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        // Third element: the future variable
-        write!(self.output, "], {future_var}}}) in {future_var}")?;
+        write!(self.output, "], {future_var}}}) in {future_var} ")?; // No semicolon!
+
+        // Case 2: Primitive - use synchronous dispatch
+        write!(self.output, "<'false'> when 'true' -> ")?;
+        write!(
+            self.output,
+            "call 'beamtalk_primitive':'send'({receiver_var}, '{selector_atom}', ["
+        )?;
+
+        // Generate argument list again
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "]) end")?;
 
         Ok(())
     }
