@@ -21,7 +21,8 @@ Each ADR follows this structure:
 
 | Number | Title | Status | Date |
 |--------|-------|--------|------|
-| [0001](0001-drop-compound-assignment-for-erlang-operator-alignment.md) | Drop Compound Assignment for Erlang Operator Alignment | Proposed | 2026-02-03 |
+| [0001](0001-no-compound-assignment.md) | No Compound Assignment in Beamtalk | Proposed | 2026-02-03 |
+| [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Proposed | 2026-02-03 |
 
 ## Creating New ADRs
 
