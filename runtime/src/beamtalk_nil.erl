@@ -12,6 +12,7 @@
 %%% | Selector | Args | Description |
 %%% |----------|------|-------------|
 %%% | `class`  | []   | Returns `'UndefinedObject'` |
+%%% | `respondsTo` | [Sel] | Returns true if responds to selector |
 %%% | `isNil`  | []   | Returns `true` |
 %%% | `ifNil:` | [Block] | Evaluate block |
 %%% | `ifNotNil:` | [Block] | Return nil (no evaluation) |
@@ -60,6 +61,7 @@ has_method(Selector) ->
 %% @doc Check if a selector is a builtin method.
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
+is_builtin('respondsTo') -> true;
 is_builtin('isNil') -> true;
 is_builtin('ifNil:') -> true;
 is_builtin('ifNotNil:') -> true;
@@ -75,7 +77,10 @@ is_builtin(_) -> false.
 -spec builtin_dispatch(atom(), list(), nil) -> {ok, term()} | not_found.
 
 %% Reflection
+%% Reflection
 builtin_dispatch('class', [], nil) -> {ok, 'UndefinedObject'};
+builtin_dispatch('respondsTo', [Selector], nil) when is_atom(Selector) -> 
+    {ok, has_method(Selector)};
 
 %% Nil checking
 builtin_dispatch('isNil', [], nil) -> {ok, true};

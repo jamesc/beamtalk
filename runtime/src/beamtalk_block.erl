@@ -12,6 +12,7 @@
 %%% | Selector | Args | Description |
 %%% |----------|------|-------------|
 %%% | `class`  | []   | Returns `'Block'` |
+%%% | `respondsTo` | [Sel] | Returns true if responds to selector |
 %%% | `value`  | []   | Evaluate block with no args |
 %%% | `value:` | [Arg] | Evaluate block with 1 arg |
 %%% | `value:value:` | [Arg1, Arg2] | Evaluate block with 2 args |
@@ -61,6 +62,7 @@ has_method(Selector) ->
 %% @doc Check if a selector is a builtin method.
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
+is_builtin('respondsTo') -> true;
 is_builtin('value') -> true;
 is_builtin('value:') -> true;
 is_builtin('value:value:') -> true;
@@ -76,7 +78,10 @@ is_builtin(_) -> false.
 -spec builtin_dispatch(atom(), list(), function()) -> {ok, term()} | not_found.
 
 %% Reflection
+%% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'Block'};
+builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
+    {ok, has_method(Selector)};
 
 %% Evaluation
 builtin_dispatch('value', [], Block) when is_function(Block, 0) ->
