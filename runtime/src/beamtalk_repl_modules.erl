@@ -72,9 +72,15 @@ get_actor_count(ModuleName, RegistryPid, Tracker) ->
     case {maps:find(ModuleName, Tracker), RegistryPid} of
         {{ok, _Info}, Pid} when is_pid(Pid) ->
             %% Query actor registry for count
-            case beamtalk_repl_actors:count_actors_for_module(Pid, ModuleName) of
-                {ok, Count} -> Count;
-                {error, _} -> 0
+            try
+                case beamtalk_repl_actors:count_actors_for_module(Pid, ModuleName) of
+                    {ok, Count} -> Count;
+                    {error, _} -> 0
+                end
+            catch
+                exit:{noproc, _} -> 0;
+                exit:{timeout, _} -> 0;
+                _:_ -> 0
             end;
         _ ->
             0

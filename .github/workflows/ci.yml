@@ -59,7 +59,7 @@ jobs:
       - name: Test Erlang runtime (unit tests)
         run: |
           cd runtime
-          rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests
+          rebar3 eunit
 
       - name: Test Erlang runtime (integration tests)
         run: |
@@ -142,9 +142,7 @@ jobs:
       - name: Generate Erlang coverage
         run: |
           cd runtime
-          rebar3 eunit --module=beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests --cover
-          rebar3 cover --verbose
-          rebar3 covertool generate
+          rebar3 do eunit --cover, cover --verbose, covertool generate
 
       - name: Rust Coverage Summary
         id: rust_coverage
