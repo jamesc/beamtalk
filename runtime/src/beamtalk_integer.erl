@@ -107,6 +107,8 @@ is_builtin('<=') -> true;
 is_builtin('>=') -> true;
 is_builtin('class') -> true;
 is_builtin('respondsTo') -> true;
+is_builtin('perform') -> true;
+is_builtin('perform:withArgs:') -> true;
 is_builtin('asString') -> true;
 is_builtin('abs') -> true;
 is_builtin('negated') -> true;
@@ -138,6 +140,19 @@ builtin_dispatch('>=', [Y], X) when is_number(Y) -> {ok, X >= Y};
 builtin_dispatch('class', [], _X) -> {ok, 'Integer'};
 builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
     {ok, has_method(Selector)};
+
+%% Dynamic message send
+builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
+    %% Recursive dispatch returns {ok, Result} or not_found
+    builtin_dispatch(TargetSelector, [], X);
+builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
+  when is_atom(TargetSelector), is_list(ArgList) ->
+    %% Recursive dispatch returns {ok, Result} or not_found
+    builtin_dispatch(TargetSelector, ArgList, X);
+builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X) 
+  when not is_list(ArgList) ->
+    %% Type error: ArgList must be a list (consistent with actor behavior)
+    error({type_error, list, ArgList});
 
 %% Conversion
 builtin_dispatch('asString', [], X) -> {ok, integer_to_binary(X)};

@@ -67,6 +67,8 @@ has_method(Selector) ->
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
 is_builtin('respondsTo') -> true;
+is_builtin('perform') -> true;
+is_builtin('perform:withArgs:') -> true;
 is_builtin('size') -> true;
 is_builtin('at:') -> true;
 is_builtin('isOk') -> true;
@@ -88,6 +90,18 @@ is_builtin(_) -> false.
 builtin_dispatch('class', [], _X) -> {ok, 'Tuple'};
 builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
     {ok, has_method(Selector)};
+
+%% Dynamic message send
+builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
+    builtin_dispatch(TargetSelector, [], X);
+builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
+  when is_atom(TargetSelector), is_list(ArgList) ->
+    builtin_dispatch(TargetSelector, ArgList, X);
+builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
+  when not is_list(ArgList) ->
+    %% Type error: ArgList must be a list (consistent with actor behavior)
+    error({type_error, list, ArgList});
+
 
 %% Size
 builtin_dispatch('size', [], X) -> {ok, tuple_size(X)};

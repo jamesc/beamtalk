@@ -355,3 +355,40 @@ reflection_responds_to_tuple_test_() ->
          ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['unknownMethod'], Tuple)),
          ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['+'], Tuple))
      end}.
+
+%%% ============================================================================
+%%% perform: dynamic message send tests (BT-165)
+%%% ============================================================================
+
+perform_on_integer_test() ->
+    %% Test perform: on integer primitive
+    %% 42 perform: #'+' withArgs: [8]  => 42 + 8  => 50
+    Result = beamtalk_integer:dispatch('perform:withArgs:', ['+', [8]], 42),
+    ?assertEqual(50, Result).
+
+perform_on_string_test() ->
+    %% Test perform: on string primitive
+    %% "hello" perform: #'++' withArgs: [" world"]  => "hello" ++ " world"
+    Result = beamtalk_string:dispatch('perform:withArgs:', ['++', [<<" world">>]], <<"hello">>),
+    ?assertEqual(<<"hello world">>, Result).
+
+perform_on_boolean_test() ->
+    %% Test perform: on boolean primitive
+    %% true perform: #'ifTrue:ifFalse:' withArgs: [yes, no]  => yes
+    YesBlock = fun() -> yes end,
+    NoBlock = fun() -> no end,
+    Result = beamtalk_boolean:dispatch('perform:withArgs:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
+    ?assertEqual(yes, Result).
+
+perform_with_unary_message_on_integer_test() ->
+    %% Test perform: with unary message (no args)
+    %% -5 perform: #abs  => 5
+    Result = beamtalk_integer:dispatch('perform', ['abs'], -5),
+    ?assertEqual(5, Result).
+
+perform_withArgs_invalid_args_type_on_primitive_test() ->
+    %% Test perform:withArgs: with non-list ArgList on primitive
+    %% Should raise type_error, not does_not_understand
+    %% This ensures consistency with actor behavior
+    ?assertError({type_error, list, 42}, 
+                 beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).

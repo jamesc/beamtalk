@@ -444,10 +444,6 @@ impl SimpleLanguageService {
                     Self::find_identifier_in_expr(receiver, offset)
                 }
             }
-            Expression::CompoundAssignment { target, value, .. } => {
-                Self::find_identifier_in_expr(target, offset)
-                    .or_else(|| Self::find_identifier_in_expr(value, offset))
-            }
             Expression::Cascade {
                 receiver, messages, ..
             } => Self::find_identifier_in_expr(receiver, offset).or_else(|| {
@@ -474,8 +470,7 @@ impl SimpleLanguageService {
             Expression::Identifier(ident) if ident.name == name => {
                 results.push(ident.span);
             }
-            Expression::Assignment { target, value, .. }
-            | Expression::CompoundAssignment { target, value, .. } => {
+            Expression::Assignment { target, value, .. } => {
                 Self::collect_identifiers(target, name, results);
                 Self::collect_identifiers(value, name, results);
             }

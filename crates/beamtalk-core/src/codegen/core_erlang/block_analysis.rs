@@ -146,31 +146,6 @@ fn analyze_expression(
             }
         }
 
-        Expression::CompoundAssignment { target, value, .. } => {
-            // Compound assignment: both read and write
-            analyze_expression(value, analysis, ctx);
-
-            match target.as_ref() {
-                Expression::Identifier(id) => {
-                    if ctx.local_bindings.contains(id.name.as_str()) {
-                        analysis.local_reads.insert(id.name.to_string());
-                        analysis.local_writes.insert(id.name.to_string());
-                    }
-                }
-                Expression::FieldAccess {
-                    receiver, field, ..
-                } => {
-                    if is_self_reference(receiver) {
-                        analysis.field_reads.insert(field.name.to_string());
-                        analysis.field_writes.insert(field.name.to_string());
-                    }
-                }
-                _ => {
-                    analyze_expression(target, analysis, ctx);
-                }
-            }
-        }
-
         Expression::MessageSend {
             receiver,
             arguments,
@@ -291,7 +266,7 @@ pub fn is_control_flow_construct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockParameter, CompoundOperator, Identifier};
+    use crate::ast::{BlockParameter, Identifier};
     use crate::parse::Span;
 
     fn make_id(name: &str) -> Identifier {
@@ -409,33 +384,6 @@ mod tests {
         let analysis = analyze_block(&block);
         assert!(analysis.field_writes.contains("value"));
         assert!(!analysis.field_reads.contains("value"));
-    }
-
-    #[test]
-    fn test_analyze_field_mutation_compound() {
-        // [self.value += 1]
-        let block = Block::new(
-            vec![],
-            vec![Expression::CompoundAssignment {
-                target: Box::new(Expression::FieldAccess {
-                    receiver: Box::new(make_expr_id("self")),
-                    field: make_id("value"),
-                    span: Span::new(0, 10),
-                }),
-                operator: CompoundOperator::Add,
-                value: Box::new(Expression::Literal(
-                    crate::ast::Literal::Integer(1),
-                    Span::new(15, 16),
-                )),
-                span: Span::new(0, 16),
-            }],
-            Span::new(0, 18),
-        );
-        let analysis = analyze_block(&block);
-        assert!(analysis.field_reads.contains("value"));
-        assert!(analysis.field_writes.contains("value"));
-        assert_eq!(analysis.threaded_fields().len(), 1);
-        assert!(analysis.threaded_fields().contains("value"));
     }
 
     #[test]

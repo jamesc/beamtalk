@@ -1,0 +1,153 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
+//
+// Messages marked "// implemented by compiler" are built-in primitives with
+// optimized implementations in the compiler. This file defines their API
+// contracts and expected behavior for users.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Beamtalk - Global class for system-wide reflection
+//
+// The Beamtalk class provides Smalltalk-style system reflection, giving access
+// to the class registry, global namespace, and system-wide introspection.
+//
+// This is analogous to Smalltalk's `Smalltalk` global, which provides:
+// ```smalltalk
+// Smalltalk allClasses          "=> [Counter, Actor, Object, ...]"
+// Smalltalk at: #Counter        "=> Counter class object"
+// ```
+//
+// ## Core Messages
+//
+// - `allClasses` - Returns list of all registered classes in the system
+// - `classNamed:` - Look up a class by name (as symbol)
+// - `globals` - Returns the global namespace dictionary
+//
+// ## Usage Examples
+//
+// ### List All Classes
+//
+// ```beamtalk
+// Beamtalk allClasses
+// // => [ProtoObject, Object, Actor, Integer, String, Counter, Point, ...]
+// ```
+//
+// ### Look Up a Class by Name
+//
+// ```beamtalk
+// CounterClass := Beamtalk classNamed: #Counter
+// CounterClass name              // => #Counter
+// CounterClass superclass        // => Actor class object
+//
+// // Use the class object to spawn instances
+// counter := CounterClass spawn
+// counter increment
+// ```
+//
+// ### Handle Missing Classes
+//
+// ```beamtalk
+// MissingClass := Beamtalk classNamed: #NonExistent
+// // => nil (class not found)
+//
+// MissingClass
+//   ifNil: [Transcript show: 'Class not found']
+//   ifNotNil: [:cls | cls spawn]
+// ```
+//
+// ### Access Global Namespace
+//
+// ```beamtalk
+// Beamtalk globals at: #MyConfig
+// // => value associated with MyConfig global (future feature)
+// ```
+//
+// ## Implementation Notes
+//
+// Beamtalk is a **value type** (Object subclass), not an actor:
+// - No process or state
+// - All methods are class-level (no instance creation needed)
+// - Acts like a namespace/module providing system access
+//
+// Class methods are implemented as compiler primitives that call into the
+// runtime class registry (`beamtalk_class:all_classes/0`, 
+// `beamtalk_class:whereis_class/1`).
+//
+// ## BEAM Mapping
+//
+// - `allClasses` → calls `beamtalk_class:all_classes()`, wraps pids as class objects
+// - `classNamed:` → calls `beamtalk_class:whereis_class(Name)`, wraps result
+// - Class objects are `#beamtalk_object{}` records with class metadata
+//
+// ## See Also
+//
+// - **ProtoObject**: Minimal root class with reflection primitives
+// - **Object**: Standard root for value types
+// - **Actor**: Process-based objects with spawn
+// - **Runtime**: `runtime/src/beamtalk_class.erl` - underlying class registry
+
+Object subclass: Beamtalk
+  // ## System Reflection Protocol
+  //
+  // These class messages provide access to the runtime class registry and
+  // system-wide introspection.
+
+  // Returns list of all registered classes in the system
+  //
+  // This is a class method that queries the runtime class registry and returns
+  // all classes that have been registered via `beamtalk_class:register/1`.
+  //
+  // Classes are registered automatically when:
+  // - Standard library loads (ProtoObject, Object, Actor, Integer, String, etc.)
+  // - User classes are compiled and loaded
+  // - Class modules are loaded via hot code reload
+  //
+  // Example:
+  // ```beamtalk
+  // Beamtalk allClasses
+  // // => [ProtoObject, Object, Actor, Integer, String, Counter, Point, ...]
+  // ```
+  //
+  // Returns: Array of class objects (pids wrapped in #beamtalk_object{} records)
+  allClasses => // implemented by compiler
+
+  // Look up a class by name and return its class object
+  //
+  // This is a class method that queries the runtime class registry for a class
+  // with the given name. Returns nil if the class is not registered.
+  //
+  // Arguments:
+  // - className: Symbol representing the class name (e.g., #Counter, #Point)
+  //
+  // Example:
+  // ```beamtalk
+  // CounterClass := Beamtalk classNamed: #Counter
+  // CounterClass name        // => #Counter
+  // CounterClass spawn       // => new Counter instance
+  //
+  // MissingClass := Beamtalk classNamed: #NonExistent
+  // // => nil
+  // ```
+  //
+  // Returns: Class object (pid wrapped in #beamtalk_object{}) or nil if not found
+  classNamed: className => // implemented by compiler
+
+  // Returns the global namespace dictionary
+  //
+  // This is a class method that returns a dictionary containing all global
+  // bindings in the system. This is analogous to Smalltalk's global dictionary.
+  //
+  // **NOTE:** This is a placeholder for future global namespace support.
+  // Currently returns an empty dictionary.
+  //
+  // Example:
+  // ```beamtalk
+  // Beamtalk globals at: #MyConfig
+  // // => value associated with MyConfig global (future feature)
+  // ```
+  //
+  // Returns: Dictionary mapping symbols to values
+  globals => // implemented by compiler

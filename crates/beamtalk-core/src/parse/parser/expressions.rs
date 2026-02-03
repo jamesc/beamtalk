@@ -7,7 +7,7 @@
 //! `Parser` implementation. Expression parsing handles:
 //!
 //! - Return statements (`^`)
-//! - Assignment (`:=` and compound assignments like `+=`)
+//! - Assignment (`:=`)
 //! - Message sends (unary, binary, keyword)
 //! - Cascade expressions (`;`)
 //! - Literals (numbers, strings, symbols, characters)
@@ -17,8 +17,8 @@
 //! - Field access (`object.field`)
 
 use crate::ast::{
-    Block, BlockParameter, CascadeMessage, CompoundOperator, Expression, Identifier, KeywordPart,
-    Literal, MapPair, MessageSelector,
+    Block, BlockParameter, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair,
+    MessageSelector,
 };
 use crate::parse::{Token, TokenKind};
 use ecow::EcoString;
@@ -103,50 +103,7 @@ impl Parser {
             };
         }
 
-        // Check for compound assignment (+=, -=, etc.)
-        if let Some(op) = self.match_compound_operator() {
-            // Validate assignment target
-            if !matches!(
-                expr,
-                Expression::Identifier(_) | Expression::FieldAccess { .. }
-            ) {
-                let span = expr.span();
-                self.diagnostics.push(Diagnostic::error(
-                    "Assignment target must be an identifier or field access",
-                    span,
-                ));
-                return Expression::Error {
-                    message: "Invalid assignment target".into(),
-                    span,
-                };
-            }
-
-            let value = Box::new(self.parse_assignment());
-            let span = expr.span().merge(value.span());
-            return Expression::CompoundAssignment {
-                target: Box::new(expr),
-                operator: op,
-                value,
-                span,
-            };
-        }
-
         expr
-    }
-
-    /// Checks for compound assignment operators.
-    fn match_compound_operator(&mut self) -> Option<CompoundOperator> {
-        let kind = self.current_kind();
-        let op = match kind {
-            TokenKind::BinarySelector(s) if s.as_str() == "+=" => CompoundOperator::Add,
-            TokenKind::BinarySelector(s) if s.as_str() == "-=" => CompoundOperator::Subtract,
-            TokenKind::BinarySelector(s) if s.as_str() == "*=" => CompoundOperator::Multiply,
-            TokenKind::BinarySelector(s) if s.as_str() == "/=" => CompoundOperator::Divide,
-            TokenKind::BinarySelector(s) if s.as_str() == "%=" => CompoundOperator::Remainder,
-            _ => return None,
-        };
-        self.advance();
-        Some(op)
     }
 
     /// Parses a cascade (multiple messages to the same receiver).
