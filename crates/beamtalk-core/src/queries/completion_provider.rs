@@ -1,9 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Code completion query implementation.
+//! Completion provider for the language service.
 //!
-//! This module provides context-aware code completion suggestions for the language service.
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `CompletionProvider` from the DDD model.
+//! It suggests completions at the cursor position based on the current editing
+//! context. The provider follows LSP terminology and aligns with the ubiquitous
+//! language defined in `docs/beamtalk-ddd-model.md`.
 //!
 //! # Design
 //!
@@ -16,6 +21,11 @@
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol completion requests
 
 use crate::ast::{Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};

@@ -507,7 +507,7 @@ impl LanguageService for SimpleLanguageService {
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {
         self.get_file(file)
             .map(|data| {
-                crate::queries::diagnostics::compute_diagnostics(
+                crate::queries::diagnostic_provider::compute_diagnostics(
                     &data.module,
                     data.diagnostics.clone(),
                 )
@@ -520,7 +520,7 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        crate::queries::completions::compute_completions(
+        crate::queries::completion_provider::compute_completions(
             &file_data.module,
             &file_data.source,
             position,
@@ -530,7 +530,11 @@ impl LanguageService for SimpleLanguageService {
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
-        crate::queries::hover::compute_hover(&file_data.module, &file_data.source, position)
+        crate::queries::hover_provider::compute_hover(
+            &file_data.module,
+            &file_data.source,
+            position,
+        )
     }
 
     fn goto_definition(&self, file: &Utf8PathBuf, position: Position) -> Option<Location> {

@@ -1,9 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Diagnostics query implementation.
+//! Diagnostic provider for the language service.
 //!
-//! This module provides diagnostic reporting (errors and warnings) for the language service.
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `DiagnosticProvider` from the DDD model.
+//! It collects errors and warnings from multiple compilation phases (lexing,
+//! parsing, semantic analysis) and reports them to the editor. The provider
+//! follows LSP terminology and aligns with the ubiquitous language defined in
+//! `docs/beamtalk-ddd-model.md`.
 //!
 //! # Design
 //!
@@ -15,6 +21,11 @@
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol publishDiagnostics notification
 
 use crate::analyse;
 use crate::ast::Module;

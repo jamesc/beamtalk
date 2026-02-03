@@ -1,9 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Hover information query implementation.
+//! Hover provider for the language service.
 //!
-//! This module provides hover information for the language service.
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `HoverProvider` from the DDD model.
+//! It shows information on hover over symbols, literals, and keywords in the
+//! editor. The provider follows LSP terminology and aligns with the ubiquitous
+//! language defined in `docs/beamtalk-ddd-model.md`.
 //!
 //! # Design
 //!
@@ -15,6 +20,11 @@
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol hover requests
 
 use crate::ast::{Expression, Literal, MessageSelector, Module};
 use crate::codegen::core_erlang::to_module_name;
