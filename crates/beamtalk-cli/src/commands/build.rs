@@ -4,6 +4,7 @@
 //! Build beamtalk projects.
 
 use crate::beam_compiler::{BeamCompiler, write_core_erlang};
+use crate::diagnostic::CompileDiagnostic;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
@@ -130,19 +131,11 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
         .any(|d| d.severity == beamtalk_core::parse::Severity::Error);
 
     if has_errors {
-        // Display diagnostics
+        // Display diagnostics using miette formatting
         for diagnostic in &diagnostics {
-            let severity = match diagnostic.severity {
-                beamtalk_core::parse::Severity::Error => "error",
-                beamtalk_core::parse::Severity::Warning => "warning",
-            };
-            eprintln!(
-                "  {} at {}:{}: {}",
-                severity,
-                diagnostic.span.start(),
-                diagnostic.span.end(),
-                diagnostic.message
-            );
+            let compile_diag =
+                CompileDiagnostic::from_core_diagnostic(diagnostic, path.as_str(), &source);
+            eprintln!("{:?}", miette::Report::new(compile_diag));
         }
         miette::bail!("Failed to compile '{path}'");
     }
