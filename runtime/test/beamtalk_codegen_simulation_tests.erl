@@ -29,6 +29,7 @@
 
 -module(beamtalk_codegen_simulation_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ===========================================================================
 %%% Test Fixtures - Counter simulation and compiled module
@@ -1300,8 +1301,12 @@ method_not_found_error_test() ->
     %% Try to call non-existent method
     Result = gen_server:call(Pid, {nonExistentMethod, []}),
     
-    %% Should get unknown_message error
-    ?assertMatch({error, {unknown_message, nonExistentMethod}}, Result),
+    %% Should get does_not_understand error
+    ?assertMatch({error, #beamtalk_error{
+        kind = does_not_understand,
+        class = 'Counter',
+        selector = nonExistentMethod
+    }}, Result),
     
     gen_server:stop(Pid).
 
@@ -1328,8 +1333,12 @@ wrong_arg_count_error_test() ->
     %% divide: expects 1 arg, give it 2
     Result = gen_server:call(Pid, {'divide:', [5, 10]}),
     
-    %% Should get a method_error with function_clause
-    ?assertMatch({error, {method_error, 'divide:', function_clause}}, Result),
+    %% Should get a type_error (method threw exception due to wrong arity)
+    ?assertMatch({error, #beamtalk_error{
+        kind = type_error,
+        class = 'Counter',
+        selector = 'divide:'
+    }}, Result),
     
     gen_server:stop(Pid).
 
