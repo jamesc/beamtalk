@@ -1,0 +1,202 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "TestActor",
+                span: Span {
+                    start: 202,
+                    end: 211,
+                },
+            },
+            superclass: Identifier {
+                name: "Actor",
+                span: Span {
+                    start: 186,
+                    end: 191,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "doError",
+                    ),
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 225,
+                                        end: 229,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "error:",
+                                        span: Span {
+                                            start: 230,
+                                            end: 236,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    String(
+                                        "This is a test error",
+                                    ),
+                                    Span {
+                                        start: 237,
+                                        end: 259,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 225,
+                                end: 259,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 214,
+                        end: 259,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "errorWithVariable",
+                    ),
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: Identifier(
+                                Identifier {
+                                    name: "msg",
+                                    span: Span {
+                                        start: 291,
+                                        end: 294,
+                                    },
+                                },
+                            ),
+                            value: Literal(
+                                String(
+                                    "Dynamic error message",
+                                ),
+                                Span {
+                                    start: 298,
+                                    end: 321,
+                                },
+                            ),
+                            span: Span {
+                                start: 291,
+                                end: 321,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 265,
+                        end: 321,
+                    },
+                },
+            ],
+            span: Span {
+                start: 186,
+                end: 321,
+            },
+        },
+    ],
+    expressions: [
+        MessageSend {
+            receiver: Identifier(
+                Identifier {
+                    name: "self",
+                    span: Span {
+                        start: 326,
+                        end: 330,
+                    },
+                },
+            ),
+            selector: Keyword(
+                [
+                    KeywordPart {
+                        keyword: "error:",
+                        span: Span {
+                            start: 331,
+                            end: 337,
+                        },
+                    },
+                ],
+            ),
+            arguments: [
+                Identifier(
+                    Identifier {
+                        name: "msg",
+                        span: Span {
+                            start: 338,
+                            end: 341,
+                        },
+                    },
+                ),
+            ],
+            span: Span {
+                start: 326,
+                end: 341,
+            },
+        },
+    ],
+    span: Span {
+        start: 186,
+        end: 341,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test error: message compilation",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// The error: message should compile to erlang:error({beamtalk_error, Message})",
+            span: Span {
+                start: 186,
+                end: 191,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -160,6 +160,16 @@ impl CoreErlangGenerator {
                     _ => {}
                 }
             }
+
+            // Special case: "error:" raises an error with the given message
+            // Compiles to: erlang:error({beamtalk_error, Message})
+            if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1 {
+                write!(self.output, "call 'erlang':'error'(")?;
+                write!(self.output, "{{'beamtalk_error', ")?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "}})")?;
+                return Ok(());
+            }
         }
 
         // Generate the async message send protocol:
