@@ -12,6 +12,7 @@
 %%% | Selector | Args | Description |
 %%% |----------|------|-------------|
 %%% | `class`  | []   | Returns `'String'` |
+%%% | `respondsTo` | [Sel] | Returns true if responds to selector |
 %%% | `size`   | []   | Byte size of string |
 %%% | `length` | []   | Character count (grapheme count) |
 %%% | `isEmpty` | []  | True if empty string |
@@ -107,6 +108,7 @@ has_method(Selector) ->
 %% @doc Check if a selector is a builtin method.
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
+is_builtin('respondsTo') -> true;
 is_builtin('size') -> true;
 is_builtin('length') -> true;
 is_builtin('isEmpty') -> true;
@@ -137,6 +139,8 @@ is_builtin(_) -> false.
 
 %% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'String'};
+builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
+    {ok, has_method(Selector)};
 
 %% Size operations
 builtin_dispatch('size', [], X) -> {ok, byte_size(X)};
