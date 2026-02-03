@@ -82,3 +82,16 @@ Object subclass: Actor
   // Example: Counter spawnWith: #{value => 10}
   // Generated code: gen_server:start_link(ClassName, InitArgs, [])
   spawnWith: initArgs => // implemented by compiler
+
+  // ## Instantiation Restrictions
+  //
+  // Actors MUST use `spawn` or `spawnWith:`, not `new`.
+  // Overrides Object>>new to raise a clear error.
+
+  // Raises an error - actors must use spawn, not new
+  // (Overrides Object>>new to prevent incorrect instantiation)
+  new => // error: Actors must use spawn, not new
+
+  // Raises an error - actors must use spawnWith:, not new:
+  // (Overrides Object>>new: to prevent incorrect instantiation)
+  new: initArgs => // error: Actors must use spawnWith:, not new:
