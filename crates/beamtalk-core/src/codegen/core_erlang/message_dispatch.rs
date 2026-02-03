@@ -265,6 +265,21 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Checks if an expression is an `error:` message send.
+    ///
+    /// Since `erlang:error/1` never returns (always throws an exception),
+    /// expressions ending with `error:` should not be wrapped in reply tuples.
+    pub(super) fn is_error_message_send(expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1
+        )
+    }
+
     /// Generates the opening part of a field assignment with state threading.
     ///
     /// For `self.field := value`, generates:

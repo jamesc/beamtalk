@@ -15,7 +15,8 @@ Token { kind: FatArrow, span: Span { start: 283, end: 285 }, leading_trivia: [],
 Token { kind: Identifier("msg"), span: Span { start: 291, end: 294 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 295, end: 297 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: String("Dynamic error message"), span: Span { start: 298, end: 321 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("self"), span: Span { start: 326, end: 330 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Keyword("error:"), span: Span { start: 331, end: 337 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Identifier("msg"), span: Span { start: 338, end: 341 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 342, end: 342 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 321, end: 322 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 327, end: 331 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("error:"), span: Span { start: 332, end: 338 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("msg"), span: Span { start: 339, end: 342 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 343, end: 343 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

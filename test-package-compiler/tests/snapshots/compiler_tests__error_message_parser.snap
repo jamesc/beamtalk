@@ -106,64 +106,63 @@ Module {
                                 end: 321,
                             },
                         },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 327,
+                                        end: 331,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "error:",
+                                        span: Span {
+                                            start: 332,
+                                            end: 338,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "msg",
+                                        span: Span {
+                                            start: 339,
+                                            end: 342,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 327,
+                                end: 342,
+                            },
+                        },
                     ],
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
                         start: 265,
-                        end: 321,
+                        end: 342,
                     },
                 },
             ],
             span: Span {
                 start: 186,
-                end: 321,
+                end: 342,
             },
         },
     ],
-    expressions: [
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "self",
-                    span: Span {
-                        start: 326,
-                        end: 330,
-                    },
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "error:",
-                        span: Span {
-                            start: 331,
-                            end: 337,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Identifier(
-                    Identifier {
-                        name: "msg",
-                        span: Span {
-                            start: 338,
-                            end: 341,
-                        },
-                    },
-                ),
-            ],
-            span: Span {
-                start: 326,
-                end: 341,
-            },
-        },
-    ],
+    expressions: [],
     span: Span {
         start: 186,
-        end: 341,
+        end: 342,
     },
     leading_comments: [
         Comment {

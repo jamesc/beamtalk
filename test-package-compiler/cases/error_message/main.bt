@@ -8,5 +8,5 @@ Actor subclass: TestActor
   doError => self error: 'This is a test error'
   
   errorWithVariable => 
-    msg := 'Dynamic error message'
+    msg := 'Dynamic error message'.
     self error: msg
