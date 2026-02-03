@@ -1008,4 +1008,125 @@ impl CoreErlangGenerator {
         }
         Ok(())
     }
+
+    /// Generates the `register_class/0` function for class registration.
+    ///
+    /// This function is called automatically via `-on_load` when the module loads.
+    /// It registers the class with `beamtalk_class:start_link/2`, making the class
+    /// available as a first-class object for reflection and metaprogramming.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'register_class'/0 = fun () ->
+    ///     call 'beamtalk_class':'start_link'('Counter', ~{
+    ///         'name' => 'Counter',
+    ///         'module' => 'counter',
+    ///         'superclass' => 'Actor',
+    ///         'instance_methods' => ~{
+    ///             'increment' => ~{'arity' => 0}~,
+    ///             'getValue' => ~{'arity' => 0}~
+    ///         }~,
+    ///         'instance_variables' => ['value'],
+    ///         'class_methods' => ~{
+    ///             'spawn' => ~{'arity' => 0}~,
+    ///             'spawnWith:' => ~{'arity' => 1}~
+    ///         }~
+    ///     }~),
+    ///     'ok'
+    /// ```
+    pub(super) fn generate_register_class(&mut self, module: &Module) -> Result<()> {
+        // Skip if no class definitions
+        if module.classes.is_empty() {
+            return Ok(());
+        }
+
+        writeln!(self.output, "'register_class'/0 = fun () ->")?;
+        self.indent += 1;
+
+        // Generate registration for each class in the module
+        for (i, class) in module.classes.iter().enumerate() {
+            self.write_indent()?;
+            // Use let bindings to sequence multiple registrations
+            if i > 0 {
+                write!(self.output, "in ")?;
+            }
+            write!(
+                self.output,
+                "let _Class{} = call 'beamtalk_class':'start_link'('{}', ~{{",
+                i, class.name.name
+            )?;
+            writeln!(self.output)?;
+            self.indent += 1;
+
+            // Class name
+            self.write_indent()?;
+            writeln!(self.output, "'name' => '{}',", class.name.name)?;
+
+            // Module name
+            self.write_indent()?;
+            writeln!(self.output, "'module' => '{}',", self.module_name)?;
+
+            // Superclass
+            self.write_indent()?;
+            writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
+
+            // Instance methods
+            self.write_indent()?;
+            write!(self.output, "'instance_methods' => ~{{")?;
+            let instance_methods: Vec<_> = class
+                .methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .collect();
+
+            for (i, method) in instance_methods.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(
+                    self.output,
+                    "'{}' => ~{{'arity' => {}}}~",
+                    method.selector.name(),
+                    method.selector.arity()
+                )?;
+            }
+            writeln!(self.output, "}}~,")?;
+
+            // Instance variables
+            self.write_indent()?;
+            write!(self.output, "'instance_variables' => [")?;
+            for (i, state_decl) in class.state.iter().enumerate() {
+                if i > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "'{}'", state_decl.name.name)?;
+            }
+            writeln!(self.output, "],")?;
+
+            // Class methods
+            self.write_indent()?;
+            writeln!(self.output, "'class_methods' => ~{{")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
+            self.write_indent()?;
+            writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~")?;
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~")?;
+
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~)")?;
+        }
+
+        writeln!(self.output)?;
+        self.write_indent()?;
+        writeln!(self.output, "in 'ok'")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
 }
