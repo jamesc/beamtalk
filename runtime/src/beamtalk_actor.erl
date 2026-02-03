@@ -270,6 +270,35 @@ make_self(State) ->
 -spec dispatch(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 dispatch(Selector, Args, Self, State) ->
+    %% First, check for built-in Object reflection methods
+    case Selector of
+        respondsTo when length(Args) =:= 1 ->
+            %% Check if object responds to a selector
+            [CheckSelector] = Args,
+            Methods = maps:get('__methods__', State),
+            Result = maps:is_key(CheckSelector, Methods),
+            {reply, Result, State};
+        instVarNames when Args =:= [] ->
+            %% Return list of instance variable names (excluding internals)
+            AllKeys = maps:keys(State),
+            InstVarNames = [K || K <- AllKeys,
+                            not lists:member(K, ['__class__', '__class_mod__', '__methods__'])],
+            {reply, InstVarNames, State};
+        instVarAt when length(Args) =:= 1 ->
+            %% Read instance variable by name
+            [Name] = Args,
+            Result = maps:get(Name, State, nil),
+            {reply, Result, State};
+        _ ->
+            %% Not a built-in method, check user-defined methods
+            dispatch_user_method(Selector, Args, Self, State)
+    end.
+
+%% @private
+%% @doc Dispatch to user-defined methods after built-in checks.
+-spec dispatch_user_method(atom(), list(), #beamtalk_object{}, map()) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
+dispatch_user_method(Selector, Args, Self, State) ->
     Methods = maps:get('__methods__', State),
     case maps:find(Selector, Methods) of
         {ok, Fun} when is_function(Fun, 4) ->

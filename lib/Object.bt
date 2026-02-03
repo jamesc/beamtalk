@@ -111,18 +111,49 @@ ProtoObject subclass: Object
   // Subclasses should override to provide detailed info
   describe => 'an Object'
 
-  // ## Reflection Protocol (TODO - not yet fully implemented)
+  // ## Reflection Protocol
   //
   // These messages enable runtime introspection of object structure.
+  // Currently implemented for actors; primitive support planned (see BT-163, BT-164).
+  //
+  // Examples:
+  // ```beamtalk
+  // counter respondsTo: #increment
+  // // => true
+  //
+  // counter instVarNames
+  // // => [#value]
+  //
+  // counter instVarAt: #value
+  // // => 0
+  // ```
   
-  // Check if this object responds to a given selector (TODO)
-  // respondsTo: selector => // implemented by compiler
+  // Check if this object responds to a given selector
+  // 
+  // For actors: Queries the method table in the object's state
+  // For primitives: Planned to check the primitive's method table (not yet implemented - see BT-163)
+  //
+  // Arguments:
+  // - selector: Symbol representing the message name (e.g., #increment)
+  //
+  // Returns: true if object understands the message, false otherwise
+  respondsTo: selector => // implemented by compiler
   
-  // Returns list of instance variable names (TODO)
-  // instVarNames => // implemented by compiler
+  // Returns list of instance variable names
+  //
+  // For actors: Extracts field names from the state map (excluding internals)
+  // For primitives: Planned to return empty list (not yet implemented - see BT-164)
+  //
+  // Returns: Array of symbols representing instance variable names
+  instVarNames => // implemented by compiler
   
-  // Read an instance variable by name (TODO)
-  // instVarAt: name => // implemented by compiler
-  
-  // Write an instance variable by name (TODO)
-  // instVarAt: name put: value => // implemented by compiler
+  // Read an instance variable by name
+  //
+  // For actors: Reads field from the state map
+  // For primitives: Planned to return nil (not yet implemented - see BT-164)
+  //
+  // Arguments:
+  // - name: Symbol representing the instance variable name
+  //
+  // Returns: Current value of the instance variable, or nil if not found
+  instVarAt: name => // implemented by compiler

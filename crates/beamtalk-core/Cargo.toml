@@ -19,14 +19,12 @@ ecow.workspace = true
 camino.workspace = true
 thiserror.workspace = true
 miette.workspace = true
-chumsky = { version = "1.0.0-alpha.8", optional = true }
 
 [dev-dependencies]
 insta.workspace = true
 
 [features]
 default = []
-chumsky-parser = ["chumsky"]
 
 [lints]
 workspace = true
