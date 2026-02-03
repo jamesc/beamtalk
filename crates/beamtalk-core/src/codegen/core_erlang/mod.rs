@@ -408,21 +408,27 @@ impl CoreErlangGenerator {
     /// # Implementation Note
     ///
     /// This is a simplified check that only looks at the direct superclass.
-    /// It treats any superclass other than "Object" as an actor to maintain
-    /// backward compatibility. Full implementation should traverse the inheritance
-    /// chain in semantic analysis.
+    /// The stdlib `Actor` root class is explicitly treated as an actor, even though
+    /// it directly subclasses `Object`, to avoid misclassifying it as a value type.
+    /// Full implementation should traverse the inheritance chain in semantic analysis.
     ///
     /// # Returns
     ///
     /// - `true` if class inherits from Actor or other non-Object classes (actors by default)
-    /// - `false` if class inherits directly from Object
+    /// - `false` if class inherits directly from Object (except for the Actor root)
     /// - `true` if module contains no class (backward compatibility for REPL)
     fn is_actor_class(module: &Module) -> bool {
         // Check if the first class in the module is an actor
         // TODO(BT-213): Handle modules with multiple classes
         if let Some(class) = module.classes.first() {
+            // Special case: The stdlib Actor class itself (`Object subclass: Actor`)
+            // must be treated as an actor, not a value type
+            if class.name.name.as_str() == "Actor" {
+                return true;
+            }
+
             // For BT-213 MVP: Only classes that directly inherit from Object are value types
-            // Everything else (Actor, Counter, Array, etc.) is treated as an actor
+            // Everything else (Counter, Array, LoggingCounter, etc.) is treated as an actor
             // TODO(BT-213): Full inheritance chain resolution in semantic analysis
             class.superclass.name.as_str() != "Object"
         } else {
@@ -675,7 +681,9 @@ impl CoreErlangGenerator {
 
         // Generate method body expressions
         // For value types, there's no state threading - they're immutable
-        // TODO: Need to handle self.field references by extracting from Self map
+        // TODO(BT-213): Consider adding immutable update syntax (e.g., withX: newX) in future
+        // Currently, field assignments are rejected at codegen (see generate_field_assignment)
+        // Field reads work via CodeGenContext routing to Self parameter
         for (i, expr) in method.body.iter().enumerate() {
             if i > 0 {
                 self.write_indent()?;

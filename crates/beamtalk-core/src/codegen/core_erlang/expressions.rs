@@ -70,9 +70,12 @@ impl CoreErlangGenerator {
     /// Generates code for an identifier reference.
     ///
     /// Handles three cases:
-    /// 1. Reserved keywords (`true`, `false`, `nil`) → Core Erlang atoms
+    /// 1. Reserved keywords (`true`, `false`, `nil`, `self`) → Core Erlang atoms/variables
     /// 2. Bound variables (in scope) → Core Erlang variable name
-    /// 3. Unbound identifiers → Field access from actor state via `maps:get/2`
+    /// 3. Unbound identifiers → Field access via `maps:get/2` from context-appropriate variable:
+    ///    - **Actor context**: `State` or `StateAcc` (with threading)
+    ///    - **`ValueType` context**: `Self` parameter
+    ///    - **Repl context**: `State` from bindings
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
         // Handle special reserved identifiers as atoms
         match id.name.as_str() {
@@ -213,11 +216,27 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The assignment returns the assigned value (Smalltalk semantics).
+    ///
+    /// # BT-213: Value Type Restriction
+    ///
+    /// Field assignments are not supported in value type methods because value types
+    /// are immutable. This function will return an error if called in `ValueType` context.
+    /// Use semantic analysis to prevent field assignments in value types at compile time.
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
     ) -> Result<()> {
+        // BT-213: Reject field assignments in value type context
+        if matches!(self.context, super::CodeGenContext::ValueType) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "field assignment 'self.{field_name} := ...' in value type method (value types are immutable)"
+                ),
+                location: "value type method body".to_string(),
+            });
+        }
+
         let val_var = self.fresh_temp_var("Val");
 
         // Capture current state BEFORE generating value expression,
