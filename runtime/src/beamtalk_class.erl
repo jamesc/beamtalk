@@ -111,7 +111,10 @@
 %% @doc Start a class process with full options.
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassName, ClassInfo) ->
-    gen_server:start_link(?MODULE, {ClassName, ClassInfo}, []).
+    %% Use gen_server's built-in registration to avoid race conditions
+    %% This atomically checks and registers the name
+    RegName = registry_name(ClassName),
+    gen_server:start_link({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
 %% @doc Start a class process with minimal info (for testing).
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.
@@ -223,32 +226,24 @@ init({ClassName, ClassInfo}) ->
     %% Ensure pg is started (needed for class registry)
     ensure_pg_started(),
     
-    %% Register with well-known name for lookup FIRST
-    %% (do this before pg:join to avoid brief membership if registration fails)
-    RegName = registry_name(ClassName),
-    case catch register(RegName, self()) of
-        true ->
-            %% Registration successful - now join pg group
-            ok = pg:join(beamtalk_classes, self()),
-            
-            %% Build state
-            State = #class_state{
-                name = ClassName,
-                module = maps:get(module, ClassInfo, ClassName),
-                superclass = maps:get(superclass, ClassInfo, none),
-                instance_methods = maps:get(instance_methods, ClassInfo, #{}),
-                class_methods = maps:get(class_methods, ClassInfo, #{}),
-                instance_variables = maps:get(instance_variables, ClassInfo, []),
-                class_variables = maps:get(class_variables, ClassInfo, #{}),
-                method_source = maps:get(method_source, ClassInfo, #{}),
-                before_methods = maps:get(before_methods, ClassInfo, #{}),
-                after_methods = maps:get(after_methods, ClassInfo, #{})
-            },
-            {ok, State};
-        {'EXIT', {badarg, _}} ->
-            %% Registration failed - name already taken
-            {stop, {already_registered, RegName}}
-    end.
+    %% Name registration is handled by gen_server:start_link({local, Name}, ...)
+    %% Join pg group for all_classes enumeration
+    ok = pg:join(beamtalk_classes, self()),
+    
+    %% Build state
+    State = #class_state{
+        name = ClassName,
+        module = maps:get(module, ClassInfo, ClassName),
+        superclass = maps:get(superclass, ClassInfo, none),
+        instance_methods = maps:get(instance_methods, ClassInfo, #{}),
+        class_methods = maps:get(class_methods, ClassInfo, #{}),
+        instance_variables = maps:get(instance_variables, ClassInfo, []),
+        class_variables = maps:get(class_variables, ClassInfo, #{}),
+        method_source = maps:get(method_source, ClassInfo, #{}),
+        before_methods = maps:get(before_methods, ClassInfo, #{}),
+        after_methods = maps:get(after_methods, ClassInfo, #{})
+    },
+    {ok, State}.
 
 handle_call({new, Args}, _From, #class_state{module = Module} = State) ->
     %% Spawn new instance via the class's behavior module
