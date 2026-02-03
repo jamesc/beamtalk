@@ -1,0 +1,22 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 186, end: 191 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test error: message compilation"), Whitespace("\n"), LineComment("// The error: message should compile to erlang:error({beamtalk_error, Message})"), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 192, end: 201 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("TestActor"), span: Span { start: 202, end: 211 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("doError"), span: Span { start: 214, end: 221 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 222, end: 224 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 225, end: 229 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("error:"), span: Span { start: 230, end: 236 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("This is a test error"), span: Span { start: 237, end: 259 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("errorWithVariable"), span: Span { start: 265, end: 282 }, leading_trivia: [Whitespace("\n  \n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 283, end: 285 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("msg"), span: Span { start: 291, end: 294 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 295, end: 297 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Dynamic error message"), span: Span { start: 298, end: 321 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 321, end: 322 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 327, end: 331 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("error:"), span: Span { start: 332, end: 338 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("msg"), span: Span { start: 339, end: 342 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 343, end: 343 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

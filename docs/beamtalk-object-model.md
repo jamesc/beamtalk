@@ -95,6 +95,8 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |### Value Types vs Actors
 |
+|**Status:** ✅ **Implemented** (BT-213) - Working in compiler as of 2026-02-03
+|
 |Beamtalk distinguishes between **value types** and **actors**, similar to Swift's `struct` vs `actor`:
 |
 || | Value Type (Object subclass) | Actor |
@@ -181,12 +183,17 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |<cite index="2-4,2-5,2-6">In Smalltalk, the root of the inheritance hierarchy is traditionally the class Object. In modern Smalltalk (e.g., Pharo), ProtoObject is the true root, but you will normally not pay attention to this class. ProtoObject encapsulates the minimal set of messages that all objects must have.</cite>
 |
 |```
-|ProtoObject (true root, minimal behavior)
-|  └─ Object (common messages, reflection, nil testing)
-|       └─ (user-defined classes...)
+|ProtoObject (minimal root - identity, DNU)
+|  └─ Object (value types - reflection, nil testing)
+|       ├─ Integer, String, etc. (sealed primitives)
+|       ├─ Point, Color, etc. (user value types) [instantiation TBD]
+|       └─ Actor (process-based - spawn, mailbox)
+|            └─ (user actors...)
 |```
 |
-|Beamtalk adapts this by adding **Actor** as the process-based layer, with primitives and user value types inheriting from Object.
+|Beamtalk places primitives, value types, and Actor all under Object, since they all share the common protocol (nil testing, reflection, etc.).
+|
+|**Note:** Universal `new` method for value type instantiation is planned but not yet implemented. Currently only `spawn`/`spawnWith:` are supported for Actor classes.
 |
 |### Key Points
 |

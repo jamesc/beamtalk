@@ -9,31 +9,45 @@
 // contracts and expected behavior for users.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Object - Common root class for most Beamtalk classes
+// Object - Root class for value types in Beamtalk
 //
 // Object inherits from ProtoObject and adds the standard protocol that almost
-// all objects need: reflection, nil testing, debugging, and comparison. Most
-// user classes should inherit from Actor (which inherits from Object) rather
-// than from Object directly.
+// all objects need: reflection, nil testing, debugging, and comparison.
+//
+// Object is the parent of:
+// - **Primitives** (Integer, String, Float, Boolean, etc.) - sealed, no process
+// - **User value types** (Point, Color, Config, etc.) - no process
+// - **Actor** - process-based objects with mailbox and spawn
 //
 // ## Class Hierarchy
 //
 // ```
-// ProtoObject (minimal root, identity and fallback)
-//   └─ Object (reflection, nil testing, debugging)
-//        └─ Actor (async-first process-based objects)
-//             └─ (user classes: Counter, Worker, etc.)
+// ProtoObject (minimal root - identity, DNU)
+//   └─ Object (value types - new, reflection, nil testing)
+//        ├─ Integer, String, Float, etc. (sealed primitives)
+//        ├─ Point, Color, Config, etc. (user value types)
+//        └─ Actor (process-based objects - spawn, mailbox)
+//             └─ Counter, Worker, etc. (user actors)
 // ```
 //
 // ## When to Inherit from Object
 //
 // Use Object directly for:
-// - **Non-concurrent utility classes** (rare in Beamtalk)
-// - **Value objects** that don't need process isolation
-// - **Data structures** used across processes
+// - **Value types** without concurrency needs (Point, Rectangle, Color)
+// - **Data structures** that are copied when passed (Config, DTO)
+// - **Immutable data** that doesn't need process isolation
 //
 // Most application code should inherit from Actor instead, which adds
 // spawning, supervision, and async messaging on top of Object.
+//
+// ## Value Types vs Actors
+//
+// - **Object subclass:** No process, value-style semantics
+//   (Note: Universal `new` instantiation is not yet implemented - tracked in BT-221)
+// - **Actor subclass:** BEAM process, use `spawn` to instantiate
+//
+// Both use the same message-sending syntax - the difference is in state management
+// and concurrency. See Actor.bt for process-based objects.
 //
 // ## Core Protocols
 //
@@ -157,3 +171,41 @@ ProtoObject subclass: Object
   //
   // Returns: Current value of the instance variable, or nil if not found
   instVarAt: name => // implemented by compiler
+
+  // ## Instantiation Protocol (Class Methods)
+  //
+  // These class messages create new instances of value types.
+  // Value types are plain Erlang terms (maps/records) with no process.
+  //
+  // **IMPORTANT:** These only work for Object subclasses (value types).
+  // Actor subclasses must use `spawn` instead.
+
+  // Create a new instance with default field values
+  //
+  // This is a class method that creates a value type instance.
+  // All fields are initialized to their default values (or nil if no default).
+  //
+  // Example:
+  // ```beamtalk
+  // Point new          // => Point instance with default x, y
+  // ```
+  //
+  // Returns: New instance of this class
+  new => // implemented by compiler
+
+  // Create a new instance with initialization arguments
+  //
+  // This is a class method that creates a value type instance with custom
+  // initial field values. Arguments should be a dictionary mapping field
+  // names to values.
+  //
+  // Example:
+  // ```beamtalk
+  // Point new: #{x => 3, y => 4}   // => Point with x=3, y=4
+  // ```
+  //
+  // Arguments:
+  // - initArgs: Dictionary of field names to initial values
+  //
+  // Returns: New instance of this class with specified field values
+  new: initArgs => // implemented by compiler
