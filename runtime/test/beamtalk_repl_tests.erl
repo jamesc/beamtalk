@@ -340,9 +340,13 @@ format_response_type_coverage_test() ->
 
 %%% Server Lifecycle Tests
 
+%% Helper function to generate a random test port to avoid conflicts
+test_port() ->
+    50000 + rand:uniform(10000).
+
 server_starts_and_stops_test() ->
     %% Start the server with a random high port to avoid conflicts
-    Port = 50000 + rand:uniform(10000),
+    Port = test_port(),
     {ok, Pid} = beamtalk_repl:start_link(Port),
     ?assert(is_process_alive(Pid)),
     ok = beamtalk_repl:stop(Pid),
@@ -359,27 +363,27 @@ server_starts_with_default_port_test() ->
     ok = beamtalk_repl:stop(Pid).
 
 server_starts_with_options_test() ->
-    Port = 50000 + rand:uniform(10000),
+    Port = test_port(),
     Options = #{daemon_socket_path => "/tmp/test.sock"},
     {ok, Pid} = beamtalk_repl:start_link(Port, Options),
     ?assert(is_process_alive(Pid)),
     ok = beamtalk_repl:stop(Pid).
 
 get_port_returns_correct_port_test() ->
-    Port = 50000 + rand:uniform(10000),
+    Port = test_port(),
     {ok, Pid} = beamtalk_repl:start_link(Port),
     ?assertEqual(Port, beamtalk_repl:get_port(Pid)),
     ok = beamtalk_repl:stop(Pid).
 
 clear_bindings_test() ->
-    Port = 50000 + rand:uniform(10000),
+    Port = test_port(),
     {ok, Pid} = beamtalk_repl:start_link(Port),
     %% Clear bindings should succeed
     ok = beamtalk_repl:clear_bindings(Pid),
     ok = beamtalk_repl:stop(Pid).
 
 get_bindings_test() ->
-    Port = 50000 + rand:uniform(10000),
+    Port = test_port(),
     {ok, Pid} = beamtalk_repl:start_link(Port),
     %% Initially should have empty bindings
     Bindings = beamtalk_repl:get_bindings(Pid),
