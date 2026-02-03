@@ -385,3 +385,10 @@ perform_with_unary_message_on_integer_test() ->
     %% -5 perform: #abs  => 5
     Result = beamtalk_integer:dispatch('perform', ['abs'], -5),
     ?assertEqual(5, Result).
+
+perform_withArgs_invalid_args_type_on_primitive_test() ->
+    %% Test perform:withArgs: with non-list ArgList on primitive
+    %% Should raise type_error, not does_not_understand
+    %% This ensures consistency with actor behavior
+    ?assertError({type_error, list, 42}, 
+                 beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).

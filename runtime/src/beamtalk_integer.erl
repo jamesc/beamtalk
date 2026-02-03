@@ -149,6 +149,10 @@ builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X)
   when is_atom(TargetSelector), is_list(ArgList) ->
     %% Recursive dispatch returns {ok, Result} or not_found
     builtin_dispatch(TargetSelector, ArgList, X);
+builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X) 
+  when not is_list(ArgList) ->
+    %% Type error: ArgList must be a list (consistent with actor behavior)
+    error({type_error, list, ArgList});
 
 %% Conversion
 builtin_dispatch('asString', [], X) -> {ok, integer_to_binary(X)};

@@ -97,6 +97,11 @@ builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
 builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
   when is_atom(TargetSelector), is_list(ArgList) ->
     builtin_dispatch(TargetSelector, ArgList, X);
+builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
+  when not is_list(ArgList) ->
+    %% Type error: ArgList must be a list (consistent with actor behavior)
+    error({type_error, list, ArgList});
+
 
 %% Size
 builtin_dispatch('size', [], X) -> {ok, tuple_size(X)};
