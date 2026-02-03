@@ -216,7 +216,7 @@ pub fn generate(module: &Module) -> Result<String> {
 /// # BT-213: Value Types vs Actors
 ///
 /// Routes to different code generators based on class hierarchy:
-/// - **Actor subclasses** → `generate_actor_module` (gen_server with mailbox)
+/// - **Actor subclasses** → `generate_actor_module` (`gen_server` with mailbox)
 /// - **Object subclasses** → `generate_value_type_module` (plain Erlang maps)
 ///
 /// # Errors
@@ -261,11 +261,11 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 ///
 /// Determines how expressions are compiled based on the execution environment:
 /// - **Actor**: Process-based with mutable state, async messaging
-/// - **ValueType**: Plain maps with immutable semantics, sync function calls
+/// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
 /// - **Repl**: Interactive evaluation with bindings map
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodeGenContext {
-    /// Generating code for an actor class (gen_server with async messaging).
+    /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
     /// - Method calls: Async via `gen_server:cast` with futures
@@ -319,7 +319,7 @@ pub(super) struct CoreErlangGenerator {
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
-    /// BT-213: Code generation context (Actor, ValueType, or Repl).
+    /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
 }
@@ -402,7 +402,7 @@ impl CoreErlangGenerator {
 
     /// BT-213: Determines if a class is an actor (process-based) or value type (plain term).
     ///
-    /// **Actor classes:** Inherit from Actor or its subclasses. Generate gen_server code.
+    /// **Actor classes:** Inherit from Actor or its subclasses. Generate `gen_server` code.
     /// **Value types:** Inherit from Object (but not Actor). Generate plain Erlang maps/records.
     ///
     /// # Implementation Note
@@ -563,7 +563,7 @@ impl CoreErlangGenerator {
             // MethodKind is about method combination (Primary, Before, After, Around)
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.to_erlang_atom();
-            exports.push(format!("'{}'/{}", mangled, arity));
+            exports.push(format!("'{mangled}'/{arity}"));
         }
 
         // Module header
@@ -657,10 +657,10 @@ impl CoreErlangGenerator {
         let arity = method.parameters.len() + 1; // +1 for Self
 
         // Function signature: 'methodName'/Arity = fun (Self, Param1, Param2, ...) ->
-        write!(self.output, "'{}'/{}= fun (Self", mangled, arity)?;
+        write!(self.output, "'{mangled}'/{arity}= fun (Self")?;
         for param in &method.parameters {
             let core_var = variable_context::VariableContext::to_core_var(&param.name);
-            write!(self.output, ", {}", core_var)?;
+            write!(self.output, ", {core_var}")?;
         }
         writeln!(self.output, ") ->")?;
 
