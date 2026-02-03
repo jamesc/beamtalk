@@ -38,38 +38,68 @@ But the implementation differs:
 
 ## Class Hierarchy
 
-Beamtalk's class hierarchy distinguishes **value types** from **actors**, similar to Swift's `struct` vs `actor`:
+Beamtalk's class hierarchy distinguishes **value types** (which inherit from Object) from **actors** (which inherit from Actor), similar to Swift's `struct` vs `actor`:
 
 ```
-ProtoObject (minimal - identity, DNU)
-  └─ Object (common behavior - nil testing, printing, reflection)
-       ├─ Integer, String, etc. (primitives - sealed value types)
-       ├─ Point, Color, etc.    (user value types - no process)
-       └─ Actor                 (process-based)
+ProtoObject (minimal root - identity, DNU)
+  └─ Object (value types - reflection, nil testing)
+       ├─ Integer, String, etc. (sealed primitives)
+       ├─ Point, Color, etc.    (user value types) [instantiation TBD]
+       └─ Actor                 (process-based - spawn, mailbox)
             └─ Counter, MyService, etc. (user actors)
 ```
 
+**Key insight:** Object is the root of most instances (primitives, user value types, and actors). Only minimal proxy classes inherit directly from ProtoObject. Actor extends Object to add process-based concurrency.
+
+**Note:** Universal `new` method for value type instantiation is planned but not yet implemented. Currently only `spawn`/`spawnWith:` are supported for Actor classes. Value type instantiation mechanism is tracked in issue BT-221.
+
+### Choosing Your Base Class
+
+**Decision tree:**
+
+1. **Do you need custom message forwarding or minimal wrapper?**
+   - ✅ Inherit from **ProtoObject** (rare - only for proxies and foreign objects)
+   - ❌ Continue to step 2
+
+2. **Does your class need process isolation and concurrency?**
+   - ✅ Inherit from **Actor** (most application code - use `spawn` to create instances)
+   - ❌ Inherit from **Object** (value types like Point, Color, Config - instantiation TBD)
+
+**Examples:**
+
+| Class | Base | Reason |
+|-------|------|--------|
+| `Counter` | Actor | Needs process, mutable state, concurrent access |
+| `Worker` | Actor | Background task with lifecycle |
+| `Point` | Object | Immutable value, no concurrency |
+| `Config` | Object | Data structure, copied when passed |
+| `Proxy` | ProtoObject | Custom message forwarding |
+
 ### Value Types vs Actors
+
+Both value types and actors inherit from Object, but Actor adds process-based concurrency:
 
 | | Value Type (`Object subclass:`) | Actor (`Actor subclass:`) |
 |---|---|---|
+| **Inherits from** | Object | Object (via Actor) |
 | **Process** | ❌ No | ✅ Yes (BEAM process) |
-| **Instantiate** | `Point new` | `Counter spawn` |
+| **Instantiate** | TBD (not yet implemented) | `Counter spawn` |
 | **State** | In caller's heap | In own process |
 | **Pass between actors** | Copied | Send pid reference |
 | **Thread safety** | Caller's responsibility | Mailbox serializes |
-| **`new` method** | ✅ Creates instance | ❌ Error (use `spawn`) |
 
-**Value types** are great for: Point, Rectangle, Color, Config, DTOs
-**Actors** are great for: Services, Agents, Stateful entities
+**Value types** (Object subclass) are great for: Point, Rectangle, Color, Config, DTOs  
+**Actors** (Actor subclass) are great for: Services, Agents, Stateful entities
+
+**Note:** The examples below show the *intended* design. Universal instantiation for value types (`Point new`) is not yet implemented in the compiler. Currently only Actor classes support `spawn`/`spawnWith:`. See issue BT-221 for value type instantiation.
 
 ```beamtalk
-// Value type - no process, uses new
+// Value type - no process, value semantics (instantiation TBD)
 Object subclass: Point
   state: x, y
   + other => Point new x: (self.x + other x) y: (self.y + other y)
 
-p := Point new x: 3 y: 4   // ✅ Value type uses new
+// p := Point new x: 3 y: 4   // ⚠️  Not yet implemented
 
 // Actor - has process, uses spawn  
 Actor subclass: Counter
@@ -77,10 +107,10 @@ Actor subclass: Counter
   increment => self.count := self.count + 1
 
 c := Counter spawn         // ✅ Actor uses spawn
-c := Counter new           // ❌ Error: Actors must use spawn
+// c := Counter new        // ⚠️  Not yet implemented (will error when value type instantiation added)
 ```
 
-Both use the same message-sending syntax — the difference is in state management.
+Both use the same message-sending syntax — the difference is in state management and instantiation.
 
 See [beamtalk-object-model.md](../docs/beamtalk-object-model.md) for the full design rationale.
 
@@ -133,11 +163,16 @@ For normal classes, inherit from Object (value types) or Actor (processes).
 
 ### Object (`Object.bt`)
 
-Common root class for most Beamtalk classes. Object inherits from ProtoObject and adds reflection, nil testing, and debugging capabilities that almost all objects need.
+Root class for value types and parent of Actor. Object inherits from ProtoObject and adds reflection, nil testing, and debugging capabilities that almost all objects need.
 
 **Inheritance:**
-- Value types (Point, Color, Config) inherit from Object directly
+- Value types (primitives like Integer, String, and user types like Point, Color) inherit from Object directly
 - Actors (Counter, Worker, Services) inherit from Actor, which inherits from Object
+
+**Role in hierarchy:**
+- Object is the parent of primitives, user value types, and Actor
+- Value type instantiation mechanism is not yet implemented (tracked in BT-221)
+- Actor provides `spawn` method for creating process-based instances
 
 **Key messages:**
 
@@ -161,25 +196,34 @@ Common root class for most Beamtalk classes. Object inherits from ProtoObject an
 
 **Usage:**
 ```beamtalk
-// Value type - no process, uses new
+// Value type - no process, value semantics
 Object subclass: Point
   state: x, y
   
   + other => Point new x: (self.x + other x) y: (self.y + other y)
   distance => (self.x squared + self.y squared) sqrt
 
-p := Point new x: 3 y: 4
-p distance  // => 5.0
+// p := Point new x: 3 y: 4  // ⚠️  Not yet implemented
+// p distance                 // Future: will work when value type instantiation added
 ```
+
+**Note:** Value type instantiation is not yet implemented. See issue BT-221.
 
 ### Actor (`Actor.bt`)
 
-Base class for process-based objects. Every Actor instance is a BEAM process with its own mailbox.
+Base class for process-based objects. Every Actor instance is a BEAM process with its own mailbox. Actor inherits from Object and adds concurrency features.
+
+**Inheritance:** `ProtoObject → Object → Actor`
+
+**Key differences from Object:**
+- Actor instances are BEAM processes with their own state and mailbox
+- Use `spawn` to create instances
+- Value type instantiation is not yet implemented
 
 **Key messages:**
-- `spawn` - Create new instance (NOT `new`)
-- `spawnWith:` - Create with initialization arguments
-- All Object messages (inherited)
+- `spawn` - Create new instance (class-side message)
+- `spawnWith:` - Create with initialization arguments (class-side message)
+- All Object messages (inherited: isNil, notNil, inspect, etc.)
 
 **Usage:**
 ```beamtalk
@@ -193,7 +237,7 @@ counter := Counter spawn   // ✅ Actors use spawn
 counter increment
 value := counter getValue
 
-counter := Counter new     // ❌ Error: Actors must use spawn
+// counter := Counter new  // ⚠️  Not yet implemented
 ```
 
 ### Boolean (`True.bt`, `False.bt`)
