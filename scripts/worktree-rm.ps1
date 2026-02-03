@@ -69,7 +69,10 @@ function Get-MainRepoRoot {
 
 # Get worktree path for a branch
 function Get-WorktreePath {
-    param([string]$BranchName)
+    param(
+        [string]$BranchName,
+        [string]$WorktreeRoot
+    )
     
     $worktrees = git worktree list --porcelain 2>$null
     $wtPath = $null
@@ -78,6 +81,11 @@ function Get-WorktreePath {
             $wtPath = $matches[1]
         }
         if ($line -match "^branch\s+refs/heads/(.+)" -and $matches[1] -eq $BranchName) {
+            # Convert container path to host path if needed
+            if ($wtPath -match "^/workspaces/(.+)$") {
+                $folderName = $matches[1]
+                $wtPath = Join-Path $WorktreeRoot $folderName
+            }
             return $wtPath
         }
     }
@@ -152,11 +160,14 @@ Write-Host "🛑 Stopping worktree for branch: $Branch" -ForegroundColor Cyan
 $mainRepo = Get-MainRepoRoot
 Write-Host "📁 Main repo: $mainRepo" -ForegroundColor Gray
 
+# Worktrees are siblings of main repo
+$worktreeRoot = Split-Path $mainRepo -Parent
+
 # Work from main repo
 Push-Location $mainRepo
 try {
     # Find the worktree path
-    $worktreePath = Get-WorktreePath -BranchName $Branch
+    $worktreePath = Get-WorktreePath -BranchName $Branch -WorktreeRoot $worktreeRoot
     
     if (-not $worktreePath) {
         Write-Host "⚠️  No worktree found for branch: $Branch" -ForegroundColor Yellow

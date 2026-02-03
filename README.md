@@ -199,6 +199,13 @@ Reloaded
 - **Rust** (latest stable) — For building the compiler  
 - **Erlang/OTP 26+** — With `erlc` on PATH
 
+#### Required Environment Variables
+
+| Variable | Purpose | How to Set |
+|----------|---------|------------|
+| `GH_TOKEN` | GitHub authentication for devcontainers | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
+| `LINEAR_API_TOKEN` | Linear issue tracking | Get from [Linear API settings](https://linear.app/settings/api) |
+
 #### Optional: Devcontainer CLI
 
 For worktree-based parallel development, install the devcontainer CLI:
@@ -270,33 +277,25 @@ Git worktrees enable **multiple Copilot agents working in parallel** on differen
 
 **Required for worktree devcontainers:**
 
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `BEAMTALK_MAIN_GIT_PATH` | Path to main `.git` directory (mounted in containers) | `C:\Users\you\source\beamtalk\.git` (Windows)<br>`/home/you/source/beamtalk/.git` (Linux) |
+| Variable | Purpose | How to Set |
+|----------|---------|------------|
+| `GH_TOKEN` | GitHub authentication | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
 
-**Optional for GitHub/Linear integration:**
+**Optional for Linear integration:**
 
 | Variable | Purpose | Where to Set |
 |----------|---------|--------------|
-| `GH_TOKEN` | GitHub authentication (for `gh` CLI and API) | Host environment |
-| `GITHUB_TOKEN` | Alias for `GH_TOKEN` | Auto-set if `GH_TOKEN` exists |
 | `LINEAR_API_TOKEN` | Linear issue tracking | Host environment |
-| `GIT_USER_NAME` | Git commit author name | Host environment or `.env` |
-| `GIT_USER_EMAIL` | Git commit author email | Host environment or `.env` |
 
 **Setting environment variables permanently (Windows):**
 
 ```powershell
-# Required for worktrees
-setx BEAMTALK_MAIN_GIT_PATH "C:\Users\you\source\beamtalk\.git"
+# GitHub: authenticate first, then set GH_TOKEN
+gh auth login
+$env:GH_TOKEN = (gh auth token)  # Set for current session
+# Or add to your PowerShell profile for persistence
 
-# Optional: GitHub/Linear integration
-setx GIT_USER_NAME "Your Name"
-setx GIT_USER_EMAIL "you@example.com"
-
-# For tokens, use secure methods instead of setx:
-# - GitHub: Use `gh auth login` (recommended)
-# - Linear: Store in password manager, retrieve at runtime
+# Linear: store securely, retrieve at runtime
 ```
 
 > **Note:** Linux/Mac instructions will be added once the scripts are tested.

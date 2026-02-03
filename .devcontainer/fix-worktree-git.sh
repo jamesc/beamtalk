@@ -105,9 +105,8 @@ if [ -f "$GIT_FILE" ]; then
         fi
     else
         log "ERROR: Main .git not mounted at /workspaces/.beamtalk-git"
-        log "Make sure BEAMTALK_MAIN_GIT_PATH is set on the host to your main repo's .git directory"
-        log "  Windows: setx BEAMTALK_MAIN_GIT_PATH \"C:\\Users\\you\\source\\beamtalk\\.git\""
-        log "  Linux/Mac: export BEAMTALK_MAIN_GIT_PATH=\"\$HOME/source/beamtalk/.git\""
+        log "The worktree script should have mounted this automatically."
+        log "Check that the devcontainer was started via worktree-new.ps1"
         exit 1
     fi
 elif [ -d "$GIT_FILE" ]; then
