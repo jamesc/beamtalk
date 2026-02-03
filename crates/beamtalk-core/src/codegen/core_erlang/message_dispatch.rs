@@ -87,6 +87,12 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // Special case: Object methods - reflection and introspection
+        // respondsTo:, instVarNames, instVarAt: enable runtime introspection
+        if let Some(result) = self.try_generate_object_message(receiver, selector, arguments)? {
+            return Ok(result);
+        }
+
         // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
         // These are synchronous function calls, not async actor messages
         if let Some(result) = self.try_generate_block_message(receiver, selector, arguments)? {
