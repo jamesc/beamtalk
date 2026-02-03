@@ -11,13 +11,15 @@
 // VALUE TYPE INSTANTIATION
 // ===========================================================================
 
+// TODO(BT-213): Enable once class message sends work in REPL
 // Create a Point with default values
-Point new
-// => #{__class__ => Point, x => 0, y => 0}
+// Point new
+// // => #{__class__ => Point, x => 0, y => 0}
 
+// TODO(BT-213): Enable once keyword message with map literal works
 // Create a Point with explicit values
-Point new: #{x => 3, y => 4}
-// => #{__class__ => Point, x => 3, y => 4}
+// Point new: #{x => 3, y => 4}
+// // => #{__class__ => Point, x => 3, y => 4}
 
 // ===========================================================================
 // ACCESSING FIELDS

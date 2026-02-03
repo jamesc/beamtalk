@@ -114,8 +114,17 @@ impl CoreErlangGenerator {
                             }
                         }
                         super::CodeGenContext::Repl => {
-                            // REPL uses State from bindings
-                            "State".to_string()
+                            // REPL uses State from bindings, but StateAcc in loops
+                            // BT-153: Use StateAcc when inside loop body
+                            if self.in_loop_body {
+                                if self.state_version() == 0 {
+                                    "StateAcc".to_string()
+                                } else {
+                                    format!("StateAcc{}", self.state_version())
+                                }
+                            } else {
+                                self.current_state_var()
+                            }
                         }
                     };
                     write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
