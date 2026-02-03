@@ -85,7 +85,6 @@ is_builtin(_) -> false.
 -spec builtin_dispatch(atom(), list(), boolean()) -> {ok, term()} | not_found.
 
 %% Reflection
-%% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'Boolean'};
 builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
     {ok, has_method(Selector)};
