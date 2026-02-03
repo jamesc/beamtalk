@@ -704,9 +704,9 @@ dispatch(Selector, Args, State) ->
 1. Add special-case handling in `dispatch/4` for `class`, `respondsTo:`, etc.
 2. Generate `has_method/1` function in each class module
 
-#### Phase 4: Remove Compatibility Layer
+#### Phase 4: Remove Compatibility Layer ✅ DONE (BT-173)
 
-After all generated code uses new format, remove `dispatch/3`.
+Compatibility layer removed after all generated code transitioned to `dispatch/4`.
 
 ---
 
@@ -1052,22 +1052,27 @@ fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
 
 ### 3.7 Migration Strategy
 
-1. **Update runtime first** (backward compatible)
-   - Add `dispatch/4`
-   - Add `make_self/1`
-   - Keep `dispatch/3` as wrapper
+**Status: COMPLETED** (as of 2026-02-03)
 
-2. **Update codegen** (generates new format)
-   - All new compilations use `dispatch/4`
-   - Add `__class_mod__` to state
+Migration completed in phases:
 
-3. **Existing compiled code**
-   - Continues to work via `dispatch/3` → `dispatch/4` wrapper
-   - `__class_mod__` defaults to deriving from `__class__`
+1. **Update runtime first** (backward compatible) - ✅ DONE
+   - Add `dispatch/4` - ✅ 
+   - Add `make_self/1` - ✅
+   - Keep `dispatch/3` as wrapper - ✅
 
-4. **Future cleanup** (after transition period)
-   - Remove `dispatch/3` wrapper
-   - Require `__class_mod__` in state
+2. **Update codegen** (generates new format) - ✅ DONE
+   - All new compilations use `dispatch/4` - ✅
+   - Add `__class_mod__` to state - ✅
+
+3. **Existing compiled code during transition window** - ✅ DONE
+   - During migration, existing compiled code continued to work via `dispatch/3` → `dispatch/4` wrapper - ✅
+   - During migration, `__class_mod__` defaulted to deriving from `__class__` - ✅
+   - Note: After cleanup in BT-173, any remaining compiled artifacts targeting `dispatch/3` must be recompiled to use `dispatch/4`.
+
+4. **Cleanup** - ✅ DONE (BT-173)
+   - Removed `dispatch/3` wrapper
+   - After BT-173, all supported code is compiled against and uses `dispatch/4` exclusively
 
 ### 3.8 Error Handling Taxonomy
 
@@ -1174,8 +1179,9 @@ Error: 'self' has no associated process (object not spawned?)
    - `"hello" class` returns `'String'`
    - Primitive methods dispatch correctly
 
-4. **Backward compatibility tests**
-   - Old-style `dispatch/3` calls still work
+4. **Method signature compatibility tests**
+   - Old-style Fun/2 methods still work via dispatch/4
+   - New-style Fun/4 methods work correctly
    - Missing `__class_mod__` handled gracefully
 
 #### Snapshot Tests (test-package-compiler/)
