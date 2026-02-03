@@ -377,7 +377,6 @@ impl SimpleLanguageService {
     }
 
     /// Finds the identifier at a given position.
-    /// Finds the identifier at a given position.
     fn find_identifier_at_position(
         &self,
         file: &Utf8PathBuf,
