@@ -210,7 +210,7 @@ method := Counter >> #increment   // Get method object
 
 method selector          // => #increment
 method argumentCount     // => 0
-method source            // => "increment => self.value += 1"
+method source            // => "increment => self.value := self.value + 1"
 method pragmas           // => []
 method valueWithReceiver: obj args: []  // Execute method
 ```

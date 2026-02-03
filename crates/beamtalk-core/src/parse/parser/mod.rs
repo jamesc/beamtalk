@@ -52,7 +52,7 @@
 
 use crate::ast::{Comment, CommentKind, Module};
 #[cfg(test)]
-use crate::ast::{CompoundOperator, Expression, Literal, MessageSelector};
+use crate::ast::{Expression, Literal, MessageSelector};
 use crate::parse::{Span, Token, TokenKind};
 use ecow::EcoString;
 
@@ -725,28 +725,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_compound_assignment() {
-        let module = parse_ok("x += 1");
-        assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
-            Expression::CompoundAssignment {
-                target,
-                operator,
-                value,
-                ..
-            } => {
-                assert!(matches!(**target, Expression::Identifier(_)));
-                assert_eq!(*operator, CompoundOperator::Add);
-                assert!(matches!(
-                    **value,
-                    Expression::Literal(Literal::Integer(1), _)
-                ));
-            }
-            _ => panic!("Expected compound assignment"),
-        }
-    }
-
-    #[test]
     fn parse_radix_integer() {
         assert_eq!(parse_integer("16rFF").unwrap(), 255);
         assert_eq!(parse_integer("2r1010").unwrap(), 10);
@@ -1107,7 +1085,7 @@ mod tests {
             "Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
+  increment => self.value := self.value + 1
   getValue => ^self.value",
         );
 
@@ -1279,8 +1257,8 @@ mod tests {
   state: value = 0
   state: name: String
 
-  increment => self.value += 1
-  decrement => self.value -= 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
 
   before increment => Telemetry log: 'incrementing'
   after increment => self notifyObservers",

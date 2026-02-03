@@ -410,11 +410,6 @@ impl Analyser {
                 self.analyse_expression(expression, parent_context);
             }
 
-            CompoundAssignment { target, value, .. } => {
-                self.analyse_expression(target, None);
-                self.analyse_expression(value, None);
-            }
-
             Pipe { value, target, .. } => {
                 self.analyse_expression(value, None);
                 self.analyse_expression(target, None);
@@ -597,38 +592,6 @@ impl Analyser {
                 }
 
                 // Recurse into value
-                self.collect_captures_and_mutations(value, captures, mutations);
-            }
-
-            CompoundAssignment {
-                target,
-                value,
-                span,
-                ..
-            } => {
-                // Track mutation
-                if let Identifier(id) = target.as_ref() {
-                    let kind = if self.scope.is_captured(&id.name) {
-                        MutationKind::CapturedVariable {
-                            name: id.name.clone(),
-                        }
-                    } else {
-                        MutationKind::LocalVariable {
-                            name: id.name.clone(),
-                        }
-                    };
-                    mutations.push(Mutation { kind, span: *span });
-                } else if let FieldAccess { field, .. } = target.as_ref() {
-                    mutations.push(Mutation {
-                        kind: MutationKind::Field {
-                            name: field.name.clone(),
-                        },
-                        span: *span,
-                    });
-                }
-
-                // Recurse
-                self.collect_captures_and_mutations(target, captures, mutations);
                 self.collect_captures_and_mutations(value, captures, mutations);
             }
 

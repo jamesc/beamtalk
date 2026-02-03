@@ -51,7 +51,7 @@ Beamtalk adapts this for modern infrastructure: files remain the source of truth
 │  │    ▼ WebApp     │  ─────────────────────────────────────────────  │ │
 │  │      Router     │                                                  │ │
 │  │      DBPool     │  increment =>                                   │ │
-│  │  ▼ Actors       │    self.value += 1                              │ │
+│  │  ▼ Actors       │    self.value := self.value + 1                              │ │
 │  │    ▶ Counter    │    Telemetry emit: #incremented                 │ │
 │  │      Agent      │                                                  │ │
 │  │      Worker     │                                                  │ │
@@ -131,7 +131,7 @@ Edit methods with immediate hot-reload:
 │  Counter >> increment                                            │
 │  ───────────────────────────────────────────────────────────────│
 │  increment =>                                                    │
-│    self.value += 1                                               │
+│    self.value := self.value + 1                                               │
 │    Telemetry emit: #incremented value: self.value               │
 │                                                                  │
 │                                            [Accept] [Revert]    │
@@ -251,7 +251,7 @@ The killer feature — **fix code mid-execution**:
 │  Source                                                          │
 │  ───────────────────────────────────────────────────────────────│
 │  increment =>                                                    │
-│    self.value += 1                                               │
+│    self.value := self.value + 1                                               │
 │    self.count += 1   // ← Error: undefined field 'count'        │
 │    ^self.value                                                   │
 │                                                                  │

@@ -140,10 +140,10 @@ Each Beamtalk actor compiles to a standard `gen_server` module:
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
-  decrement => self.value -= 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
   getValue => ^self.value
-  incrementBy: delta => self.value += delta
+  incrementBy: delta => self.value := self.value + delta
 ```
 
 Generates an Erlang module `beamtalk_counter` with:

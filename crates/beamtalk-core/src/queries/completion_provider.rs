@@ -123,8 +123,7 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
         Expression::Identifier(ident) => {
             identifiers.insert(ident.name.clone());
         }
-        Expression::Assignment { target, value, .. }
-        | Expression::CompoundAssignment { target, value, .. } => {
+        Expression::Assignment { target, value, .. } => {
             collect_identifiers_from_expr(target, identifiers);
             collect_identifiers_from_expr(value, identifiers);
         }
