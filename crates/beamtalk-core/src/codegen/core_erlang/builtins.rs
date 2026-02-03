@@ -477,7 +477,7 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "size" if arguments.is_empty() && is_string_literal => {
                     // BT-223: Route through beamtalk_primitive:send for runtime dispatch
-                    // This handles both literal strings and string variables correctly
+                    // This handles string literals; string variables/identifiers use normal runtime dispatch
                     let recv_var = self.fresh_var("Str");
                     write!(self.output, "let {recv_var} = ")?;
                     self.generate_expression(receiver)?;

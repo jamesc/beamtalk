@@ -200,22 +200,34 @@ impl CoreErlangGenerator {
             )));
         }
 
-        // Runtime type check: is this a beamtalk_object tuple?
-        write!(self.output, "case call 'erlang':'and'(")?;
+        // BT-223: Runtime type check - short-circuit evaluation for actor vs primitive
+        // Use nested case expressions (like control_flow.rs) to avoid badarg on primitives
         write!(
             self.output,
-            "call 'erlang':'and'(call 'erlang':'is_tuple'({receiver_var}), "
-        )?;
-        write!(
-            self.output,
-            "call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4)), "
-        )?;
-        write!(
-            self.output,
-            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object')) of "
+            "case case call 'erlang':'is_tuple'({receiver_var}) of "
         )?;
 
-        // Case 1: Actor - use async dispatch with futures
+        // True branch: Receiver is a tuple, check size
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(
+            self.output,
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of "
+        )?;
+
+        // True branch: Size is 4, check first element
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        write!(
+            self.output,
+            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') "
+        )?;
+
+        // Default branch: Size is not 4
+        write!(self.output, "<_> when 'true' -> 'false' end ")?;
+
+        // Default branch: Not a tuple
+        write!(self.output, "<_> when 'true' -> 'false' end of ")?;
+
+        // Case 1: Result is true (beamtalk_object) - use async actor dispatch
         write!(self.output, "<'true'> when 'true' -> ")?;
 
         // Extract PID from actor record (4th element)

@@ -88,7 +88,7 @@ module 'async_unary_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'run'> when 'true' ->
-            let _Result = let _Receiver1 = call 'maps':'get'('counter', State) in case call 'erlang':'and'(call 'erlang':'and'(call 'erlang':'is_tuple'(_Receiver1), call 'erlang':'=='(call 'erlang':'tuple_size'(_Receiver1), 4)), call 'erlang':'=='(call 'erlang':'element'(1, _Receiver1), 'beamtalk_object')) of <'true'> when 'true' -> let _Pid2 = call 'erlang':'element'(4, _Receiver1) in let _Future3 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Pid2, {'increment', [], _Future3}) in _Future3 <'false'> when 'true' -> call 'beamtalk_primitive':'send'(_Receiver1, 'increment', []) end in {'reply', _Result, State}
+            let _Result = let _Receiver1 = call 'maps':'get'('counter', State) in case case call 'erlang':'is_tuple'(_Receiver1) of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(_Receiver1), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, _Receiver1), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of <'true'> when 'true' -> let _Pid2 = call 'erlang':'element'(4, _Receiver1) in let _Future3 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Pid2, {'increment', [], _Future3}) in _Future3 <'false'> when 'true' -> call 'beamtalk_primitive':'send'(_Receiver1, 'increment', []) end in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% Try doesNotUnderstand:args: fallback (BT-29)
             let DnuSelector = 'doesNotUnderstand:args:' in
