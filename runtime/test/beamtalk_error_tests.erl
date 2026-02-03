@@ -114,6 +114,21 @@ future_not_awaited_with_hint_test() ->
     ?assertEqual(Expected, Formatted),
     ?assertEqual(#{original_selector => 'instVarNames'}, Error#beamtalk_error.details).
 
+%%% Test: future_not_awaited without selector (edge case)
+future_not_awaited_without_selector_test() ->
+    %% This tests the edge case where future_not_awaited is created without selector
+    %% Should not crash - should have a reasonable default message
+    Error = beamtalk_error:new(future_not_awaited, 'Future'),
+    ?assertEqual(future_not_awaited, Error#beamtalk_error.kind),
+    ?assertEqual('Future', Error#beamtalk_error.class),
+    ?assertEqual(undefined, Error#beamtalk_error.selector),
+    %% Should have a reasonable message even without selector
+    ?assertMatch(<<"Sent message to a Future">>, Error#beamtalk_error.message),
+    
+    %% Should be able to format without crashing
+    Formatted = iolist_to_binary(beamtalk_error:format(Error)),
+    ?assertEqual(<<"Sent message to a Future">>, Formatted).
+
 %%% Test: does_not_understand with hint (from design doc example)
 does_not_understand_with_hint_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),

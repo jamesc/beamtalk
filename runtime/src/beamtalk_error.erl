@@ -109,6 +109,8 @@ generate_message(type_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
 generate_message(type_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
+generate_message(future_not_awaited, _Class, undefined) ->
+    iolist_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
     iolist_to_binary(io_lib:format("Sent '~s' to a Future", [Selector]));
 generate_message(Kind, Class, undefined) ->
