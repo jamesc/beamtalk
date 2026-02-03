@@ -45,8 +45,8 @@ new(Kind, Class) ->
 %% The message is regenerated to include the selector.
 %%
 %% Example:
-%%   Error = beamtalk_error:new(does_not_understand, 'Integer')
-%%       |> beamtalk_error:with_selector('foo')
+%%   Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+%%   Error = beamtalk_error:with_selector(Error0, 'foo')
 -spec with_selector(#beamtalk_error{}, atom()) -> #beamtalk_error{}.
 with_selector(#beamtalk_error{kind = Kind, class = Class} = Error, Selector) ->
     Message = generate_message(Kind, Class, Selector),
@@ -60,8 +60,8 @@ with_selector(#beamtalk_error{kind = Kind, class = Class} = Error, Selector) ->
 %% Hints provide actionable suggestions for fixing the error.
 %%
 %% Example:
-%%   Error = beamtalk_error:new(does_not_understand, 'Integer')
-%%       |> beamtalk_error:with_hint(<<"Check spelling">>)
+%%   Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+%%   Error = beamtalk_error:with_hint(Error0, <<"Check spelling">>)
 -spec with_hint(#beamtalk_error{}, binary()) -> #beamtalk_error{}.
 with_hint(Error, Hint) ->
     Error#beamtalk_error{hint = Hint}.
@@ -71,8 +71,8 @@ with_hint(Error, Hint) ->
 %% Details is a map with additional context like arity, expected types, etc.
 %%
 %% Example:
-%%   Error = beamtalk_error:new(arity_mismatch, 'Counter')
-%%       |> beamtalk_error:with_details(#{expected => 1, got => 0})
+%%   Error0 = beamtalk_error:new(arity_mismatch, 'Counter'),
+%%   Error = beamtalk_error:with_details(Error0, #{expected => 1, got => 0})
 -spec with_details(#beamtalk_error{}, map()) -> #beamtalk_error{}.
 with_details(Error, Details) ->
     Error#beamtalk_error{details = Details}.
