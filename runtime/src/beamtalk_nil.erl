@@ -62,6 +62,8 @@ has_method(Selector) ->
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
 is_builtin('respondsTo') -> true;
+is_builtin('perform') -> true;
+is_builtin('perform:withArgs:') -> true;
 is_builtin('isNil') -> true;
 is_builtin('ifNil:') -> true;
 is_builtin('ifNotNil:') -> true;
@@ -80,6 +82,13 @@ is_builtin(_) -> false.
 builtin_dispatch('class', [], nil) -> {ok, 'UndefinedObject'};
 builtin_dispatch('respondsTo', [Selector], nil) when is_atom(Selector) -> 
     {ok, has_method(Selector)};
+
+%% Dynamic message send
+builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
+    builtin_dispatch(TargetSelector, [], X);
+builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
+  when is_atom(TargetSelector), is_list(ArgList) ->
+    builtin_dispatch(TargetSelector, ArgList, X);
 
 %% Nil checking
 builtin_dispatch('isNil', [], nil) -> {ok, true};

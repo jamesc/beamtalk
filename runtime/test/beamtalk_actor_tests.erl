@@ -771,3 +771,100 @@ reflection_combined_test() ->
     ?assertEqual(124, NewValue),
     
     gen_server:stop(Counter).
+
+%%% BT-165: perform: dynamic message send tests
+
+perform_unary_message_test() ->
+    %% Test perform: with no arguments (unary message)
+    {ok, Counter} = test_counter:start_link(10),
+    
+    %% obj perform: #increment  => obj increment
+    %% increment returns noreply, so the result is nil
+    nil = gen_server:call(Counter, {perform, [increment]}),
+    ?assertEqual(11, gen_server:call(Counter, {getValue, []})),
+    
+    %% Another increment via perform:
+    nil = gen_server:call(Counter, {perform, [increment]}),
+    ?assertEqual(12, gen_server:call(Counter, {getValue, []})),
+    
+    gen_server:stop(Counter).
+
+perform_keyword_message_test() ->
+    %% Test perform:withArgs: with keyword message
+    {ok, Counter} = test_counter:start_link(5),
+    
+    %% obj perform: #'setValue:' withArgs: [100]  => obj setValue: 100
+    ok = gen_server:call(Counter, {'perform:withArgs:', ['setValue:', [100]]}),
+    ?assertEqual(100, gen_server:call(Counter, {getValue, []})),
+    
+    gen_server:stop(Counter).
+
+perform_with_result_test() ->
+    %% Test perform: on a method that returns a value
+    {ok, Counter} = test_counter:start_link(42),
+    
+    %% obj perform: #getValue  => obj getValue (returns value)
+    Result = gen_server:call(Counter, {perform, [getValue]}),
+    ?assertEqual(42, Result),
+    
+    gen_server:stop(Counter).
+
+perform_withArgs_multiple_arguments_test() ->
+    %% Test perform:withArgs: with multiple arguments
+    {ok, Actor} = test_multi_arg_actor:start_link(),
+    
+    %% obj perform: #'compute:plus:' withArgs: [10, 20]  => obj compute: 10 plus: 20
+    Result = gen_server:call(Actor, {'perform:withArgs:', ['compute:plus:', [10, 20]]}),
+    ?assertEqual(30, Result),
+    
+    gen_server:stop(Actor).
+
+perform_unknown_selector_test() ->
+    %% Test perform: with unknown selector (should trigger doesNotUnderstand)
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% obj perform: #unknownMethod  => doesNotUnderstand
+    Result = gen_server:call(Counter, {perform, [unknownMethod]}),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = unknownMethod}}, Result),
+    
+    gen_server:stop(Counter).
+
+perform_withArgs_invalid_args_type_test() ->
+    %% Test perform:withArgs: with non-list args (should error)
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% obj perform: #increment withArgs: 42  => type error (42 is not a list)
+    Result = gen_server:call(Counter, {'perform:withArgs:', [increment, 42]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'perform:withArgs:'}}, Result),
+    
+    gen_server:stop(Counter).
+
+perform_async_with_future_test() ->
+    %% Test perform: with async message (cast with future)
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Send async perform: message
+    Future = beamtalk_future:new(),
+    gen_server:cast(Counter, {perform, [increment], Future}),
+    
+    %% Wait for future to resolve
+    ?assertEqual(nil, beamtalk_future:await(Future)),
+    
+    %% Verify state was updated
+    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
+    
+    gen_server:stop(Counter).
+
+perform_recursive_dispatch_test() ->
+    %% Test that perform: correctly dispatches through the same dispatch/4 logic
+    {ok, Counter} = test_counter:start_link(50),
+    
+    %% Use perform: to call respondsTo: (a built-in reflection method)
+    Result1 = gen_server:call(Counter, {'perform:withArgs:', [respondsTo, [increment]]}),
+    ?assertEqual(true, Result1),
+    
+    %% Use perform: to call instVarAt: (another built-in)
+    Result2 = gen_server:call(Counter, {'perform:withArgs:', [instVarAt, [value]]}),
+    ?assertEqual(50, Result2),
+    
+    gen_server:stop(Counter).

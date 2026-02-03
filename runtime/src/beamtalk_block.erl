@@ -63,6 +63,8 @@ has_method(Selector) ->
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
 is_builtin('respondsTo') -> true;
+is_builtin('perform') -> true;
+is_builtin('perform:withArgs:') -> true;
 is_builtin('value') -> true;
 is_builtin('value:') -> true;
 is_builtin('value:value:') -> true;
@@ -81,6 +83,13 @@ is_builtin(_) -> false.
 builtin_dispatch('class', [], _X) -> {ok, 'Block'};
 builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
     {ok, has_method(Selector)};
+
+%% Dynamic message send
+builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
+    builtin_dispatch(TargetSelector, [], X);
+builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
+  when is_atom(TargetSelector), is_list(ArgList) ->
+    builtin_dispatch(TargetSelector, ArgList, X);
 
 %% Evaluation
 builtin_dispatch('value', [], Block) when is_function(Block, 0) ->
