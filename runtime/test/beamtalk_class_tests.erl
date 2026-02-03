@@ -19,6 +19,18 @@ setup() ->
     end.
 
 teardown(_) ->
+    %% Force unregister all known test class names first
+    lists:foreach(
+        fun(Name) ->
+            try unregister(Name) catch _:_ -> ok end
+        end,
+        [beamtalk_class_StartLinkTestClass, beamtalk_class_RegistryTestClass,
+         beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
+         beamtalk_class_TestClassA, beamtalk_class_TestClassB,
+         beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
+         beamtalk_class_CounterNoMethods]
+    ),
+    
     %% Clean up all registered class processes by getting all from pg group
     Members = try
         pg:get_members(beamtalk_classes)
@@ -26,19 +38,18 @@ teardown(_) ->
         _:_ -> []
     end,
     
-    %% Terminate each class process
+    %% Terminate each class process and wait for them to die
     lists:foreach(
         fun(Pid) when is_pid(Pid) ->
             case is_process_alive(Pid) of
                 true ->
-                    %% Get the registered name if any and unregister
-                    case process_info(Pid, registered_name) of
-                        {registered_name, Name} when Name =/= [] ->
-                            try unregister(Name) catch _:_ -> ok end;
-                        _ ->
-                            ok
-                    end,
-                    exit(Pid, kill);
+                    MRef = monitor(process, Pid),
+                    exit(Pid, kill),
+                    receive
+                        {'DOWN', MRef, process, Pid, _} -> ok
+                    after 1000 ->
+                        ok  %% Timeout waiting for process to die
+                    end;
                 false ->
                     ok
             end;
@@ -46,18 +57,6 @@ teardown(_) ->
             ok
         end,
         Members
-    ),
-    
-    %% Wait for all processes to actually die
-    timer:sleep(50),
-    
-    %% Double-check and force unregister any stragglers
-    lists:foreach(
-        fun(Name) ->
-            try unregister(Name) catch _:_ -> ok end
-        end,
-        [beamtalk_class_TestClass, beamtalk_class_TestClassA, beamtalk_class_TestClassB,
-         beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter]
     ),
     ok.
 
@@ -73,13 +72,13 @@ start_link_test_() ->
          [
           ?_test(begin
                      ClassInfo = #{
-                         name => 'TestClass',
+                         name => 'StartLinkTestClass',
                          module => test_class,
                          superclass => 'Object',
                          instance_methods => #{},
                          instance_variables => []
                      },
-                     {ok, Pid} = beamtalk_class:start_link('TestClass', ClassInfo),
+                     {ok, Pid} = beamtalk_class:start_link('StartLinkTestClass', ClassInfo),
                      ?assert(is_pid(Pid)),
                      ?assert(is_process_alive(Pid))
                  end)
@@ -94,14 +93,14 @@ registry_name_test_() ->
          [
           ?_test(begin
                      ClassInfo = #{
-                         name => 'TestClass',
+                         name => 'RegistryTestClass',
                          module => test_class,
                          superclass => none
                      },
-                     {ok, _Pid} = beamtalk_class:start_link('TestClass', ClassInfo),
-                     RegPid = beamtalk_class:whereis_class('TestClass'),
+                     {ok, _Pid} = beamtalk_class:start_link('RegistryTestClass', ClassInfo),
+                     RegPid = beamtalk_class:whereis_class('RegistryTestClass'),
                      ?assert(is_pid(RegPid)),
-                     ?assertEqual(RegPid, whereis(beamtalk_class_TestClass))
+                     ?assertEqual(RegPid, whereis(beamtalk_class_RegistryTestClass))
                  end)
          ]
      end}.
@@ -114,11 +113,11 @@ pg_group_membership_test_() ->
          [
           ?_test(begin
                      ClassInfo = #{
-                         name => 'TestClass',
+                         name => 'PgMembershipTestClass',
                          module => test_class,
                          superclass => none
                      },
-                     {ok, Pid} = beamtalk_class:start_link('TestClass', ClassInfo),
+                     {ok, Pid} = beamtalk_class:start_link('PgMembershipTestClass', ClassInfo),
                      Members = pg:get_members(beamtalk_classes),
                      ?assert(lists:member(Pid, Members))
                  end)
@@ -383,7 +382,7 @@ all_classes_test_() ->
                      ?assert(lists:member(Pid1, AllClasses)),
                      ?assert(lists:member(Pid2, AllClasses)),
                      
-                     %% Clean up immediately after test
+                     %% Clean up immediately after test (teardown will also clean)
                      exit(Pid1, kill),
                      exit(Pid2, kill)
                  end)
@@ -402,14 +401,14 @@ duplicate_registration_test_() ->
          [
           ?_test(begin
                      ClassInfo = #{
-                         name => 'TestClass',
+                         name => 'DuplicateTestClass',
                          module => test_class,
                          superclass => none
                      },
-                     {ok, _Pid1} = beamtalk_class:start_link('TestClass', ClassInfo),
+                     {ok, _Pid1} = beamtalk_class:start_link('DuplicateTestClass', ClassInfo),
                      
                      %% Try to register the same name again
-                     Result = beamtalk_class:start_link('TestClass', ClassInfo),
+                     Result = beamtalk_class:start_link('DuplicateTestClass', ClassInfo),
                      ?assertMatch({error, _}, Result)
                  end)
          ]

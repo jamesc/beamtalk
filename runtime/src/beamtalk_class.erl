@@ -111,7 +111,15 @@
 %% @doc Start a class process with full options.
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassName, ClassInfo) ->
-    gen_server:start_link(?MODULE, {ClassName, ClassInfo}, []).
+    %% Check if already registered BEFORE starting process
+    %% This avoids crash reports from init/1 returning {stop, ...}
+    RegName = registry_name(ClassName),
+    case whereis(RegName) of
+        undefined ->
+            gen_server:start_link(?MODULE, {ClassName, ClassInfo}, []);
+        _Pid ->
+            {error, {already_registered, RegName}}
+    end.
 
 %% @doc Start a class process with minimal info (for testing).
 -spec start_link(map()) -> {ok, pid()} | {error, term()}.

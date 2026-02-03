@@ -35,7 +35,8 @@ new_with_daemon_socket_path_test() ->
     ?assertEqual("/custom/path/daemon.sock", beamtalk_repl_state:get_daemon_socket_path(State)).
 
 new_default_daemon_socket_path_test() ->
-    %% Default path should be ~/.beamtalk/daemon.sock
+    %% Default path should be ~/.beamtalk/daemon*.sock
+    %% In worktrees it may be daemon-bt123.sock instead of daemon.sock
     case os:getenv("HOME") of
         false ->
             %% Skip test if HOME not set - the module itself will error
@@ -44,7 +45,9 @@ new_default_daemon_socket_path_test() ->
         Home ->
             State = beamtalk_repl_state:new(undefined, 0),
             Path = beamtalk_repl_state:get_daemon_socket_path(State),
-            ?assert(lists:suffix("/daemon.sock", Path)),
+            %% Path should end with .sock and be in .beamtalk directory
+            ?assert(lists:suffix(".sock", Path)),
+            ?assertMatch("/" ++ _, string:find(Path, "/.beamtalk/")),
             ?assert(lists:prefix(Home, Path))
     end.
 
