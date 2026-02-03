@@ -685,3 +685,88 @@ dispatch4_async_with_self_test() ->
     ?assertMatch({beamtalk_object, 'SelfAwareActor', 'test_self_aware_actor', _}, Result),
     
     gen_server:stop(Actor).
+
+%%% BT-177: Object reflection API tests
+
+respondsTo_existing_method_test() ->
+    %% Test respondsTo: with an existing method
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Check for existing methods
+    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [increment]})),
+    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [getValue]})),
+    ?assertEqual(true, gen_server:call(Counter, {respondsTo, ['setValue:']})),
+    
+    gen_server:stop(Counter).
+
+respondsTo_nonexistent_method_test() ->
+    %% Test respondsTo: with a nonexistent method
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Check for nonexistent methods
+    ?assertEqual(false, gen_server:call(Counter, {respondsTo, [unknownMethod]})),
+    ?assertEqual(false, gen_server:call(Counter, {respondsTo, [noSuchThing]})),
+    
+    gen_server:stop(Counter).
+
+instVarNames_test() ->
+    %% Test instVarNames returns instance variable names
+    {ok, Counter} = test_counter:start_link(42),
+    
+    %% Get instance variable names (should exclude __class__, __class_mod__, __methods__)
+    Result = gen_server:call(Counter, {instVarNames, []}),
+    
+    %% Should return [value] - the only user-defined instance variable
+    ?assertEqual([value], Result),
+    
+    gen_server:stop(Counter).
+
+instVarAt_existing_variable_test() ->
+    %% Test instVarAt: with an existing instance variable
+    {ok, Counter} = test_counter:start_link(42),
+    
+    %% Read the value field
+    Result = gen_server:call(Counter, {instVarAt, [value]}),
+    ?assertEqual(42, Result),
+    
+    %% Modify state and read again
+    gen_server:call(Counter, {'setValue:', [99]}),
+    Result2 = gen_server:call(Counter, {instVarAt, [value]}),
+    ?assertEqual(99, Result2),
+    
+    gen_server:stop(Counter).
+
+instVarAt_nonexistent_variable_test() ->
+    %% Test instVarAt: with a nonexistent instance variable (should return nil)
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Read nonexistent field
+    Result = gen_server:call(Counter, {instVarAt, [nonExistent]}),
+    ?assertEqual(nil, Result),
+    
+    gen_server:stop(Counter).
+
+reflection_combined_test() ->
+    %% Combined test: use reflection to discover and access instance variables
+    {ok, Counter} = test_counter:start_link(123),
+    
+    %% Discover instance variables
+    VarNames = gen_server:call(Counter, {instVarNames, []}),
+    ?assertEqual([value], VarNames),
+    
+    %% Read each discovered variable
+    [VarName] = VarNames,
+    Value = gen_server:call(Counter, {instVarAt, [VarName]}),
+    ?assertEqual(123, Value),
+    
+    %% Check that we respond to the method we're about to call
+    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [increment]})),
+    
+    %% Call the method
+    gen_server:call(Counter, {increment, []}),
+    
+    %% Read the updated value via reflection
+    NewValue = gen_server:call(Counter, {instVarAt, [value]}),
+    ?assertEqual(124, NewValue),
+    
+    gen_server:stop(Counter).

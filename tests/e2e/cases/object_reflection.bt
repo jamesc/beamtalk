@@ -1,0 +1,180 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Object reflection API
+//
+// Object extends ProtoObject with reflection and introspection capabilities:
+// - respondsTo: - Check if object understands a message
+// - instVarNames - Get list of instance variable names
+// - instVarAt: - Read instance variable by name
+//
+// NOTE: Full actor reflection tests (respondsTo:, instVarNames, instVarAt:)
+// require async message sends and state inspection. These are best tested
+// in runtime/test/beamtalk_actor_tests.erl where we have full control.
+//
+// This file focuses on deterministic primitive operations that can be verified
+// in E2E tests.
+
+// ===========================================================================
+// NIL TESTING PROTOCOL
+// ===========================================================================
+//
+// Object provides nil-testing methods that work on all objects
+
+// ---------------------------------------------------------------------------
+// isNil and notNil on primitives
+// ---------------------------------------------------------------------------
+
+42 isNil
+// => false
+
+42 notNil
+// => true
+
+'hello' isNil
+// => false
+
+'hello' notNil
+// => true
+
+true isNil
+// => false
+
+true notNil
+// => true
+
+// ---------------------------------------------------------------------------
+// isNil and notNil on nil
+// ---------------------------------------------------------------------------
+
+nil isNil
+// => true
+
+nil notNil
+// => false
+
+// ---------------------------------------------------------------------------
+// ifNil: on non-nil objects
+// ---------------------------------------------------------------------------
+
+42 ifNil: [99]
+// => 42
+
+'hello' ifNil: ['default']
+// => hello
+
+// ---------------------------------------------------------------------------
+// ifNil: on nil
+// ---------------------------------------------------------------------------
+
+nil ifNil: [99]
+// => 99
+
+nil ifNil: ['default']
+// => default
+
+// ---------------------------------------------------------------------------
+// ifNotNil: on non-nil objects
+// ---------------------------------------------------------------------------
+
+42 ifNotNil: [:v | v + 1]
+// => 43
+
+'hello' ifNotNil: [:s | s ++ ' world']
+// => hello world
+
+// ---------------------------------------------------------------------------
+// ifNotNil: on nil
+// ---------------------------------------------------------------------------
+
+nil ifNotNil: [:v | v + 1]
+// => nil
+
+// ---------------------------------------------------------------------------
+// ifNil:ifNotNil: two-way conditional on non-nil
+// ---------------------------------------------------------------------------
+
+42 ifNil: [0] ifNotNil: [:v | v * 2]
+// => 84
+
+'hello' ifNil: [''] ifNotNil: [:s | s ++ '!']
+// => hello!
+
+// ---------------------------------------------------------------------------
+// ifNil:ifNotNil: two-way conditional on nil
+// ---------------------------------------------------------------------------
+
+nil ifNil: [0] ifNotNil: [:v | v * 2]
+// => 0
+
+nil ifNil: ['empty'] ifNotNil: [:s | s ++ '!']
+// => empty
+
+// ---------------------------------------------------------------------------
+// ifNotNil:ifNil: reversed order on non-nil
+// ---------------------------------------------------------------------------
+
+42 ifNotNil: [:v | v * 2] ifNil: [0]
+// => 84
+
+// ---------------------------------------------------------------------------
+// ifNotNil:ifNil: reversed order on nil
+// ---------------------------------------------------------------------------
+
+nil ifNotNil: [:v | v * 2] ifNil: [0]
+// => 0
+
+// ===========================================================================
+// ACTOR REFLECTION TESTS (TODO - Requires Runtime Testing)
+// ===========================================================================
+//
+// Full reflection tests on actors are in runtime/test/beamtalk_actor_tests.erl
+// because they require:
+// - Spawning actors (non-deterministic PIDs)
+// - Async message sends (futures)
+// - State mutation and inspection
+//
+// Example runtime tests to add:
+//
+// ```erlang
+// reflection_test() ->
+//     %% Spawn counter actor
+//     {ok, Pid} = counter:start_link([]),
+//     
+//     %% Test respondsTo:
+//     {ok, true} = gen_server:call(Pid, {respondsTo, [increment]}),
+//     {ok, false} = gen_server:call(Pid, {respondsTo, [unknown]}),
+//     
+//     %% Test instVarNames
+//     {ok, [value]} = gen_server:call(Pid, {instVarNames, []}),
+//     
+//     %% Test instVarAt:
+//     {ok, 0} = gen_server:call(Pid, {instVarAt, [value]}),
+//     
+//     %% Increment and check again
+//     ok = gen_server:cast(Pid, {increment, [], FuturePid}),
+//     {ok, 1} = gen_server:call(Pid, {instVarAt, [value]}).
+// ```
+
+// ===========================================================================
+// PRIMITIVE REFLECTION (Future Enhancement)
+// ===========================================================================
+//
+// Primitives should also respond to reflection messages:
+// - respondsTo: should check primitive's method table
+// - instVarNames should return empty list (primitives have no instance vars)
+// - instVarAt: should return nil
+//
+// These will be implemented when we add primitive dispatch support.
+
+// ===========================================================================
+// IMPLEMENTATION STATUS
+// ===========================================================================
+//
+// ✅ Object.bt defined with reflection API
+// ✅ Compiler support for respondsTo:, instVarNames, instVarAt:
+// ✅ Runtime support in beamtalk_actor.erl
+// ✅ Nil-testing protocol (isNil, notNil, ifNil:, ifNotNil:) - TESTED HERE
+// ⏳ Actor reflection E2E tests - Need runtime EUnit tests
+// ⏳ Primitive reflection - Future enhancement
+

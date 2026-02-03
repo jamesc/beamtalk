@@ -38,8 +38,6 @@
 mod error;
 mod lexer;
 mod parser;
-#[cfg(feature = "chumsky-parser")]
-mod parser_chumsky;
 mod span;
 mod token;
 

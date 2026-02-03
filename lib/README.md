@@ -133,17 +133,35 @@ For normal classes, inherit from Object (value types) or Actor (processes).
 
 ### Object (`Object.bt`)
 
-Base class for value types in Beamtalk. Object instances are plain data (no process).
+Common root class for most Beamtalk classes. Object inherits from ProtoObject and adds reflection, nil testing, and debugging capabilities that almost all objects need.
+
+**Inheritance:**
+- Value types (Point, Color, Config) inherit from Object directly
+- Actors (Counter, Worker, Services) inherit from Actor, which inherits from Object
 
 **Key messages:**
-- `new` - Create new instance
-- `class` - Get object's class name
-- `isNil`, `notNil` - Nil testing
+
+*Reflection:*
+- `class` - Returns the object's class (inherited from ProtoObject)
+- `respondsTo:` - Check if object understands a message
+- `instVarNames` - List of instance variable names
+- `instVarAt:` - Read instance variable by name
+
+*Nil Testing:*
+- `isNil` - Returns false for all objects except Nil
+- `notNil` - Returns true for all objects except Nil
+- `ifNil:` - Conditional execution if nil
+- `ifNotNil:` - Conditional execution if not nil
+- `ifNil:ifNotNil:` - Two-way conditional
+- `ifNotNil:ifNil:` - Reversed-order two-way conditional
+
+*Debugging:*
 - `inspect` - Show description on Transcript
 - `describe` - Return string description
 
 **Usage:**
 ```beamtalk
+// Value type - no process, uses new
 Object subclass: Point
   state: x, y
   
