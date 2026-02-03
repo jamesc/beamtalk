@@ -84,8 +84,6 @@ fn parse_binary_expr(..., min_bp: u8, ...) -> Expression {
 
 Chumsky is a parser combinator library with good error recovery support.
 
-**Evaluation:** `crates/beamtalk-core/src/parse/parser_chumsky.rs` (documentation only)
-
 **Key finding:** Chumsky uses Pratt parsing internally for operator precedence via its `pratt()` combinator. This means adopting chumsky would provide the same algorithm as our Pratt prototype, but with additional abstraction overhead.
 
 **Why not recommended:**
@@ -172,4 +170,3 @@ Chumsky was not adopted because it provides the same underlying algorithm with m
 - [rust-analyzer parser](https://github.com/rust-lang/rust-analyzer/tree/master/crates/parser) - Production Pratt parser example
 - [Simple but Powerful Pratt Parsing](https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/) - Bob Nystrom's explanation
 - Implementation: `crates/beamtalk-core/src/parse/parser.rs` (search for `binary_binding_power`)
-- Chumsky evaluation: `crates/beamtalk-core/src/parse/parser_chumsky.rs`
