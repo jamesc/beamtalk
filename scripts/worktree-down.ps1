@@ -25,14 +25,14 @@
     Force removal even if there are uncommitted changes
 
 .EXAMPLE
-    .\worktree-rm.ps1 BT-99-feature
+    .\worktree-down.ps1 BT-99-feature
     
 .EXAMPLE
-    .\worktree-rm.ps1 -Branch BT-99 -Force
+    .\worktree-down.ps1 -Branch BT-99 -Force
 #>
 
 param(
-    [Parameter(Mandatory=$true, Position=0)]
+    [Parameter(Position=0)]
     [string]$Branch,
     
     [Parameter(Mandatory=$false)]
@@ -40,6 +40,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Show usage if no branch specified
+if (-not $Branch) {
+    Write-Host "Usage: worktree-down.ps1 <branch-name> [-Force]" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Examples:" -ForegroundColor Gray
+    Write-Host "  .\scripts\worktree-down.ps1 BT-99-feature"
+    Write-Host "  .\scripts\worktree-down.ps1 feature-branch -Force"
+    exit 0
+}
 
 # Find the main repo root (where .git is a directory, not a file)
 function Get-MainRepoRoot {
@@ -160,8 +170,8 @@ Write-Host "🛑 Stopping worktree for branch: $Branch" -ForegroundColor Cyan
 $mainRepo = Get-MainRepoRoot
 Write-Host "📁 Main repo: $mainRepo" -ForegroundColor Gray
 
-# Worktrees are siblings of main repo
-$worktreeRoot = Split-Path $mainRepo -Parent
+# Worktrees are in .worktrees/ subdirectory
+$worktreeRoot = Join-Path $mainRepo ".worktrees"
 
 # Work from main repo
 Push-Location $mainRepo

@@ -1,14 +1,18 @@
 # Scripts
 
-Helper scripts for development.
+Helper scripts for git worktree + devcontainer workflows.
+
+Worktrees are created in `.worktrees/` subdirectory inside the repo (inspired by [Jesse Vincent's workflow](https://blog.fsck.com/2025/10/05/how-im-using-coding-agents-in-september-2025/)).
 
 ## Worktree Scripts
 
 | Script | Description |
 |--------|-------------|
-| `worktree-new.ps1` | Create a worktree and start a devcontainer |
-| `worktree-rm.ps1` | Remove a worktree and clean up containers |
-| `worktree-cleanup.ps1` | Remove orphaned containers from deleted worktrees |
+| `worktree-up.ps1` | Create a worktree and start a devcontainer |
+| `worktree-down.ps1` | Remove a worktree and clean up containers |
+| `worktree-status.ps1` | Show status of all worktrees and containers |
+| `worktree-cleanup.ps1` | Remove orphaned containers and project volumes |
+| `smoke-test.sh` | Verify devcontainer is working (run inside container) |
 
 ## Other Scripts
 
@@ -18,17 +22,20 @@ Helper scripts for development.
 
 ---
 
-## Port and Node Name Auto-Assignment
+## `worktree-up.ps1`
 
 Start a Copilot devcontainer session for a git worktree branch. This enables running multiple parallel Copilot sessions, each in its own container working on a different branch.
 
 ### Usage
 
 ```powershell
-.\scripts\worktree-new.ps1 BT-99-feature
+.\scripts\worktree-up.ps1 BT-99-feature
 
 # Create new branch from main
-.\scripts\worktree-new.ps1 -Branch BT-99 -BaseBranch main
+.\scripts\worktree-up.ps1 -Branch BT-123 -BaseBranch main
+
+# Run bash instead of copilot
+.\scripts\worktree-up.ps1 feature-branch -Command bash
 ```
 
 ### What it does
@@ -36,7 +43,8 @@ Start a Copilot devcontainer session for a git worktree branch. This enables run
 1. **Checks if worktree exists** for the branch
 2. **Creates worktree** if needed (new branch from base, or existing branch)
 3. **Starts the devcontainer** using `devcontainer up`
-4. **Connects via bash** using `devcontainer exec`
+4. **Configures Copilot CLI** with config and MCP servers
+5. **Launches Copilot** (or specified command) in the container
 
 You'll get a shell inside the container where you can run Copilot CLI or other tools.
 
@@ -45,39 +53,53 @@ You'll get a shell inside the container where you can run Copilot CLI or other t
 - Git with worktree support
 - VS Code with Dev Containers extension
 - `devcontainer` CLI (auto-installed if missing): `npm install -g @devcontainers/cli`
+- `GH_TOKEN` environment variable set
 
 ---
 
-## `worktree-rm.ps1`
+## `worktree-down.ps1`
 
 Stop and remove a git worktree, handling container path fixups automatically.
 
 ### Usage
 
 ```powershell
-.\scripts\worktree-rm.ps1 BT-99-feature
+.\scripts\worktree-down.ps1 BT-99-feature
 
 # Force remove even with uncommitted changes
-.\scripts\worktree-rm.ps1 -Branch BT-99 -Force
+.\scripts\worktree-down.ps1 -Branch BT-123 -Force
 ```
 
 ### What it does
 
 1. **Finds the worktree** for the given branch
-2. **Fixes the .git file** if it was modified for container paths (points to `/workspaces/...`)
-3. **Removes the worktree** using `git worktree remove`
-4. **Falls back to manual cleanup** if standard removal fails
-5. **Optionally deletes the branch** (prompts you)
+2. **Stops and removes the devcontainer**
+3. **Fixes the .git file** if it was modified for container paths
+4. **Removes the worktree** using `git worktree remove`
+5. **Falls back to manual cleanup** if standard removal fails
+6. **Optionally deletes the branch** (prompts you)
 
 ### Why this is needed
 
-When a worktree is used inside a devcontainer, the `.git` file gets modified to point to container paths (`/workspaces/.beamtalk-git/...`). This breaks `git worktree remove` on the host system. The stop-worktree script fixes the path before removal.
+When a worktree is used inside a devcontainer, the `.git` file gets modified to point to container paths (`/workspaces/...`). This breaks `git worktree remove` on the host system. The script fixes the path before removal.
+
+---
+
+## `worktree-status.ps1`
+
+Show status of all worktrees and their devcontainers.
+
+```powershell
+.\scripts\worktree-status.ps1
+```
+
+Displays a table showing each worktree's branch, folder name, and container status (🟢 Running, 🔴 Stopped, ⚪ No container).
 
 ---
 
 ## `worktree-cleanup.ps1`
 
-Remove containers from worktrees that were deleted without using `worktree-rm.ps1`.
+Remove containers and project volumes from worktrees that were deleted without using `worktree-down.ps1`.
 
 ```powershell
 .\scripts\worktree-cleanup.ps1        # Interactive
@@ -86,11 +108,11 @@ Remove containers from worktrees that were deleted without using `worktree-rm.ps
 .\scripts\worktree-cleanup.ps1 -All   # Remove ALL project containers
 ```
 
-Shows orphaned containers with their worktree names and lets you confirm before removal.
+Shows orphaned containers with their worktree names and lets you confirm before removal. Volumes are matched by project name and skipped if in use.
 
 ---
 
-## `worktree-new.ps1`
+## Port and Node Name Auto-Assignment
 
 Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts when running multiple parallel sessions.
 
@@ -128,3 +150,52 @@ For long or conflicting names, the script may truncate the sanitized name to kee
 4. Default values
 
 The worktree scripts automatically set these in a `.env` file, which is loaded by the devcontainer.
+
+---
+
+## Environment Variables
+
+Set these on your Windows host before using the scripts:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GH_TOKEN` | Yes | GitHub auth token (`gh auth token`) |
+| `GIT_USER_NAME` | No | Git commit author name |
+| `GIT_USER_EMAIL` | No | Git commit author email |
+| `GIT_SIGNING_KEY` | No | SSH key name for commit signing |
+
+Example setup:
+
+```powershell
+$env:GH_TOKEN = (gh auth token)
+$env:GIT_USER_NAME = "Your Name"
+$env:GIT_USER_EMAIL = "your.email@example.com"
+$env:GIT_SIGNING_KEY = "id_ed25519"
+```
+
+---
+
+## Customization
+
+### Adding Project-Specific Environment
+
+Edit `devcontainer.json` to add environment variables via `containerEnv` or `remoteEnv`:
+
+```json
+"containerEnv": {
+  "MY_VAR": "value"
+},
+"remoteEnv": {
+  "MY_TOKEN": "${localEnv:MY_TOKEN}"
+}
+```
+
+### Changing the Default Model
+
+Edit `model` in `.devcontainer/copilot-config.json`:
+
+```json
+{
+  "model": "gpt-4o"
+}
+```

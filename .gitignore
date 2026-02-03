@@ -94,6 +94,9 @@ _rel/
 *.pem
 *.key
 
+# Git worktrees (created by worktree-up.ps1)
+.worktrees/
+
 # Session and temporary files
 *.tmp
 *.log

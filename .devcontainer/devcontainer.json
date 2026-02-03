@@ -45,7 +45,7 @@
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
   // Cargo caching for faster builds
-  // NOTE: For worktrees, the main .git mount is added via CLI --mount argument in worktree-new.ps1
+  // NOTE: For worktrees, the main .git mount is added via CLI --mount argument in worktree-up.ps1
   // because ${localEnv:...} variable substitution doesn't work reliably with devcontainer CLI
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
@@ -58,11 +58,11 @@
   //    - Basic git config from GIT_USER_NAME/GIT_USER_EMAIL env vars
   //    - Can build and develop normally
   //
-  // 2. Git Worktrees (advanced): Use scripts/worktree-new.ps1 for parallel work
+  // 2. Git Worktrees (advanced): Use scripts/worktree-up.ps1 for parallel work
   //    - Creates worktrees with isolated containers
   //    - Sets up SSH commit signing
   //    - Configures Copilot CLI with MCP
-  //    - See scripts/worktree-new.ps1 for details
+  //    - See scripts/worktree-up.ps1 for details
   // ═══════════════════════════════════════════════════════════════════════════
   "containerEnv": {
     "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target"

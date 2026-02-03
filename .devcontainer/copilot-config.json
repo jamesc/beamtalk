@@ -6,6 +6,7 @@
   "trusted_folders": ["${containerWorkspaceFolder}"],
   "allowed_urls": [
     "https://api.github.com",
+    "https://docs.github.com",
     "https://docs.rs",
     "https://crates.io",
     "https://erlang.org",
@@ -14,8 +15,8 @@
   "experimental": true,
   "log_level": "info",
   "default_permissions": {
-    "tools": "prompt",
-    "paths": "prompt",
-    "urls": "prompt"
+    "tools": "allow",
+    "paths": "allow",
+    "urls": "allow"
   }
 }
