@@ -23,6 +23,7 @@ beamtalk-core.workspace = true
 clap.workspace = true
 camino.workspace = true
 miette.workspace = true
+thiserror.workspace = true
 dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true

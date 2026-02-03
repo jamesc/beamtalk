@@ -22,7 +22,7 @@
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
--export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
+-export([derive_module_name/1, extract_assignment/1, format_formatted_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1]).
@@ -162,8 +162,9 @@ compile_expression(Expression, ModuleName, Bindings, State) ->
             {ok, Binary, {daemon_compiled}};
         {error, daemon_unavailable} ->
             {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
-        {error, {compile_error, Diagnostics}} ->
-            {error, format_daemon_diagnostics(Diagnostics)};
+        {error, {compile_error_formatted, FormattedDiagnostics}} ->
+            %% Use pre-formatted miette output
+            {error, format_formatted_diagnostics(FormattedDiagnostics)};
         {error, {core_compile_error, Errors}} ->
             {error, iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Errors]))};
         {error, {daemon_error, Msg}} ->
@@ -286,10 +287,9 @@ parse_compile_result(Result, ModuleName) ->
                     compile_core_erlang(CoreErlang, ModuleName)
             end;
         false ->
-            %% Compilation failed - extract diagnostics
-            Diagnostics = maps:get(<<"diagnostics">>, Result, []),
-            Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
-            {error, {compile_error, Messages}}
+            %% Compilation failed - use pre-formatted miette diagnostics
+            FormattedList = maps:get(<<"formatted_diagnostics">>, Result, []),
+            {error, {compile_error_formatted, FormattedList}}
     end.
 
 %% Compile Core Erlang source to BEAM bytecode.
@@ -406,12 +406,13 @@ ensure_dir_with_mode(Dir, Mode) ->
             end
     end.
 
-%% Format daemon diagnostics for display.
--spec format_daemon_diagnostics(list()) -> binary().
-format_daemon_diagnostics([]) ->
+%% Format pre-formatted diagnostics from daemon (miette output).
+-spec format_formatted_diagnostics(list()) -> binary().
+format_formatted_diagnostics([]) ->
     <<"Compilation failed">>;
-format_daemon_diagnostics(Diagnostics) ->
-    iolist_to_binary(lists:join(<<"\n">>, Diagnostics)).
+format_formatted_diagnostics(FormattedList) ->
+    %% Join the formatted diagnostics with double newlines for separation
+    iolist_to_binary(lists:join(<<"\n\n">>, FormattedList)).
 
 %% Format Erlang compile errors.
 format_compile_errors(Errors) ->
@@ -538,9 +539,9 @@ parse_file_compile_result(Result, ModuleName) ->
                     end
             end;
         false ->
-            Diagnostics = maps:get(<<"diagnostics">>, Result, []),
-            Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
-            {error, {compile_error, format_daemon_diagnostics(Messages)}}
+            %% Use pre-formatted miette diagnostics
+            FormattedList = maps:get(<<"formatted_diagnostics">>, Result, []),
+            {error, {compile_error, format_formatted_diagnostics(FormattedList)}}
     end.
 
 %% Extract class info from compile result.

@@ -10,6 +10,7 @@ use miette::Result;
 
 pub mod beam_compiler;
 mod commands;
+mod diagnostic;
 mod paths;
 
 /// Beamtalk: A Smalltalk-inspired language for the BEAM VM
