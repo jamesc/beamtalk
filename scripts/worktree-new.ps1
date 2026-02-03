@@ -265,6 +265,18 @@ BEAMTALK_DAEMON_SOCKET=$daemonSocket
 
 Write-Host "✅ Created .env file" -ForegroundColor Green
 
+# Install git hooks (pre-commit for auto-formatting)
+Write-Host "🪝 Installing git hooks..." -ForegroundColor Cyan
+$installHooksScript = Join-Path $mainRepo "scripts" "install-git-hooks.sh"
+if (Test-Path $installHooksScript) {
+    Push-Location $worktreePath
+    bash $installHooksScript
+    Pop-Location
+    Write-Host "✅ Git hooks installed" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  install-git-hooks.sh not found, skipping hook installation" -ForegroundColor Yellow
+}
+
 # Sync devcontainer config from main repo (worktrees may be created from old commits)
 Write-Host "📋 Syncing devcontainer config..." -ForegroundColor Cyan
 $mainDevcontainer = Join-Path $mainRepo ".devcontainer"
@@ -279,7 +291,9 @@ if (Test-Path $mainDevcontainer) {
 Write-Host "🔧 Pre-fixing .git paths for container..." -ForegroundColor Cyan
 $worktreeGitFile = Join-Path $worktreePath ".git"
 $worktreeName = Split-Path $worktreePath -Leaf
-$containerGitPath = "/workspaces/.beamtalk-git/worktrees/$worktreeName"
+# IMPORTANT: Point to the git directory itself, not a subdirectory
+# The .git file contains "gitdir: <directory>" where <directory> is the actual .git folder
+$containerGitPath = "/workspaces/.beamtalk-git"
 Set-Content -Path $worktreeGitFile -Value "gitdir: $containerGitPath" -NoNewline
 Write-Host "   Set .git to: $containerGitPath" -ForegroundColor Gray
 
@@ -413,25 +427,4 @@ if ($env:GIT_SIGNING_KEY) {
 Write-Host "`nStarting Copilot..." -ForegroundColor Cyan
 
 # Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
-# Use try/finally to ensure git paths are reset when copilot exits
-try {
-    devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5
-}
-finally {
-    # Reset git paths back to host paths
-    Write-Host "`n🔧 Resetting .git paths for host..." -ForegroundColor Cyan
-    
-    # Reset worktree .git file to point to host path
-    $hostGitPath = Join-Path $env:BEAMTALK_MAIN_GIT_PATH "worktrees" $worktreeName
-    Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline -Encoding utf8NoBOM
-    Write-Host "   Set .git to: $hostGitPath" -ForegroundColor Gray
-    
-    # Reset gitdir in main repo's worktree metadata to host path
-    if (Test-Path $worktreeMetaGitdir) {
-        $hostWorktreeGitFile = Join-Path $worktreePath ".git"
-        Set-Content -Path $worktreeMetaGitdir -Value $hostWorktreeGitFile -NoNewline -Encoding utf8NoBOM
-        Write-Host "   Set gitdir to: $hostWorktreeGitFile" -ForegroundColor Gray
-    }
-    
-    Write-Host "✅ Git paths restored for host" -ForegroundColor Green
-}
+devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5
