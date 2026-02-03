@@ -252,7 +252,7 @@ The killer feature — **fix code mid-execution**:
 │  ───────────────────────────────────────────────────────────────│
 │  increment =>                                                    │
 │    self.value := self.value + 1                                               │
-│    self.count += 1   // ← Error: undefined field 'count'        │
+│    self.count := self.count + 1   // ← Error: undefined field 'count'        │
 │    ^self.value                                                   │
 │                                                                  │
 │  ───────────────────────────────────────────────────────────────│
