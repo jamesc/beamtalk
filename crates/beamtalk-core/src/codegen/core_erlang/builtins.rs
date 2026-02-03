@@ -828,4 +828,245 @@ impl CoreErlangGenerator {
             MessageSelector::Binary(_) => Ok(None),
         }
     }
+
+    /// Tries to generate code for Object reflection methods.
+    ///
+    /// Object provides reflection and introspection capabilities for all objects
+    /// that inherit from it. This function handles both:
+    /// - Reflection methods (respondsTo:, instVarNames, instVarAt:) for actors
+    /// - Nil-testing protocol (isNil, notNil, ifNil:, ifNotNil:) for all values
+    ///
+    /// - Returns `Ok(Some(()))` if the message was an Object method and code was generated
+    /// - Returns `Ok(None)` if the message is NOT an Object method (caller should continue)
+    /// - Returns `Err(...)` on error
+    ///
+    /// # Object Reflection Methods (Actors only)
+    ///
+    /// - `respondsTo:` - Check if object responds to a selector
+    /// - `instVarNames` - Get list of instance variable names
+    /// - `instVarAt:` - Read instance variable by name
+    ///
+    /// # Nil-Testing Protocol (All values)
+    ///
+    /// - `isNil` - Returns true only for nil, false for everything else
+    /// - `notNil` - Returns false only for nil, true for everything else
+    /// - `ifNil:` - Conditional execution if nil
+    /// - `ifNotNil:` - Conditional execution if not nil
+    /// - `ifNil:ifNotNil:` - Two-way conditional
+    #[expect(
+        clippy::too_many_lines,
+        reason = "handles multiple Object protocol methods"
+    )]
+    pub(super) fn try_generate_object_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "isNil" if arguments.is_empty() => {
+                    // Check if value is nil: case Receiver of 'nil' -> true; _ -> false
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case {recv_var} of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+                    )?;
+                    Ok(Some(()))
+                }
+                "notNil" if arguments.is_empty() => {
+                    // Check if value is not nil: case Receiver of 'nil' -> false; _ -> true
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
+                    )?;
+                    Ok(Some(()))
+                }
+                "instVarNames" if arguments.is_empty() => {
+                    // For actors: Extract instance variable names from state map
+                    // For primitives: Return empty list (they have no instance vars)
+                    //
+                    // Generate async call since actors need mailbox serialization:
+                    // gen_server:cast(Pid, {instVarNames, [], Future})
+
+                    let receiver_var = self.fresh_var("Receiver");
+                    let pid_var = self.fresh_var("Pid");
+                    let future_var = self.fresh_var("Future");
+
+                    write!(self.output, "let {receiver_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in ")?;
+
+                    write!(
+                        self.output,
+                        "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                    )?;
+
+                    write!(
+                        self.output,
+                        "let {future_var} = call 'beamtalk_future':'new'() in "
+                    )?;
+
+                    write!(
+                        self.output,
+                        "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarNames', [], {future_var}}}) in "
+                    )?;
+
+                    write!(self.output, "{future_var}")?;
+
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
+                    "ifNil:" if arguments.len() == 1 => {
+                        // case Receiver of 'nil' -> apply Block (); _ -> Receiver end
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let block_var = self.fresh_temp_var("NilBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {block_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'nil'> when 'true' -> apply {block_var} () <_> when 'true' -> {recv_var} end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "ifNotNil:" if arguments.len() == 1 => {
+                        // case Receiver of 'nil' -> 'nil'; _ -> apply Block (Receiver) end
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let block_var = self.fresh_temp_var("NotNilBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {block_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> apply {block_var} ({recv_var}) end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "ifNil:ifNotNil:" if arguments.len() == 2 => {
+                        // case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let nil_var = self.fresh_temp_var("NilBlk");
+                        let not_nil_var = self.fresh_temp_var("NotNilBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {nil_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in let {not_nil_var} = ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "ifNotNil:ifNil:" if arguments.len() == 2 => {
+                        // Reversed order: case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let not_nil_var = self.fresh_temp_var("NotNilBlk");
+                        let nil_var = self.fresh_temp_var("NilBlk");
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {not_nil_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in let {nil_var} = ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(
+                            self.output,
+                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
+                        )?;
+                        Ok(Some(()))
+                    }
+                    "respondsTo:" if arguments.len() == 1 => {
+                        // Check if object responds to a selector
+                        // For actors: Query method table via gen_server
+                        // For primitives: Check primitive's method table
+
+                        let receiver_var = self.fresh_var("Receiver");
+                        let selector_var = self.fresh_var("Selector");
+                        let pid_var = self.fresh_var("Pid");
+                        let future_var = self.fresh_var("Future");
+
+                        write!(self.output, "let {receiver_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in ")?;
+
+                        write!(self.output, "let {selector_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in ")?;
+
+                        write!(
+                            self.output,
+                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let {future_var} = call 'beamtalk_future':'new'() in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{'respondsTo', [{selector_var}], {future_var}}}) in "
+                        )?;
+
+                        write!(self.output, "{future_var}")?;
+
+                        Ok(Some(()))
+                    }
+                    "instVarAt:" if arguments.len() == 1 => {
+                        // Read instance variable by name
+                        // For actors: Read from state map via gen_server
+                        // For primitives: Return nil (they have no instance vars)
+
+                        let receiver_var = self.fresh_var("Receiver");
+                        let name_var = self.fresh_var("Name");
+                        let pid_var = self.fresh_var("Pid");
+                        let future_var = self.fresh_var("Future");
+
+                        write!(self.output, "let {receiver_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in ")?;
+
+                        write!(self.output, "let {name_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in ")?;
+
+                        write!(
+                            self.output,
+                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let {future_var} = call 'beamtalk_future':'new'() in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt', [{name_var}], {future_var}}}) in "
+                        )?;
+
+                        write!(self.output, "{future_var}")?;
+
+                        Ok(Some(()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
 }
