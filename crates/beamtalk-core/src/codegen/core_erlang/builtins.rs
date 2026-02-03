@@ -852,7 +852,7 @@ impl CoreErlangGenerator {
     /// - `notNil` - Returns false only for nil, true for everything else
     /// - `ifNil:` - Conditional execution if nil
     /// - `ifNotNil:` - Conditional execution if not nil
-    /// - `ifNil:ifNotNil:` - Two-way conditional
+    /// - `ifNil:ifNotNil:` / `ifNotNil:ifNil:` - Two-way conditional
     #[expect(
         clippy::too_many_lines,
         reason = "handles multiple Object protocol methods"
@@ -889,7 +889,9 @@ impl CoreErlangGenerator {
                 }
                 "instVarNames" if arguments.is_empty() => {
                     // For actors: Extract instance variable names from state map
-                    // For primitives: Return empty list (they have no instance vars)
+                    // For primitives: Intended future semantics is to return empty list
+                    //                 (they have no instance vars); current implementation
+                    //                 only supports actor instances (see BT-164).
                     //
                     // Generate async call since actors need mailbox serialization:
                     // gen_server:cast(Pid, {instVarNames, [], Future})
@@ -992,7 +994,8 @@ impl CoreErlangGenerator {
                     "respondsTo:" if arguments.len() == 1 => {
                         // Check if object responds to a selector
                         // For actors: Query method table via gen_server
-                        // For primitives: Check primitive's method table
+                        // For primitives: Planned to check primitive's method table
+                        //                 (not yet implemented - see BT-163)
 
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
@@ -1029,7 +1032,10 @@ impl CoreErlangGenerator {
                     "instVarAt:" if arguments.len() == 1 => {
                         // Read instance variable by name
                         // For actors: Read from state map via gen_server
-                        // For primitives: Return nil (they have no instance vars)
+                        // For primitives: Intended future behavior is to return nil
+                        //                 (they have no instance vars); current
+                        //                 implementation only supports actor instances
+                        //                 (see BT-164).
 
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");

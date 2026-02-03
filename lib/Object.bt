@@ -114,7 +114,7 @@ ProtoObject subclass: Object
   // ## Reflection Protocol
   //
   // These messages enable runtime introspection of object structure.
-  // They work on both actors (using gen_server protocol) and value types.
+  // Currently implemented for actors; primitive support planned (see BT-163, BT-164).
   //
   // Examples:
   // ```beamtalk
@@ -131,7 +131,7 @@ ProtoObject subclass: Object
   // Check if this object responds to a given selector
   // 
   // For actors: Queries the method table in the object's state
-  // For primitives: Checks the primitive's method table
+  // For primitives: Planned to check the primitive's method table (not yet implemented - see BT-163)
   //
   // Arguments:
   // - selector: Symbol representing the message name (e.g., #increment)
@@ -142,7 +142,7 @@ ProtoObject subclass: Object
   // Returns list of instance variable names
   //
   // For actors: Extracts field names from the state map (excluding internals)
-  // For primitives: Returns empty list (primitives have no instance variables)
+  // For primitives: Planned to return empty list (not yet implemented - see BT-164)
   //
   // Returns: Array of symbols representing instance variable names
   instVarNames => // implemented by compiler
@@ -150,7 +150,7 @@ ProtoObject subclass: Object
   // Read an instance variable by name
   //
   // For actors: Reads field from the state map
-  // For primitives: Always returns nil (primitives have no instance variables)
+  // For primitives: Planned to return nil (not yet implemented - see BT-164)
   //
   // Arguments:
   // - name: Symbol representing the instance variable name

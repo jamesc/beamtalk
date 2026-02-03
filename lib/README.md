@@ -153,6 +153,7 @@ Common root class for most Beamtalk classes. Object inherits from ProtoObject an
 - `ifNil:` - Conditional execution if nil
 - `ifNotNil:` - Conditional execution if not nil
 - `ifNil:ifNotNil:` - Two-way conditional
+- `ifNotNil:ifNil:` - Reversed-order two-way conditional
 
 *Debugging:*
 - `inspect` - Show description on Transcript
