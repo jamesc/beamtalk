@@ -740,14 +740,21 @@ impl CoreErlangGenerator {
     /// - `globals/0` - Returns global namespace dictionary
     ///
     /// These are compiler primitives that call into the runtime class registry.
-    fn generate_beamtalk_module(&mut self, _class: &ClassDefinition) -> Result<()> {
-        // Module header with class method exports
+    fn generate_beamtalk_module(&mut self, class: &ClassDefinition) -> Result<()> {
+        // Module header with class method exports + registration
         writeln!(
             self.output,
-            "module '{}' ['allClasses'/0, 'classNamed:'/1, 'globals'/0]",
+            "module '{}' ['allClasses'/0, 'classNamed:'/1, 'globals'/0, 'register_class'/0]",
             self.module_name
         )?;
-        writeln!(self.output, "  attributes []")?;
+        writeln!(
+            self.output,
+            "  attributes ['on_load' = [{{'register_class', 0}}]]"
+        )?;
+        writeln!(self.output)?;
+
+        // Generate registration function (BT-218 + BT-215)
+        self.generate_beamtalk_registration(class)?;
         writeln!(self.output)?;
 
         // Generate allClasses/0 - returns list of all registered classes
@@ -763,6 +770,72 @@ impl CoreErlangGenerator {
 
         // Module end
         writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates the registration function for Beamtalk class.
+    ///
+    /// Beamtalk is a special class with only class methods (no instances).
+    fn generate_beamtalk_registration(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.to_class_name();
+
+        writeln!(self.output, "'register_class'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        writeln!(
+            self.output,
+            "case call 'beamtalk_class':'start_link'('{class_name}', ~{{"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'name' => '{class_name}',")?;
+        self.write_indent()?;
+        writeln!(self.output, "'module' => '{}',", self.module_name)?;
+        self.write_indent()?;
+        writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
+        self.write_indent()?;
+        writeln!(self.output, "'instance_methods' => ~{{}}~,")?;
+        self.write_indent()?;
+        writeln!(self.output, "'class_methods' => ~{{")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'allClasses' => ~{{'arity' => 0}}~,")?;
+        self.write_indent()?;
+        writeln!(self.output, "'classNamed:' => ~{{'arity' => 1}}~,")?;
+        self.write_indent()?;
+        writeln!(self.output, "'globals' => ~{{'arity' => 0}}~")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "}}~,")?;
+        self.write_indent()?;
+        writeln!(self.output, "'instance_variables' => []")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "}}~) of")?;
+
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'ok', _Pid}}> when 'true' -> 'ok'")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<{{'error', {{'already_started', _}}}}> when 'true' -> 'ok'"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call 'erlang':'error'({{'class_registration_failed', '{class_name}', Reason}})"
+        )?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
 
         Ok(())
     }
@@ -979,11 +1052,11 @@ impl CoreErlangGenerator {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
             Expression::ClassReference { name, .. } => {
-                // Class references by themselves aren't valid expressions
-                // They must be used with message sends (e.g., `Counter spawn`)
+                // BT-215: For now, class references without message sends are not supported
+                // Future: Resolve to class object for full metaclass system
                 Err(CodeGenError::UnsupportedFeature {
                     feature: format!(
-                        "standalone class reference '{}' - use with a message like 'spawn'",
+                        "standalone class reference '{}' - use with a message send",
                         name.name
                     ),
                     location: format!("{:?}", expr.span()),
