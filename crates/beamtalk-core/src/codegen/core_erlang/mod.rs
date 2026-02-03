@@ -974,8 +974,8 @@ mod tests {
         let result = generator.generate_binary_op("~=", &left, &right);
         assert!(result.is_ok());
         assert!(
-            generator.output.contains("call 'erlang':'=/='"),
-            "Should use strict inequality =/=. Got: {}",
+            generator.output.contains("call 'erlang':'/='"),
+            "Should use inequality /= (negation of ==). Got: {}",
             generator.output
         );
     }

@@ -246,7 +246,7 @@ c1 == c2           // => false (different processes)
 **BEAM mapping:**
 - `==` → Erlang's `==` (value equality with coercion)
 - `=` → Erlang's `=:=` (strict equality, no coercion)
-- `~=` → Erlang's `=/=` (strict inequality)
+- `~=` → Erlang's `/=` (inequality, negation of `==`)
 
 **Decision rationale:** This hybrid approach emerged from BT-213 (value types) — we discovered that Erlang's `==` already provides the correct semantics for both value types and actors without any special handling.
 
