@@ -43,6 +43,20 @@ use crate::parse::Diagnostic;
 /// # Returns
 ///
 /// A list of all diagnostics (errors and warnings).
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
+/// use beamtalk_core::parse::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, parse_diags) = parse(tokens);
+///
+/// let diagnostics = compute_diagnostics(&module, parse_diags);
+/// assert!(diagnostics.is_empty()); // Valid code has no errors
+/// ```
 #[must_use]
 pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     compute_diagnostics_with_known_vars(module, parse_diagnostics, &[])

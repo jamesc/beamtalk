@@ -42,17 +42,28 @@ use crate::parse::Span;
 /// # Returns
 ///
 /// Hover information if the position is over a relevant symbol, `None` otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::queries::hover_provider::compute_hover;
+/// use beamtalk_core::language_service::Position;
+/// use beamtalk_core::parse::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, _) = parse(tokens);
+///
+/// let hover = compute_hover(&module, source, Position::new(0, 0));
+/// assert!(hover.is_some());
+/// ```
 #[must_use]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "source files over 4GB are not supported"
-)]
 pub fn compute_hover(module: &Module, source: &str, position: Position) -> Option<HoverInfo> {
-    let offset = position.to_offset(source)? as u32;
+    let offset = position.to_byte_offset(source)?;
 
     // Find the expression at this position
     for expr in &module.expressions {
-        if let Some(hover) = find_hover_in_expr(expr, offset) {
+        if let Some(hover) = find_hover_in_expr(expr, offset.get()) {
             return Some(hover);
         }
     }

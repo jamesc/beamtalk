@@ -53,6 +53,26 @@ use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::HashMap;
 
+/// A byte offset in a source file (0-indexed).
+///
+/// This newtype provides type safety to prevent mixing positions and offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ByteOffset(pub u32);
+
+impl ByteOffset {
+    /// Creates a new byte offset.
+    #[must_use]
+    pub const fn new(offset: u32) -> Self {
+        Self(offset)
+    }
+
+    /// Returns the raw byte offset value.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
 /// A position in a source file (line and column, both 0-indexed).
 ///
 /// The `column` field is a **byte offset within the line**, not a character
@@ -82,8 +102,9 @@ impl Position {
         clippy::cast_possible_truncation,
         reason = "source files over 4GB are not supported"
     )]
-    pub fn from_offset(source: &str, offset: usize) -> Option<Self> {
-        if offset > source.len() {
+    pub fn from_byte_offset(source: &str, offset: ByteOffset) -> Option<Self> {
+        let offset_val = offset.get() as usize;
+        if offset_val > source.len() {
             return None;
         }
 
@@ -91,8 +112,8 @@ impl Position {
         let mut line_start = 0;
 
         for (i, ch) in source.char_indices() {
-            if i >= offset {
-                return Some(Self::new(line, (offset - line_start) as u32));
+            if i >= offset_val {
+                return Some(Self::new(line, (offset_val - line_start) as u32));
             }
             if ch == '\n' {
                 line += 1;
@@ -100,12 +121,41 @@ impl Position {
             }
         }
 
-        Some(Self::new(line, (offset - line_start) as u32))
+        Some(Self::new(line, (offset_val - line_start) as u32))
+    }
+
+    /// Converts a byte offset to a position given source text (legacy).
+    ///
+    /// Returns `None` if the offset is out of bounds.
+    ///
+    /// **Deprecated:** Use `from_byte_offset` for type safety.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source files over 4GB are not supported"
+    )]
+    pub fn from_offset(source: &str, offset: usize) -> Option<Self> {
+        Self::from_byte_offset(source, ByteOffset::new(offset as u32))
     }
 
     /// Converts a position to a byte offset given source text.
     ///
     /// Returns `None` if the position is out of bounds.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source files over 4GB are not supported"
+    )]
+    pub fn to_byte_offset(self, source: &str) -> Option<ByteOffset> {
+        self.to_offset(source)
+            .map(|off| ByteOffset::new(off as u32))
+    }
+
+    /// Converts a position to a byte offset given source text (legacy).
+    ///
+    /// Returns `None` if the position is out of bounds.
+    ///
+    /// **Deprecated:** Use `to_byte_offset` for type safety.
     #[must_use]
     #[expect(
         clippy::cast_possible_truncation,

@@ -43,6 +43,23 @@ use std::collections::HashSet;
 /// # Returns
 ///
 /// A list of completion suggestions appropriate for the context.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::queries::completion_provider::compute_completions;
+/// use beamtalk_core::language_service::Position;
+/// use beamtalk_core::parse::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, _) = parse(tokens);
+///
+/// let completions = compute_completions(&module, source, Position::new(0, 0));
+/// assert!(!completions.is_empty());
+/// // Should include keywords like "self", "true", "false"
+/// assert!(completions.iter().any(|c| c.label == "self"));
+/// ```
 #[must_use]
 pub fn compute_completions(module: &Module, source: &str, position: Position) -> Vec<Completion> {
     // Validate position is within bounds
@@ -191,9 +208,18 @@ fn add_message_completions(completions: &mut Vec<Completion>) {
 }
 
 /// Removes duplicate completions, keeping the first occurrence.
+/// Removes duplicate completions based on label.
 fn deduplicate_completions(completions: &mut Vec<Completion>) {
     let mut seen = HashSet::new();
-    completions.retain(|c| seen.insert(c.label.clone()));
+    completions.retain(|c| {
+        // Use reference to avoid cloning EcoString
+        if seen.contains(&c.label) {
+            false
+        } else {
+            seen.insert(c.label.clone());
+            true
+        }
+    });
 }
 
 #[cfg(test)]

@@ -616,7 +616,7 @@ beamtalk/
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
-- See `docs/beamtalk-testing-strategy.md` for compilation workflow details
+- See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests
 **Location:** `tests/e2e/cases/*.bt`
