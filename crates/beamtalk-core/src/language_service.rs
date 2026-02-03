@@ -377,17 +377,14 @@ impl SimpleLanguageService {
     }
 
     /// Finds the identifier at a given position.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "source files over 4GB are not supported"
-    )]
+    /// Finds the identifier at a given position.
     fn find_identifier_at_position(
         &self,
         file: &Utf8PathBuf,
         position: Position,
     ) -> Option<(Identifier, Span)> {
         let file_data = self.get_file(file)?;
-        let offset = position.to_offset(&file_data.source)? as u32;
+        let offset = position.to_byte_offset(&file_data.source)?;
 
         // Walk the AST to find the identifier at this position
         for expr in &file_data.module.expressions {
@@ -400,15 +397,19 @@ impl SimpleLanguageService {
     }
 
     /// Recursively searches for an identifier at the given offset.
-    fn find_identifier_in_expr(expr: &Expression, offset: u32) -> Option<(Identifier, Span)> {
+    fn find_identifier_in_expr(
+        expr: &Expression,
+        offset: ByteOffset,
+    ) -> Option<(Identifier, Span)> {
+        let offset_val = offset.get();
         let span = expr.span();
-        if offset < span.start() || offset >= span.end() {
+        if offset_val < span.start() || offset_val >= span.end() {
             return None;
         }
 
         match expr {
             Expression::Identifier(ident) => {
-                if offset >= ident.span.start() && offset < ident.span.end() {
+                if offset_val >= ident.span.start() && offset_val < ident.span.end() {
                     Some((ident.clone(), ident.span))
                 } else {
                     None
@@ -438,7 +439,7 @@ impl SimpleLanguageService {
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
-                if offset >= field.span.start() && offset < field.span.end() {
+                if offset_val >= field.span.start() && offset_val < field.span.end() {
                     Some((field.clone(), field.span))
                 } else {
                     Self::find_identifier_in_expr(receiver, offset)
