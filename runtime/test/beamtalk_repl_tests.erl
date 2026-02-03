@@ -356,11 +356,15 @@ server_starts_and_stops_test() ->
 server_starts_with_default_port_test() ->
     %% Test start_link/0 which uses application:get_env
     application:set_env(beamtalk_runtime, repl_port, 51234),
-    {ok, Pid} = beamtalk_repl:start_link(),
-    ?assert(is_process_alive(Pid)),
-    Port = beamtalk_repl:get_port(Pid),
-    ?assertEqual(51234, Port),
-    ok = beamtalk_repl:stop(Pid).
+    try
+        {ok, Pid} = beamtalk_repl:start_link(),
+        ?assert(is_process_alive(Pid)),
+        Port = beamtalk_repl:get_port(Pid),
+        ?assertEqual(51234, Port),
+        ok = beamtalk_repl:stop(Pid)
+    after
+        application:unset_env(beamtalk_runtime, repl_port)
+    end.
 
 server_starts_with_options_test() ->
     Port = test_port(),

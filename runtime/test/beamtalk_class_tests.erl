@@ -19,18 +19,6 @@ setup() ->
     end.
 
 teardown(_) ->
-    %% Force unregister all known test class names first
-    lists:foreach(
-        fun(Name) ->
-            try unregister(Name) catch _:_ -> ok end
-        end,
-        [beamtalk_class_StartLinkTestClass, beamtalk_class_RegistryTestClass,
-         beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
-         beamtalk_class_TestClassA, beamtalk_class_TestClassB,
-         beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
-         beamtalk_class_CounterNoMethods]
-    ),
-    
     %% Clean up all registered class processes by getting all from pg group
     Members = try
         pg:get_members(beamtalk_classes)
@@ -39,6 +27,7 @@ teardown(_) ->
     end,
     
     %% Terminate each class process and wait for them to die
+    %% gen_server will auto-unregister names when processes terminate
     lists:foreach(
         fun(Pid) when is_pid(Pid) ->
             case is_process_alive(Pid) of
@@ -57,6 +46,19 @@ teardown(_) ->
             ok
         end,
         Members
+    ),
+    
+    %% Force unregister any stragglers that didn't auto-unregister
+    %% (shouldn't be necessary with gen_server, but defensive cleanup)
+    lists:foreach(
+        fun(Name) ->
+            try unregister(Name) catch _:_ -> ok end
+        end,
+        [beamtalk_class_StartLinkTestClass, beamtalk_class_RegistryTestClass,
+         beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
+         beamtalk_class_TestClassA, beamtalk_class_TestClassB,
+         beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
+         beamtalk_class_CounterNoMethods]
     ),
     ok.
 
