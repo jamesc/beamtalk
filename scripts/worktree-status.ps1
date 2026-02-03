@@ -45,16 +45,19 @@ function Get-MainRepoRoot {
 function Get-ContainerStatus {
     param([string]$WorktreeName)
     
-    $allContainers = docker ps -a --format '{{.ID}}|{{.Status}}' 2>$null
+    # Fetch all container info including labels in a single docker ps call
+    # Format: ID|git.worktree label|devcontainer.local_folder label|Status
+    $allContainers = docker ps -a --format '{{.ID}}|{{.Label "git.worktree"}}|{{.Label "devcontainer.local_folder"}}|{{.Status}}' 2>$null
     foreach ($line in $allContainers) {
         if (-not $line) { continue }
         
         $parts = $line -split '\|'
         $id = $parts[0]
-        $status = $parts[1]
+        $worktreeLabel = $parts[1]
+        $localFolder = $parts[2]
+        $status = $parts[3]
         
-        # Check our custom label
-        $worktreeLabel = docker inspect --format '{{index .Config.Labels "git.worktree"}}' $id 2>$null
+        # Check our custom git.worktree label
         if ($worktreeLabel -eq $WorktreeName) {
             if ($status -match "^Up") {
                 return "🟢 Running"
@@ -64,7 +67,6 @@ function Get-ContainerStatus {
         }
         
         # Fallback to devcontainer.local_folder label
-        $localFolder = docker inspect --format '{{index .Config.Labels "devcontainer.local_folder"}}' $id 2>$null
         if ($localFolder) {
             $labelName = Split-Path -Leaf $localFolder
             if ($labelName -eq $WorktreeName) {

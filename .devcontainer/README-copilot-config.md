@@ -22,7 +22,7 @@
 | `allowed_urls` | Array | Whitelisted URLs for documentation access |
 | `experimental` | `true` | Enable experimental Copilot features |
 | `log_level` | `"info"` | Logging verbosity |
-| `default_permissions` | `"allow"` | Auto-allow tools, paths, and URLs (yolo mode) |
+| `default_permissions` | `{ "tools": "allow", "paths": "allow", "urls": "allow" }` | Auto-allow tools, paths, and URLs (yolo mode) |
 
 ## Modification
 
