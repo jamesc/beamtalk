@@ -289,6 +289,23 @@ dispatch(Selector, Args, Self, State) ->
             [Name] = Args,
             Result = maps:get(Name, State, nil),
             {reply, Result, State};
+        perform when length(Args) =:= 1 ->
+            %% Dynamic message send with no arguments
+            %% obj perform: #increment  => obj increment
+            [TargetSelector] = Args,
+            dispatch(TargetSelector, [], Self, State);
+        'perform:withArgs:' when length(Args) =:= 2 ->
+            %% Dynamic message send with argument array
+            %% obj perform: #'at:put:' withArgs: [1, 'x']  => obj at: 1 put: 'x'
+            [TargetSelector, ArgList] = Args,
+            when_list(ArgList,
+                fun() -> dispatch(TargetSelector, ArgList, Self, State) end,
+                fun() ->
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                    {error, Error, State}
+                end);
         _ ->
             %% Not a built-in method, check user-defined methods
             dispatch_user_method(Selector, Args, Self, State)
@@ -390,3 +407,12 @@ handle_dnu(Selector, Args, Self, State) ->
             Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
             {error, Error, State}
     end.
+
+%% @private
+%% @doc Execute ThenFun if Value is a list, else execute ElseFun.
+%% Used for type checking in perform:withArgs:
+-spec when_list(term(), fun(() -> term()), fun(() -> term())) -> term().
+when_list(Value, ThenFun, _ElseFun) when is_list(Value) ->
+    ThenFun();
+when_list(_Value, _ThenFun, ElseFun) ->
+    ElseFun().
