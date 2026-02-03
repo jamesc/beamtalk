@@ -1126,14 +1126,14 @@ impl CoreErlangGenerator {
             // Handle success case
             self.indent += 1;
             self.write_indent()?;
-            writeln!(self.output, "<{{'ok', _Pid{}}}> when 'true' -> 'ok'", i)?;
+            writeln!(self.output, "<{{'ok', _Pid{i}}}> when 'true' -> 'ok'")?;
 
             // Handle error case - fail module loading with descriptive error
             self.write_indent()?;
             writeln!(
                 self.output,
-                "<{{'error', Reason{}}}> when 'true' -> call 'erlang':'error'({{'class_registration_failed', '{}', Reason{}}})",
-                i, class.name.name, i
+                "<{{'error', Reason{i}}}> when 'true' -> call 'erlang':'error'({{'class_registration_failed', '{}', Reason{i}}})",
+                class.name.name
             )?;
             self.indent -= 1;
 
