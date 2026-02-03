@@ -240,6 +240,50 @@ value := counter getValue
 // counter := Counter new  // ⚠️  Not yet implemented
 ```
 
+### Beamtalk (`beamtalk.bt`)
+
+Global class for system-wide reflection and introspection. The Beamtalk class provides Smalltalk-style access to the class registry and global namespace.
+
+**Inheritance:** `ProtoObject → Object → Beamtalk`
+
+**Key messages (all class-side):**
+- `allClasses` - Returns list of all registered classes in the system
+- `classNamed:` - Look up a class by name (symbol), returns nil if not found
+- `globals` - Returns the global namespace dictionary (placeholder)
+
+**Usage:**
+```beamtalk
+// List all classes in the system
+classes := Beamtalk allClasses
+// => [ProtoObject, Object, Actor, Integer, String, Counter, ...]
+
+// Look up a class by name
+CounterClass := Beamtalk classNamed: #Counter
+CounterClass name              // => #Counter
+CounterClass superclass        // => Actor class object
+
+// Use class object to spawn instances
+counter := CounterClass spawn
+counter increment
+
+// Handle missing classes
+MissingClass := Beamtalk classNamed: #NonExistent
+// => nil
+
+MissingClass
+  ifNil: [Transcript show: 'Class not found']
+  ifNotNil: [:cls | cls spawn]
+```
+
+**Implementation:**
+- Beamtalk is a value type (Object subclass), not an actor
+- All methods are class-level - no instance creation needed
+- Acts like a namespace providing system-wide access
+- Class methods implemented as compiler primitives
+- Calls into runtime class registry (`beamtalk_class:all_classes/0`, `beamtalk_class:whereis_class/1`)
+
+**Note:** Full testing requires BT-224 (auto-loading standard library).
+
 ### Boolean (`True.bt`, `False.bt`)
 
 Control flow via message sends to boolean objects.

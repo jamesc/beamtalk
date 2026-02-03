@@ -172,6 +172,13 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-215: Class-level message sends (e.g., Beamtalk allClasses, Point new)
+        // For now, generate direct function calls to class methods
+        // Future: Full metaclass dispatch through class objects
+        if let Expression::ClassReference { name, .. } = receiver {
+            return self.generate_class_method_call(&name.name, selector, arguments);
+        }
+
         // Generate the async message send protocol:
         // let Receiver1 = <receiver expression>
         // in let Pid1 = call 'erlang':'element'(4, Receiver1)  % Extract pid from #beamtalk_object{}
@@ -465,6 +472,40 @@ impl CoreErlangGenerator {
             }
             write!(self.output, ")")?;
         }
+
+        Ok(())
+    }
+
+    /// Generates a class-level method call (BT-215).
+    ///
+    /// Class methods are just module functions, so we generate a direct call:
+    /// ```erlang
+    /// call 'ModuleName':'methodName'(Args)
+    /// ```
+    ///
+    /// Examples:
+    /// - `Beamtalk allClasses` → `call 'Beamtalk':'allClasses'()`
+    /// - `Point new` → `call 'Point':'new'()`
+    /// - `Counter spawn` → Already handled by `generate_actor_spawn`
+    fn generate_class_method_call(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let module_name = to_module_name(class_name);
+        let method_name = selector.to_erlang_atom();
+
+        write!(self.output, "call '{module_name}':'{method_name}'(")?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, ")")?;
 
         Ok(())
     }

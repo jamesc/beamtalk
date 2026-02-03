@@ -71,7 +71,9 @@
     instance_variables/1,
     add_before/3,
     add_after/3,
-    super_dispatch/3
+    super_dispatch/3,
+    class_name/1,
+    module_name/1
 ]).
 
 %% gen_server callbacks
@@ -152,6 +154,16 @@ methods(ClassPid) ->
 -spec superclass(pid()) -> class_name() | none.
 superclass(ClassPid) ->
     gen_server:call(ClassPid, superclass).
+
+%% @doc Get the class name.
+-spec class_name(pid()) -> class_name().
+class_name(ClassPid) ->
+    gen_server:call(ClassPid, class_name).
+
+%% @doc Get the module name.
+-spec module_name(pid()) -> atom().
+module_name(ClassPid) ->
+    gen_server:call(ClassPid, module_name).
 
 %% @doc Get a compiled method object.
 -spec method(pid(), selector()) -> map() | nil.
@@ -260,6 +272,12 @@ handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
 
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
     {reply, Super, State};
+
+handle_call(class_name, _From, #class_state{name = Name} = State) ->
+    {reply, Name, State};
+
+handle_call(module_name, _From, #class_state{module = Module} = State) ->
+    {reply, Module, State};
 
 handle_call({method, Selector}, _From, #class_state{
     instance_methods = Methods,
