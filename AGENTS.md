@@ -393,7 +393,7 @@ mutation {
 
 ## Architecture Decision Records (ADRs)
 
-We use **Architecture Decision Records (ADRs)** to document significant design and architectural decisions in `docs/adr/`.
+We use **Architecture Decision Records (ADRs)** to document significant design and architectural decisions in `docs/ADR/`.
 
 ### When to Create an ADR
 
@@ -456,15 +456,15 @@ The decision made (clear, concise statement)
 2. **Title format:** `NNNN-kebab-case-title.md`
 3. **One decision per ADR:** Keep focused—split complex decisions into multiple ADRs
 4. **Document dependencies:** If ADR B depends on ADR A, state it explicitly
-5. **Update the index:** Add your ADR to `docs/adr/README.md`
+5. **Update the index:** Add your ADR to `docs/ADR/README.md`
 
 **Example workflow:**
 ```bash
 # Create ADR file
-vim docs/adr/0003-add-pattern-matching.md
+vim docs/ADR/0003-add-pattern-matching.md
 
 # Update index
-vim docs/adr/README.md
+vim docs/ADR/README.md
 
 # Commit with reference
 git commit -m "docs: add ADR 0003 - pattern matching syntax BT-XXX"
@@ -481,7 +481,7 @@ git commit -m "docs: add ADR 0003 - pattern matching syntax BT-XXX"
 
 ### Current ADRs
 
-See `docs/adr/README.md` for the complete list. Recent examples:
+See `docs/ADR/README.md` for the complete list. Recent examples:
 - **ADR 0001:** No compound assignment in Beamtalk (Smalltalk purity)
 - **ADR 0002:** Use Erlang comparison operators directly (BEAM-first)
 
