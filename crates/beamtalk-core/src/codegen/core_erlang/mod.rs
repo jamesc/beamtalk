@@ -100,7 +100,7 @@ mod variable_context;
 // Re-export utility functions for IDE queries
 pub use util::to_module_name;
 
-use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::ast::{Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, Module};
 use state_threading::StateThreading;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -509,26 +509,148 @@ impl CoreErlangGenerator {
     /// - No state threading (value types are immutable)
     /// - Methods return new instances rather than mutating
     fn generate_value_type_module(&mut self, module: &Module) -> Result<()> {
-        // For now, return an error indicating this is not yet implemented
-        // TODO(BT-213): Implement full value type code generation
-        let class_name = module
+        let class = module
             .classes
             .first()
-            .map(|c| c.name.name.as_str())
-            .unwrap_or("UnknownClass");
-        let location = module
-            .classes
-            .first()
-            .map(|c| format!("{}:{}", class_name, c.span.start()))
-            .unwrap_or_else(|| "unknown:0".to_string());
+            .ok_or_else(|| CodeGenError::Internal("Value type module has no class".to_string()))?;
 
-        Err(CodeGenError::UnsupportedFeature {
-            feature: format!(
-                "Value type code generation (Object subclass: {})",
-                class_name
-            ),
-            location,
-        })
+        // Collect method exports
+        let mut exports = vec!["'new'/0".to_string(), "'new'/1".to_string()];
+
+        // Add instance method exports (each takes Self as first parameter)
+        for method in &class.methods {
+            // All methods in a class are instance methods in Beamtalk
+            // MethodKind is about method combination (Primary, Before, After, Around)
+            let arity = method.parameters.len() + 1; // +1 for Self parameter
+            let mangled = method.selector.to_erlang_atom();
+            exports.push(format!("'{}'/{}", mangled, arity));
+        }
+
+        // Module header
+        writeln!(
+            self.output,
+            "module '{}' [{}]",
+            self.module_name,
+            exports.join(", ")
+        )?;
+        writeln!(self.output, "  attributes []")?;
+        writeln!(self.output)?;
+
+        // Generate new/0 - creates instance with default field values
+        self.generate_value_type_new(class)?;
+        writeln!(self.output)?;
+
+        // Generate new/1 - creates instance with initialization arguments
+        self.generate_value_type_new_with_args()?;
+        writeln!(self.output)?;
+
+        // Generate instance methods as pure functions
+        for method in &class.methods {
+            self.generate_value_type_method(method, class)?;
+            writeln!(self.output)?;
+        }
+
+        // Module end
+        writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates the `new/0` function for a value type.
+    ///
+    /// Creates an instance map with __class__ and default field values.
+    fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
+        writeln!(self.output, "'new'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        // Generate map literal with __class__ and fields
+        write!(self.output, "~{{'__class__' => '{}'", self.to_class_name())?;
+
+        // Add each field with its default value
+        for field in &class.state {
+            write!(self.output, ", '{}' => ", field.name.name)?;
+            if let Some(default_value) = &field.default_value {
+                self.generate_expression(default_value)?;
+            } else {
+                write!(self.output, "'nil'")?;
+            }
+        }
+
+        writeln!(self.output, "}}~")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `new/1` function for a value type.
+    ///
+    /// Merges initialization arguments with default values.
+    fn generate_value_type_new_with_args(&mut self) -> Result<()> {
+        writeln!(self.output, "'new'/1 = fun (InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let DefaultState = call '{}':'new'() in",
+            self.module_name
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'maps':'merge'(DefaultState, InitArgs)")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates an instance method for a value type.
+    ///
+    /// Value type methods are pure functions that take Self as first parameter
+    /// and return a new instance (immutable semantics).
+    fn generate_value_type_method(
+        &mut self,
+        method: &MethodDefinition,
+        _class: &ClassDefinition,
+    ) -> Result<()> {
+        let mangled = method.selector.to_erlang_atom();
+        let arity = method.parameters.len() + 1; // +1 for Self
+
+        // Function signature: 'methodName'/Arity = fun (Self, Param1, Param2, ...) ->
+        write!(self.output, "'{}'/{}= fun (Self", mangled, arity)?;
+        for param in &method.parameters {
+            let core_var = variable_context::VariableContext::to_core_var(&param.name);
+            write!(self.output, ", {}", core_var)?;
+        }
+        writeln!(self.output, ") ->")?;
+
+        self.indent += 1;
+
+        // Bind parameters in scope
+        self.push_scope();
+        for param in &method.parameters {
+            let core_var = variable_context::VariableContext::to_core_var(&param.name);
+            self.bind_var(&param.name, &core_var);
+        }
+
+        // Generate method body expressions
+        // For value types, there's no state threading - they're immutable
+        // TODO: Need to handle self.field references by extracting from Self map
+        for (i, expr) in method.body.iter().enumerate() {
+            if i > 0 {
+                self.write_indent()?;
+            }
+            self.generate_expression(expr)?;
+            if i < method.body.len() - 1 {
+                writeln!(self.output)?;
+            }
+        }
+
+        self.pop_scope();
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
     }
 
     /// Generates a simple REPL evaluation module.
