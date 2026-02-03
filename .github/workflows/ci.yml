@@ -198,6 +198,10 @@ jobs:
           badge: true
           format: markdown
           output: both
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          thresholds: '60 70'
 
       - name: Preserve Erlang Coverage Report
         run: |
@@ -205,6 +209,19 @@ jobs:
           if [ -f code-coverage-results.md ]; then
             mv code-coverage-results.md erlang-coverage-results.md
           fi
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            rust-coverage-results.md
+            erlang-coverage-results.md
+            runtime/_build/test/cover/index.html
+            runtime/_build/test/cover/aggregate/*.html
+            coverage.cobertura.xml
+            runtime/_build/test/covertool/*.xml
+          retention-days: 30
 
       - name: Add Coverage to Job Summary
         run: |
@@ -227,6 +244,10 @@ jobs:
           else
             echo "⚠️ WARNING: Erlang coverage report not generated" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📁 **Detailed HTML Reports:** Download the \`coverage-reports\` artifact for per-module breakdowns" >> $GITHUB_STEP_SUMMARY
 
       - name: Check Coverage Thresholds
         run: |
