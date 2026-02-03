@@ -200,18 +200,38 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// ```
 pub fn generate(module: &Module) -> Result<String> {
     let mut generator = CoreErlangGenerator::new("beamtalk_module");
-    generator.generate_module(module)?;
+
+    // BT-213: Route based on whether class is actor or value type
+    if CoreErlangGenerator::is_actor_class(module) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
     Ok(generator.output)
 }
 
 /// Generates Core Erlang code with a specified module name.
+///
+/// # BT-213: Value Types vs Actors
+///
+/// Routes to different code generators based on class hierarchy:
+/// - **Actor subclasses** → `generate_actor_module` (gen_server with mailbox)
+/// - **Object subclasses** → `generate_value_type_module` (plain Erlang maps)
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
-    generator.generate_module(module)?;
+
+    // BT-213: Route based on whether class is actor or value type
+    if CoreErlangGenerator::is_actor_class(module) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
     Ok(generator.output)
 }
 
@@ -346,9 +366,41 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Generates a full module with `gen_server` behaviour.
+    /// BT-213: Determines if a class is an actor (process-based) or value type (plain term).
     ///
-    /// Per BT-29 design doc, each class generates a `gen_server` module with:
+    /// **Actor classes:** Inherit from Actor or its subclasses. Generate gen_server code.
+    /// **Value types:** Inherit from Object (but not Actor). Generate plain Erlang maps/records.
+    ///
+    /// # Implementation Note
+    ///
+    /// This is a simplified check that only looks at the direct superclass.
+    /// It treats any superclass other than "Object" as an actor to maintain
+    /// backward compatibility. Full implementation should traverse the inheritance
+    /// chain in semantic analysis.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if class inherits from Actor or other non-Object classes (actors by default)
+    /// - `false` if class inherits directly from Object
+    /// - `true` if module contains no class (backward compatibility for REPL)
+    fn is_actor_class(module: &Module) -> bool {
+        // Check if the first class in the module is an actor
+        // TODO(BT-213): Handle modules with multiple classes
+        if let Some(class) = module.classes.first() {
+            // For BT-213 MVP: Only classes that directly inherit from Object are value types
+            // Everything else (Actor, Counter, Array, etc.) is treated as an actor
+            // TODO(BT-213): Full inheritance chain resolution in semantic analysis
+            class.superclass.name.as_str() != "Object"
+        } else {
+            // If no class definition, assume actor to maintain backward compatibility
+            // (existing tests expect gen_server generation)
+            true
+        }
+    }
+
+    /// Generates a full actor module with `gen_server` behaviour.
+    ///
+    /// Per BT-29 design doc, each actor class generates a `gen_server` module with:
     /// - Error isolation via `safe_dispatch/3`
     /// - `doesNotUnderstand:args:` fallback dispatch
     /// - `terminate/2` with method call support
@@ -360,7 +412,7 @@ impl CoreErlangGenerator {
     /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
-    fn generate_module(&mut self, module: &Module) -> Result<()> {
+    fn generate_actor_module(&mut self, module: &Module) -> Result<()> {
         // Module header with expanded exports per BT-29
         writeln!(
             self.output,
@@ -419,6 +471,64 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
 
         Ok(())
+    }
+
+    /// Generates a value type module (BT-213).
+    ///
+    /// Value types are plain Erlang terms (maps/records) with no process.
+    /// They are created with `new` and `new:`, not `spawn`.
+    ///
+    /// ## Generated Structure
+    ///
+    /// ```erlang
+    /// module 'point' ['new'/0, 'new'/1, 'plus'/2, ...]
+    ///   attributes []
+    ///
+    /// 'new'/0 = fun () ->
+    ///     ~{'__class__' => 'Point', 'x' => 0, 'y' => 0}~
+    ///
+    /// 'new'/1 = fun (InitArgs) ->
+    ///     DefaultState = call 'point':'new'(),
+    ///     call 'maps':'merge'(DefaultState, InitArgs)
+    ///
+    /// 'plus'/2 = fun (Self, Other) ->
+    ///     % Direct function call, no gen_server
+    ///     NewX = call 'erlang':'+'(
+    ///         call 'maps':'get'('x', Self),
+    ///         call 'maps':'get'('x', Other)
+    ///     ),
+    ///     ...
+    ///     ~{'__class__' => 'Point', 'x' => NewX, 'y' => NewY}~
+    /// ```
+    ///
+    /// ## Key Differences from Actors
+    ///
+    /// - No `gen_server` behavior
+    /// - No `spawn/0` or `spawn/1` - use `new/0` and `new/1` instead
+    /// - Methods are synchronous functions operating on maps
+    /// - No state threading (value types are immutable)
+    /// - Methods return new instances rather than mutating
+    fn generate_value_type_module(&mut self, module: &Module) -> Result<()> {
+        // For now, return an error indicating this is not yet implemented
+        // TODO(BT-213): Implement full value type code generation
+        let class_name = module
+            .classes
+            .first()
+            .map(|c| c.name.name.as_str())
+            .unwrap_or("UnknownClass");
+        let location = module
+            .classes
+            .first()
+            .map(|c| format!("{}:{}", class_name, c.span.start()))
+            .unwrap_or_else(|| "unknown:0".to_string());
+
+        Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "Value type code generation (Object subclass: {})",
+                class_name
+            ),
+            location,
+        })
     }
 
     /// Generates a simple REPL evaluation module.
