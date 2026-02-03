@@ -108,6 +108,35 @@ When reviewing code for DDD compliance:
 
 ---
 
+## Development Architecture Principles
+
+The beamtalk codebase follows strict architectural principles for code organization, error handling, testing, security, and dependencies. Full details in [docs/development/architecture-principles.md](docs/development/architecture-principles.md).
+
+**Core principles:**
+1. **Layered Architecture** - Dependencies flow down only (core never depends on CLI)
+2. **Error Recovery** - Return partial results + diagnostics (don't stop at first error)
+3. **Testing Pyramid** - Unit 60-70%, Integration 20-30%, E2E 10%
+4. **Security-First** - Input validation at boundaries, no unsafe without justification
+5. **Minimal Dependencies** - Prefer std library, document why each dependency exists
+
+**Critical rules:**
+
+❌ **NEVER:**
+- `beamtalk-core` importing `beamtalk-cli` or `beamtalk-lsp`
+- Panic on user input (malformed source, invalid args, missing files)
+- Add dependencies without security review and commit message justification
+- Use `unwrap()` on user input
+
+✅ **ALWAYS:**
+- Return `(Result, Vec<Diagnostic>)` or equivalent for user-facing operations
+- Validate file paths and buffer boundaries
+- Document unsafe code with `// SAFETY:` comment explaining invariants
+- Run `cargo audit` before releases
+
+See full guide: [docs/development/architecture-principles.md](docs/development/architecture-principles.md)
+
+---
+
 ## Work Tracking
 
 We use **Linear** for task management. Project prefix: `BT`
