@@ -1323,8 +1323,8 @@ impl CoreErlangGenerator {
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            for (i, method) in instance_methods.iter().enumerate() {
-                if i > 0 {
+            for (method_idx, method) in instance_methods.iter().enumerate() {
+                if method_idx > 0 {
                     write!(self.output, ", ")?;
                 }
                 write!(
@@ -1339,8 +1339,8 @@ impl CoreErlangGenerator {
             // Instance variables
             self.write_indent()?;
             write!(self.output, "'instance_variables' => [")?;
-            for (i, state_decl) in class.state.iter().enumerate() {
-                if i > 0 {
+            for (state_idx, state_decl) in class.state.iter().enumerate() {
+                if state_idx > 0 {
                     write!(self.output, ", ")?;
                 }
                 write!(self.output, "'{}'", state_decl.name.name)?;
