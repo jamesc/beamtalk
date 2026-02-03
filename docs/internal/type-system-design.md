@@ -42,7 +42,7 @@ Beamtalk follows TypeScript/Python's approach - types are optional annotations t
 
 ```beamtalk
 // Optional - types inferred
-increment => self.value += 1
+increment => self.value := self.value + 1
 
 // Explicit when you want tooling/safety
 getValue -> Integer => self.value

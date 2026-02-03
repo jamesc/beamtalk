@@ -278,7 +278,7 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |  state: value = 0
 |  
 |  // Instance methods
-|  increment => self.value += 1
+|  increment => self.value := self.value + 1
 |  
 |  // Class methods (defined on the metaclass automatically)
 |  class >> create: initialValue => self spawnWith: #{value => initialValue}
@@ -305,7 +305,7 @@ Smalltalk's objects have identity, state, and behavior. BEAM processes have exac
 Object subclass: Counter
   state: value = 0
   
-  increment => self.value += 1
+  increment => self.value := self.value + 1
   getValue => ^self.value
 ```
 
@@ -402,7 +402,7 @@ Methods can be inspected, replaced, and wrapped at runtime.
 #{
     '__class__' => 'CompiledMethod',
     '__selector__' => increment,
-    '__source__' => <<"increment => self.value += 1">>,
+    '__source__' => <<"increment => self.value := self.value + 1">>,
     '__bytecode__' => fun handle_increment/2,
     '__pragmas__' => [],
     '__literals__' => [],
@@ -417,13 +417,13 @@ method := Counter >> #increment
 
 // Introspect
 method selector         // => #increment
-method source           // => "increment => self.value += 1"
+method source           // => "increment => self.value := self.value + 1"
 method argumentCount    // => 0
 
 // Replace at runtime (hot patching) - low-level API
 Counter >> #increment put: [:self |
   Telemetry log: 'incrementing'
-  self.value += 1
+  self.value := self.value + 1
 ]
 ```
 
