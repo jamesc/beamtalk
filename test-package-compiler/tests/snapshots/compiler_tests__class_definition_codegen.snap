@@ -113,7 +113,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 
 'register_class'/0 = fun () ->
-    let _Class0 = call 'beamtalk_class':'start_link'('Counter', ~{
+    let _Reg0 = case call 'beamtalk_class':'start_link'('Counter', ~{
         'name' => 'Counter',
         'module' => 'class_definition',
         'superclass' => 'Actor',
@@ -123,7 +123,10 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
             'spawn' => ~{'arity' => 0}~,
             'spawnWith:' => ~{'arity' => 1}~
         }~
-    }~)
+    }~) of
+        <{'ok', _Pid0}> when 'true' -> 'ok'
+        <{'error', Reason0}> when 'true' -> call 'erlang':'error'({'class_registration_failed', 'Counter', Reason0})
+    end
 
     in 'ok'
 

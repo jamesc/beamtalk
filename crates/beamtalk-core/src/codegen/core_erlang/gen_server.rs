@@ -1019,7 +1019,7 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'register_class'/0 = fun () ->
-    ///     call 'beamtalk_class':'start_link'('Counter', ~{
+    ///     case call 'beamtalk_class':'start_link'('Counter', ~{
     ///         'name' => 'Counter',
     ///         'module' => 'counter',
     ///         'superclass' => 'Actor',
@@ -1032,8 +1032,11 @@ impl CoreErlangGenerator {
     ///             'spawn' => ~{'arity' => 0}~,
     ///             'spawnWith:' => ~{'arity' => 1}~
     ///         }~
-    ///     }~),
-    ///     'ok'
+    ///     }~) of
+    ///         <{'ok', _Pid}> when 'true' -> 'ok'
+    ///         <{'error', Reason}> when 'true' ->
+    ///             call 'erlang':'error'({'class_registration_failed', 'Counter', Reason})
+    ///     end
     /// ```
     pub(super) fn generate_register_class(&mut self, module: &Module) -> Result<()> {
         // Skip if no class definitions
@@ -1047,13 +1050,13 @@ impl CoreErlangGenerator {
         // Generate registration for each class in the module
         for (i, class) in module.classes.iter().enumerate() {
             self.write_indent()?;
-            // Use let bindings to sequence multiple registrations
+            // Use case expressions for proper error handling
             if i > 0 {
                 write!(self.output, "in ")?;
             }
             write!(
                 self.output,
-                "let _Class{} = call 'beamtalk_class':'start_link'('{}', ~{{",
+                "let _Reg{} = case call 'beamtalk_class':'start_link'('{}', ~{{",
                 i, class.name.name
             )?;
             writeln!(self.output)?;
@@ -1118,7 +1121,24 @@ impl CoreErlangGenerator {
 
             self.indent -= 1;
             self.write_indent()?;
-            writeln!(self.output, "}}~)")?;
+            writeln!(self.output, "}}~) of")?;
+
+            // Handle success case
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "<{{'ok', _Pid{}}}> when 'true' -> 'ok'", i)?;
+
+            // Handle error case - fail module loading with descriptive error
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "<{{'error', Reason{}}}> when 'true' -> call 'erlang':'error'({{'class_registration_failed', '{}', Reason{}}})",
+                i, class.name.name, i
+            )?;
+            self.indent -= 1;
+
+            self.write_indent()?;
+            writeln!(self.output, "end")?;
         }
 
         writeln!(self.output)?;
