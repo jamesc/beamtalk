@@ -3551,4 +3551,132 @@ end
             "Should return ok after all registrations. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_beamtalk_module_generation() {
+        // BT-220: Test that Beamtalk class generates special module with class methods
+        use crate::ast::{ClassDefinition, Identifier};
+        use crate::parse::Span;
+
+        let class = ClassDefinition {
+            name: Identifier::new("Beamtalk", Span::new(0, 8)),
+            superclass: Identifier::new("Object", Span::new(0, 6)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 50),
+        };
+
+        let module = Module {
+            expressions: vec![],
+            classes: vec![class],
+            span: Span::new(0, 50),
+            leading_comments: vec![],
+        };
+
+        let code = generate_with_name(&module, "Beamtalk").expect("codegen should succeed");
+
+        // Should export class methods
+        assert!(
+            code.contains("'allClasses'/0"),
+            "Should export allClasses. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'classNamed:'/1"),
+            "Should export classNamed:. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'globals'/0"),
+            "Should export globals. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'register_class'/0"),
+            "Should export register_class. Got:\n{code}"
+        );
+
+        // Should have on_load attribute
+        assert!(
+            code.contains("'on_load' = [{'register_class', 0}]"),
+            "Should have on_load attribute. Got:\n{code}"
+        );
+
+        // Should register with class_methods map
+        assert!(
+            code.contains("'class_methods' => ~{"),
+            "Should include class_methods map. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'allClasses' => ~{'arity' => 0}"),
+            "Should include allClasses in class_methods. Got:\n{code}"
+        );
+
+        // Should implement allClasses to call beamtalk_class:all_classes
+        assert!(
+            code.contains("call 'beamtalk_class':'all_classes'()"),
+            "Should call beamtalk_class:all_classes. Got:\n{code}"
+        );
+
+        // Should wrap results in #beamtalk_object{} records
+        assert!(
+            code.contains("{'beamtalk_object', ClassName, ClassModName, Pid}"),
+            "Should wrap in beamtalk_object records. Got:\n{code}"
+        );
+
+        // Should implement classNamed: to call whereis_class
+        assert!(
+            code.contains("call 'beamtalk_class':'whereis_class'(ClassName)"),
+            "Should call whereis_class. Got:\n{code}"
+        );
+
+        // Should return nil for undefined classes
+        assert!(
+            code.contains("'undefined'> when 'true' ->\n            'nil'"),
+            "Should return nil for undefined classes. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_class_method_call_generation() {
+        // BT-215: Test that ClassReference message sends generate direct function calls
+        use crate::ast::{Expression, Identifier, MessageSelector, Module};
+        use crate::parse::Span;
+
+        // Create expression: Beamtalk allClasses
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Beamtalk", Span::new(0, 8)),
+                span: Span::new(0, 8),
+            }),
+            selector: MessageSelector::Unary("allClasses".into()),
+            arguments: vec![],
+            span: Span::new(0, 20),
+        };
+
+        let module = Module {
+            expressions: vec![expr],
+            classes: vec![],
+            span: Span::new(0, 20),
+            leading_comments: vec![],
+        };
+
+        let code = generate_repl_expression(&module.expressions[0], "repl_eval")
+            .expect("codegen should succeed");
+
+        // Should generate direct function call, not async message protocol
+        assert!(
+            code.contains("call 'beamtalk':'allClasses'()"),
+            "Should generate direct function call to beamtalk:allClasses. Got:\n{code}"
+        );
+
+        // Should NOT contain async message protocol
+        assert!(
+            !code.contains("beamtalk_future"),
+            "Should not use async protocol for class methods. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("gen_server':'cast"),
+            "Should not use gen_server:cast for class methods. Got:\n{code}"
+        );
+    }
 }

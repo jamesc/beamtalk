@@ -181,6 +181,56 @@ superclass_test_() ->
          ]
      end}.
 
+class_name_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'Counter',
+                         module => counter
+                     },
+                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     ?assertEqual('Counter', beamtalk_class:class_name(Pid))
+                 end),
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'Beamtalk',
+                         module => 'Beamtalk'
+                     },
+                     {ok, Pid} = beamtalk_class:start_link('Beamtalk', ClassInfo),
+                     ?assertEqual('Beamtalk', beamtalk_class:class_name(Pid))
+                 end)
+         ]
+     end}.
+
+module_name_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'Counter',
+                         module => counter
+                     },
+                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     ?assertEqual(counter, beamtalk_class:module_name(Pid))
+                 end),
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'Beamtalk',
+                         module => 'Beamtalk'
+                     },
+                     {ok, Pid} = beamtalk_class:start_link('Beamtalk', ClassInfo),
+                     ?assertEqual('Beamtalk', beamtalk_class:module_name(Pid))
+                 end)
+         ]
+     end}.
+
 method_test_() ->
     {setup,
      fun setup/0,

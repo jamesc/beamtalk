@@ -282,7 +282,7 @@ MissingClass
 - Class methods implemented as compiler primitives
 - Calls into runtime class registry (`beamtalk_class:all_classes/0`, `beamtalk_class:whereis_class/1`)
 
-**Note:** Full testing requires BT-218 (auto-registration) and BT-215 (class message sends).
+**Note:** Full testing requires BT-224 (auto-loading standard library).
 
 ### Boolean (`True.bt`, `False.bt`)
 
