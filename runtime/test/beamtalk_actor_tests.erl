@@ -13,6 +13,7 @@
 
 -module(beamtalk_actor_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% Tests
 
@@ -61,7 +62,7 @@ sync_message_modify_state_test() ->
 sync_message_unknown_selector_test() ->
     {ok, Counter} = test_counter:start_link(0),
     Result = gen_server:call(Counter, {unknownMethod, []}),
-    ?assertMatch({error, {unknown_message, unknownMethod}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = unknownMethod}}, Result),
     gen_server:stop(Counter).
 
 malformed_call_message_test() ->
@@ -180,7 +181,7 @@ dnu_handler_throws_test() ->
     
     %% Call unknown method - DNU handler will throw
     Result = gen_server:call(Actor, {unknownMethod, [arg1]}),
-    ?assertMatch({error, {dnu_handler_error, _}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'doesNotUnderstand:args:'}}, Result),
     
     gen_server:stop(Actor).
 
@@ -281,7 +282,7 @@ method_throws_exception_sync_test() ->
     
     %% Call method that throws - should return error tuple
     Result = gen_server:call(Actor, {throwError, []}),
-    ?assertMatch({error, {method_error, throwError, intentional_error}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
     
     %% Verify actor still works after exception
     NormalResult = gen_server:call(Actor, {normalMethod, []}),
@@ -298,7 +299,7 @@ method_throws_exception_async_test() ->
     
     %% Future should be rejected with the error
     Result = beamtalk_future:await(Future, 1000),
-    ?assertMatch({error, {method_error, throwError, intentional_error}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
     
     %% Verify actor still works after exception
     NormalFuture = beamtalk_future:new(),
@@ -313,7 +314,7 @@ invalid_method_not_function_sync_test() ->
     
     %% Try to call a method that's not a function
     Result = gen_server:call(Actor, {notAFunction, []}),
-    ?assertMatch({error, {invalid_method, notAFunction}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = notAFunction}}, Result),
     
     %% Verify actor still works with valid methods
     ValidResult = gen_server:call(Actor, {validMethod, []}),
@@ -330,7 +331,7 @@ invalid_method_not_function_async_test() ->
     
     %% Future should be rejected
     Result = beamtalk_future:await(Future, 1000),
-    ?assertMatch({error, {invalid_method, notAFunction}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = notAFunction}}, Result),
     
     gen_server:stop(Actor).
 
@@ -399,7 +400,7 @@ actor_crash_during_processing_test() ->
     
     %% Actor should handle exception without crashing
     Result = gen_server:call(Actor, {throwError, []}),
-    ?assertMatch({error, {method_error, throwError, _}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
     
     %% Verify actor is still alive
     ?assert(is_process_alive(Actor)),
@@ -461,16 +462,16 @@ dnu_with_invalid_signatures_test() ->
     
     %% Test with empty selector - should be unknown
     Result1 = gen_server:call(Proxy, {'', []}),
-    ?assertMatch({error, {unknown_message, ''}}, Result1),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = ''}}, Result1),
     
     %% Test with atom selector containing special characters
     Result2 = gen_server:call(Proxy, {'method:with:colons:', [1, 2, 3]}),
-    ?assertMatch({error, {unknown_message, 'method:with:colons:'}}, Result2),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = 'method:with:colons:'}}, Result2),
     
     %% Test with very long selector name (will be unknown)
     LongSelector = list_to_atom(lists:duplicate(100, $a)),
     Result3 = gen_server:call(Proxy, {LongSelector, []}),
-    ?assertMatch({error, {unknown_message, LongSelector}}, Result3),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = LongSelector}}, Result3),
     
     %% Test that proxy still works after invalid selectors
     ValidResult = gen_server:call(Proxy, {getValue, []}),
