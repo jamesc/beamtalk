@@ -23,9 +23,9 @@
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([derive_module_name/1, extract_assignment/1, format_daemon_diagnostics/1,
-         compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
-         ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
-         strip_internal_bindings/1]).
+         format_formatted_diagnostics/1, compile_core_erlang/2, extract_class_names/1,
+         ensure_secure_temp_dir/0, ensure_dir_with_mode/2, maybe_await_future/1,
+         should_purge_module/2, strip_internal_bindings/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -162,6 +162,9 @@ compile_expression(Expression, ModuleName, Bindings, State) ->
             {ok, Binary, {daemon_compiled}};
         {error, daemon_unavailable} ->
             {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
+        {error, {compile_error_formatted, FormattedDiagnostics}} ->
+            %% Use pre-formatted miette output
+            {error, format_formatted_diagnostics(FormattedDiagnostics)};
         {error, {compile_error, Diagnostics}} ->
             {error, format_daemon_diagnostics(Diagnostics)};
         {error, {core_compile_error, Errors}} ->
@@ -287,9 +290,17 @@ parse_compile_result(Result, ModuleName) ->
             end;
         false ->
             %% Compilation failed - extract diagnostics
-            Diagnostics = maps:get(<<"diagnostics">>, Result, []),
-            Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
-            {error, {compile_error, Messages}}
+            %% Check for formatted_diagnostics first (miette-formatted), fallback to plain
+            case maps:get(<<"formatted_diagnostics">>, Result, undefined) of
+                undefined ->
+                    %% Use plain format
+                    Diagnostics = maps:get(<<"diagnostics">>, Result, []),
+                    Messages = [maps:get(<<"message">>, D, <<"Unknown error">>) || D <- Diagnostics],
+                    {error, {compile_error, Messages}};
+                FormattedList when is_list(FormattedList) ->
+                    %% Use miette-formatted output
+                    {error, {compile_error_formatted, FormattedList}}
+            end
     end.
 
 %% Compile Core Erlang source to BEAM bytecode.
@@ -412,6 +423,14 @@ format_daemon_diagnostics([]) ->
     <<"Compilation failed">>;
 format_daemon_diagnostics(Diagnostics) ->
     iolist_to_binary(lists:join(<<"\n">>, Diagnostics)).
+
+%% Format pre-formatted diagnostics from daemon (miette output).
+-spec format_formatted_diagnostics(list()) -> binary().
+format_formatted_diagnostics([]) ->
+    <<"Compilation failed">>;
+format_formatted_diagnostics(FormattedList) ->
+    %% Join the formatted diagnostics with double newlines for separation
+    iolist_to_binary(lists:join(<<"\n\n">>, FormattedList)).
 
 %% Format Erlang compile errors.
 format_compile_errors(Errors) ->

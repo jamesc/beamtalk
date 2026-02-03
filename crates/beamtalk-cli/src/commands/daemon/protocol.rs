@@ -409,6 +409,9 @@ struct CompileExpressionResult {
     success: bool,
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
+    /// Pre-formatted diagnostic messages using miette (optional for backward compatibility)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    formatted_diagnostics: Option<Vec<String>>,
 }
 
 /// Handle the `compile_expression` method for REPL evaluation.
@@ -455,6 +458,21 @@ fn handle_compile_expression(
         })
         .collect();
 
+    // Generate formatted diagnostics using miette
+    let formatted_diagnostics: Option<Vec<String>> = (!all_diagnostics.is_empty()).then(|| {
+        all_diagnostics
+            .iter()
+            .map(|d| {
+                let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                    d,
+                    "repl",
+                    &params.source,
+                );
+                format!("{:?}", miette::Report::new(diag))
+            })
+            .collect()
+    });
+
     let has_errors = diagnostics.iter().any(|d| d.severity == "error");
 
     // Generate Core Erlang for the expression
@@ -482,6 +500,7 @@ fn handle_compile_expression(
         success: !has_errors && core_erlang.is_some(),
         core_erlang,
         diagnostics,
+        formatted_diagnostics,
     };
 
     match serde_json::to_value(result) {
