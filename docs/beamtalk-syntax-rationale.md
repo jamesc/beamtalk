@@ -203,6 +203,53 @@ literal := 'No {interpolation} here'
 
 **Why:** String interpolation is table stakes in 2026. Using `{expr}` inside double-quoted strings is clean and unambiguous.
 
+### Equality Semantics: Identity → Structural (Hybrid)
+
+**Smalltalk's equality:**
+- `==` tests identity (pointer equality)
+- `=` tests value equality (overrideable)
+
+**Beamtalk's equality (BT-188):**
+- `==` tests structural equality (value-based with type coercion)
+- `=` tests strict equality (no type coercion)
+- `~=` tests inequality (negation of `==`)
+
+```beamtalk
+// Primitives with type coercion
+1.0 == 1           // => true (coercion allowed)
+1.0 = 1            // => false (strict, no coercion)
+
+// Value types (compare map contents)
+p1 := Point new: #{x => 3, y => 4}
+p2 := Point new: #{x => 3, y => 4}
+p1 == p2           // => true (same field values)
+
+// Actors (compare pids - effectively identity)
+c1 := Counter spawn
+c2 := Counter spawn
+c1 == c2           // => false (different processes)
+```
+
+**Why we differ from Smalltalk:**
+
+1. **Erlang semantics are already correct** — `==` does the right thing for all types:
+   - Primitives: value equality with sensible coercion
+   - Maps (value types): structural equality
+   - Pids (actors): identity comparison
+   
+2. **Value types need value semantics** — Two `Point` objects with the same coordinates should be equal. Smalltalk's identity-based `==` would make them unequal unless they're the same object reference.
+
+3. **Actors automatically get identity** — Process pids are compared by identity in Erlang, which is the correct behavior for actors.
+
+4. **Simplifies the mental model** — "Structural equality" is more intuitive than "identity for most things, but value equality for immutables."
+
+**BEAM mapping:**
+- `==` → Erlang's `==` (value equality with coercion)
+- `=` → Erlang's `=:=` (strict equality, no coercion)
+- `~=` → Erlang's `/=` (inequality, negation of `==`)
+
+**Decision rationale:** This hybrid approach emerged from BT-213 (value types) — we discovered that Erlang's `==` already provides the correct semantics for both value types and actors without any special handling.
+
 ### Control Flow Mutations: Make Them Work (BT-90)
 
 **Smalltalk-80 problem:** Blocks capture variables by value, so mutations inside blocks don't affect outer scope:

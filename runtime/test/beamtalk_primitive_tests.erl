@@ -229,3 +229,129 @@ class_of_nested_structures_test() ->
     ?assertEqual('Array', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => #{nested => value}})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({{a, b}, {c, d}})).
+
+%%% ============================================================================
+%%% BT-163: Reflection methods (class, respondsTo)
+%%% ============================================================================
+
+%% Test class reflection directly via dispatch
+reflection_class_integer_test() ->
+    ?assertEqual('Integer', beamtalk_integer:dispatch('class', [], 42)),
+    ?assertEqual('Integer', beamtalk_integer:dispatch('class', [], -100)),
+    ?assertEqual('Integer', beamtalk_integer:dispatch('class', [], 0)).
+
+reflection_class_string_test() ->
+    ?assertEqual('String', beamtalk_string:dispatch('class', [], <<"hello">>)),
+    ?assertEqual('String', beamtalk_string:dispatch('class', [], <<>>)).
+
+reflection_class_boolean_test() ->
+    ?assertEqual('Boolean', beamtalk_boolean:dispatch('class', [], true)),
+    ?assertEqual('Boolean', beamtalk_boolean:dispatch('class', [], false)).
+
+reflection_class_nil_test() ->
+    ?assertEqual('UndefinedObject', beamtalk_nil:dispatch('class', [], nil)).
+
+reflection_class_block_test() ->
+    ?assertEqual('Block', beamtalk_block:dispatch('class', [], fun() -> ok end)).
+
+reflection_class_tuple_test() ->
+    ?assertEqual('Tuple', beamtalk_tuple:dispatch('class', [], {a, b, c})).
+
+%% Test respondsTo reflection directly via dispatch
+reflection_responds_to_integer_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases - methods that exist
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['+'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['class'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['abs'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['respondsTo'], 42)),
+         
+         %% False cases - methods that don't exist
+         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo', ['unknownMethod'], 42)),
+         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo', ['fooBar'], 42))
+     end}.
+
+reflection_responds_to_string_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['++'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['class'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['size'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['respondsTo'], <<"hi">>)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_string:dispatch('respondsTo', ['unknownMethod'], <<"hi">>)),
+         ?assertEqual(false, beamtalk_string:dispatch('respondsTo', ['+'], <<"hi">>))
+     end}.
+
+reflection_responds_to_boolean_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases
+         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['not'], true)),
+         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['class'], true)),
+         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['ifTrue:'], true)),
+         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['respondsTo'], true)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_boolean:dispatch('respondsTo', ['unknownMethod'], true)),
+         ?assertEqual(false, beamtalk_boolean:dispatch('respondsTo', ['+'], true))
+     end}.
+
+reflection_responds_to_nil_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases
+         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['isNil'], nil)),
+         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['class'], nil)),
+         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['ifNil:'], nil)),
+         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['respondsTo'], nil)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_nil:dispatch('respondsTo', ['unknownMethod'], nil)),
+         ?assertEqual(false, beamtalk_nil:dispatch('respondsTo', ['+'], nil))
+     end}.
+
+reflection_responds_to_block_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         Block = fun() -> ok end,
+         %% True cases
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['value'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['class'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['arity'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['respondsTo'], Block)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_block:dispatch('respondsTo', ['unknownMethod'], Block)),
+         ?assertEqual(false, beamtalk_block:dispatch('respondsTo', ['+'], Block))
+     end}.
+
+reflection_responds_to_tuple_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         Tuple = {a, b, c},
+         %% True cases
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['size'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['class'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['at:'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['respondsTo'], Tuple)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['unknownMethod'], Tuple)),
+         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['+'], Tuple))
+     end}.

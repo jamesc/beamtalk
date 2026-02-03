@@ -20,7 +20,7 @@ impl CoreErlangGenerator {
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
     /// - Arithmetic: `+`, `-`, `*`, `/`, `%` (rem)
-    /// - Comparison: `==`, `=` (strict), `~=` (strict inequality), `<`, `>`, `<=`, `>=`
+    /// - Comparison: `==`, `=` (strict), `~=` (inequality), `<`, `>`, `<=`, `>=`
     /// - String: `++` (concatenation via `iolist_to_binary`)
     ///
     /// # Arguments
@@ -64,8 +64,8 @@ impl CoreErlangGenerator {
             "/" => "/",
             "%" => "rem",
             "==" => "==",
-            "=" => "=:=",  // Strict equality
-            "~=" => "=/=", // Strict inequality
+            "=" => "=:=", // Strict equality
+            "~=" => "/=", // Inequality (negation of ==)
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
@@ -993,14 +993,11 @@ impl CoreErlangGenerator {
                     }
                     "respondsTo:" if arguments.len() == 1 => {
                         // Check if object responds to a selector
-                        // For actors: Query method table via gen_server
-                        // For primitives: Planned to check primitive's method table
-                        //                 (not yet implemented - see BT-163)
+                        // Use beamtalk_primitive:responds_to/2 which handles both actors and primitives
+                        // This is a synchronous call that returns a boolean immediately
 
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
-                        let pid_var = self.fresh_var("Pid");
-                        let future_var = self.fresh_var("Future");
 
                         write!(self.output, "let {receiver_var} = ")?;
                         self.generate_expression(receiver)?;
@@ -1010,22 +1007,11 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in ")?;
 
+                        // Call beamtalk_primitive:responds_to/2 for uniform handling
                         write!(
                             self.output,
-                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                            "call 'beamtalk_primitive':'responds_to'({receiver_var}, {selector_var})"
                         )?;
-
-                        write!(
-                            self.output,
-                            "let {future_var} = call 'beamtalk_future':'new'() in "
-                        )?;
-
-                        write!(
-                            self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{'respondsTo', [{selector_var}], {future_var}}}) in "
-                        )?;
-
-                        write!(self.output, "{future_var}")?;
 
                         Ok(Some(()))
                     }

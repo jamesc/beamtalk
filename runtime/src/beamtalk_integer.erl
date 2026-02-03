@@ -21,6 +21,7 @@
 %%% | `<=`     | [Y]  | Less than or equal (accepts numbers) |
 %%% | `>=`     | [Y]  | Greater than or equal (accepts numbers) |
 %%% | `class`  | []   | Returns `'Integer'` |
+%%% | `respondsTo` | [Sel] | Returns true if responds to selector |
 %%% | `asString` | [] | Binary representation |
 %%% | `abs`    | []   | Absolute value |
 %%% | `negated` | []  | Negation (-X) |
@@ -105,6 +106,7 @@ is_builtin('>') -> true;
 is_builtin('<=') -> true;
 is_builtin('>=') -> true;
 is_builtin('class') -> true;
+is_builtin('respondsTo') -> true;
 is_builtin('asString') -> true;
 is_builtin('abs') -> true;
 is_builtin('negated') -> true;
@@ -134,6 +136,8 @@ builtin_dispatch('>=', [Y], X) when is_number(Y) -> {ok, X >= Y};
 
 %% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'Integer'};
+builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
+    {ok, has_method(Selector)};
 
 %% Conversion
 builtin_dispatch('asString', [], X) -> {ok, integer_to_binary(X)};
