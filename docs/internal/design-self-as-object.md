@@ -1065,13 +1065,14 @@ Migration completed in phases:
    - All new compilations use `dispatch/4` - ✅
    - Add `__class_mod__` to state - ✅
 
-3. **Existing compiled code** - ✅ DONE
-   - Continues to work via `dispatch/3` → `dispatch/4` wrapper - ✅
-   - `__class_mod__` defaults to deriving from `__class__` - ✅
+3. **Existing compiled code during transition window** - ✅ DONE
+   - During migration, existing compiled code continued to work via `dispatch/3` → `dispatch/4` wrapper - ✅
+   - During migration, `__class_mod__` defaulted to deriving from `__class__` - ✅
+   - Note: After cleanup in BT-173, any remaining compiled artifacts targeting `dispatch/3` must be recompiled to use `dispatch/4`.
 
 4. **Cleanup** - ✅ DONE (BT-173)
    - Removed `dispatch/3` wrapper
-   - All code now uses `dispatch/4` exclusively
+   - After BT-173, all supported code is compiled against and uses `dispatch/4` exclusively
 
 ### 3.8 Error Handling Taxonomy
 
