@@ -155,9 +155,9 @@ jobs:
       - name: Generate Erlang coverage
         run: |
           cd runtime
-          # rebar3 eunit exits with 1 if tests are skipped, check actual failures
+          # Run eunit with coverage (exits with 1 if tests skipped, but that's ok)
           set +e  # Don't exit on error
-          OUTPUT=$(rebar3 do eunit --cover, cover --verbose, covertool generate 2>&1)
+          OUTPUT=$(rebar3 eunit --cover 2>&1)
           EXIT_CODE=$?
           echo "$OUTPUT"
           
@@ -167,8 +167,10 @@ jobs:
             exit 1
           fi
           
-          # All tests passed (even if some skipped), success
-          exit 0
+          # Tests passed, now generate coverage reports
+          set -e  # Exit on error for coverage commands
+          rebar3 cover --verbose
+          rebar3 covertool generate
 
       - name: Rust Coverage Summary
         id: rust_coverage
