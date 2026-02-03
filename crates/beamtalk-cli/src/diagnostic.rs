@@ -52,7 +52,7 @@ impl CompileDiagnostic {
             src: miette::NamedSource::new(source_path, source.to_string()),
             span: (
                 diagnostic.span.start() as usize,
-                (diagnostic.span.end() - diagnostic.span.start()) as usize,
+                diagnostic.span.len() as usize,
             )
                 .into(),
             label: label.to_string(),
