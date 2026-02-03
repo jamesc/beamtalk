@@ -1178,8 +1178,9 @@ Error: 'self' has no associated process (object not spawned?)
    - `"hello" class` returns `'String'`
    - Primitive methods dispatch correctly
 
-4. **Backward compatibility tests**
-   - Old-style `dispatch/3` calls still work
+4. **Method signature compatibility tests**
+   - Old-style Fun/2 methods still work via dispatch/4
+   - New-style Fun/4 methods work correctly
    - Missing `__class_mod__` handled gracefully
 
 #### Snapshot Tests (test-package-compiler/)
