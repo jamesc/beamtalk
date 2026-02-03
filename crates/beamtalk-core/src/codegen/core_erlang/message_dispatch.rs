@@ -160,6 +160,16 @@ impl CoreErlangGenerator {
                     _ => {}
                 }
             }
+
+            // Special case: "error:" raises an error with the given message
+            // Compiles to: erlang:error({beamtalk_error, Message})
+            if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1 {
+                write!(self.output, "call 'erlang':'error'(")?;
+                write!(self.output, "{{'beamtalk_error', ")?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "}})")?;
+                return Ok(());
+            }
         }
 
         // Generate the async message send protocol:
@@ -253,6 +263,21 @@ impl CoreErlangGenerator {
         } else {
             false
         }
+    }
+
+    /// Checks if an expression is an `error:` message send.
+    ///
+    /// Since `erlang:error/1` never returns (always throws an exception),
+    /// expressions ending with `error:` should not be wrapped in reply tuples.
+    pub(super) fn is_error_message_send(expr: &Expression) -> bool {
+        matches!(
+            expr,
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1
+        )
     }
 
     /// Generates the opening part of a field assignment with state threading.

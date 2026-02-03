@@ -67,6 +67,12 @@ Object subclass: Actor
   // (Overrides Object>>describe to provide actor-specific description)
   describe => 'an Actor'
 
+  // Actors cannot be instantiated with 'new' - use 'spawn' instead
+  // This enforces the value type vs actor distinction:
+  // - Value types (Object subclass): use 'new'
+  // - Actors (Actor subclass): use 'spawn'
+  new => self error: 'Actors must use spawn, not new'
+
   // Spawn a new instance with default state (compiler primitive)
   // Generated code: gen_server:start_link(ClassName, ~{}~, [])
   spawn => // implemented by compiler
