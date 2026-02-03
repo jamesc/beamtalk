@@ -2,19 +2,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for ProtoObject with actor loading
+//
+// These tests verify that actor futures are automatically awaited in the REPL
+// via `maybe_await_future/1` (see runtime/src/beamtalk_repl_eval.erl).
+// No explicit `await` keyword is needed for synchronous REPL interaction.
 
 // @load tests/e2e/fixtures/counter.bt
 
-// Test actor spawn and async method calls
+// Test actor spawn
 counter := Counter spawn
 // => _
 
-// Test async method call with auto-await
+// Test initial state (auto-await)
 counter getValue
 // => 0
 
+// Test increment (auto-await, returns new value)
 counter increment
 // => 1
 
+// Verify state persisted
 counter getValue
 // => 1
+
+// Test multiple consecutive increments
+counter increment
+// => 2
+
+counter increment
+// => 3
+
+// Test decrement
+counter decrement
+// => 2
+
+// Final state verification
+counter getValue
+// => 2
