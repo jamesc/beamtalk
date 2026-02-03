@@ -8,6 +8,8 @@
 
 -module(beamtalk_repl_server).
 
+-include("beamtalk.hrl").
+
 -export([handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1]).
 
@@ -364,6 +366,9 @@ term_to_json(Value) ->
 %% @private
 %% Format an error reason as a human-readable message.
 -spec format_error_message(term()) -> binary().
+format_error_message(#beamtalk_error{} = Error) ->
+    %% Format structured beamtalk_error using the error helper
+    iolist_to_binary(beamtalk_error:format(Error));
 format_error_message(empty_expression) ->
     <<"Empty expression">>;
 format_error_message(timeout) ->
