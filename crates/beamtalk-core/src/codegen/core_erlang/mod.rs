@@ -775,15 +775,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "'allClasses'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let ClassPids = call 'beamtalk_class':'all_classes'() in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'lists':'map'(")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "fun (Pid) ->")?;
+        writeln!(self.output, "let MapFun = fun (Pid) ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
@@ -802,12 +794,10 @@ impl CoreErlangGenerator {
         )?;
         self.indent -= 1;
         self.write_indent()?;
-        writeln!(self.output, "end,")?;
-        self.write_indent()?;
-        writeln!(self.output, "ClassPids")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, ")")?;
+        writeln!(
+            self.output,
+            "in call 'lists':'map'(MapFun, call 'beamtalk_class':'all_classes'())"
+        )?;
         self.indent -= 1;
         writeln!(self.output)?;
 
