@@ -53,16 +53,16 @@ extract_assignment_invalid_variable_name_test() ->
 
 %%% Daemon diagnostics formatting tests
 
-format_daemon_diagnostics_empty_test() ->
-    ?assertEqual(<<"Compilation failed">>, beamtalk_repl_eval:format_daemon_diagnostics([])).
+format_formatted_diagnostics_empty_test() ->
+    ?assertEqual(<<"Compilation failed">>, beamtalk_repl_eval:format_formatted_diagnostics([])).
 
-format_daemon_diagnostics_single_test() ->
-    Diagnostics = [<<"Unexpected token">>],
-    ?assertEqual(<<"Unexpected token">>, beamtalk_repl_eval:format_daemon_diagnostics(Diagnostics)).
+format_formatted_diagnostics_single_test() ->
+    FormattedDiagnostics = [<<"Unexpected token">>],
+    ?assertEqual(<<"Unexpected token">>, beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics)).
 
-format_daemon_diagnostics_multiple_test() ->
-    Diagnostics = [<<"Error 1">>, <<"Error 2">>, <<"Error 3">>],
-    Result = beamtalk_repl_eval:format_daemon_diagnostics(Diagnostics),
+format_formatted_diagnostics_multiple_test() ->
+    FormattedDiagnostics = [<<"Error 1">>, <<"Error 2">>, <<"Error 3">>],
+    Result = beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics),
     ?assert(binary:match(Result, <<"Error 1">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Error 2">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Error 3">>) =/= nomatch).
