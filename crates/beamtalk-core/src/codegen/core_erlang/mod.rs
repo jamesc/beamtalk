@@ -584,6 +584,12 @@ impl CoreErlangGenerator {
             .first()
             .ok_or_else(|| CodeGenError::Internal("Value type module has no class".to_string()))?;
 
+        // BT-220: Special case for Beamtalk global class
+        // The Beamtalk class provides system reflection via class methods, not instances
+        if class.name.name.as_str() == "Beamtalk" {
+            return self.generate_beamtalk_module(class);
+        }
+
         // Collect method exports
         let mut exports = vec!["'new'/0".to_string(), "'new'/1".to_string()];
 
@@ -719,6 +725,144 @@ impl CoreErlangGenerator {
         }
 
         self.pop_scope();
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the Beamtalk global class module.
+    ///
+    /// BT-220: The Beamtalk class is a special value type that provides system
+    /// reflection via class methods (not instances). It exports:
+    /// - `allClasses/0` - Returns list of all registered classes
+    /// - `classNamed:/1` - Looks up a class by name (symbol)
+    /// - `globals/0` - Returns global namespace dictionary
+    ///
+    /// These are compiler primitives that call into the runtime class registry.
+    fn generate_beamtalk_module(&mut self, _class: &ClassDefinition) -> Result<()> {
+        // Module header with class method exports
+        writeln!(
+            self.output,
+            "module '{}' ['allClasses'/0, 'classNamed:'/1, 'globals'/0]",
+            self.module_name
+        )?;
+        writeln!(self.output, "  attributes []")?;
+        writeln!(self.output)?;
+
+        // Generate allClasses/0 - returns list of all registered classes
+        self.generate_beamtalk_all_classes()?;
+        writeln!(self.output)?;
+
+        // Generate classNamed:/1 - looks up class by name
+        self.generate_beamtalk_class_named()?;
+        writeln!(self.output)?;
+
+        // Generate globals/0 - returns global namespace dictionary
+        self.generate_beamtalk_globals()?;
+
+        // Module end
+        writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates the `allClasses/0` class method for Beamtalk.
+    ///
+    /// Calls `beamtalk_class:all_classes/0` and wraps each class pid in a
+    /// `#beamtalk_object{}` record with class metadata.
+    fn generate_beamtalk_all_classes(&mut self) -> Result<()> {
+        writeln!(self.output, "'allClasses'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassPids = call 'beamtalk_class':'all_classes'() in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'lists':'map'(")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "fun (Pid) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassName = call 'beamtalk_class':'class_name'(Pid) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassModName = call 'beamtalk_class':'module_name'(Pid) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', ClassName, ClassModName, Pid}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end,")?;
+        self.write_indent()?;
+        writeln!(self.output, "ClassPids")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, ")")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `classNamed:/1` class method for Beamtalk.
+    ///
+    /// Calls `beamtalk_class:whereis_class/1` and wraps the result in a
+    /// `#beamtalk_object{}` record, or returns nil if class not found.
+    fn generate_beamtalk_class_named(&mut self) -> Result<()> {
+        writeln!(self.output, "'classNamed:'/1 = fun (ClassName) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_class':'whereis_class'(ClassName) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'undefined'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'nil'")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<Pid> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassModName = call 'beamtalk_class':'module_name'(Pid) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', ClassName, ClassModName, Pid}}"
+        )?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `globals/0` class method for Beamtalk.
+    ///
+    /// Currently returns an empty map as a placeholder for future global namespace support.
+    fn generate_beamtalk_globals(&mut self) -> Result<()> {
+        writeln!(self.output, "'globals'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "~{{}}~  %% TODO: Implement global namespace")?;
         self.indent -= 1;
         writeln!(self.output)?;
 
