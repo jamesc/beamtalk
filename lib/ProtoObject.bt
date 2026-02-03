@@ -30,9 +30,12 @@
 // ## Class Hierarchy
 //
 // ```
-// ProtoObject (true root, minimal behavior)
-//   └─ Object (common messages, reflection, nil testing)
-//        └─ Actor (async-first process-based objects)
+// ProtoObject (minimal root - identity, DNU)
+//   └─ Object (value types - reflection, nil testing)
+//        ├─ Integer, String, etc. (sealed primitives)
+//        ├─ Point, Color, etc. (user value types) [instantiation TBD]
+//        └─ Actor (process-based - spawn, mailbox)
+//             └─ Counter, Worker, etc. (user actors)
 // ```
 //
 // ## When to Inherit from ProtoObject

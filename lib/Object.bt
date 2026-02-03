@@ -42,7 +42,8 @@
 //
 // ## Value Types vs Actors
 //
-// - **Object subclass:** No process, use `new` to instantiate
+// - **Object subclass:** No process, value-style semantics
+//   (Note: Universal `new` instantiation is not yet implemented - tracked in BT-221)
 // - **Actor subclass:** BEAM process, use `spawn` to instantiate
 //
 // Both use the same message-sending syntax - the difference is in state management

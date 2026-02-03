@@ -39,7 +39,7 @@
 // - Process creation via `spawn` and `spawnWith:`
 // - Mailbox for async message handling
 // - Supervision tree integration
-// - Override `new` to raise error (use `spawn` instead)
+// - (Note: `new` method override not yet implemented - value type instantiation TBD)
 //
 // ## Core Messages
 //

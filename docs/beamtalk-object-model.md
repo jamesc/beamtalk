@@ -184,14 +184,16 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |```
 |ProtoObject (minimal root - identity, DNU)
-|  └─ Object (value types - new, reflection, nil testing)
+|  └─ Object (value types - reflection, nil testing)
 |       ├─ Integer, String, etc. (sealed primitives)
-|       ├─ Point, Color, etc. (user value types)
+|       ├─ Point, Color, etc. (user value types) [instantiation TBD]
 |       └─ Actor (process-based - spawn, mailbox)
 |            └─ (user actors...)
 |```
 |
 |Beamtalk places primitives, value types, and Actor all under Object, since they all share the common protocol (nil testing, reflection, etc.).
+|
+|**Note:** Universal `new` method for value type instantiation is planned but not yet implemented. Currently only `spawn`/`spawnWith:` are supported for Actor classes.
 |
 |### Key Points
 |
