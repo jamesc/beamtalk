@@ -172,10 +172,10 @@ str := String fromCharlist: [72, 101, 108, 108, 111]  // => 'Hello'
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
-  decrement => self.value -= 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
   getValue => ^self.value
-  incrementBy: delta => self.value += delta
+  incrementBy: delta => self.value := self.value + delta
 ```
 
 ### Value Types vs Actors
@@ -296,10 +296,10 @@ current := self.value
 // Write field
 self.value := 10
 
-// Compound assignment
-self.value += 1
-self.count -= delta
-self.total *= factor
+// Explicit assignment
+self.value := self.value + 1
+self.count := self.count - delta
+self.total := self.total * factor
 ```
 
 **Note:** `self.field` compiles to direct map access, not a message send. For external access to another actor's state, use message sends.
@@ -802,7 +802,7 @@ Types are optional - add them gradually for safety and optimization.
 Actor subclass: Counter
   state: value: Integer = 0
 
-  increment => self.value += 1
+  increment => self.value := self.value + 1
   getValue -> Integer => ^self.value
 
 // Typed parameters
@@ -902,7 +902,7 @@ Agent >> before processMessage: msg =>
 
 // After - runs last
 Agent >> after processMessage: msg =>
-  self.messageCount += 1
+  self.messageCount := self.messageCount + 1
 
 // Around - wraps
 Agent >> around processMessage: msg =>
@@ -1039,7 +1039,7 @@ counter mailbox peek    // => []
 // Hot patch
 patch Counter >> #increment {
   Transcript log: 'incrementing'
-  self.value += 1
+  self.value := self.value + 1
 }
 
 // Evaluate in actor context

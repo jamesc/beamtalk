@@ -178,13 +178,13 @@ max: other =>
 // Direct field access within actor
 self.value          // read field
 self.value := 10    // write field
-self.value += 1     // compound assignment
+self.value := self.value + 1  // explicit assignment
 
 // Equivalent to message send (still works)
 self getValue       // unary message
 ```
 
-**Why:** Direct field access is clearer for state manipulation. `self.value` is less noisy than `self getValue` for simple reads. Compound assignment (`+=`) eliminates repetition.
+**Why:** Direct field access is clearer for state manipulation. `self.value` is less noisy than `self getValue` for simple reads.
 
 **Compilation:** `self.value` compiles to `maps:get('value', State)` — it's a direct lookup, not a message send.
 
@@ -318,7 +318,6 @@ See [beamtalk-language-features.md](beamtalk-language-features.md#control-flow-a
 | Comment (line) | `//` | `// this is a comment` |
 | Comment (block) | `/* */` | `/* multi-line */` |
 | Assignment | `:=` | `x := 5` |
-| Compound assignment | `+=`, `-=`, `*=`, `/=` | `x += 1` |
 | Field access | `self.field` | `self.value` |
 | Return (early) | `^` | `^self` (only for early returns) |
 | Unary message | `receiver message` | `counter increment` |
@@ -374,10 +373,10 @@ Use parentheses to override: `(2 + 3) * 4`
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
-  decrement => self.value -= 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
   getValue => self.value                    // implicit return - no ^
-  incrementBy: delta => self.value += delta
+  incrementBy: delta => self.value := self.value + delta
 ```
 
 ### Async Message Passing

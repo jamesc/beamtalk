@@ -584,18 +584,6 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A compound assignment (`self.value += 1`, `x *= 2`).
-    CompoundAssignment {
-        /// The target being modified.
-        target: Box<Expression>,
-        /// The compound operator.
-        operator: CompoundOperator,
-        /// The value (right-hand side).
-        value: Box<Expression>,
-        /// Source location of the entire assignment.
-        span: Span,
-    },
-
     /// A return statement.
     Return {
         /// The value being returned.
@@ -682,7 +670,6 @@ impl Expression {
             | Self::FieldAccess { span, .. }
             | Self::MessageSend { span, .. }
             | Self::Assignment { span, .. }
-            | Self::CompoundAssignment { span, .. }
             | Self::Return { span, .. }
             | Self::Cascade { span, .. }
             | Self::Parenthesized { span, .. }
@@ -699,47 +686,6 @@ impl Expression {
     #[must_use]
     pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error { .. })
-    }
-}
-
-/// Compound assignment operators (`+=`, `-=`, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompoundOperator {
-    /// Addition assignment (`+=`).
-    Add,
-    /// Subtraction assignment (`-=`).
-    Subtract,
-    /// Multiplication assignment (`*=`).
-    Multiply,
-    /// Division assignment (`/=`).
-    Divide,
-    /// Remainder assignment (`%=`).
-    Remainder,
-}
-
-impl CompoundOperator {
-    /// Returns the string representation of the operator.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Add => "+=",
-            Self::Subtract => "-=",
-            Self::Multiply => "*=",
-            Self::Divide => "/=",
-            Self::Remainder => "%=",
-        }
-    }
-
-    /// Returns the corresponding binary operator.
-    #[must_use]
-    pub const fn to_binary(self) -> &'static str {
-        match self {
-            Self::Add => "+",
-            Self::Subtract => "-",
-            Self::Multiply => "*",
-            Self::Divide => "/",
-            Self::Remainder => "%",
-        }
     }
 }
 
@@ -1335,33 +1281,6 @@ mod tests {
     }
 
     #[test]
-    fn compound_assignment() {
-        let target = Box::new(Expression::Identifier(Identifier::new(
-            "count",
-            Span::new(0, 5),
-        )));
-        let value = Box::new(Expression::Literal(Literal::Integer(1), Span::new(9, 10)));
-        let expr = Expression::CompoundAssignment {
-            target,
-            operator: CompoundOperator::Add,
-            value,
-            span: Span::new(0, 10),
-        };
-        assert_eq!(expr.span(), Span::new(0, 10));
-        assert_eq!(CompoundOperator::Add.as_str(), "+=");
-        assert_eq!(CompoundOperator::Add.to_binary(), "+");
-    }
-
-    #[test]
-    fn compound_operators() {
-        assert_eq!(CompoundOperator::Add.as_str(), "+=");
-        assert_eq!(CompoundOperator::Subtract.as_str(), "-=");
-        assert_eq!(CompoundOperator::Multiply.as_str(), "*=");
-        assert_eq!(CompoundOperator::Divide.as_str(), "/=");
-        assert_eq!(CompoundOperator::Remainder.as_str(), "%=");
-    }
-
-    #[test]
     fn pipe_operators() {
         assert_eq!(PipeOperator::Sync.as_str(), "|>");
         assert_eq!(PipeOperator::Async.as_str(), "|>>");
@@ -1568,7 +1487,7 @@ mod tests {
     #[test]
     fn method_definition_unary() {
         let selector = MessageSelector::Unary("increment".into());
-        let body = vec![Expression::CompoundAssignment {
+        let body = vec![Expression::Assignment {
             target: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "self",
@@ -1577,11 +1496,22 @@ mod tests {
                 field: Identifier::new("value", Span::new(5, 10)),
                 span: Span::new(0, 10),
             }),
-            operator: CompoundOperator::Add,
-            value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(14, 15))),
-            span: Span::new(0, 15),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(Expression::Identifier(Identifier::new(
+                        "self",
+                        Span::new(14, 18),
+                    ))),
+                    field: Identifier::new("value", Span::new(19, 24)),
+                    span: Span::new(14, 24),
+                }),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(27, 28))],
+                span: Span::new(14, 28),
+            }),
+            span: Span::new(0, 28),
         }];
-        let method = MethodDefinition::new(selector, Vec::new(), body, Span::new(0, 15));
+        let method = MethodDefinition::new(selector, Vec::new(), body, Span::new(0, 28));
         assert_eq!(method.selector.name(), "increment");
         assert!(method.parameters.is_empty());
         assert_eq!(method.body.len(), 1);
@@ -1641,7 +1571,7 @@ mod tests {
         let methods = vec![MethodDefinition::new(
             MessageSelector::Unary("increment".into()),
             Vec::new(),
-            vec![Expression::CompoundAssignment {
+            vec![Expression::Assignment {
                 target: Box::new(Expression::FieldAccess {
                     receiver: Box::new(Expression::Identifier(Identifier::new(
                         "self",
@@ -1650,14 +1580,25 @@ mod tests {
                     field: Identifier::new("value", Span::new(55, 60)),
                     span: Span::new(50, 60),
                 }),
-                operator: CompoundOperator::Add,
-                value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(64, 65))),
-                span: Span::new(50, 65),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(Expression::FieldAccess {
+                        receiver: Box::new(Expression::Identifier(Identifier::new(
+                            "self",
+                            Span::new(64, 68),
+                        ))),
+                        field: Identifier::new("value", Span::new(69, 74)),
+                        span: Span::new(64, 74),
+                    }),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(77, 78))],
+                    span: Span::new(64, 78),
+                }),
+                span: Span::new(50, 78),
             }],
-            Span::new(45, 65),
+            Span::new(45, 78),
         )];
 
-        let class = ClassDefinition::new(name, superclass, state, methods, Span::new(0, 65));
+        let class = ClassDefinition::new(name, superclass, state, methods, Span::new(0, 78));
 
         assert_eq!(class.name.name, "Counter");
         assert_eq!(class.superclass.name, "Actor");
