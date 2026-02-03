@@ -10,8 +10,7 @@ This repository has custom skills in `.github/skills/` that provide detailed wor
 | `/done` | Complete work, commit, push, and create PR |
 | `/whats-next` | Get recommendations for what to work on next |
 | `/pr-resolve` | Address all PR review comments systematically |
-| `/worktree-start <branch>` | Create a new worktree for parallel development |
-| `/worktree-stop <branch>` | Remove a worktree |
+| `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
 
 See `.github/skills/` for full workflow details, or ask Copilot about any command.
 

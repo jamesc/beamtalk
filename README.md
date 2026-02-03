@@ -153,9 +153,6 @@ git clone https://github.com/jamesc/beamtalk.git
 cd beamtalk
 cargo build
 
-# Install git hooks (recommended - auto-formats code before commits)
-./scripts/install-git-hooks.sh
-
 # Start the REPL
 cargo run -- repl
 ```
@@ -348,9 +345,9 @@ setx GIT_USER_EMAIL "you@example.com"
 If you deleted worktree directories manually, clean up leftover containers:
 
 ```powershell
-.\scripts\cleanup-orphaned-containers.ps1        # Interactive
-.\scripts\cleanup-orphaned-containers.ps1 -DryRun # Preview only
-.\scripts\cleanup-orphaned-containers.ps1 -NoConfirm # Auto-confirm
+.\scripts\worktree-cleanup.ps1        # Interactive
+.\scripts\worktree-cleanup.ps1 -DryRun # Preview only
+.\scripts\worktree-cleanup.ps1 -NoConfirm # Auto-confirm
 ```
 
 See [scripts/README.md](scripts/README.md) for detailed documentation.

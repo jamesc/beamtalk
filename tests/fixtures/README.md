@@ -13,10 +13,10 @@ erlc build/counter.core
 cp build/counter.beam ../../runtime/test/
 ```
 
-Or use the helper script (if added):
+Or use the compile script:
 
 ```bash
-./scripts/compile-test-fixtures.sh
+./tests/fixtures/compile.sh
 ```
 
 ## Fixtures
