@@ -21,7 +21,7 @@
 // ProtoObject provides ONLY what is absolutely essential:
 // - Reflection: `class` (what kind of object am I?)
 // - Fallback: `doesNotUnderstand:args:` (handle unknown messages)
-// - Identity: `==` and `~=` (am I the same object?)
+// - Equality: `==` and `~=` (structural equality)
 //
 // All other functionality (nil testing, copying, description, comparison)
 // lives in Object, which inherits from ProtoObject. Most user code should
@@ -74,31 +74,43 @@
 // ```
 //
 // ### ==
-// Tests object identity (reference equality). Returns true if both
-// references point to the exact same object, false otherwise.
+// Tests structural equality. Behavior depends on the type:
+//
+// - **Value types** (Object subclass): Compares field values recursively
+// - **Actors**: Compares process identifiers (pids) - effectively identity
+// - **Primitives**: Compares values with type coercion (1.0 == 1 is true)
 //
 // ```beamtalk
-// a := Object spawn
-// b := a
-// c := Object spawn
+// // Primitives with coercion
+// 1.0 == 1           // => true (type coercion)
+// 'hello' == 'hello' // => true (same string value)
 //
-// a == b   // => true (same object)
-// a == c   // => false (different objects)
+// // Value types - compares fields
+// p1 := Point new: #{x => 3, y => 4}
+// p2 := Point new: #{x => 3, y => 4}
+// p1 == p2           // => true (same field values)
+//
+// // Actors - compares pids (identity)
+// c1 := Counter spawn
+// c2 := Counter spawn
+// c1 == c2           // => false (different processes)
 // ```
 //
-// For value equality (comparing contents), use Object's `=` method.
+// For strict equality without type coercion, use `=` (e.g., 1.0 = 1 is false).
 //
 // ### ~=
-// Tests object inequality (not identical). Returns the negation of `==`.
+// Tests structural inequality. Returns the negation of `==`.
 //
 // ```beamtalk
-// a ~= b   // equivalent to: (a == b) not
+// 1.0 ~= 2           // => true (different values)
+// 1.0 ~= 1           // => false (equal with coercion)
 // ```
 //
 // ## BEAM Mapping
 //
 // - `class` returns the `__class__` field from the object's state map
-// - `==` compiles to Erlang's `=:=` operator (exact equality)
+// - `==` compiles to Erlang's `==` operator (value equality with coercion)
+// - `=` compiles to Erlang's `=:=` operator (strict equality, no coercion)
 // - `doesNotUnderstand:args:` is called by gen_server dispatch when no method matches
 //
 // ## Implementation Notes
@@ -123,15 +135,16 @@ ProtoObject
   // - args: Array of arguments passed with the message
   doesNotUnderstand: selector args: arguments => // implemented by compiler
 
-  // Object equality test (compiler intrinsic)
-  // Returns true if self and other have equal values
-  // Note: Currently uses value equality (1.0 == 1 is true)
-  // TODO: Consider strict identity semantics for Smalltalk compatibility
+  // Structural equality test (compiler intrinsic)
+  // Returns true if self and other are structurally equal.
+  // - Value types: compares field values
+  // - Actors: compares pids (identity)
+  // - Primitives: value equality with type coercion
   // Implementation: compiles to erlang:'=='(Self, Other)
   == other => // implemented by compiler
 
-  // Object inequality test
-  // Returns true if self and other are different objects
+  // Structural inequality test
+  // Returns true if self and other are not structurally equal
   // Delegates to == and negates the result
   ~= other => (self == other) not
 

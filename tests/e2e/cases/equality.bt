@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test structural equality semantics (BT-188)
+//
+// Beamtalk uses Erlang's `==` operator, which provides:
+// - Value equality with type coercion for primitives
+// - Structural equality for value types (compares map contents)
+// - Identity comparison for actors (compares pids)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Primitive Type Equality with Coercion
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Numeric coercion: integer and float with same value are equal
+assert: (1.0 == 1)
+
+// Numeric inequality: different values
+assert: (1.0 ~= 2)
+assert: (1 ~= 2)
+
+// String equality
+assert: ('hello' == 'hello')
+assert: ('hello' ~= 'world')
+
+// Boolean equality
+assert: (true == true)
+assert: (false == false)
+assert: (true ~= false)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Strict Equality (no type coercion)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Use `=` for strict equality without coercion
+assert: (1.0 = 1.0)
+assert: (1 = 1)
+
+// Strict inequality: integer and float are NOT strictly equal
+assert: ((1.0 = 1) not)
+assert: (1.0 ~= 1) not  // ~= uses ==, which allows coercion, so this is false
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Value Type Equality (Map Contents)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Two maps with same keys and values are equal
+m1 := #{x => 3, y => 4}
+m2 := #{x => 3, y => 4}
+assert: (m1 == m2)
+
+// Maps with different values are not equal
+m3 := #{x => 5, y => 6}
+assert: (m1 ~= m3)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Actor Identity (Process PIDs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Actors are compared by pid - different spawns are not equal
+Counter := Actor
+  state: count
+
+  spawn => #{count => 0}
+
+  increment => [
+    newCount := count + 1
+    #{count => newCount}
+  ]
+
+c1 := Counter spawn
+c2 := Counter spawn
+
+// Different actor instances are not equal (different pids)
+assert: (c1 ~= c2)
+
+// Same reference is equal to itself
+assert: (c1 == c1)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Edge Cases
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Empty maps are equal
+assert: (#{} == #{})
+
+// Zero values with coercion
+assert: (0.0 == 0)
+assert: (0 == 0.0)
+
+// Negative values
+assert: (-1.0 == -1)
+assert: (-5 ~= -6)
