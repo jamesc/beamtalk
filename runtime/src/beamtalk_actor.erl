@@ -39,10 +39,10 @@
 %%%
 %%% ## Message Dispatch
 %%%
-%%% The dispatch/3 function looks up the method in the `__methods__` map:
-%%% - If found, calls the method function with Args and State
+%%% The dispatch/4 function looks up the method in the `__methods__` map:
+%%% - If found, calls the method function with Args, Self, and State
 %%% - If not found, calls doesNotUnderstand handler if defined
-%%% - If no doesNotUnderstand handler, crashes with {unknown_message, Selector}
+%%% - If no doesNotUnderstand handler, returns {error, {unknown_message, Selector}, State}
 %%%
 %%% ## Code Hot Reload
 %%%
@@ -111,7 +111,7 @@
          code_change/3, terminate/2]).
 
 %% Internal dispatch
--export([dispatch/3, dispatch/4, make_self/1]).
+-export([dispatch/4, make_self/1]).
 
 %%% Public API
 
@@ -311,7 +311,10 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     io:format(standard_error,
                         "Error in method ~p: ~p:~p~n",
                         [Selector, Class, Reason]),
-                    {error, {method_error, Selector, Reason}, State}
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error, State}
             end;
         {ok, Fun} when is_function(Fun, 2) ->
             %% Old-style method: Fun(Args, State) - for backward compatibility
@@ -323,30 +326,21 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     io:format(standard_error,
                         "Error in method ~p: ~p:~p~n",
                         [Selector, Class, Reason]),
-                    {error, {method_error, Selector, Reason}, State}
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error, State}
             end;
         {ok, _NotAFunction} ->
             %% Method value is not a function
-            {error, {invalid_method, Selector}, State};
+            ClassName = maps:get('__class__', State, unknown),
+            Error0 = beamtalk_error:new(type_error, ClassName),
+            Error = beamtalk_error:with_selector(Error0, Selector),
+            {error, Error, State};
         error ->
             %% Method not found - try doesNotUnderstand
             handle_dnu(Selector, Args, Self, State)
     end.
-
-%% @doc Dispatch a message to the appropriate method (dispatch/3 version - backward compatibility).
-%% This is the old signature maintained for backward compatibility with existing
-%% generated code. It constructs Self internally and delegates to dispatch/4.
-%% Looks up the selector in the __methods__ map and calls the method function.
-%% If not found, attempts to call doesNotUnderstand handler.
-%% Returns one of:
-%%   {reply, Result, NewState} - Method returned a value
-%%   {noreply, NewState} - Method didn't return a value
-%%   {error, Reason, State} - Method or dispatch failed
--spec dispatch(atom(), list(), map()) ->
-    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
-dispatch(Selector, Args, State) ->
-    Self = make_self(State),
-    dispatch(Selector, Args, Self, State).
 
 %% @private
 %% @doc Handle messages for unknown selectors.
@@ -368,7 +362,10 @@ handle_dnu(Selector, Args, Self, State) ->
                     io:format(standard_error,
                         "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
                         [Selector, Class, Reason]),
-                    {error, {dnu_handler_error, Reason}, State}
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
+                    {error, Error, State}
             end;
         {ok, DnuFun} when is_function(DnuFun, 2) ->
             %% Old-style DNU handler (backward compatibility)
@@ -380,9 +377,16 @@ handle_dnu(Selector, Args, Self, State) ->
                     io:format(standard_error,
                         "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
                         [Selector, Class, Reason]),
-                    {error, {dnu_handler_error, Reason}, State}
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
+                    {error, Error, State}
             end;
         _ ->
             %% No DNU handler - method not found is an error
-            {error, {unknown_message, Selector}, State}
+            ClassName = maps:get('__class__', State, unknown),
+            Error0 = beamtalk_error:new(does_not_understand, ClassName),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+            {error, Error, State}
     end.

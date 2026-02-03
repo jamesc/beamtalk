@@ -30,9 +30,12 @@
 // ## Class Hierarchy
 //
 // ```
-// ProtoObject (true root, minimal behavior)
-//   └─ Object (common messages, reflection, nil testing)
-//        └─ Actor (async-first process-based objects)
+// ProtoObject (minimal root - identity, DNU)
+//   └─ Object (value types - reflection, nil testing)
+//        ├─ Integer, String, etc. (sealed primitives)
+//        ├─ Point, Color, etc. (user value types) [instantiation TBD]
+//        └─ Actor (process-based - spawn, mailbox)
+//             └─ Counter, Worker, etc. (user actors)
 // ```
 //
 // ## When to Inherit from ProtoObject
@@ -167,3 +170,19 @@ ProtoObject
   //     target perform: selector withArguments: arguments
   // ```
   perform: selector withArguments: arguments => // implemented by compiler
+
+  // Raise an error with a message (compiler intrinsic)
+  // Terminates execution and propagates the error up the call stack
+  // For actors, the error is caught and sent as a rejected future
+  //
+  // Arguments:
+  // - message: String describing the error
+  //
+  // Example:
+  // ```beamtalk
+  // self error: 'Invalid argument'
+  // self error: 'Index out of bounds: ', index asString
+  // ```
+  //
+  // Implementation: compiles to erlang:error({beamtalk_error, Message})
+  error: message => // implemented by compiler

@@ -12,6 +12,7 @@
 %%% | Selector | Args | Description |
 %%% |----------|------|-------------|
 %%% | `class`  | []   | Returns `'Tuple'` |
+%%% | `respondsTo` | [Sel] | Returns true if responds to selector |
 %%% | `size`   | []   | Tuple size |
 %%% | `at:`    | [Idx] | Element at index (1-based) |
 %%% | `isOk`   | []   | Check if `{ok, _}` pattern |
@@ -65,6 +66,7 @@ has_method(Selector) ->
 %% @doc Check if a selector is a builtin method.
 -spec is_builtin(atom()) -> boolean().
 is_builtin('class') -> true;
+is_builtin('respondsTo') -> true;
 is_builtin('size') -> true;
 is_builtin('at:') -> true;
 is_builtin('isOk') -> true;
@@ -84,6 +86,8 @@ is_builtin(_) -> false.
 
 %% Reflection
 builtin_dispatch('class', [], _X) -> {ok, 'Tuple'};
+builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) -> 
+    {ok, has_method(Selector)};
 
 %% Size
 builtin_dispatch('size', [], X) -> {ok, tuple_size(X)};

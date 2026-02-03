@@ -137,6 +137,94 @@ See full guide: [docs/development/architecture-principles.md](docs/development/a
 
 ---
 
+## User Experience & Developer Experience (DevEx) First
+
+**CRITICAL:** Beamtalk is an **interactive-first** language. Every feature must be validated from the user's perspective before it's considered complete.
+
+### Core Principle
+
+**A feature is not done until the user can interact with it and see its value.**
+
+Building internal infrastructure (error records, helper functions, data structures) is necessary but insufficient. Always complete the loop to user-facing integration.
+
+### DevEx Checklist
+
+Before marking any feature as complete, verify:
+
+#### 1. **REPL Integration** (Most Critical)
+- [ ] Does this feature appear in the REPL? How?
+- [ ] Are error messages user-friendly and actionable?
+- [ ] Can the user inspect results in the REPL?
+- [ ] Are hints and help text available?
+
+#### 2. **Error Messages**
+- [ ] Do errors use user-facing names? (e.g., `self` not `Self`)
+- [ ] Are errors actionable? (Do they explain what to do?)
+- [ ] Are stack traces helpful and not overwhelming?
+- [ ] Are compiler errors formatted with context and suggestions?
+
+#### 3. **Tooling Display**
+- [ ] How does this appear in the CLI? (`beamtalk repl`, `beamtalk build`)
+- [ ] What does the user see when things go wrong?
+- [ ] Are success/failure states clear?
+- [ ] Is output formatted for human readability?
+
+#### 4. **Examples & Testing**
+- [ ] Can you demonstrate the feature in 1-2 lines of REPL code?
+- [ ] Are there examples in `examples/` or docs showing real usage?
+- [ ] Do tests verify the user-facing behavior, not just internals?
+
+### Example: BT-169 Error Handling
+
+**What we built:** `#beamtalk_error{}` records with structured fields and formatting helpers.
+
+**Initially missed:** Integration into REPL error display! Users would have seen raw Erlang records instead of formatted messages.
+
+**Lesson learned:** 
+```erlang
+% Build the infrastructure
+Error = beamtalk_error:new(does_not_understand, 'Integer')
+
+% ✅ ALSO integrate into display layer
+format_error_message(#beamtalk_error{} = Error) ->
+    beamtalk_error:format(Error)
+```
+
+**Always ask:**
+1. "What does the user see when this runs?"
+2. "How do I test this in the REPL?"
+3. "What happens when this fails? Is the error helpful?"
+
+### Common Integration Points
+
+| Feature Type | User-Facing Integration |
+|-------------|------------------------|
+| **Error handling** | REPL error display, CLI error output |
+| **Language features** | REPL evaluation, syntax examples |
+| **Runtime features** | REPL inspection, debug output |
+| **Compiler features** | Diagnostic messages, LSP integration |
+| **Standard library** | REPL usage, documentation examples |
+
+### Red Flags (Incomplete Features)
+
+🚩 "The infrastructure is done" - but no user can see it
+🚩 "Tests pass" - but no examples show real usage
+🚩 "Error handling works" - but messages are cryptic tuples
+🚩 "Feature implemented" - but REPL doesn't expose it
+🚩 "Documented" - but no interactive examples
+
+### Success Criteria
+
+✅ A new developer can try the feature in the REPL immediately
+✅ Error messages explain what went wrong and how to fix it
+✅ Examples show real-world usage, not internal APIs
+✅ Documentation includes REPL session snippets
+✅ Failure modes are tested and produce helpful output
+
+**Remember:** Beamtalk is a *live*, *interactive* language. If users can't interact with your feature in the REPL, it's not done.
+
+---
+
 ## Work Tracking
 
 We use **Linear** for task management. Project prefix: `BT`

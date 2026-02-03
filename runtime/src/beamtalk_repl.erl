@@ -123,6 +123,9 @@ get_port(Pid) ->
 
 %% @private
 init({Port, Options}) ->
+    %% Ensure beamtalk runtime is started (for class registry, bootstrap, etc.)
+    application:ensure_all_started(beamtalk_runtime),
+    
     %% Open TCP listen socket
     case gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {packet, line}]) of
         {ok, ListenSocket} ->
