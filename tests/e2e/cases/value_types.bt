@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for value types (Object subclasses)
+// Value types are plain Erlang terms with no process
+// They are created with 'new', not 'spawn'
+
+// @load tests/e2e/fixtures/point.bt
+
+// ===========================================================================
+// VALUE TYPE INSTANTIATION
+// ===========================================================================
+
+// TODO(BT-213): Enable once class message sends work in REPL
+// Create a Point with default values
+// Point new
+// // => #{__class__ => Point, x => 0, y => 0}
+
+// TODO(BT-213): Enable once keyword message with map literal works
+// Create a Point with explicit values
+// Point new: #{x => 3, y => 4}
+// // => #{__class__ => Point, x => 3, y => 4}
+
+// ===========================================================================
+// ACCESSING FIELDS
+// ===========================================================================
+
+// @load tests/e2e/fixtures/point.bt
+// p := Point new: #{x => 5, y => 10}
+// p.x
+// // => 5
+
+// p.y
+// // => 10
+
+// ===========================================================================
+// METHOD CALLS
+// ===========================================================================
+
+// @load tests/e2e/fixtures/point.bt
+// p := Point new: #{x => 3, y => 4}
+// p describe
+// // => 'Point(3, 4)'
+
+// ===========================================================================
+// IMMUTABILITY
+// ===========================================================================
+
+// Value types are immutable - methods return new instances
+// @load tests/e2e/fixtures/point.bt
+// p1 := Point new: #{x => 1, y => 2}
+// p2 := p1  // p2 references same map
+// p1 == p2
+// // => true
+
+// ===========================================================================
+// COPYING SEMANTICS
+// ===========================================================================
+
+// Value types are copied when sent between processes
+// (This is default BEAM behavior for non-process terms)
+
+// ===========================================================================
+// ACTOR INSTANTIATION ERRORS
+// ===========================================================================
+
+// Actors MUST use 'spawn', not 'new'
+// @load tests/e2e/fixtures/counter.bt
+// Counter new
+// // => Error: Actors must use spawn, not new

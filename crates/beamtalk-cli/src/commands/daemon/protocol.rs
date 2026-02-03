@@ -225,6 +225,8 @@ struct CompileResult {
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
     classes: Vec<ClassInfo>,
+    /// Pre-formatted diagnostic messages using miette
+    formatted_diagnostics: Vec<String>,
 }
 
 /// Class metadata extracted from compiled source.
@@ -274,15 +276,29 @@ fn handle_compile(
     // Update the language service
     service.update_file(file_path.clone(), source.clone());
 
-    // Get diagnostics
-    let diagnostics: Vec<DiagnosticInfo> = service
-        .diagnostics(&file_path)
-        .into_iter()
+    // Get diagnostics from language service
+    let core_diagnostics = service.diagnostics(&file_path);
+
+    let diagnostics: Vec<DiagnosticInfo> = core_diagnostics
+        .iter()
         .map(|d| DiagnosticInfo {
             message: d.message.to_string(),
             severity: "error".to_string(),
             start: d.span.start(),
             end: d.span.end(),
+        })
+        .collect();
+
+    // Generate formatted diagnostics using miette
+    let formatted_diagnostics: Vec<String> = core_diagnostics
+        .iter()
+        .map(|d| {
+            let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                d,
+                &params.path,
+                &source,
+            );
+            format!("{:?}", miette::Report::new(diag))
         })
         .collect();
 
@@ -311,6 +327,7 @@ fn handle_compile(
         core_erlang,
         diagnostics,
         classes: class_names,
+        formatted_diagnostics,
     };
 
     match serde_json::to_value(result) {
@@ -409,6 +426,8 @@ struct CompileExpressionResult {
     success: bool,
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
+    /// Pre-formatted diagnostic messages using miette
+    formatted_diagnostics: Vec<String>,
 }
 
 /// Handle the `compile_expression` method for REPL evaluation.
@@ -455,6 +474,19 @@ fn handle_compile_expression(
         })
         .collect();
 
+    // Generate formatted diagnostics using miette
+    let formatted_diagnostics: Vec<String> = all_diagnostics
+        .iter()
+        .map(|d| {
+            let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                d,
+                "repl",
+                &params.source,
+            );
+            format!("{:?}", miette::Report::new(diag))
+        })
+        .collect();
+
     let has_errors = diagnostics.iter().any(|d| d.severity == "error");
 
     // Generate Core Erlang for the expression
@@ -482,6 +514,7 @@ fn handle_compile_expression(
         success: !has_errors && core_erlang.is_some(),
         core_erlang,
         diagnostics,
+        formatted_diagnostics,
     };
 
     match serde_json::to_value(result) {

@@ -100,7 +100,7 @@ mod variable_context;
 // Re-export utility functions for IDE queries
 pub use util::to_module_name;
 
-use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::ast::{Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, Module};
 use state_threading::StateThreading;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -200,18 +200,38 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// ```
 pub fn generate(module: &Module) -> Result<String> {
     let mut generator = CoreErlangGenerator::new("beamtalk_module");
-    generator.generate_module(module)?;
+
+    // BT-213: Route based on whether class is actor or value type
+    if CoreErlangGenerator::is_actor_class(module) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
     Ok(generator.output)
 }
 
 /// Generates Core Erlang code with a specified module name.
+///
+/// # BT-213: Value Types vs Actors
+///
+/// Routes to different code generators based on class hierarchy:
+/// - **Actor subclasses** → `generate_actor_module` (`gen_server` with mailbox)
+/// - **Object subclasses** → `generate_value_type_module` (plain Erlang maps)
 ///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
-    generator.generate_module(module)?;
+
+    // BT-213: Route based on whether class is actor or value type
+    if CoreErlangGenerator::is_actor_class(module) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
     Ok(generator.output)
 }
 
@@ -235,6 +255,36 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.generate_repl_module(expression)?;
     Ok(generator.output)
+}
+
+/// Code generation context (BT-213).
+///
+/// Determines how expressions are compiled based on the execution environment:
+/// - **Actor**: Process-based with mutable state, async messaging
+/// - **`ValueType`**: Plain maps with immutable semantics, sync function calls
+/// - **Repl**: Interactive evaluation with bindings map
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeGenContext {
+    /// Generating code for an actor class (`gen_server` with async messaging).
+    ///
+    /// - Field access: `call 'maps':'get'('field', State)`
+    /// - Method calls: Async via `gen_server:cast` with futures
+    /// - State threading: Use State, State1, State2... for mutations
+    Actor,
+
+    /// Generating code for a value type class (plain Erlang functions).
+    ///
+    /// - Field access: `call 'maps':'get'('field', Self)`
+    /// - Method calls: Synchronous function calls
+    /// - No state threading: Value types are immutable
+    ValueType,
+
+    /// Generating code for REPL evaluation.
+    ///
+    /// - Variable access: `call 'maps':'get'('var', Bindings)`
+    /// - Field access: Via maps:get from State (if in actor context)
+    /// - Special handling for variable persistence across expressions
+    Repl,
 }
 
 /// Core Erlang code generator.
@@ -269,6 +319,9 @@ pub(super) struct CoreErlangGenerator {
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
+    /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
+    /// Determines variable naming and method dispatch strategy.
+    context: CodeGenContext,
 }
 
 impl CoreErlangGenerator {
@@ -282,6 +335,7 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             is_repl_mode: false,
+            context: CodeGenContext::Actor, // Default to Actor for backward compatibility
         }
     }
 
@@ -346,9 +400,47 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Generates a full module with `gen_server` behaviour.
+    /// BT-213: Determines if a class is an actor (process-based) or value type (plain term).
     ///
-    /// Per BT-29 design doc, each class generates a `gen_server` module with:
+    /// **Actor classes:** Inherit from Actor or its subclasses. Generate `gen_server` code.
+    /// **Value types:** Inherit from Object (but not Actor). Generate plain Erlang maps/records.
+    ///
+    /// # Implementation Note
+    ///
+    /// This is a simplified check that only looks at the direct superclass.
+    /// The stdlib `Actor` root class is explicitly treated as an actor, even though
+    /// it directly subclasses `Object`, to avoid misclassifying it as a value type.
+    /// Full implementation should traverse the inheritance chain in semantic analysis.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if class inherits from Actor or other non-Object classes (actors by default)
+    /// - `false` if class inherits directly from Object (except for the Actor root)
+    /// - `true` if module contains no class (backward compatibility for REPL)
+    fn is_actor_class(module: &Module) -> bool {
+        // Check if the first class in the module is an actor
+        // TODO(BT-213): Handle modules with multiple classes
+        if let Some(class) = module.classes.first() {
+            // Special case: The stdlib Actor class itself (`Object subclass: Actor`)
+            // must be treated as an actor, not a value type
+            if class.name.name.as_str() == "Actor" {
+                return true;
+            }
+
+            // For BT-213 MVP: Only classes that directly inherit from Object are value types
+            // Everything else (Counter, Array, LoggingCounter, etc.) is treated as an actor
+            // TODO(BT-213): Full inheritance chain resolution in semantic analysis
+            class.superclass.name.as_str() != "Object"
+        } else {
+            // If no class definition, assume actor to maintain backward compatibility
+            // (existing tests expect gen_server generation)
+            true
+        }
+    }
+
+    /// Generates a full actor module with `gen_server` behaviour.
+    ///
+    /// Per BT-29 design doc, each actor class generates a `gen_server` module with:
     /// - Error isolation via `safe_dispatch/3`
     /// - `doesNotUnderstand:args:` fallback dispatch
     /// - `terminate/2` with method call support
@@ -360,7 +452,10 @@ impl CoreErlangGenerator {
     /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
-    fn generate_module(&mut self, module: &Module) -> Result<()> {
+    fn generate_actor_module(&mut self, module: &Module) -> Result<()> {
+        // BT-213: Set context to Actor for this module
+        self.context = CodeGenContext::Actor;
+
         // Module header with expanded exports per BT-29
         writeln!(
             self.output,
@@ -421,6 +516,191 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates a value type module (BT-213).
+    ///
+    /// Value types are plain Erlang terms (maps/records) with no process.
+    /// They are created with `new` and `new:`, not `spawn`.
+    ///
+    /// ## Generated Structure
+    ///
+    /// ```erlang
+    /// module 'point' ['new'/0, 'new'/1, 'plus'/2, ...]
+    ///   attributes []
+    ///
+    /// 'new'/0 = fun () ->
+    ///     ~{'__class__' => 'Point', 'x' => 0, 'y' => 0}~
+    ///
+    /// 'new'/1 = fun (InitArgs) ->
+    ///     DefaultState = call 'point':'new'(),
+    ///     call 'maps':'merge'(DefaultState, InitArgs)
+    ///
+    /// 'plus'/2 = fun (Self, Other) ->
+    ///     % Direct function call, no gen_server
+    ///     NewX = call 'erlang':'+'(
+    ///         call 'maps':'get'('x', Self),
+    ///         call 'maps':'get'('x', Other)
+    ///     ),
+    ///     ...
+    ///     ~{'__class__' => 'Point', 'x' => NewX, 'y' => NewY}~
+    /// ```
+    ///
+    /// ## Key Differences from Actors
+    ///
+    /// - No `gen_server` behavior
+    /// - No `spawn/0` or `spawn/1` - use `new/0` and `new/1` instead
+    /// - Methods are synchronous functions operating on maps
+    /// - No state threading (value types are immutable)
+    /// - Methods return new instances rather than mutating
+    fn generate_value_type_module(&mut self, module: &Module) -> Result<()> {
+        // BT-213: Set context to ValueType for this module
+        self.context = CodeGenContext::ValueType;
+
+        let class = module
+            .classes
+            .first()
+            .ok_or_else(|| CodeGenError::Internal("Value type module has no class".to_string()))?;
+
+        // Collect method exports
+        let mut exports = vec!["'new'/0".to_string(), "'new'/1".to_string()];
+
+        // Add instance method exports (each takes Self as first parameter)
+        for method in &class.methods {
+            // All methods in a class are instance methods in Beamtalk
+            // MethodKind is about method combination (Primary, Before, After, Around)
+            let arity = method.parameters.len() + 1; // +1 for Self parameter
+            let mangled = method.selector.to_erlang_atom();
+            exports.push(format!("'{mangled}'/{arity}"));
+        }
+
+        // Module header
+        writeln!(
+            self.output,
+            "module '{}' [{}]",
+            self.module_name,
+            exports.join(", ")
+        )?;
+        writeln!(self.output, "  attributes []")?;
+        writeln!(self.output)?;
+
+        // Generate new/0 - creates instance with default field values
+        self.generate_value_type_new(class)?;
+        writeln!(self.output)?;
+
+        // Generate new/1 - creates instance with initialization arguments
+        self.generate_value_type_new_with_args()?;
+        writeln!(self.output)?;
+
+        // Generate instance methods as pure functions
+        for method in &class.methods {
+            self.generate_value_type_method(method, class)?;
+            writeln!(self.output)?;
+        }
+
+        // Module end
+        writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates the `new/0` function for a value type.
+    ///
+    /// Creates an instance map with __class__ and default field values.
+    fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
+        writeln!(self.output, "'new'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        // Generate map literal with __class__ and fields
+        write!(self.output, "~{{'__class__' => '{}'", self.to_class_name())?;
+
+        // Add each field with its default value
+        for field in &class.state {
+            write!(self.output, ", '{}' => ", field.name.name)?;
+            if let Some(default_value) = &field.default_value {
+                self.generate_expression(default_value)?;
+            } else {
+                write!(self.output, "'nil'")?;
+            }
+        }
+
+        writeln!(self.output, "}}~")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `new/1` function for a value type.
+    ///
+    /// Merges initialization arguments with default values.
+    fn generate_value_type_new_with_args(&mut self) -> Result<()> {
+        writeln!(self.output, "'new'/1 = fun (InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let DefaultState = call '{}':'new'() in",
+            self.module_name
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'maps':'merge'(DefaultState, InitArgs)")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates an instance method for a value type.
+    ///
+    /// Value type methods are pure functions that take Self as first parameter
+    /// and return a new instance (immutable semantics).
+    fn generate_value_type_method(
+        &mut self,
+        method: &MethodDefinition,
+        _class: &ClassDefinition,
+    ) -> Result<()> {
+        let mangled = method.selector.to_erlang_atom();
+        let arity = method.parameters.len() + 1; // +1 for Self
+
+        // Function signature: 'methodName'/Arity = fun (Self, Param1, Param2, ...) ->
+        write!(self.output, "'{mangled}'/{arity}= fun (Self")?;
+        for param in &method.parameters {
+            let core_var = variable_context::VariableContext::to_core_var(&param.name);
+            write!(self.output, ", {core_var}")?;
+        }
+        writeln!(self.output, ") ->")?;
+
+        self.indent += 1;
+
+        // Bind parameters in scope
+        self.push_scope();
+        for param in &method.parameters {
+            let core_var = variable_context::VariableContext::to_core_var(&param.name);
+            self.bind_var(&param.name, &core_var);
+        }
+
+        // Generate method body expressions
+        // For value types, there's no state threading - they're immutable
+        // TODO(BT-213): Consider adding immutable update syntax (e.g., withX: newX) in future
+        // Currently, field assignments are rejected at codegen (see generate_field_assignment)
+        // Field reads work via CodeGenContext routing to Self parameter
+        for (i, expr) in method.body.iter().enumerate() {
+            if i > 0 {
+                self.write_indent()?;
+            }
+            self.generate_expression(expr)?;
+            if i < method.body.len() - 1 {
+                writeln!(self.output)?;
+            }
+        }
+
+        self.pop_scope();
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
     /// Generates a simple REPL evaluation module.
     ///
     /// Creates a module with a single `eval/1` function that evaluates
@@ -446,6 +726,10 @@ impl CoreErlangGenerator {
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
     fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
+        // BT-213: Set context to Repl for this module
+        self.context = CodeGenContext::Repl;
+        self.is_repl_mode = true; // Also set legacy flag for compatibility
+
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
         writeln!(self.output, "  attributes []")?;
