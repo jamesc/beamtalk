@@ -434,11 +434,12 @@ fn handle_compile_expression(
     let known_vars: Vec<&str> = params.known_variables.iter().map(String::as_str).collect();
 
     // Run semantic analysis with known REPL variables to avoid false "Undefined variable" errors
-    let all_diagnostics = beamtalk_core::queries::diagnostics::compute_diagnostics_with_known_vars(
-        &module,
-        parse_diagnostics,
-        &known_vars,
-    );
+    let all_diagnostics =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
+            &module,
+            parse_diagnostics,
+            &known_vars,
+        );
 
     // Convert diagnostics
     let diagnostics: Vec<DiagnosticInfo> = all_diagnostics

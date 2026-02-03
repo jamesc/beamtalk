@@ -1,5 +1,7 @@
 # Beamtalk: Live, Reflective Actor Programming for AI Agents
 
+> **Note:** This document describes **why Beamtalk is well-suited for building AI agent platforms** as a language use case and vision. For guidance on **AI agents contributing to the Beamtalk compiler**, see [AGENTS.md](../AGENTS.md) in the repository root.
+
 ## Executive Summary
 
 Beamtalk brings Smalltalk's legendary live, reflective programming paradigm to the BEAM runtime (Erlang/Elixir VM), creating a purpose-built language for **exploratory, agentic AI systems**. Every agent is a first-class actor—a lightweight process with a mailbox and dynamic message dispatch—enabling teams to spawn swarms of autonomous agents (Claude, Copilot, GPT), interact with them via live browsers, hot-patch behaviors mid-execution, and scale to millions of concurrent agents across BEAM clusters without restarts.

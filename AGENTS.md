@@ -27,6 +27,116 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 ---
 
+## Domain Driven Design (DDD)
+
+**CRITICAL:** The beamtalk architecture is **driven by Domain Driven Design principles**. Always consider DDD when creating new code or refactoring existing code.
+
+### Core DDD Principles
+
+1. **Ubiquitous Language** - Use domain terms consistently throughout the codebase
+   - Module names, types, and functions should reflect the domain model
+   - Example: `CompletionProvider`, `DiagnosticProvider`, `HoverProvider` (not `completions`, `diagnostics`, `hover`)
+   - When the domain expert says "provider", the code should say "provider"
+
+2. **Bounded Contexts** - The codebase is organized into distinct contexts
+   - **Language Service Context** - IDE features (completions, diagnostics, hover)
+   - **Compilation Context** - Lexer, parser, AST, semantic analysis, codegen
+   - **Runtime Context** - Erlang runtime, actors, OTP integration
+   - **REPL Context** - Interactive development, live coding
+
+3. **Domain Services** - Stateless operations that don't naturally fit in entities
+   - Example: `CompletionProvider::compute_completions()` is a domain service
+   - Domain services are pure functions operating on domain objects (AST, Module)
+
+4. **Value Objects** - Immutable objects defined by their attributes
+   - Example: `Span`, `Position`, `Identifier`, `Token`
+   - Use newtypes for clarity: `ModuleId`, `FunctionId`, `ByteOffset`, `LineNumber`
+
+5. **Entities** - Objects with identity that can change over time
+   - Example: `Module`, `Expression`, `Statement` in the AST
+   - Identity matters more than attributes
+
+### When to Apply DDD
+
+**Always apply DDD when:**
+
+1. **Creating new modules** - Name them after domain concepts
+   ```rust
+   // ✅ GOOD - Uses domain language
+   pub mod completion_provider;
+   pub mod diagnostic_provider;
+   
+   // ❌ BAD - Generic technical terms
+   pub mod completions;
+   pub mod diagnostics;
+   ```
+
+2. **Refactoring** - Align code with the domain model
+   - If the code structure doesn't match the domain model, refactor it
+   - Example: BT-199 renamed `completions` → `completion_provider` to match LSP terminology
+
+3. **Adding features** - Consider which bounded context it belongs to
+   - Language Service feature? → `crates/beamtalk-core/src/queries/`
+   - Compilation feature? → `crates/beamtalk-core/src/parse/` or `src/analyse/`
+   - Runtime feature? → `runtime/src/`
+
+4. **Writing documentation** - Include DDD context annotations
+   ```rust
+   //! Completion provider for the language service.
+   //!
+   //! **DDD Context:** Language Service
+   //!
+   //! This domain service implements the `CompletionProvider` from the DDD model.
+   ```
+
+### DDD Resources
+
+- **Primary reference:** [docs/beamtalk-ddd-model.md](docs/beamtalk-ddd-model.md) - Defines all bounded contexts and domain services
+- **LSP alignment:** Language Service context aligns with LSP specification terminology
+- **Review examples:** See BT-199 for a refactoring that improved DDD alignment
+
+### Code Review Checklist
+
+When reviewing code for DDD compliance:
+
+- [ ] Module names use domain language (not generic technical terms)
+- [ ] Types have clear bounded context (documented in module header)
+- [ ] Functions use ubiquitous language from domain model
+- [ ] Domain services are stateless and operate on domain objects
+- [ ] Value objects are immutable
+- [ ] Documentation includes DDD context annotations
+
+---
+
+## Development Architecture Principles
+
+The beamtalk codebase follows strict architectural principles for code organization, error handling, testing, security, and dependencies. Full details in [docs/development/architecture-principles.md](docs/development/architecture-principles.md).
+
+**Core principles:**
+1. **Layered Architecture** - Dependencies flow down only (core never depends on CLI)
+2. **Error Recovery** - Return partial results + diagnostics (don't stop at first error)
+3. **Testing Pyramid** - Unit 60-70%, Integration 20-30%, E2E 10%
+4. **Security-First** - Input validation at boundaries, no unsafe without justification
+5. **Minimal Dependencies** - Prefer std library, document why each dependency exists
+
+**Critical rules:**
+
+❌ **NEVER:**
+- `beamtalk-core` importing `beamtalk-cli` or `beamtalk-lsp`
+- Panic on user input (malformed source, invalid args, missing files)
+- Add dependencies without security review and commit message justification
+- Use `unwrap()` on user input
+
+✅ **ALWAYS:**
+- Return `(Result, Vec<Diagnostic>)` or equivalent for user-facing operations
+- Validate file paths and buffer boundaries
+- Document unsafe code with `// SAFETY:` comment explaining invariants
+- Run `cargo audit` before releases
+
+See full guide: [docs/development/architecture-principles.md](docs/development/architecture-principles.md)
+
+---
+
 ## Work Tracking
 
 We use **Linear** for task management. Project prefix: `BT`
@@ -506,7 +616,7 @@ beamtalk/
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
-- See `docs/beamtalk-testing-strategy.md` for compilation workflow details
+- See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests
 **Location:** `tests/e2e/cases/*.bt`

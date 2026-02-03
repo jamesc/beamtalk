@@ -1,9 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Code completion query implementation.
+//! Completion provider for the language service.
 //!
-//! This module provides context-aware code completion suggestions for the language service.
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `CompletionProvider` from the DDD model.
+//! It suggests completions at the cursor position based on the current editing
+//! context. The provider follows LSP terminology and aligns with the ubiquitous
+//! language defined in `docs/beamtalk-ddd-model.md`.
 //!
 //! # Design
 //!
@@ -16,6 +21,11 @@
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol completion requests
 
 use crate::ast::{Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
@@ -33,6 +43,23 @@ use std::collections::HashSet;
 /// # Returns
 ///
 /// A list of completion suggestions appropriate for the context.
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::queries::completion_provider::compute_completions;
+/// use beamtalk_core::language_service::Position;
+/// use beamtalk_core::parse::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, _) = parse(tokens);
+///
+/// let completions = compute_completions(&module, source, Position::new(0, 0));
+/// assert!(!completions.is_empty());
+/// // Should include keywords like "self", "true", "false"
+/// assert!(completions.iter().any(|c| c.label == "self"));
+/// ```
 #[must_use]
 pub fn compute_completions(module: &Module, source: &str, position: Position) -> Vec<Completion> {
     // Validate position is within bounds
@@ -180,10 +207,20 @@ fn add_message_completions(completions: &mut Vec<Completion>) {
     }
 }
 
-/// Removes duplicate completions, keeping the first occurrence.
+/// Removes duplicate completions based on label.
+///
+/// Keeps the first occurrence of each unique label.
 fn deduplicate_completions(completions: &mut Vec<Completion>) {
     let mut seen = HashSet::new();
-    completions.retain(|c| seen.insert(c.label.clone()));
+    completions.retain(|c| {
+        // Check for existence before cloning
+        if seen.contains(&c.label) {
+            false
+        } else {
+            seen.insert(c.label.clone());
+            true
+        }
+    });
 }
 
 #[cfg(test)]
