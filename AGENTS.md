@@ -391,6 +391,104 @@ mutation {
 
 ---
 
+## Architecture Decision Records (ADRs)
+
+We use **Architecture Decision Records (ADRs)** to document significant design and architectural decisions in `docs/adr/`.
+
+### When to Create an ADR
+
+Create an ADR for decisions that:
+
+1. **Affect language design** - Syntax, semantics, operators, control flow
+2. **Change core architecture** - Module organization, compilation pipeline, runtime behavior
+3. **Impact interoperability** - Erlang/Elixir compatibility, BEAM alignment
+4. **Alter user-facing behavior** - Breaking changes, API changes, feature removal
+5. **Establish patterns** - Coding conventions, design patterns, best practices
+
+**Examples requiring ADRs:**
+- Adding/removing language features (e.g., pattern matching, string interpolation)
+- Changing operator semantics (e.g., BT-188: equality operators)
+- Architectural refactoring (e.g., DDD reorganization)
+- Deprecating features (e.g., ADR 0001: no compound assignment)
+
+**Examples NOT requiring ADRs:**
+- Bug fixes (unless they change behavior significantly)
+- Documentation updates
+- Test additions
+- Dependency updates
+- Minor refactoring
+
+### ADR Structure
+
+Each ADR must include:
+
+```markdown
+# ADR NNNN: Descriptive Title
+
+## Status
+Proposed | Accepted | Deprecated | Superseded
+
+## Context
+Background, problem statement, why this decision is needed
+
+## Decision
+The decision made (clear, concise statement)
+
+## Consequences
+### Positive
+- Benefits and advantages
+
+### Negative
+- Costs, trade-offs, risks
+
+### Neutral
+- Other impacts
+
+## References
+- Related issues (BT-XXX)
+- Documentation links
+- Prior discussions
+```
+
+### Creating ADRs
+
+1. **Number sequentially:** Use next available number (0001, 0002, etc.)
+2. **Title format:** `NNNN-kebab-case-title.md`
+3. **One decision per ADR:** Keep focused—split complex decisions into multiple ADRs
+4. **Document dependencies:** If ADR B depends on ADR A, state it explicitly
+5. **Update the index:** Add your ADR to `docs/adr/README.md`
+
+**Example workflow:**
+```bash
+# Create ADR file
+vim docs/adr/0003-add-pattern-matching.md
+
+# Update index
+vim docs/adr/README.md
+
+# Commit with reference
+git commit -m "docs: add ADR 0003 - pattern matching syntax BT-XXX"
+```
+
+### ADR Best Practices
+
+- **Write early:** Create ADR when decision is made, not months later
+- **Be specific:** Include code examples, not just prose
+- **Show trade-offs:** Document what you're giving up, not just what you gain
+- **Link to issues:** Reference Linear issues (BT-XXX) for context
+- **Update status:** Mark as Accepted/Deprecated when status changes
+- **Supersede, don't delete:** If decision changes, create new ADR and mark old one as Superseded
+
+### Current ADRs
+
+See `docs/adr/README.md` for the complete list. Recent examples:
+- **ADR 0001:** No compound assignment in Beamtalk (Smalltalk purity)
+- **ADR 0002:** Use Erlang comparison operators directly (BEAM-first)
+
+**Reference:** [ADR best practices](https://github.com/joelparkerhenderson/architecture-decision-record)
+
+---
+
 ## Agent Skills
 
 This repository includes custom skills in `.github/skills/` that teach Copilot specialized workflows for this project. Skills are automatically loaded when relevant to your prompt.
