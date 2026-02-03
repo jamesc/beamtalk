@@ -456,15 +456,33 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
+        // Check if module has class definitions for registration
+        let has_classes = !module.classes.is_empty();
+
         // Module header with expanded exports per BT-29
-        writeln!(
-            self.output,
-            "module '{}' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-             'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
-             'method_table'/0, 'spawn'/0, 'spawn'/1]",
-            self.module_name
-        )?;
-        writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
+        let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
+                            'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
+                            'method_table'/0, 'spawn'/0, 'spawn'/1";
+
+        if has_classes {
+            writeln!(
+                self.output,
+                "module '{}' [{base_exports}, 'register_class'/0]",
+                self.module_name
+            )?;
+            writeln!(
+                self.output,
+                "  attributes ['behaviour' = ['gen_server'], \
+                 'on_load' = [{{'register_class', 0}}]]"
+            )?;
+        } else {
+            writeln!(
+                self.output,
+                "module '{}' [{base_exports}]",
+                self.module_name
+            )?;
+            writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
+        }
         writeln!(self.output)?;
 
         // Generate start_link/1 (standard gen_server entry point)
@@ -509,6 +527,12 @@ impl CoreErlangGenerator {
 
         // Generate method table
         self.generate_method_table(module)?;
+
+        // Generate class registration function (BT-218)
+        if !module.classes.is_empty() {
+            writeln!(self.output)?;
+            self.generate_register_class(module)?;
+        }
 
         // Module end
         writeln!(self.output, "end")?;
@@ -3072,5 +3096,252 @@ end
         } else {
             panic!("Expected LocalMutationInStoredClosure error, got: {result:?}");
         }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "comprehensive test covering all registration metadata"
+    )]
+    fn test_class_registration_generation() {
+        // BT-218: Test that class definitions generate registration code
+        use crate::ast::{
+            ClassDefinition, Identifier, MethodDefinition, MethodKind, StateDeclaration,
+        };
+        use crate::parse::Span;
+
+        // Create a Counter class with instance variables and methods
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 7)),
+            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("value", Span::new(0, 5)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            }],
+            methods: vec![
+                MethodDefinition {
+                    selector: MessageSelector::Unary("increment".into()),
+                    parameters: vec![],
+                    body: vec![Expression::Literal(Literal::Integer(42), Span::new(0, 2))],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    span: Span::new(0, 10),
+                },
+                MethodDefinition {
+                    selector: MessageSelector::Unary("getValue".into()),
+                    parameters: vec![],
+                    body: vec![Expression::Literal(Literal::Integer(42), Span::new(0, 2))],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: MethodKind::Primary,
+                    span: Span::new(0, 10),
+                },
+            ],
+            span: Span::new(0, 50),
+        };
+
+        let module = Module {
+            expressions: vec![],
+            classes: vec![class],
+            span: Span::new(0, 50),
+            leading_comments: vec![],
+        };
+
+        let code = generate_with_name(&module, "counter").expect("codegen should succeed");
+
+        // Check that on_load attribute is present
+        assert!(
+            code.contains("'on_load' = [{'register_class', 0}]"),
+            "Should have on_load attribute. Got:\n{code}"
+        );
+
+        // Check that register_class/0 is exported
+        assert!(
+            code.contains("'register_class'/0"),
+            "Should export register_class/0. Got:\n{code}"
+        );
+
+        // Check that register_class/0 function exists
+        assert!(
+            code.contains("'register_class'/0 = fun () ->"),
+            "Should generate register_class function. Got:\n{code}"
+        );
+
+        // Check that it calls beamtalk_class:start_link
+        assert!(
+            code.contains("call 'beamtalk_class':'start_link'('Counter',"),
+            "Should call beamtalk_class:start_link with class name. Got:\n{code}"
+        );
+
+        // Check metadata fields
+        assert!(
+            code.contains("'name' => 'Counter'"),
+            "Should include class name in metadata. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'module' => 'counter'"),
+            "Should include module name in metadata. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'superclass' => 'Actor'"),
+            "Should include superclass in metadata. Got:\n{code}"
+        );
+
+        // Check instance_methods map
+        assert!(
+            code.contains("'instance_methods' => ~{"),
+            "Should include instance_methods map. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'increment' => ~{'arity' => 0}~"),
+            "Should include increment method with arity. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'getValue' => ~{'arity' => 0}~"),
+            "Should include getValue method with arity. Got:\n{code}"
+        );
+
+        // Check instance_variables list
+        assert!(
+            code.contains("'instance_variables' => ['value']"),
+            "Should include instance_variables list. Got:\n{code}"
+        );
+
+        // Check class_methods map
+        assert!(
+            code.contains("'class_methods' => ~{"),
+            "Should include class_methods map. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'spawn' => ~{'arity' => 0}~"),
+            "Should include spawn class method. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'spawnWith:' => ~{'arity' => 1}~"),
+            "Should include spawnWith: class method. Got:\n{code}"
+        );
+
+        // Check function returns ok
+        assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
+    }
+
+    #[test]
+    fn test_no_class_registration_for_empty_module() {
+        // BT-218: Modules without class definitions should not have on_load or register_class
+        let module = Module::new(vec![], Span::new(0, 0));
+        let code = generate_with_name(&module, "empty_module").expect("codegen should succeed");
+
+        // Should NOT have on_load attribute
+        assert!(
+            !code.contains("'on_load'"),
+            "Module without classes should not have on_load. Got:\n{code}"
+        );
+
+        // Should NOT export register_class/0
+        assert!(
+            !code.contains("'register_class'/0"),
+            "Module without classes should not export register_class. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_classes_registration() {
+        // BT-218: Test that modules with multiple classes register all of them
+        use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
+        use crate::parse::Span;
+
+        let class1 = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 7)),
+            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("value", Span::new(0, 5)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            }],
+            methods: vec![],
+            span: Span::new(0, 20),
+        };
+
+        let class2 = ClassDefinition {
+            name: Identifier::new("Logger", Span::new(0, 6)),
+            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("messages", Span::new(0, 8)),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),
+                type_annotation: None,
+                span: Span::new(0, 10),
+            }],
+            methods: vec![],
+            span: Span::new(0, 30),
+        };
+
+        let module = Module {
+            expressions: vec![],
+            classes: vec![class1, class2],
+            span: Span::new(0, 50),
+            leading_comments: vec![],
+        };
+
+        let code = generate_with_name(&module, "multi_actors").expect("codegen should succeed");
+
+        // Should have on_load attribute
+        assert!(
+            code.contains("'on_load' = [{'register_class', 0}]"),
+            "Should have on_load attribute for multiple classes. Got:\n{code}"
+        );
+
+        // Should register first class (Counter)
+        assert!(
+            code.contains("call 'beamtalk_class':'start_link'('Counter',"),
+            "Should register Counter class. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'name' => 'Counter'"),
+            "Should include Counter metadata. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'instance_variables' => ['value']"),
+            "Should include Counter instance variables. Got:\n{code}"
+        );
+
+        // Should register second class (Logger)
+        assert!(
+            code.contains("call 'beamtalk_class':'start_link'('Logger',"),
+            "Should register Logger class. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'name' => 'Logger'"),
+            "Should include Logger metadata. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'instance_variables' => ['messages']"),
+            "Should include Logger instance variables. Got:\n{code}"
+        );
+
+        // Should use let-binding chain to sequence registrations
+        assert!(
+            code.contains("let _Reg0 = case"),
+            "Should have first registration with _Reg0. Got:\n{code}"
+        );
+        assert!(
+            code.contains("in let _Reg1 = case"),
+            "Should chain second registration with let. Got:\n{code}"
+        );
+
+        // Function should return ok
+        assert!(
+            code.contains("in 'ok'"),
+            "Should return ok after all registrations. Got:\n{code}"
+        );
     }
 }

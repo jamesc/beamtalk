@@ -1250,4 +1250,156 @@ impl CoreErlangGenerator {
         }
         Ok(())
     }
+
+    /// Generates the `register_class/0` function for class registration.
+    ///
+    /// This function is called automatically via `-on_load` when the module loads.
+    /// It registers the class with `beamtalk_class:start_link/2`, making the class
+    /// available as a first-class object for reflection and metaprogramming.
+    ///
+    /// The function is defensive - if `beamtalk_class` is not available (e.g., during
+    /// early module loading), it returns `ok` to allow the module to load. Classes can
+    /// be registered later via explicit calls if needed.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'register_class'/0 = fun () ->
+    ///     try
+    ///         case call 'beamtalk_class':'start_link'('Counter', ~{...}~) of
+    ///             <{'ok', _Pid}> when 'true' -> 'ok'
+    ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
+    ///             <{'error', _Reason}> when 'true' -> 'ok'
+    ///         end
+    ///     catch <_,_,_> -> 'ok'
+    /// ```
+    pub(super) fn generate_register_class(&mut self, module: &Module) -> Result<()> {
+        // Skip if no class definitions
+        if module.classes.is_empty() {
+            return Ok(());
+        }
+
+        writeln!(self.output, "'register_class'/0 = fun () ->")?;
+        self.indent += 1;
+
+        // Wrap in try-catch for defensive loading
+        self.write_indent()?;
+        writeln!(self.output, "try")?;
+        self.indent += 1;
+
+        // Generate registration for each class in the module
+        for (i, class) in module.classes.iter().enumerate() {
+            self.write_indent()?;
+            // Use case expressions for error handling
+            if i > 0 {
+                write!(self.output, "in ")?;
+            }
+            write!(
+                self.output,
+                "let _Reg{} = case call 'beamtalk_class':'start_link'('{}', ~{{",
+                i, class.name.name
+            )?;
+            writeln!(self.output)?;
+            self.indent += 1;
+
+            // Class name
+            self.write_indent()?;
+            writeln!(self.output, "'name' => '{}',", class.name.name)?;
+
+            // Module name
+            self.write_indent()?;
+            writeln!(self.output, "'module' => '{}',", self.module_name)?;
+
+            // Superclass
+            self.write_indent()?;
+            writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
+
+            // Instance methods
+            self.write_indent()?;
+            write!(self.output, "'instance_methods' => ~{{")?;
+            let instance_methods: Vec<_> = class
+                .methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .collect();
+
+            for (method_idx, method) in instance_methods.iter().enumerate() {
+                if method_idx > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(
+                    self.output,
+                    "'{}' => ~{{'arity' => {}}}~",
+                    method.selector.name(),
+                    method.selector.arity()
+                )?;
+            }
+            writeln!(self.output, "}}~,")?;
+
+            // Instance variables
+            self.write_indent()?;
+            write!(self.output, "'instance_variables' => [")?;
+            for (state_idx, state_decl) in class.state.iter().enumerate() {
+                if state_idx > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "'{}'", state_decl.name.name)?;
+            }
+            writeln!(self.output, "],")?;
+
+            // Class methods
+            self.write_indent()?;
+            writeln!(self.output, "'class_methods' => ~{{")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
+            self.write_indent()?;
+            writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~")?;
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~")?;
+
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~) of")?;
+
+            // Handle success case
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "<{{'ok', _Pid{i}}}> when 'true' -> 'ok'")?;
+
+            // Handle error cases - allow module to load anyway
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
+            )?;
+
+            self.write_indent()?;
+            writeln!(self.output, "<{{'error', _Reason{i}}}> when 'true' -> 'ok'")?;
+            self.indent -= 1;
+
+            self.write_indent()?;
+            writeln!(self.output, "end")?;
+        }
+
+        writeln!(self.output)?;
+        self.write_indent()?;
+        writeln!(self.output, "in 'ok'")?;
+
+        // Catch any exceptions during registration
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "of RegResult -> RegResult")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "catch <CatchType, CatchError, CatchStack> -> 'ok'"
+        )?;
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
 }
