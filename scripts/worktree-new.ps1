@@ -425,4 +425,24 @@ if ($env:GIT_SIGNING_KEY) {
 Write-Host "`nStarting Copilot..." -ForegroundColor Cyan
 
 # Connect to the container and start Copilot in yolo mode with claude-sonnet-4.5
-devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5
+# Use try/finally to ensure git paths are reset when copilot exits
+try {
+    devcontainer exec --workspace-folder $worktreePath copilot --yolo --model claude-sonnet-4.5
+}
+finally {
+    # Reset git paths back to host paths
+    Write-Host "`n🔧 Resetting .git paths for host..." -ForegroundColor Cyan
+    
+    # Reset worktree .git file to point to host path
+    $hostGitPath = Join-Path $env:BEAMTALK_MAIN_GIT_PATH "worktrees" $worktreeName
+    Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline
+    Write-Host "   Set .git to: $hostGitPath" -ForegroundColor Gray
+    
+    # Reset gitdir in main repo's worktree metadata to host path
+    if (Test-Path $worktreeMetaGitdir) {
+        Set-Content -Path $worktreeMetaGitdir -Value $worktreePath -NoNewline
+        Write-Host "   Set gitdir to: $worktreePath" -ForegroundColor Gray
+    }
+    
+    Write-Host "✅ Git paths restored for host" -ForegroundColor Green
+}
