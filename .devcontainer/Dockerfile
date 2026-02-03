@@ -35,8 +35,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub Copilot CLI
-RUN npm install -g @githubnext/github-copilot-cli
+# GitHub Copilot CLI is installed via devcontainer.json feature
 
 # Install additional Rust components
 #RUN rustup component add rustfmt clippy rust-src rust-analyzer

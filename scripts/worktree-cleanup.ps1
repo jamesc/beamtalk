@@ -93,12 +93,19 @@ foreach ($line in $allContainers) {
     $normalizedLocalFolder = if ($localFolder) { $localFolder -replace "\\", "/" } else { "" }
     
     # Only consider containers that belong to THIS project's worktree directory
+    # Must match BOTH a project identifier AND be in our worktree directory structure
     $isThisProject = $false
-    if ($image -match [regex]::Escape($projectName) -or $image -match "vsc-bt-") {
+    
+    # Primary check: local_folder must be within this repo's directory structure
+    $repoRootNormalized = $repoRoot -replace "\\", "/"
+    $isInRepoDir = $normalizedLocalFolder -and $normalizedLocalFolder -match [regex]::Escape($repoRootNormalized)
+    
+    if ($isInRepoDir) {
+        # Container's local_folder is within this repo - definitely ours
         $isThisProject = $true
-    } elseif ($worktreeLabel) {
-        $isThisProject = $true
-    } elseif ($worktreeParentDir -and $normalizedLocalFolder -match [regex]::Escape($worktreeParentDir)) {
+    } elseif (($image -match [regex]::Escape($projectName) -or $image -match "vsc-$projectName") -and -not $normalizedLocalFolder) {
+        # Image matches project name and no local_folder to check - assume ours
+        # (legacy containers without labels)
         $isThisProject = $true
     }
     
@@ -215,14 +222,15 @@ foreach ($container in $containersToRemove) {
 }
 Write-Host "✅ Removed $removed containers" -ForegroundColor Green
 
-# Find and remove orphaned volumes matching project name or BT issue pattern
+# Find and remove orphaned volumes matching project name
 Write-Host ""
 Write-Host "🔍 Scanning for orphaned volumes..." -ForegroundColor Cyan
 $allVolumes = docker volume ls --format "{{.Name}}" 2>$null
 
 $projectVolumes = @()
 foreach ($volume in $allVolumes) {
-    if ($volume -match [regex]::Escape($projectName) -or $volume -match "bt-\d+") {
+    # Devcontainer volumes typically include project name
+    if ($volume -match [regex]::Escape($projectName)) {
         $projectVolumes += $volume
     }
 }
