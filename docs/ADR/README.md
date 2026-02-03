@@ -26,7 +26,7 @@ Each ADR follows this structure:
 
 ## Creating New ADRs
 
-1. **Number sequentially:** Use the next available number (0002, 0003, etc.)
+1. **Number sequentially:** Use the next available number (0003, 0004, etc.)
 2. **Use descriptive titles:** Make it clear what decision is being made
 3. **Document thoroughly:** Include context, rationale, and consequences
 4. **Link to issues:** Reference Linear issues (e.g., BT-XXX) where relevant

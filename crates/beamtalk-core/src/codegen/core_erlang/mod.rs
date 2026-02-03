@@ -1275,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_strict_inequality_operator() {
+    fn test_generate_loose_inequality_operator() {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
         let right = vec![Expression::Literal(Literal::Integer(99), Span::new(7, 9))];
@@ -1283,7 +1283,7 @@ mod tests {
         assert!(result.is_ok());
         assert!(
             generator.output.contains("call 'erlang':'/='"),
-            "Should use inequality /= (negation of ==). Got: {}",
+            "Should use loose inequality /= (negation of ==). Got: {}",
             generator.output
         );
     }

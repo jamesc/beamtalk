@@ -73,9 +73,9 @@ This design was chosen to avoid conflict with compound assignment (`/=` for "div
 ## Migration Path
 
 1. **Update implementation:**
-   - Change lexer to recognize `/=`, `=:=`, `=/=` tokens
-   - Update operator mapping in `builtins.rs`: `~=` → `/=`, `=` → `=:=`, add `=/=`
-   - Remove `~=` method from ProtoObject.bt (it becomes a built-in operator)
+   - Change lexer to recognize new Beamtalk comparison operator tokens in source: `/=`, `=:=`, `=/=` instead of `~=`, `=`
+   - Update operator mapping in `builtins.rs` to use the new Beamtalk comparison tokens (`/=`, `=:=`, `=/=`) and drop support for the legacy `~=` and `=` comparison tokens
+   - Remove the user-defined `~=` method from `ProtoObject.bt`; inequality will now be provided by the built-in `/=` operator
 
 2. **Update tests:**
    - Replace all `~=` with `/=`

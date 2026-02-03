@@ -38,7 +38,7 @@ assert: (1 = 1)
 
 // Strict inequality: integer and float are NOT strictly equal
 assert: ((1.0 = 1) not)
-assert: (1.0 ~= 1) not  // ~= uses ==, which allows coercion, so this is false
+assert: (1.0 ~= 1) not  // 1.0 ~= 1 is false (they're equal with coercion), so negating gives true
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Value Type Equality (Map Contents)
