@@ -222,9 +222,6 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 find_hover_in_expr(receiver, offset)
             }
         }
-        Expression::CompoundAssignment { target, value, .. } => {
-            find_hover_in_expr(target, offset).or_else(|| find_hover_in_expr(value, offset))
-        }
         Expression::Cascade {
             receiver, messages, ..
         } => {

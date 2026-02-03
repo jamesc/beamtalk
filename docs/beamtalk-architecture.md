@@ -157,7 +157,7 @@ Target: **<50ms** for single-file change to loaded code.
 │  │  Actor subclass: Counter                             │   │
 │  │    state: value = 0                                  │   │
 │  │                                                      │   │
-│  │    increment => self.value += 1   ← you edit here   │   │
+│  │    increment => self.value := self.value + 1   ← you edit here   │   │
 │  │    getValue => ^self.value                           │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                           │                                 │
@@ -491,7 +491,7 @@ Beamtalk compiles to Core Erlang, which `erlc` then compiles to BEAM bytecode. T
 Actor subclass: Counter
   state: value = 0
 
-  increment => self.value += 1
+  increment => self.value := self.value + 1
   getValue => ^self.value
 ```
 
