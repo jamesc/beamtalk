@@ -704,9 +704,9 @@ dispatch(Selector, Args, State) ->
 1. Add special-case handling in `dispatch/4` for `class`, `respondsTo:`, etc.
 2. Generate `has_method/1` function in each class module
 
-#### Phase 4: Remove Compatibility Layer
+#### Phase 4: Remove Compatibility Layer ✅ DONE (BT-173)
 
-After all generated code uses new format, remove `dispatch/3`.
+Compatibility layer removed after all generated code transitioned to `dispatch/4`.
 
 ---
 
@@ -1052,22 +1052,26 @@ fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
 
 ### 3.7 Migration Strategy
 
-1. **Update runtime first** (backward compatible)
-   - Add `dispatch/4`
-   - Add `make_self/1`
-   - Keep `dispatch/3` as wrapper
+**Status: COMPLETED** (as of 2026-02-03)
 
-2. **Update codegen** (generates new format)
-   - All new compilations use `dispatch/4`
-   - Add `__class_mod__` to state
+Migration completed in phases:
 
-3. **Existing compiled code**
-   - Continues to work via `dispatch/3` → `dispatch/4` wrapper
-   - `__class_mod__` defaults to deriving from `__class__`
+1. **Update runtime first** (backward compatible) - ✅ DONE
+   - Add `dispatch/4` - ✅ 
+   - Add `make_self/1` - ✅
+   - Keep `dispatch/3` as wrapper - ✅
 
-4. **Future cleanup** (after transition period)
-   - Remove `dispatch/3` wrapper
-   - Require `__class_mod__` in state
+2. **Update codegen** (generates new format) - ✅ DONE
+   - All new compilations use `dispatch/4` - ✅
+   - Add `__class_mod__` to state - ✅
+
+3. **Existing compiled code** - ✅ DONE
+   - Continues to work via `dispatch/3` → `dispatch/4` wrapper - ✅
+   - `__class_mod__` defaults to deriving from `__class__` - ✅
+
+4. **Cleanup** - ✅ DONE (BT-173)
+   - Removed `dispatch/3` wrapper
+   - All code now uses `dispatch/4` exclusively
 
 ### 3.8 Error Handling Taxonomy
 

@@ -111,7 +111,7 @@
          code_change/3, terminate/2]).
 
 %% Internal dispatch
--export([dispatch/3, dispatch/4, make_self/1]).
+-export([dispatch/4, make_self/1]).
 
 %%% Public API
 
@@ -337,17 +337,6 @@ dispatch_user_method(Selector, Args, Self, State) ->
 %% This is the old signature maintained for backward compatibility with existing
 %% generated code. It constructs Self internally and delegates to dispatch/4.
 %% Looks up the selector in the __methods__ map and calls the method function.
-%% If not found, attempts to call doesNotUnderstand handler.
-%% Returns one of:
-%%   {reply, Result, NewState} - Method returned a value
-%%   {noreply, NewState} - Method didn't return a value
-%%   {error, Reason, State} - Method or dispatch failed
--spec dispatch(atom(), list(), map()) ->
-    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
-dispatch(Selector, Args, State) ->
-    Self = make_self(State),
-    dispatch(Selector, Args, Self, State).
-
 %% @private
 %% @doc Handle messages for unknown selectors.
 %% Attempts to call the doesNotUnderstand:args: handler if defined.
