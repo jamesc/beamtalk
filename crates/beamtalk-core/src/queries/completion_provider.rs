@@ -207,12 +207,13 @@ fn add_message_completions(completions: &mut Vec<Completion>) {
     }
 }
 
-/// Removes duplicate completions, keeping the first occurrence.
 /// Removes duplicate completions based on label.
+///
+/// Keeps the first occurrence of each unique label.
 fn deduplicate_completions(completions: &mut Vec<Completion>) {
     let mut seen = HashSet::new();
     completions.retain(|c| {
-        // Use reference to avoid cloning EcoString
+        // Check for existence before cloning
         if seen.contains(&c.label) {
             false
         } else {
