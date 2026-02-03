@@ -337,3 +337,75 @@ format_response_type_coverage_test() ->
         beamtalk_repl:format_response([1, 2, 3])),
     ?assertMatch(<<"{\"type\":\"result\",\"value\":", _/binary>>, 
         beamtalk_repl:format_response(#{key => value})).
+
+%%% Server Lifecycle Tests
+
+server_starts_and_stops_test() ->
+    %% Start the server with a random high port to avoid conflicts
+    Port = 50000 + rand:uniform(10000),
+    {ok, Pid} = beamtalk_repl:start_link(Port),
+    ?assert(is_process_alive(Pid)),
+    ok = beamtalk_repl:stop(Pid),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Pid)).
+
+server_starts_with_default_port_test() ->
+    %% Test start_link/0 which uses application:get_env
+    application:set_env(beamtalk_runtime, repl_port, 51234),
+    {ok, Pid} = beamtalk_repl:start_link(),
+    ?assert(is_process_alive(Pid)),
+    Port = beamtalk_repl:get_port(Pid),
+    ?assertEqual(51234, Port),
+    ok = beamtalk_repl:stop(Pid).
+
+server_starts_with_options_test() ->
+    Port = 50000 + rand:uniform(10000),
+    Options = #{daemon_socket_path => "/tmp/test.sock"},
+    {ok, Pid} = beamtalk_repl:start_link(Port, Options),
+    ?assert(is_process_alive(Pid)),
+    ok = beamtalk_repl:stop(Pid).
+
+get_port_returns_correct_port_test() ->
+    Port = 50000 + rand:uniform(10000),
+    {ok, Pid} = beamtalk_repl:start_link(Port),
+    ?assertEqual(Port, beamtalk_repl:get_port(Pid)),
+    ok = beamtalk_repl:stop(Pid).
+
+clear_bindings_test() ->
+    Port = 50000 + rand:uniform(10000),
+    {ok, Pid} = beamtalk_repl:start_link(Port),
+    %% Clear bindings should succeed
+    ok = beamtalk_repl:clear_bindings(Pid),
+    ok = beamtalk_repl:stop(Pid).
+
+get_bindings_test() ->
+    Port = 50000 + rand:uniform(10000),
+    {ok, Pid} = beamtalk_repl:start_link(Port),
+    %% Initially should have empty bindings
+    Bindings = beamtalk_repl:get_bindings(Pid),
+    ?assertEqual(#{}, Bindings),
+    ok = beamtalk_repl:stop(Pid).
+
+%%% Error Formatting Tests (additional edge cases)
+
+format_error_undefined_variable_test() ->
+    Response = beamtalk_repl:format_error({undefined_variable, "foo"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assertMatch(<<"Undefined variable: foo">>, Message).
+
+format_error_compilation_failed_test() ->
+    Response = beamtalk_repl:format_error({compile_error, "syntax error"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assertEqual(<<"syntax error">>, Message).
+
+format_error_generic_test() ->
+    Response = beamtalk_repl:format_error(some_unknown_error),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    %% Generic errors are formatted with io_lib:format("~p", [Reason])
+    ?assertMatch(<<"some_unknown_error">>, Message).
