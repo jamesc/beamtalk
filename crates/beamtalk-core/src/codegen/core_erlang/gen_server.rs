@@ -138,12 +138,36 @@ impl CoreErlangGenerator {
 
     /// Generates the `init/1` callback for `gen_server`.
     ///
-    /// The init function:
-    /// 1. Creates a default state map with `__class__`, `__methods__`, and default field values
-    /// 2. Merges the `InitArgs` map into the default state (`InitArgs` values override defaults)
+    /// For classes with non-Actor superclasses, the init function:
+    /// 1. Calls parent's `init(InitArgs)` to get inherited state
+    /// 2. Creates a map with this class's metadata and fields
+    /// 3. Merges parent state with child fields (`ChildFields` override parent defaults)
+    /// 4. Returns `{ok, FinalState}` or propagates parent init errors
+    ///
+    /// For base classes (extending Actor), it generates a simple init:
+    /// 1. Creates a default state map with `__class__`, `__methods__`, and field values
+    /// 2. Merges `InitArgs` into the default state (`InitArgs` values override defaults)
     /// 3. Returns `{ok, FinalState}`
     ///
-    /// # Generated Code
+    /// # Generated Code (with inheritance)
+    ///
+    /// ```erlang
+    /// 'init'/1 = fun (InitArgs) ->
+    ///     case call 'counter':'init'(InitArgs) of
+    ///         <{'ok', ParentState}> when 'true' ->
+    ///             let ChildFields = ~{
+    ///                 '__class__' => 'LoggingCounter',
+    ///                 '__methods__' => call 'logging_counter':'method_table'(),
+    ///                 'logCount' => 0
+    ///             }~
+    ///             in let FinalState = call 'maps':'merge'(ParentState, ChildFields)
+    ///             in {'ok', FinalState}
+    ///         <{'error', Reason}> when 'true' ->
+    ///             {'error', Reason}
+    ///     end
+    /// ```
+    ///
+    /// # Generated Code (base class)
     ///
     /// ```erlang
     /// 'init'/1 = fun (InitArgs) ->
@@ -155,37 +179,124 @@ impl CoreErlangGenerator {
     ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     ///        in {'ok', FinalState}
     /// ```
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_init_function(&mut self, module: &Module) -> Result<()> {
         writeln!(self.output, "'init'/1 = fun (InitArgs) ->")?;
         self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "let DefaultState = ~{{")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
-        self.write_indent()?;
-        writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "'__methods__' => call '{}':'method_table'()",
-            self.module_name
-        )?;
 
-        // Initialize fields from module expressions
-        self.generate_initial_state_fields(module)?;
+        // Find the current class to check for superclass
+        let current_class = module.classes.iter().find(|c| {
+            // Compare module names using the same conversion (PascalCase -> snake_case)
+            use super::util::to_module_name;
+            to_module_name(&c.name.name) == self.module_name
+        });
 
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "}}~")?;
-        self.write_indent()?;
-        // Merge InitArgs into DefaultState - InitArgs values override defaults
-        writeln!(
-            self.output,
-            "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "in {{'ok', FinalState}}")?;
+        // Check if we have a superclass that's not Actor (base class)
+        let has_parent_init = if let Some(class) = current_class {
+            !class.superclass.name.eq_ignore_ascii_case("Actor")
+                && !class.superclass.name.eq_ignore_ascii_case("Object")
+        } else {
+            false
+        };
+
+        if has_parent_init {
+            // Call parent's init to get inherited state, then merge with our state
+            let parent_module = current_class
+                .map(|c| {
+                    use super::util::to_module_name;
+                    to_module_name(&c.superclass.name)
+                })
+                .unwrap_or_default();
+
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "%% Call parent init to get inherited state fields"
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "case call '{parent_module}':'init'(InitArgs) of"
+            )?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "<{{'ok', ParentState}}> when 'true' ->")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "%% Merge parent state with this class's fields"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "let ChildFields = ~{{")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
+            self.write_indent()?;
+            writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'__methods__' => call '{}':'method_table'()",
+                self.module_name
+            )?;
+
+            // Add this class's own fields
+            self.generate_own_state_fields(module)?;
+
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~")?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "in let FinalState = call 'maps':'merge'(ParentState, ChildFields)"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "in {{'ok', FinalState}}")?;
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "%% Propagate parent init error")?;
+            self.write_indent()?;
+            writeln!(self.output, "{{'error', Reason}}")?;
+            self.indent -= 2;
+            self.write_indent()?;
+            writeln!(self.output, "end")?;
+        } else {
+            // No parent, or parent is Actor base class - generate normal init
+            self.write_indent()?;
+            writeln!(self.output, "let DefaultState = ~{{")?;
+            self.indent += 1;
+            self.write_indent()?;
+            writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
+            self.write_indent()?;
+            writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'__methods__' => call '{}':'method_table'()",
+                self.module_name
+            )?;
+
+            // Initialize fields from module expressions
+            self.generate_initial_state_fields(module)?;
+
+            self.indent -= 1;
+            self.write_indent()?;
+            writeln!(self.output, "}}~")?;
+            self.write_indent()?;
+            // Merge InitArgs into DefaultState - InitArgs values override defaults
+            writeln!(
+                self.output,
+                "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "in {{'ok', FinalState}}")?;
+        }
+
         self.indent -= 1;
         writeln!(self.output)?;
 
@@ -729,6 +840,40 @@ impl CoreErlangGenerator {
     /// Includes:
     /// - Literal field values from module-level assignments
     /// - State declarations from class definitions with their default values
+    ///
+    /// Generates only the current class's own state fields (not inherited).
+    ///
+    /// This is used when calling parent init - we only add fields defined in this class,
+    /// not fields from parent classes (those come from parent's init).
+    fn generate_own_state_fields(&mut self, module: &Module) -> Result<()> {
+        // Find the current class being compiled
+        let current_class = module.classes.iter().find(|c| {
+            use super::util::to_module_name;
+            to_module_name(&c.name.name) == self.module_name
+        });
+
+        if let Some(class) = current_class {
+            // Only emit this class's own fields
+            for state in &class.state {
+                self.write_indent()?;
+                write!(self.output, ", '{}' => ", state.name.name)?;
+                if let Some(ref default_value) = state.default_value {
+                    self.generate_expression(default_value)?;
+                } else {
+                    // No default value - initialize to nil
+                    write!(self.output, "'nil'")?;
+                }
+                writeln!(self.output)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Generates all state fields including inherited ones (for base classes).
+    ///
+    /// This version includes fields from module-level assignments and recursively
+    /// collects inherited fields from parent classes when they're in the same module.
     pub(super) fn generate_initial_state_fields(&mut self, module: &Module) -> Result<()> {
         // Initialize fields from module expressions (assignments at top level)
         // Only include literal values - blocks are methods handled by dispatch/3
@@ -746,8 +891,25 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Initialize fields from class state declarations
-        for class in &module.classes {
+        // Find the current class being compiled (matches module name)
+        let current_class = module.classes.iter().find(|c| {
+            use super::util::to_module_name;
+            to_module_name(&c.name.name) == self.module_name
+        });
+
+        if let Some(class) = current_class {
+            // Collect inherited fields from parent classes (recursively)
+            let inherited_fields = Self::collect_inherited_fields(&class.superclass.name, module)?;
+
+            // Emit inherited fields first
+            for (field_name, default_value) in inherited_fields {
+                self.write_indent()?;
+                write!(self.output, ", '{field_name}' => ")?;
+                self.generate_expression(&default_value)?;
+                writeln!(self.output)?;
+            }
+
+            // Then emit this class's own fields (can override parent defaults)
             for state in &class.state {
                 self.write_indent()?;
                 write!(self.output, ", '{}' => ", state.name.name)?;
@@ -759,9 +921,76 @@ impl CoreErlangGenerator {
                 }
                 writeln!(self.output)?;
             }
+        } else {
+            // Fallback: if no matching class found (legacy modules), emit all class fields
+            for class in &module.classes {
+                for state in &class.state {
+                    self.write_indent()?;
+                    write!(self.output, ", '{}' => ", state.name.name)?;
+                    if let Some(ref default_value) = state.default_value {
+                        self.generate_expression(default_value)?;
+                    } else {
+                        // No default value - initialize to nil
+                        write!(self.output, "'nil'")?;
+                    }
+                    writeln!(self.output)?;
+                }
+            }
         }
 
         Ok(())
+    }
+
+    /// Recursively collects all inherited state fields from parent classes.
+    ///
+    /// Returns a vector of `(field_name, default_value)` pairs in inheritance order
+    /// (most distant ancestor first). This ensures parent fields are initialized
+    /// before child fields, allowing children to override parent defaults.
+    ///
+    /// Only works when parent classes are defined in the same Module AST.
+    /// For cross-file inheritance (e.g., from standard library classes), the
+    /// parent's fields are not included - they must be provided via `InitArgs` or
+    /// handled by a future import mechanism.
+    fn collect_inherited_fields(
+        parent_name: &str,
+        module: &Module,
+    ) -> Result<Vec<(String, Expression)>> {
+        let mut fields = Vec::new();
+
+        // Base case: Actor and other built-in types have no state fields
+        if parent_name == "Actor" || parent_name == "Object" {
+            return Ok(fields);
+        }
+
+        // Find parent class in the same module
+        let parent_class = module
+            .classes
+            .iter()
+            .find(|c| c.name.name.eq_ignore_ascii_case(parent_name));
+
+        if let Some(parent) = parent_class {
+            // Recursively collect grandparent fields first
+            let grandparent_fields =
+                Self::collect_inherited_fields(&parent.superclass.name, module)?;
+            fields.extend(grandparent_fields);
+
+            // Add this parent's fields
+            for state in &parent.state {
+                let default_value = if let Some(ref val) = state.default_value {
+                    val.clone()
+                } else {
+                    // No default - use nil
+                    Expression::Identifier(crate::ast::Identifier {
+                        name: "nil".into(),
+                        span: state.span,
+                    })
+                };
+                fields.push((state.name.name.to_string(), default_value));
+            }
+        }
+        // If parent not found in module, it's a cross-file reference - skip for now
+
+        Ok(fields)
     }
 
     /// Generates a method definition body wrapped in a reply tuple.
