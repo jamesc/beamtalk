@@ -1068,6 +1068,10 @@ impl CoreErlangGenerator {
                         " in let _NewState = call 'erlang':'element'(3, _SuperTuple)"
                     )?;
                     write!(self.output, " in {{'reply', _Result, _NewState}}")?;
+                } else if Self::is_error_message_send(expr) {
+                    // Error message send: never returns, so just emit the call directly
+                    // without wrapping in a reply tuple (would be unreachable code)
+                    self.generate_expression(expr)?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -1148,6 +1152,10 @@ impl CoreErlangGenerator {
                         " in let _NewState = call 'erlang':'element'(3, _SuperTuple)"
                     )?;
                     write!(self.output, " in {{'reply', _Result, _NewState}}")?;
+                } else if Self::is_error_message_send(expr) {
+                    // Error message send: never returns, so just emit the call directly
+                    // without wrapping in a reply tuple (would be unreachable code)
+                    self.generate_expression(expr)?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
