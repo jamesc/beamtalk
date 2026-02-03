@@ -70,9 +70,12 @@ impl CoreErlangGenerator {
     /// Generates code for an identifier reference.
     ///
     /// Handles three cases:
-    /// 1. Reserved keywords (`true`, `false`, `nil`) → Core Erlang atoms
+    /// 1. Reserved keywords (`true`, `false`, `nil`, `self`) → Core Erlang atoms/variables
     /// 2. Bound variables (in scope) → Core Erlang variable name
-    /// 3. Unbound identifiers → Field access from actor state via `maps:get/2`
+    /// 3. Unbound identifiers → Field access via `maps:get/2` from context-appropriate variable:
+    ///    - **Actor context**: `State` or `StateAcc` (with threading)
+    ///    - **`ValueType` context**: `Self` parameter
+    ///    - **Repl context**: `State` from bindings
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
         // Handle special reserved identifiers as atoms
         match id.name.as_str() {
@@ -93,17 +96,39 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     write!(self.output, "{var_name}")?;
                 } else {
-                    // Field access from state
-                    // BT-153: Use StateAcc when inside loop body, otherwise use State
-                    let state_var = if self.in_loop_body {
-                        // Get the current StateAcc version
-                        if self.state_version() == 0 {
-                            "StateAcc".to_string()
-                        } else {
-                            format!("StateAcc{}", self.state_version())
+                    // Field access from state/self
+                    // BT-213: Context determines which variable to use
+                    let state_var = match self.context {
+                        super::CodeGenContext::ValueType => {
+                            // Value types use Self parameter
+                            "Self".to_string()
                         }
-                    } else {
-                        self.current_state_var()
+                        super::CodeGenContext::Actor => {
+                            // Actors use State with threading
+                            // BT-153: Use StateAcc when inside loop body
+                            if self.in_loop_body {
+                                if self.state_version() == 0 {
+                                    "StateAcc".to_string()
+                                } else {
+                                    format!("StateAcc{}", self.state_version())
+                                }
+                            } else {
+                                self.current_state_var()
+                            }
+                        }
+                        super::CodeGenContext::Repl => {
+                            // REPL uses State from bindings, but StateAcc in loops
+                            // BT-153: Use StateAcc when inside loop body
+                            if self.in_loop_body {
+                                if self.state_version() == 0 {
+                                    "StateAcc".to_string()
+                                } else {
+                                    format!("StateAcc{}", self.state_version())
+                                }
+                            } else {
+                                self.current_state_var()
+                            }
+                        }
                     };
                     write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
                 }
@@ -149,17 +174,23 @@ impl CoreErlangGenerator {
     ///
     /// Maps to Erlang `maps:get/2` call:
     /// ```erlang
-    /// call 'maps':'get'('value', State)
+    /// call 'maps':'get'('value', State)  // Actor context
+    /// call 'maps':'get'('value', Self)   // ValueType context
     /// ```
     pub(super) fn generate_field_access(
         &mut self,
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<()> {
-        // For now, assume receiver is 'self' and access from State
+        // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                let state_var = self.current_state_var();
+                // BT-213: Use appropriate variable based on context
+                let state_var = match self.context {
+                    super::CodeGenContext::ValueType => "Self".to_string(),
+                    super::CodeGenContext::Actor => self.current_state_var(),
+                    super::CodeGenContext::Repl => "State".to_string(),
+                };
                 write!(
                     self.output,
                     "call 'maps':'get'('{}', {state_var})",
@@ -185,11 +216,27 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The assignment returns the assigned value (Smalltalk semantics).
+    ///
+    /// # BT-213: Value Type Restriction
+    ///
+    /// Field assignments are not supported in value type methods because value types
+    /// are immutable. This function will return an error if called in `ValueType` context.
+    /// Use semantic analysis to prevent field assignments in value types at compile time.
     pub(super) fn generate_field_assignment(
         &mut self,
         field_name: &str,
         value: &Expression,
     ) -> Result<()> {
+        // BT-213: Reject field assignments in value type context
+        if matches!(self.context, super::CodeGenContext::ValueType) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "field assignment 'self.{field_name} := ...' in value type method (value types are immutable)"
+                ),
+                location: "value type method body".to_string(),
+            });
+        }
+
         let val_var = self.fresh_temp_var("Val");
 
         // Capture current state BEFORE generating value expression,
