@@ -181,11 +181,11 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |<cite index="2-4,2-5,2-6">In Smalltalk, the root of the inheritance hierarchy is traditionally the class Object. In modern Smalltalk (e.g., Pharo), ProtoObject is the true root, but you will normally not pay attention to this class. ProtoObject encapsulates the minimal set of messages that all objects must have.</cite>
 |
 |```
-|ProtoObject (true root, minimal behavior)
-|  └─ Object (common messages, reflection, nil testing)
+|ProtoObject (minimal root - identity, DNU)
+|  └─ Object (value types - new, reflection, nil testing)
 |       ├─ Integer, String, etc. (sealed primitives)
 |       ├─ Point, Color, etc. (user value types)
-|       └─ Actor (process-based)
+|       └─ Actor (process-based - spawn, mailbox)
 |            └─ (user actors...)
 |```
 |

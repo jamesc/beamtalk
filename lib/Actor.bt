@@ -18,7 +18,7 @@
 // ## Class Hierarchy
 //
 // ```
-// ProtoObject (minimal root)
+// ProtoObject (minimal root - identity, DNU)
 //   └─ Object (value types - new, reflection, nil testing)
 //        ├─ Integer, String, etc. (sealed primitives)
 //        ├─ Point, Color, etc. (user value types)

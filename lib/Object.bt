@@ -22,8 +22,8 @@
 // ## Class Hierarchy
 //
 // ```
-// ProtoObject (minimal root, identity and fallback)
-//   └─ Object (value types - new, reflection, nil testing, debugging)
+// ProtoObject (minimal root - identity, DNU)
+//   └─ Object (value types - new, reflection, nil testing)
 //        ├─ Integer, String, Float, etc. (sealed primitives)
 //        ├─ Point, Color, Config, etc. (user value types)
 //        └─ Actor (process-based objects - spawn, mailbox)

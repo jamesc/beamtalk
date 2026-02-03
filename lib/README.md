@@ -41,15 +41,15 @@ But the implementation differs:
 Beamtalk's class hierarchy distinguishes **value types** (which inherit from Object) from **actors** (which inherit from Actor), similar to Swift's `struct` vs `actor`:
 
 ```
-ProtoObject (minimal - identity, DNU)
-  └─ Object (value types - new, isNil, print, reflection)
+ProtoObject (minimal root - identity, DNU)
+  └─ Object (value types - new, reflection, nil testing)
        ├─ Integer, String, etc. (sealed primitives)
        ├─ Point, Color, etc.    (user value types)
        └─ Actor                 (process-based - spawn, mailbox)
             └─ Counter, MyService, etc. (user actors)
 ```
 
-**Key insight:** Object is the root of ALL value types (including primitives and actors). Actor extends Object to add process-based concurrency.
+**Key insight:** Object is the root of ALL instances (primitives, user value types, and actors). Actor extends Object to add process-based concurrency.
 
 ### Choosing Your Base Class
 
