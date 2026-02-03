@@ -133,8 +133,9 @@ Each worktree also gets its own compiler daemon socket:
 
 - `BT-190` branch → `~/.beamtalk/daemon-bt190.sock`
 - `main` branch → `~/.beamtalk/daemon.sock` (default)
+- Other branches → `~/.beamtalk/daemon-<sanitized_name>.sock`
 
-This means each worktree can run its own compiler daemon without conflicts.
+For long or conflicting names, the script may truncate the sanitized name to keep the socket path unique and within OS path-length limits. This means each worktree can run its own compiler daemon without conflicts.
 
 ### Priority order (highest to lowest)
 

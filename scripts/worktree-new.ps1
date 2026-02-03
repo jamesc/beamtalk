@@ -423,13 +423,14 @@ finally {
     
     # Reset worktree .git file to point to host path
     $hostGitPath = Join-Path $env:BEAMTALK_MAIN_GIT_PATH "worktrees" $worktreeName
-    Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline
+    Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline -Encoding utf8NoBOM
     Write-Host "   Set .git to: $hostGitPath" -ForegroundColor Gray
     
     # Reset gitdir in main repo's worktree metadata to host path
     if (Test-Path $worktreeMetaGitdir) {
-        Set-Content -Path $worktreeMetaGitdir -Value $worktreePath -NoNewline
-        Write-Host "   Set gitdir to: $worktreePath" -ForegroundColor Gray
+        $hostWorktreeGitFile = Join-Path $worktreePath ".git"
+        Set-Content -Path $worktreeMetaGitdir -Value $hostWorktreeGitFile -NoNewline -Encoding utf8NoBOM
+        Write-Host "   Set gitdir to: $hostWorktreeGitFile" -ForegroundColor Gray
     }
     
     Write-Host "✅ Git paths restored for host" -ForegroundColor Green
