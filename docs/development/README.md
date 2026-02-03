@@ -13,8 +13,18 @@ This directory contains documentation for **contributors and AI agents** working
 | Guide | Description |
 |-------|-------------|
 | [Architecture Principles](architecture-principles.md) | Core development principles: layered architecture, error recovery, testing, security, dependencies |
+| [Rust Guidelines](rust-guidelines.md) | Rust coding standards: naming, traits, error handling, testing, compiler patterns |
+| [Erlang Guidelines](erlang-guidelines.md) | Erlang/OTP patterns: code generation, BEAM interop, testing |
+| [Common Tasks](common-tasks.md) | Step-by-step guides: adding AST nodes, CLI commands, stdlib features |
 | [Testing Strategy](testing-strategy.md) | Test organization, fixtures, E2E tests, coverage requirements |
 | [AGENTS.md](../../AGENTS.md) | Complete guide for AI agents contributing to the codebase |
+
+### Language Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Language Features](../beamtalk-language-features.md) | Full Beamtalk syntax specification |
+| [Syntax Rationale](../beamtalk-syntax-rationale.md) | Design decisions: why we keep/change Smalltalk conventions |
 
 ### Related Documentation
 

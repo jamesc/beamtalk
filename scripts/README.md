@@ -1,8 +1,24 @@
 # Scripts
 
-Helper scripts for Beamtalk development.
+Helper scripts for development.
 
-## `worktree-new.ps1`
+## Worktree Scripts
+
+| Script | Description |
+|--------|-------------|
+| `worktree-new.ps1` | Create a worktree and start a devcontainer |
+| `worktree-rm.ps1` | Remove a worktree and clean up containers |
+| `worktree-cleanup.ps1` | Remove orphaned containers from deleted worktrees |
+
+## Other Scripts
+
+| Script | Location | Description |
+|--------|----------|-------------|
+| `compile.sh` | `tests/fixtures/` | Compile Beamtalk test fixtures for runtime tests |
+
+---
+
+## Port and Node Name Auto-Assignment
 
 Start a Copilot devcontainer session for a git worktree branch. This enables running multiple parallel Copilot sessions, each in its own container working on a different branch.
 
@@ -76,19 +92,22 @@ When a worktree is used inside a devcontainer, the `.git` file gets modified to 
 
 ---
 
-## `cleanup-orphaned-containers.ps1`
+## `worktree-cleanup.ps1`
 
 Remove containers from worktrees that were deleted without using `worktree-rm.ps1`.
 
 ```powershell
-.\scripts\cleanup-orphaned-containers.ps1        # Interactive
-.\scripts\cleanup-orphaned-containers.ps1 -DryRun # Preview only
-.\scripts\cleanup-orphaned-containers.ps1 -NoConfirm # Auto-confirm
+.\scripts\worktree-cleanup.ps1        # Interactive
+.\scripts\worktree-cleanup.ps1 -DryRun # Preview only
+.\scripts\worktree-cleanup.ps1 -NoConfirm # Auto-confirm
+.\scripts\worktree-cleanup.ps1 -All   # Remove ALL project containers
 ```
+
+Shows orphaned containers with their worktree names and lets you confirm before removal.
 
 ---
 
-## Port and Node Name Auto-Assignment
+## `worktree-new.ps1`
 
 Each worktree automatically gets a unique REPL port and Erlang node name to avoid conflicts when running multiple parallel sessions.
 
