@@ -9,7 +9,8 @@
 //! - Diagnostic codes for easy reference
 //! - Support for multiple errors and warnings
 
-#![allow(unused)]
+// Suppress unused_assignments for struct fields used by derive macros
+#![allow(unused_assignments)]
 
 use beamtalk_core::parse::{Diagnostic as CoreDiagnostic, Severity};
 use miette::{Diagnostic, SourceSpan};
@@ -19,7 +20,7 @@ use miette::{Diagnostic, SourceSpan};
 #[error("{message}")]
 #[diagnostic(code(beamtalk::compile))]
 pub struct CompileDiagnostic {
-    /// Error or warning
+    /// Error or warning (stored for potential future use)
     pub severity: Severity,
     /// Human-readable error message
     pub message: String,
@@ -29,7 +30,7 @@ pub struct CompileDiagnostic {
     /// Location of the error
     #[label("{label}")]
     pub span: SourceSpan,
-    /// Label for the error span
+    /// Label for the error span (interpolated by miette derive macro)
     pub label: String,
 }
 
@@ -65,7 +66,7 @@ mod tests {
     use beamtalk_core::parse::Span;
 
     #[test]
-    fn test_from_core_diagnostic() {
+    fn test_from_core_diagnostic_error() {
         let core_diag = CoreDiagnostic::error("Expected expression", Span::new(10, 15));
         let source = "test := [1 + ].";
         let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
@@ -74,5 +75,39 @@ mod tests {
         assert_eq!(diag.message, "Expected expression");
         assert_eq!(diag.span.offset(), 10);
         assert_eq!(diag.span.len(), 5);
+        assert_eq!(diag.label, "error here");
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_warning() {
+        let core_diag = CoreDiagnostic::warning("Unused variable", Span::new(5, 8));
+        let source = "test := 42";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert_eq!(diag.severity, Severity::Warning);
+        assert_eq!(diag.message, "Unused variable");
+        assert_eq!(diag.span.offset(), 5);
+        assert_eq!(diag.span.len(), 3);
+        assert_eq!(diag.label, "warning here");
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_zero_length_span() {
+        let core_diag = CoreDiagnostic::error("Unexpected EOF", Span::new(10, 10));
+        let source = "test := [1";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert_eq!(diag.span.offset(), 10);
+        assert_eq!(diag.span.len(), 0);
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_preserves_message() {
+        let message = "Custom error message with details";
+        let core_diag = CoreDiagnostic::error(message, Span::new(0, 5));
+        let source = "test := 42";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert_eq!(diag.message, message);
     }
 }

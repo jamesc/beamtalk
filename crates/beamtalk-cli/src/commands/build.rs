@@ -130,13 +130,17 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
         .iter()
         .any(|d| d.severity == beamtalk_core::parse::Severity::Error);
 
-    if has_errors {
-        // Display diagnostics using miette formatting
+    // Display all diagnostics (errors and warnings) using miette formatting
+    if !diagnostics.is_empty() {
         for diagnostic in &diagnostics {
             let compile_diag =
                 CompileDiagnostic::from_core_diagnostic(diagnostic, path.as_str(), &source);
             eprintln!("{:?}", miette::Report::new(compile_diag));
         }
+    }
+
+    // Fail compilation only if there are errors
+    if has_errors {
         miette::bail!("Failed to compile '{path}'");
     }
 
