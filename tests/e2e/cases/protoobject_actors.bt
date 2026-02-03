@@ -2,11 +2,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for ProtoObject with actor loading
-
-// NOTE: Actor loading tests are minimal here because full actor testing
-// (state mutations, message sending) requires multiple REPL commands
-// and deterministic PID comparison is not possible in E2E tests.
 //
-// For comprehensive actor tests, see:
-//   - runtime/test/beamtalk_actor_tests.erl (dnu_forward_to_target_test, counter_test)
-//   - runtime/test/beamtalk_codegen_simulation_tests.erl (spawn tests)
+// These tests verify that actor futures are automatically awaited in the REPL
+// via `maybe_await_future/1` (see runtime/src/beamtalk_repl_eval.erl).
+// No explicit `await` keyword is needed for synchronous REPL interaction.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Test actor spawn
+counter := Counter spawn
+// => _
+
+// Test initial state (auto-await)
+counter getValue
+// => 0
+
+// Test increment (auto-await, returns new value)
+counter increment
+// => 1
+
+// Verify state persisted
+counter getValue
+// => 1
+
+// Test multiple consecutive increments
+counter increment
+// => 2
+
+counter increment
+// => 3
+
+// Test decrement
+counter decrement
+// => 2
+
+// Final state verification
+counter getValue
+// => 2
