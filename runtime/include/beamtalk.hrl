@@ -30,3 +30,36 @@
     class_mod :: atom(),       % Class module (e.g., 'counter')
     pid :: pid()               % The actor process
 }).
+
+%% @doc Structured error record for runtime errors.
+%%
+%% All Beamtalk errors use this consistent structure for better tooling
+%% and developer experience:
+%% - kind: Error category (does_not_understand, immutable_value, type_error, etc.)
+%% - class: The class name where the error occurred (e.g., 'Integer')
+%% - selector: The method that failed (if applicable)
+%% - message: Human-readable explanation using user-facing names
+%% - hint: Actionable suggestion for fixing the error
+%% - details: Additional context map (arity, expected types, etc.)
+%%
+%% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
+-record(beamtalk_error, {
+    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited
+    class   :: atom(),              % 'Integer', 'Counter', 'String'
+    selector:: atom() | undefined,  % method that failed
+    message :: binary(),            % human-readable explanation
+    hint    :: binary() | undefined,% actionable suggestion
+    details :: map()                % additional context (arity, expected types, etc.)
+}).
+
+%% @doc Located error wrapper for compile-time errors with source spans.
+%%
+%% Compile-time errors include source location information.
+%% Runtime errors use stack traces instead, so they don't need spans.
+%%
+%% - error: The underlying beamtalk_error
+%% - span: Source location {file, start_line, start_col, end_line, end_col}
+-record(located_error, {
+    error :: #beamtalk_error{},
+    span  :: {binary(), integer(), integer(), integer(), integer()} | undefined
+}).
