@@ -95,6 +95,8 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |### Value Types vs Actors
 |
+|**Status:** ✅ **Implemented** (BT-213) - Working in compiler as of 2026-02-03
+|
 |Beamtalk distinguishes between **value types** and **actors**, similar to Swift's `struct` vs `actor`:
 |
 || | Value Type (Object subclass) | Actor |

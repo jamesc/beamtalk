@@ -178,6 +178,58 @@ Actor subclass: Counter
   incrementBy: delta => self.value += delta
 ```
 
+### Value Types vs Actors
+
+**Status:** ✅ Implemented (BT-213)
+
+Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
+
+```
+// Value type - plain Erlang map, no process
+Object subclass: Point
+  state: x = 0
+  state: y = 0
+  
+  // Methods return new instances (immutable)
+  plus: other => Point new: #{x => self.x + other.x, y => self.y + other.y}
+  describe => 'Point({self.x}, {self.y})'
+
+// Actor - process with mailbox
+Actor subclass: Counter
+  state: count = 0
+  
+  // Methods mutate state via message passing
+  increment => self.count := self.count + 1
+  getCount => ^self.count
+```
+
+**Key differences:**
+
+| Aspect | Value Types (`Object subclass:`) | Actors (`Actor subclass:`) |
+|--------|----------------------------------|----------------------------|
+| Instantiation | `Point new` or `Point new: #{x => 5}` | `Counter spawn` or `Counter spawnWith: #{count => 0}` |
+| Runtime | Plain Erlang map/record | BEAM process (gen_server) |
+| Mutation | Immutable - methods return new instances | Mutable - methods modify state |
+| Message passing | N/A (direct function calls) | Async messages with futures |
+| Concurrency | Copied when sent between processes | Process isolation, mailbox queuing |
+| Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks |
+
+**Class hierarchy:**
+```
+ProtoObject (minimal - identity, DNU)
+  └─ Object (reflection + new)
+       ├─ Integer, String (primitives)
+       ├─ Point, Color (value types)
+       └─ Actor (process-based + spawn)
+            └─ Counter, Server (actors)
+```
+
+**Why this matters:**
+- **Performance**: Value types avoid process overhead for simple data
+- **Semantics**: Clear distinction between data and concurrent entities
+- **BEAM interop**: Maps naturally to Erlang records/maps vs gen_server processes
+- **Idiomatic code**: Use value types for data, actors for behavior
+
 ### Message Sends
 
 ```

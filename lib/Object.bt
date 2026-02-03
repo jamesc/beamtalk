@@ -170,3 +170,41 @@ ProtoObject subclass: Object
   //
   // Returns: Current value of the instance variable, or nil if not found
   instVarAt: name => // implemented by compiler
+
+  // ## Instantiation Protocol (Class Methods)
+  //
+  // These class messages create new instances of value types.
+  // Value types are plain Erlang terms (maps/records) with no process.
+  //
+  // **IMPORTANT:** These only work for Object subclasses (value types).
+  // Actor subclasses must use `spawn` instead.
+
+  // Create a new instance with default field values
+  //
+  // This is a class method that creates a value type instance.
+  // All fields are initialized to their default values (or nil if no default).
+  //
+  // Example:
+  // ```beamtalk
+  // Point new          // => Point instance with default x, y
+  // ```
+  //
+  // Returns: New instance of this class
+  new => // implemented by compiler
+
+  // Create a new instance with initialization arguments
+  //
+  // This is a class method that creates a value type instance with custom
+  // initial field values. Arguments should be a dictionary mapping field
+  // names to values.
+  //
+  // Example:
+  // ```beamtalk
+  // Point new: #{x => 3, y => 4}   // => Point with x=3, y=4
+  // ```
+  //
+  // Arguments:
+  // - initArgs: Dictionary of field names to initial values
+  //
+  // Returns: New instance of this class with specified field values
+  new: initArgs => // implemented by compiler

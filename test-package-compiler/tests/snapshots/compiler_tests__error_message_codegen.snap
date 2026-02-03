@@ -1,0 +1,113 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+  attributes ['behaviour' = ['gen_server']]
+
+'start_link'/1 = fun (InitArgs) ->
+    call 'gen_server':'start_link'('error_message', InitArgs, [])
+
+
+'spawn'/0 = fun () ->
+    case call 'gen_server':'start_link'('error_message', ~{}~, []) of
+        <{'ok', Pid}> when 'true' ->
+            {'beamtalk_object', 'ErrorMessage', 'error_message', Pid}
+        <{'error', Reason}> when 'true' ->
+            call 'erlang':'error'({'spawn_failed', Reason})
+    end
+
+
+'spawn'/1 = fun (InitArgs) ->
+    case call 'gen_server':'start_link'('error_message', InitArgs, []) of
+        <{'ok', Pid}> when 'true' ->
+            {'beamtalk_object', 'ErrorMessage', 'error_message', Pid}
+        <{'error', Reason}> when 'true' ->
+            call 'erlang':'error'({'spawn_failed', Reason})
+    end
+
+
+'init'/1 = fun (InitArgs) ->
+    let DefaultState = ~{
+        '__class__' => 'ErrorMessage',
+        '__class_mod__' => 'error_message',
+        '__methods__' => call 'error_message':'method_table'()
+    }~
+    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in {'ok', FinalState}
+
+
+'handle_cast'/2 = fun (Msg, State) ->
+    case Msg of
+        <{Selector, Args, FuturePid}> when 'true' ->
+            case call 'error_message':'safe_dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
+                    in {'noreply', NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
+                    in {'noreply', NewState}
+            end
+    end
+
+
+'handle_call'/3 = fun (Msg, _From, State) ->
+    case Msg of
+        <{Selector, Args}> when 'true' ->
+            case call 'error_message':'safe_dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    {'reply', {'ok', Result}, NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    {'reply', {'error', Error}, NewState}
+            end
+    end
+
+
+'code_change'/3 = fun (_OldVsn, State, _Extra) ->
+    %% TODO: Add state migration logic
+    {'ok', State}
+
+
+'terminate'/2 = fun (Reason, State) ->
+    %% Call terminate method if defined (Flavors pattern)
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    case call 'error_message':'dispatch'('terminate', [Reason], Self, State) of
+        <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
+        <_TermOther> when 'true' -> 'ok'
+    end
+
+
+'safe_dispatch'/3 = fun (Selector, Args, State) ->
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    try call 'error_message':'dispatch'(Selector, Args, Self, State)
+    of Result -> Result
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    case Selector of
+        <'doError'> when 'true' ->
+            call 'erlang':'error'({'beamtalk_error', #{#<84>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#})
+        <'errorWithVariable'> when 'true' ->
+            let _seq1 = #{#<68>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}# in call 'erlang':'error'({'beamtalk_error', call 'maps':'get'('msg', State)})
+        <OtherSelector> when 'true' ->
+            %% Try doesNotUnderstand:args: fallback (BT-29)
+            let DnuSelector = 'doesNotUnderstand:args:' in
+            let Methods = call 'maps':'get'('__methods__', State) in
+            case call 'maps':'is_key'(DnuSelector, Methods) of
+                <'true'> when 'true' ->
+                    %% Call doesNotUnderstand:args: with [Selector, Args]
+                    call 'error_message':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
+                <'false'> when 'true' ->
+                    %% No DNU handler - return unknown_message error
+                    let ClassName = call 'maps':'get'('__class__', State) in
+                    {'error', {'unknown_message', OtherSelector, ClassName}, State}
+            end
+    end
+
+
+'method_table'/0 = fun () ->
+    ~{'doError' => 0, 'errorWithVariable' => 0}~
+
+end
