@@ -93,17 +93,30 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     write!(self.output, "{var_name}")?;
                 } else {
-                    // Field access from state
-                    // BT-153: Use StateAcc when inside loop body, otherwise use State
-                    let state_var = if self.in_loop_body {
-                        // Get the current StateAcc version
-                        if self.state_version() == 0 {
-                            "StateAcc".to_string()
-                        } else {
-                            format!("StateAcc{}", self.state_version())
+                    // Field access from state/self
+                    // BT-213: Context determines which variable to use
+                    let state_var = match self.context {
+                        super::CodeGenContext::ValueType => {
+                            // Value types use Self parameter
+                            "Self".to_string()
                         }
-                    } else {
-                        self.current_state_var()
+                        super::CodeGenContext::Actor => {
+                            // Actors use State with threading
+                            // BT-153: Use StateAcc when inside loop body
+                            if self.in_loop_body {
+                                if self.state_version() == 0 {
+                                    "StateAcc".to_string()
+                                } else {
+                                    format!("StateAcc{}", self.state_version())
+                                }
+                            } else {
+                                self.current_state_var()
+                            }
+                        }
+                        super::CodeGenContext::Repl => {
+                            // REPL uses State from bindings
+                            "State".to_string()
+                        }
                     };
                     write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
                 }
@@ -149,17 +162,23 @@ impl CoreErlangGenerator {
     ///
     /// Maps to Erlang `maps:get/2` call:
     /// ```erlang
-    /// call 'maps':'get'('value', State)
+    /// call 'maps':'get'('value', State)  // Actor context
+    /// call 'maps':'get'('value', Self)   // ValueType context
     /// ```
     pub(super) fn generate_field_access(
         &mut self,
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<()> {
-        // For now, assume receiver is 'self' and access from State
+        // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
-                let state_var = self.current_state_var();
+                // BT-213: Use appropriate variable based on context
+                let state_var = match self.context {
+                    super::CodeGenContext::ValueType => "Self".to_string(),
+                    super::CodeGenContext::Actor => self.current_state_var(),
+                    super::CodeGenContext::Repl => "State".to_string(),
+                };
                 write!(
                     self.output,
                     "call 'maps':'get'('{}', {state_var})",

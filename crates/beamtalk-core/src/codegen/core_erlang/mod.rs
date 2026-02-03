@@ -257,6 +257,36 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     Ok(generator.output)
 }
 
+/// Code generation context (BT-213).
+///
+/// Determines how expressions are compiled based on the execution environment:
+/// - **Actor**: Process-based with mutable state, async messaging
+/// - **ValueType**: Plain maps with immutable semantics, sync function calls
+/// - **Repl**: Interactive evaluation with bindings map
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeGenContext {
+    /// Generating code for an actor class (gen_server with async messaging).
+    ///
+    /// - Field access: `call 'maps':'get'('field', State)`
+    /// - Method calls: Async via `gen_server:cast` with futures
+    /// - State threading: Use State, State1, State2... for mutations
+    Actor,
+
+    /// Generating code for a value type class (plain Erlang functions).
+    ///
+    /// - Field access: `call 'maps':'get'('field', Self)`
+    /// - Method calls: Synchronous function calls
+    /// - No state threading: Value types are immutable
+    ValueType,
+
+    /// Generating code for REPL evaluation.
+    ///
+    /// - Variable access: `call 'maps':'get'('var', Bindings)`
+    /// - Field access: Via maps:get from State (if in actor context)
+    /// - Special handling for variable persistence across expressions
+    Repl,
+}
+
 /// Core Erlang code generator.
 ///
 /// This is the main code generator that coordinates compilation of Beamtalk
@@ -289,6 +319,9 @@ pub(super) struct CoreErlangGenerator {
     /// BT-153: Whether we're generating REPL code (vs module code).
     /// In REPL mode, local variable assignments should update bindings.
     is_repl_mode: bool,
+    /// BT-213: Code generation context (Actor, ValueType, or Repl).
+    /// Determines variable naming and method dispatch strategy.
+    context: CodeGenContext,
 }
 
 impl CoreErlangGenerator {
@@ -302,6 +335,7 @@ impl CoreErlangGenerator {
             state_threading: StateThreading::new(),
             in_loop_body: false,
             is_repl_mode: false,
+            context: CodeGenContext::Actor, // Default to Actor for backward compatibility
         }
     }
 
@@ -413,6 +447,9 @@ impl CoreErlangGenerator {
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
     fn generate_actor_module(&mut self, module: &Module) -> Result<()> {
+        // BT-213: Set context to Actor for this module
+        self.context = CodeGenContext::Actor;
+
         // Module header with expanded exports per BT-29
         writeln!(
             self.output,
@@ -509,6 +546,9 @@ impl CoreErlangGenerator {
     /// - No state threading (value types are immutable)
     /// - Methods return new instances rather than mutating
     fn generate_value_type_module(&mut self, module: &Module) -> Result<()> {
+        // BT-213: Set context to ValueType for this module
+        self.context = CodeGenContext::ValueType;
+
         let class = module
             .classes
             .first()
@@ -678,6 +718,10 @@ impl CoreErlangGenerator {
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
     fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
+        // BT-213: Set context to Repl for this module
+        self.context = CodeGenContext::Repl;
+        self.is_repl_mode = true; // Also set legacy flag for compatibility
+
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
         writeln!(self.output, "  attributes []")?;
