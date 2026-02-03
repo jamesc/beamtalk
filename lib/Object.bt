@@ -9,31 +9,44 @@
 // contracts and expected behavior for users.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Object - Common root class for most Beamtalk classes
+// Object - Root class for value types in Beamtalk
 //
 // Object inherits from ProtoObject and adds the standard protocol that almost
-// all objects need: reflection, nil testing, debugging, and comparison. Most
-// user classes should inherit from Actor (which inherits from Object) rather
-// than from Object directly.
+// all objects need: reflection, nil testing, debugging, and comparison.
+//
+// Object is the parent of:
+// - **Primitives** (Integer, String, Float, Boolean, etc.) - sealed, no process
+// - **User value types** (Point, Color, Config, etc.) - no process
+// - **Actor** - process-based objects with mailbox and spawn
 //
 // ## Class Hierarchy
 //
 // ```
 // ProtoObject (minimal root, identity and fallback)
-//   └─ Object (reflection, nil testing, debugging)
-//        └─ Actor (async-first process-based objects)
-//             └─ (user classes: Counter, Worker, etc.)
+//   └─ Object (value types - new, reflection, nil testing, debugging)
+//        ├─ Integer, String, Float, etc. (sealed primitives)
+//        ├─ Point, Color, Config, etc. (user value types)
+//        └─ Actor (process-based objects - spawn, mailbox)
+//             └─ Counter, Worker, etc. (user actors)
 // ```
 //
 // ## When to Inherit from Object
 //
 // Use Object directly for:
-// - **Non-concurrent utility classes** (rare in Beamtalk)
-// - **Value objects** that don't need process isolation
-// - **Data structures** used across processes
+// - **Value types** without concurrency needs (Point, Rectangle, Color)
+// - **Data structures** that are copied when passed (Config, DTO)
+// - **Immutable data** that doesn't need process isolation
 //
 // Most application code should inherit from Actor instead, which adds
 // spawning, supervision, and async messaging on top of Object.
+//
+// ## Value Types vs Actors
+//
+// - **Object subclass:** No process, use `new` to instantiate
+// - **Actor subclass:** BEAM process, use `spawn` to instantiate
+//
+// Both use the same message-sending syntax - the difference is in state management
+// and concurrency. See Actor.bt for process-based objects.
 //
 // ## Core Protocols
 //

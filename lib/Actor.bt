@@ -9,11 +9,37 @@
 // contracts and expected behavior for users.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Actor - Base class for all actors in Beamtalk
+// Actor - Base class for process-based objects in Beamtalk
 //
 // Actor inherits from Object and adds process-based concurrency. Every actor
 // runs in its own BEAM process and communicates via asynchronous messages.
 // This is the base class for most application code in Beamtalk.
+//
+// ## Class Hierarchy
+//
+// ```
+// ProtoObject (minimal root)
+//   └─ Object (value types - new, reflection, nil testing)
+//        ├─ Integer, String, etc. (sealed primitives)
+//        ├─ Point, Color, etc. (user value types)
+//        └─ Actor (process-based - spawn, mailbox)
+//             └─ Counter, Worker, etc. (user actors)
+// ```
+//
+// ## Value Types vs Actors
+//
+// | | Object subclass | Actor subclass |
+// |---|---|---|
+// | **Process** | ❌ No | ✅ Yes (BEAM process) |
+// | **Create with** | `new` | `spawn` |
+// | **State storage** | Caller's heap | Own process |
+// | **Concurrency** | None | Mailbox serializes |
+//
+// Actor extends Object to add:
+// - Process creation via `spawn` and `spawnWith:`
+// - Mailbox for async message handling
+// - Supervision tree integration
+// - Override `new` to raise error (use `spawn` instead)
 //
 // ## Core Messages
 //

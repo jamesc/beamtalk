@@ -38,21 +38,48 @@ But the implementation differs:
 
 ## Class Hierarchy
 
-Beamtalk's class hierarchy distinguishes **value types** from **actors**, similar to Swift's `struct` vs `actor`:
+Beamtalk's class hierarchy distinguishes **value types** (which inherit from Object) from **actors** (which inherit from Actor), similar to Swift's `struct` vs `actor`:
 
 ```
 ProtoObject (minimal - identity, DNU)
-  └─ Object (common behavior - nil testing, printing, reflection)
-       ├─ Integer, String, etc. (primitives - sealed value types)
-       ├─ Point, Color, etc.    (user value types - no process)
-       └─ Actor                 (process-based)
+  └─ Object (value types - new, isNil, print, reflection)
+       ├─ Integer, String, etc. (sealed primitives)
+       ├─ Point, Color, etc.    (user value types)
+       └─ Actor                 (process-based - spawn, mailbox)
             └─ Counter, MyService, etc. (user actors)
 ```
 
+**Key insight:** Object is the root of ALL value types (including primitives and actors). Actor extends Object to add process-based concurrency.
+
+### Choosing Your Base Class
+
+**Decision tree:**
+
+1. **Do you need custom message forwarding or minimal wrapper?**
+   - ✅ Inherit from **ProtoObject** (rare - only for proxies and foreign objects)
+   - ❌ Continue to step 2
+
+2. **Does your class need process isolation and concurrency?**
+   - ✅ Inherit from **Actor** (most application code)
+   - ❌ Inherit from **Object** (value types like Point, Color, Config)
+
+**Examples:**
+
+| Class | Base | Reason |
+|-------|------|--------|
+| `Counter` | Actor | Needs process, mutable state, concurrent access |
+| `Worker` | Actor | Background task with lifecycle |
+| `Point` | Object | Immutable value, no concurrency |
+| `Config` | Object | Data structure, copied when passed |
+| `Proxy` | ProtoObject | Custom message forwarding |
+
 ### Value Types vs Actors
+
+Both value types and actors inherit from Object, but Actor adds process-based concurrency:
 
 | | Value Type (`Object subclass:`) | Actor (`Actor subclass:`) |
 |---|---|---|
+| **Inherits from** | Object | Object (via Actor) |
 | **Process** | ❌ No | ✅ Yes (BEAM process) |
 | **Instantiate** | `Point new` | `Counter spawn` |
 | **State** | In caller's heap | In own process |
@@ -60,8 +87,8 @@ ProtoObject (minimal - identity, DNU)
 | **Thread safety** | Caller's responsibility | Mailbox serializes |
 | **`new` method** | ✅ Creates instance | ❌ Error (use `spawn`) |
 
-**Value types** are great for: Point, Rectangle, Color, Config, DTOs
-**Actors** are great for: Services, Agents, Stateful entities
+**Value types** (Object subclass) are great for: Point, Rectangle, Color, Config, DTOs  
+**Actors** (Actor subclass) are great for: Services, Agents, Stateful entities
 
 ```beamtalk
 // Value type - no process, uses new
@@ -133,11 +160,15 @@ For normal classes, inherit from Object (value types) or Actor (processes).
 
 ### Object (`Object.bt`)
 
-Common root class for most Beamtalk classes. Object inherits from ProtoObject and adds reflection, nil testing, and debugging capabilities that almost all objects need.
+Root class for value types and parent of Actor. Object inherits from ProtoObject and adds reflection, nil testing, and debugging capabilities that almost all objects need.
 
 **Inheritance:**
-- Value types (Point, Color, Config) inherit from Object directly
+- Value types (primitives like Integer, String, and user types like Point, Color) inherit from Object directly
 - Actors (Counter, Worker, Services) inherit from Actor, which inherits from Object
+
+**Role in hierarchy:**
+- Object provides `new` method for creating value type instances
+- Actor overrides `new` to raise an error (actors must use `spawn`)
 
 **Key messages:**
 
@@ -174,12 +205,19 @@ p distance  // => 5.0
 
 ### Actor (`Actor.bt`)
 
-Base class for process-based objects. Every Actor instance is a BEAM process with its own mailbox.
+Base class for process-based objects. Every Actor instance is a BEAM process with its own mailbox. Actor inherits from Object and adds concurrency features.
+
+**Inheritance:** `ProtoObject → Object → Actor`
+
+**Key differences from Object:**
+- Actor instances are BEAM processes with their own state and mailbox
+- Use `spawn` to create instances (NOT `new`)
+- Actor overrides `new` to raise an error
 
 **Key messages:**
-- `spawn` - Create new instance (NOT `new`)
-- `spawnWith:` - Create with initialization arguments
-- All Object messages (inherited)
+- `spawn` - Create new instance (class-side message)
+- `spawnWith:` - Create with initialization arguments (class-side message)
+- All Object messages (inherited: isNil, notNil, inspect, etc.)
 
 **Usage:**
 ```beamtalk

@@ -183,10 +183,13 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |```
 |ProtoObject (true root, minimal behavior)
 |  └─ Object (common messages, reflection, nil testing)
-|       └─ (user-defined classes...)
+|       ├─ Integer, String, etc. (sealed primitives)
+|       ├─ Point, Color, etc. (user value types)
+|       └─ Actor (process-based)
+|            └─ (user actors...)
 |```
 |
-|Beamtalk adapts this by adding **Actor** as the process-based layer, with primitives and user value types inheriting from Object.
+|Beamtalk places primitives, value types, and Actor all under Object, since they all share the common protocol (nil testing, reflection, etc.).
 |
 |### Key Points
 |
