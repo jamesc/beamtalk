@@ -185,6 +185,9 @@ impl CoreErlangGenerator {
         self.indent += 1;
 
         // Find the current class to check for superclass
+        // NOTE: This requires the .bt file to have an explicit class definition
+        // like "Counter subclass: LoggingCounter" (see tests/fixtures/logging_counter.bt).
+        // Module-level expressions without a class definition take the base class path below.
         let current_class = module.classes.iter().find(|c| {
             // Compare module names using the same conversion (PascalCase -> snake_case)
             use super::util::to_module_name;
@@ -192,6 +195,7 @@ impl CoreErlangGenerator {
         });
 
         // Check if we have a superclass that's not Actor (base class)
+        // When true, we'll call the parent's init to inherit state fields
         let has_parent_init = if let Some(class) = current_class {
             !class.superclass.name.eq_ignore_ascii_case("Actor")
                 && !class.superclass.name.eq_ignore_ascii_case("Object")
@@ -201,12 +205,13 @@ impl CoreErlangGenerator {
 
         if has_parent_init {
             // Call parent's init to get inherited state, then merge with our state
-            let parent_module = current_class
-                .map(|c| {
-                    use super::util::to_module_name;
-                    to_module_name(&c.superclass.name)
-                })
-                .unwrap_or_default();
+            // SAFETY: has_parent_init is true only when current_class.is_some(),
+            // so this expect cannot fail unless there's a logic error
+            let class = current_class.expect("has_parent_init implies current_class is Some");
+            let parent_module = {
+                use super::util::to_module_name;
+                to_module_name(&class.superclass.name)
+            };
 
             self.write_indent()?;
             writeln!(
