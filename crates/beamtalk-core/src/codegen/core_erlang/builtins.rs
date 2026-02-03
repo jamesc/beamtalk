@@ -12,7 +12,7 @@
 //! - Binary operators with standard math precedence
 
 use super::{CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, Literal, MessageSelector};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -469,16 +469,33 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<()>> {
+        // Only handle methods for string LITERALS
+        // For identifiers/variables, let them fall through to runtime dispatch
+        let is_string_literal = matches!(receiver, Expression::Literal(Literal::String(_), _));
+
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
-                "length" if arguments.is_empty() => {
+                "size" if arguments.is_empty() && is_string_literal => {
+                    // BT-223: Route through beamtalk_primitive:send for runtime dispatch
+                    // This handles both literal strings and string variables correctly
+                    let recv_var = self.fresh_var("Str");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in ")?;
+                    write!(
+                        self.output,
+                        "call 'beamtalk_primitive':'send'({recv_var}, 'size', [])"
+                    )?;
+                    Ok(Some(()))
+                }
+                "length" if arguments.is_empty() && is_string_literal => {
                     // call 'string':'length'(Receiver)
                     write!(self.output, "call 'string':'length'(")?;
                     self.generate_expression(receiver)?;
                     write!(self.output, ")")?;
                     Ok(Some(()))
                 }
-                "isEmpty" if arguments.is_empty() => {
+                "isEmpty" if arguments.is_empty() && is_string_literal => {
                     // call 'erlang':'=:='(call 'string':'length'(Receiver), 0)
                     // Using string:length == 0 because Core Erlang empty binary syntax is complex
                     write!(self.output, "call 'erlang':'=:='(call 'string':'length'(")?;
