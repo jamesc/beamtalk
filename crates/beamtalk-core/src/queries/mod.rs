@@ -3,16 +3,26 @@
 
 //! Query modules for language service operations.
 //!
-//! This module provides specialized query implementations for different
-//! language service features. Each submodule focuses on a specific capability:
+//! This module provides domain services (Providers) from the Language Service
+//! context in the DDD model. Each provider implements a specific language
+//! service capability:
 //!
-//! - [`completions`] - Code completion suggestions
-//! - [`diagnostics`] - Error and warning reporting
-//! - [`hover`] - Hover information and documentation
+//! - [`completion_provider`] - Suggest completions at cursor position
+//! - [`diagnostic_provider`] - Collect errors and warnings
+//! - [`hover_provider`] - Show information on hover
 //!
-//! These modules are designed to be extensible and can be enhanced with
-//! semantic analysis, type information, and cross-file references in the future.
+//! **DDD Context:** Language Service
+//!
+//! These providers follow the DDD ubiquitous language where "Provider" is
+//! the standard term for domain services that compute language service
+//! responses. This aligns with LSP terminology (`CompletionProvider`,
+//! `DiagnosticProvider`, `HoverProvider`) and makes the code self-documenting.
+//!
+//! ## References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol
 
-pub mod completions;
-pub mod diagnostics;
-pub mod hover;
+pub mod completion_provider;
+pub mod diagnostic_provider;
+pub mod hover_provider;

@@ -1,9 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Diagnostics query implementation.
+//! Diagnostic provider for the language service.
 //!
-//! This module provides diagnostic reporting (errors and warnings) for the language service.
+//! **DDD Context:** Language Service
+//!
+//! This domain service implements the `DiagnosticProvider` from the DDD model.
+//! It collects errors and warnings from multiple compilation phases (lexing,
+//! parsing, semantic analysis) and reports them to the editor. The provider
+//! follows LSP terminology and aligns with the ubiquitous language defined in
+//! `docs/beamtalk-ddd-model.md`.
 //!
 //! # Design
 //!
@@ -15,6 +21,11 @@
 //! # Performance
 //!
 //! Must respond in <50ms for typical file sizes.
+//!
+//! # References
+//!
+//! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
+//! - LSP specification: Language Server Protocol publishDiagnostics notification
 
 use crate::analyse;
 use crate::ast::Module;
@@ -32,6 +43,20 @@ use crate::parse::Diagnostic;
 /// # Returns
 ///
 /// A list of all diagnostics (errors and warnings).
+///
+/// # Examples
+///
+/// ```
+/// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
+/// use beamtalk_core::parse::{lex_with_eof, parse};
+///
+/// let source = "x := 42";
+/// let tokens = lex_with_eof(source);
+/// let (module, parse_diags) = parse(tokens);
+///
+/// let diagnostics = compute_diagnostics(&module, parse_diags);
+/// assert!(diagnostics.is_empty()); // Valid code has no errors
+/// ```
 #[must_use]
 pub fn compute_diagnostics(module: &Module, parse_diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     compute_diagnostics_with_known_vars(module, parse_diagnostics, &[])

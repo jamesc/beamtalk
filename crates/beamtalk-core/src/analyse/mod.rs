@@ -163,18 +163,25 @@ fn extract_pattern_bindings_impl(
     match pattern {
         // Variable patterns bind the identifier
         Pattern::Variable(id) => {
-            if let Some(first_span) = seen.get(&id.name) {
-                // Duplicate variable - emit diagnostic
-                diagnostics.push(crate::parse::Diagnostic::error(
-                    format!(
-                        "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
-                        id.name,
-                        first_span.start()
-                    ),
-                    id.span,
-                ));
-            } else {
-                seen.insert(id.name.clone(), id.span);
+            // Use Entry API to avoid double lookup
+            use std::collections::hash_map::Entry;
+
+            match seen.entry(id.name.clone()) {
+                Entry::Occupied(entry) => {
+                    // Duplicate variable - emit diagnostic
+                    let first_span = *entry.get();
+                    diagnostics.push(crate::parse::Diagnostic::error(
+                        format!(
+                            "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
+                            id.name,
+                            first_span.start()
+                        ),
+                        id.span,
+                    ));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(id.span);
+                }
             }
             bindings.push(id.clone());
         }
