@@ -105,5 +105,6 @@ _rel/
 
 # Build outputs
 /build/
+/lib/build/
 *.backup
 *.crashdump
