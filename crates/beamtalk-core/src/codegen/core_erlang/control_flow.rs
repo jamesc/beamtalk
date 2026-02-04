@@ -90,7 +90,7 @@ impl CoreErlangGenerator {
         let new_state = self.next_state_var();
         write!(
             self.output,
-            "{new_state} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var})"
+            "{new_state} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var}) in 'nil'"
         )?;
 
         Ok(())

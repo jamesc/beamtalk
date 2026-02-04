@@ -1109,9 +1109,9 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
             } else {
-                // Non-field-assignment intermediate expression: wrap in let
-                let tmp_var = self.fresh_temp_var("seq");
-                write!(self.output, "let {tmp_var} = ")?;
+                // Non-field-assignment intermediate expression: just generate it
+                // If it performs state threading (e.g., control flow), it will update
+                // the state version internally. Otherwise, we ignore its return value.
                 self.generate_expression(expr)?;
                 write!(self.output, " in ")?;
             }
