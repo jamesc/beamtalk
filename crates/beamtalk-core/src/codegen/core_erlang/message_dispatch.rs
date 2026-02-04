@@ -335,8 +335,12 @@ impl CoreErlangGenerator {
 
     /// Checks if an expression is a control flow construct that handles its own state threading.
     ///
-    /// These expressions (do:, inject:into:, whileTrue:, etc.) internally manage state
-    /// and should NOT be wrapped in `let _seq = ... in` bindings.
+    /// These expressions (do:, whileTrue:, etc.) internally manage state
+    /// and should be bound to a state variable by the caller. They return the
+    /// final state value.
+    ///
+    /// Note: inject:into: is NOT included because it returns an accumulated value,
+    /// not the state. It has special handling for state extraction.
     pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
         match expr {
             Expression::MessageSend {
@@ -347,15 +351,7 @@ impl CoreErlangGenerator {
                 let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 matches!(
                     selector.as_str(),
-                    "do:"
-                        | "collect:"
-                        | "select:"
-                        | "reject:"
-                        | "inject:into:"
-                        | "whileTrue:"
-                        | "whileFalse:"
-                        | "to:do:"
-                        | "to:by:do:"
+                    "do:" | "whileTrue:" | "whileFalse:" | "to:do:" | "to:by:do:"
                 )
             }
             Expression::MessageSend {

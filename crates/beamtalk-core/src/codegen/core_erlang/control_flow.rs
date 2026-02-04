@@ -513,11 +513,9 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
+        write!(self.output, "in apply 'while'/{arity} (")?;
         for (i, var) in mutated_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -528,10 +526,6 @@ impl CoreErlangGenerator {
             write!(self.output, ", ")?;
         }
         write!(self.output, "{prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        // This makes the expression a valid value in REPL context
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -704,11 +698,9 @@ impl CoreErlangGenerator {
         write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
+        write!(self.output, "in apply 'while'/{arity} (")?;
         for (i, var) in mutated_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -719,9 +711,6 @@ impl CoreErlangGenerator {
             write!(self.output, ", ")?;
         }
         write!(self.output, "{prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -861,18 +850,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'repeat'/{arity} (1")?;
+        write!(self.output, "in apply 'repeat'/{arity} (1")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -1081,21 +1065,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(
-            self.output,
-            "{new_state} = apply 'loop'/{arity} ({start_var}"
-        )?;
+        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -1396,21 +1372,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(
-            self.output,
-            "{new_state} = apply 'loop'/{arity} ({start_var}"
-        )?;
+        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
