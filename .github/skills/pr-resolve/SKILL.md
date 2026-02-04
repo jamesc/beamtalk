@@ -33,12 +33,9 @@ When activated, execute this workflow to systematically address all PR review co
 
 4. **Run tests first**: Verify current state passes all checks:
    ```bash
-   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+   just ci
    ```
-   Also run Erlang tests if runtime changes are involved:
-   ```bash
-   cd runtime && rebar3 eunit
-   ```
+   This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
 
 5. **Write tests first (TDD)**: For each code fix needed:
    - Write a failing test that demonstrates the bug or missing behavior
@@ -55,7 +52,7 @@ When activated, execute this workflow to systematically address all PR review co
 
 7. **Run full test suite**: After all changes:
    ```bash
-   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+   just ci
    ```
 
 8. **Commit changes**: Stage and commit with a descriptive message (using issue ID from step 1):
