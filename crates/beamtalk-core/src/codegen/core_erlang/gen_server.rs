@@ -139,8 +139,8 @@ impl CoreErlangGenerator {
     /// Generates the `new/0` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new` - they must use `spawn`.
-    /// This function generates a method that throws a structured #beamtalk_error{}
-    /// record with kind=instantiation_error.
+    /// This function generates a method that throws a structured `#beamtalk_error{}`
+    /// record with `kind=instantiation_error`.
     ///
     /// # Generated Code
     ///
@@ -178,8 +178,8 @@ impl CoreErlangGenerator {
     /// Generates the `new/1` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
-    /// This function generates a method that throws a structured #beamtalk_error{}
-    /// record with kind=instantiation_error.
+    /// This function generates a method that throws a structured `#beamtalk_error{}`
+    /// record with `kind=instantiation_error`.
     ///
     /// # Generated Code
     ///
