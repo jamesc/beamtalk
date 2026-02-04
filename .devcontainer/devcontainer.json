@@ -41,7 +41,7 @@
   },
   // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
   "initializeCommand": "pwsh -NoProfile -File ${localWorkspaceFolder}/.devcontainer/ensure-env-file.ps1",
-  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry /home/vscode/.copilot && cargo fetch",
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
   // Cargo caching for faster builds
@@ -49,7 +49,8 @@
   // because ${localEnv:...} variable substitution doesn't work reliably with devcontainer CLI
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
-    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
+    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
+    "source=beamtalk-copilot-state,target=/home/vscode/.copilot,type=volume"
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // DEVELOPMENT WORKFLOWS
