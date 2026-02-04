@@ -73,7 +73,10 @@ init(Parent) ->
             },
             instance_variables => []
         },
-        {ok, _ProtoObjectClassPid} = beamtalk_class:start_link('ProtoObject', ProtoObjectClassInfo),
+        {ok, _ProtoObjectClassPid} = case beamtalk_class:start_link('ProtoObject', ProtoObjectClassInfo) of
+            {ok, Pid1} -> {ok, Pid1};
+            {error, {already_started, Pid1}} -> {ok, Pid1}
+        end,
         
         %% Step 2: Create Object class (inherits from ProtoObject class)
         ObjectClassInfo = #{
@@ -94,7 +97,10 @@ init(Parent) ->
             class_methods => #{},
             instance_variables => []
         },
-        {ok, _ObjectClassPid} = beamtalk_class:start_link('Object', ObjectClassInfo),
+        {ok, _ObjectClassPid} = case beamtalk_class:start_link('Object', ObjectClassInfo) of
+            {ok, Pid2} -> {ok, Pid2};
+            {error, {already_started, Pid2}} -> {ok, Pid2}
+        end,
         
         %% Step 3: Create Actor class (inherits from Object class)
         ActorClassInfo = #{
@@ -112,7 +118,10 @@ init(Parent) ->
             },
             instance_variables => []
         },
-        {ok, _ActorClassPid} = beamtalk_class:start_link('Actor', ActorClassInfo),
+        {ok, _ActorClassPid} = case beamtalk_class:start_link('Actor', ActorClassInfo) of
+            {ok, Pid3} -> {ok, Pid3};
+            {error, {already_started, Pid3}} -> {ok, Pid3}
+        end,
         
         %% Signal parent that we're ready
         proc_lib:init_ack(Parent, {ok, self()}),
