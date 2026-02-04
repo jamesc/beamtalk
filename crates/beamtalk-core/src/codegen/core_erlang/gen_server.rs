@@ -165,7 +165,10 @@ impl CoreErlangGenerator {
             "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in"
         )?;
         self.write_indent()?;
-        write!(self.output, "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ")?;
+        write!(
+            self.output,
+            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
+        )?;
         self.generate_binary_string("Use spawn instead")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
@@ -204,7 +207,10 @@ impl CoreErlangGenerator {
             "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in"
         )?;
         self.write_indent()?;
-        write!(self.output, "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ")?;
+        write!(
+            self.output,
+            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
+        )?;
         self.generate_binary_string("Use spawnWith: instead")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
