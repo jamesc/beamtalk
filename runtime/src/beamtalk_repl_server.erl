@@ -100,13 +100,33 @@ parse_request(Data) when is_binary(Data) ->
 %% @doc Format a successful response as JSON.
 -spec format_response(term()) -> binary().
 format_response(Value) ->
-    jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => term_to_json(Value)}).
+    try
+        JsonValue = term_to_json(Value),
+        jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue})
+    catch
+        Class:Reason:_Stack ->
+            %% Fallback with details about what went wrong
+            ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
+            jsx:encode(#{<<"type">> => <<"error">>, 
+                        <<"message">> => iolist_to_binary(ErrorMsg)})
+    end.
 
 %% @doc Format an error response as JSON.
 -spec format_error(term()) -> binary().
 format_error(Reason) ->
-    Message = format_error_message(Reason),
-    jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message}).
+    try
+        Message = format_error_message(Reason),
+        jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message})
+    catch
+        Class:Error:Stack ->
+            %% Log formatting failure for debugging
+            io:format(standard_error,
+                      "Failed to format error:~nClass: ~p~nError: ~p~nStack: ~p~nReason: ~p~n",
+                      [Class, Error, lists:sublist(Stack, 3), Reason]),
+            %% Return fallback error response
+            jsx:encode(#{<<"type">> => <<"error">>, 
+                        <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
+    end.
 
 %% @doc Format bindings response as JSON.
 -spec format_bindings(map()) -> binary().
@@ -261,6 +281,9 @@ term_to_json(Value) when is_map(Value) ->
         #{},
         Value
     );
+term_to_json(#beamtalk_error{} = Error) ->
+    %% Format beamtalk_error records as user-friendly strings
+    iolist_to_binary(beamtalk_error:format(Error));
 term_to_json(Value) when is_tuple(Value) ->
     %% Special handling for known tuple types
     case Value of
@@ -275,8 +298,11 @@ term_to_json(Value) when is_tuple(Value) ->
             Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
             iolist_to_binary([<<"#Future<timeout,">>, Inner, <<">">>]);
         {future_rejected, Reason} ->
-            %% Future that was rejected
-            iolist_to_binary([<<"#Future<rejected: ">>, term_to_json(Reason), <<">">>]);
+            %% Future that was rejected - format the reason as error message
+            iolist_to_binary([<<"#Future<rejected: ">>, format_rejection_reason(Reason), <<">">>]);
+        {unknown_message, Selector, ClassName} ->
+            %% Old-style doesNotUnderstand error (for backward compatibility)
+            iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
         _ ->
             %% Format generic tuple with marker
             #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]}
@@ -284,6 +310,15 @@ term_to_json(Value) when is_tuple(Value) ->
 term_to_json(Value) ->
     %% Fallback: format using io_lib
     iolist_to_binary(io_lib:format("~p", [Value])).
+
+%% @private
+%% Format a rejection reason for display in #Future<rejected: ...>
+format_rejection_reason(#beamtalk_error{} = Error) ->
+    beamtalk_error:format(Error);
+format_rejection_reason({unknown_message, Selector, ClassName}) ->
+    iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
+format_rejection_reason(Reason) ->
+    term_to_json(Reason).
 
 %%% Error Formatting
 

@@ -253,13 +253,23 @@ handle_info({client_request, Request, ClientPid}, State) ->
     %% Handle request from client handler process
     case beamtalk_repl_server:parse_request(Request) of
         {eval, Expression} ->
-            case beamtalk_repl_eval:do_eval(Expression, State) of
-                {ok, Result, NewState} ->
-                    ClientPid ! {response, beamtalk_repl_server:format_response(Result)},
-                    {noreply, NewState};
-                {error, Reason, NewState} ->
-                    ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
-                    {noreply, NewState}
+            try
+                case beamtalk_repl_eval:do_eval(Expression, State) of
+                    {ok, Result, NewState} ->
+                        ClientPid ! {response, beamtalk_repl_server:format_response(Result)},
+                        {noreply, NewState};
+                    {error, ErrorReason, NewState} ->
+                        ClientPid ! {response, beamtalk_repl_server:format_error(ErrorReason)},
+                        {noreply, NewState}
+                end
+            catch
+                Class:CrashReason:Stack ->
+                    %% Crash in eval - log and send error response
+                    io:format(standard_error,
+                              "REPL eval error:~nClass: ~p~nReason: ~p~nStack: ~p~nExpression: ~p~n",
+                              [Class, CrashReason, lists:sublist(Stack, 5), Expression]),
+                    ClientPid ! {response, beamtalk_repl_server:format_error({eval_crash, Class, CrashReason})},
+                    {noreply, State}
             end;
         {clear_bindings} ->
             NewState = beamtalk_repl_state:clear_bindings(State),
