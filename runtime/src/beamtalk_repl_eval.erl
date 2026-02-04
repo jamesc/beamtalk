@@ -69,17 +69,26 @@ do_eval(Expression, State) ->
                         CleanBindings = strip_internal_bindings(UpdatedBindings),
                         %% Auto-await futures for synchronous REPL experience
                         Result = maybe_await_future(RawResult),
-                        %% Check if this was an assignment
-                        case extract_assignment(Expression) of
-                            {ok, VarName} ->
-                                %% Assignment: merge updated bindings with new assignment
-                                NewBindings = maps:put(VarName, Result, CleanBindings),
-                                FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
-                                {ok, Result, FinalState};
-                            none ->
-                                %% No assignment: use updated bindings from mutations
+                        %% Check if result is a rejected future - treat as error
+                        case Result of
+                            {future_rejected, ErrorReason} ->
+                                %% Rejected future should be an error, not a result
+                                %% Still update bindings from any mutations before the error
                                 FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                                {ok, Result, FinalState}
+                                {error, ErrorReason, FinalState};
+                            _ ->
+                                %% Normal result - check if this was an assignment
+                                case extract_assignment(Expression) of
+                                    {ok, VarName} ->
+                                        %% Assignment: merge updated bindings with new assignment
+                                        NewBindings = maps:put(VarName, Result, CleanBindings),
+                                        FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
+                                        {ok, Result, FinalState};
+                                    none ->
+                                        %% No assignment: use updated bindings from mutations
+                                        FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
+                                        {ok, Result, FinalState}
+                                end
                         end
                     catch
                         Class:Reason:_Stacktrace ->

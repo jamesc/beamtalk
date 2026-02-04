@@ -329,6 +329,9 @@ format_rejection_reason(Reason) ->
 format_error_message(#beamtalk_error{} = Error) ->
     %% Format structured beamtalk_error using the error helper
     iolist_to_binary(beamtalk_error:format(Error));
+format_error_message({unknown_message, Selector, ClassName}) ->
+    %% Old-style doesNotUnderstand error (for backward compatibility)
+    iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
 format_error_message(empty_expression) ->
     <<"Empty expression">>;
 format_error_message(timeout) ->
