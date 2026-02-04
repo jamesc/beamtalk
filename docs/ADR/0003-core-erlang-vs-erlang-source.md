@@ -25,6 +25,7 @@ Gleam, a successful Rust-to-BEAM compiler, generates Erlang source rather than C
 2. **Explicit semantics**: Core Erlang makes control flow and evaluation order explicit
 3. **No syntactic sugar**: What you generate is what you get—no hidden transformations
 4. **Compiler internals alignment**: Easier to debug compilation issues with `erlc +core`
+5. **Type system compatibility**: Core Erlang's simplified semantics are better suited for static analysis and type inference (see Alpaca's rationale below)
 
 ### Beamtalk-Specific Considerations
 
@@ -165,6 +166,23 @@ Beamtalk's situation differs:
 1. **Smalltalk developer audience**: Users expect live inspection, not source reading
 2. **Actor paradigm**: Generated code is gen_server boilerplate regardless of format
 3. **Already invested**: 10k lines of working Core Erlang codegen exists
+
+### What Other BEAM Languages Chose (and Why)
+
+| Language | Target | Rationale |
+|----------|--------|-----------|
+| **Alpaca** | Core Erlang | Static typing with Hindley-Milner inference; Core Erlang's simplified semantics support type analysis and exhaustiveness checking |
+| **Efene** | Erlang source | "Different syntax for Erlang"; 1:1 mapping for readable output; leverage existing tooling without reinventing |
+| **Gleam** | Erlang source | Maintainer preferred simplicity; targets Erlang developers who read generated code |
+| **LFE** | Core Erlang | Lisp macros need explicit control over generated code; Core Erlang provides predictable output |
+| **Clojerl** | Erlang source | Clojure compatibility; familiar patterns for Clojure developers |
+
+**Pattern:** Languages prioritizing **static analysis and type systems** (Alpaca, LFE) tend toward Core Erlang. Languages prioritizing **readable output and ecosystem familiarity** (Efene, Gleam, Clojerl) tend toward Erlang source.
+
+**Beamtalk's trajectory:** Planned Hindley-Milner type inference aligns with Core Erlang choice. The explicit semantics will support:
+- Type inference across message sends
+- Exhaustive pattern matching in dispatch
+- Static analysis of actor protocols
 
 ## Decision
 
