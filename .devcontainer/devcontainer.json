@@ -41,7 +41,7 @@
   },
   // initializeCommand: Ensure .env file exists before container starts (--env-file requires it)
   "initializeCommand": "pwsh -NoProfile -File ${localWorkspaceFolder}/.devcontainer/ensure-env-file.ps1",
-  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry && cargo fetch",
+  "postCreateCommand": "sudo chown -R vscode:vscode ${containerWorkspaceFolder} /usr/local/cargo/registry /home/vscode/.copilot && cargo fetch",
   "postStartCommand": "bash .devcontainer/setup-git-auth.sh || true",
   "remoteUser": "vscode",
   // Cargo caching for faster builds
