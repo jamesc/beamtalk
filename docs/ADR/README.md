@@ -24,6 +24,7 @@ Each ADR follows this structure:
 | [0001](0001-no-compound-assignment.md) | No Compound Assignment in Beamtalk | Proposed | 2026-02-03 |
 | [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Proposed | 2026-02-03 |
 | [0003](0003-core-erlang-vs-erlang-source.md) | Keep Core Erlang as Primary Code Generation Target | Accepted | 2026-02-04 |
+| [0004](0004-persistent-workspace-management.md) | Persistent Workspace Management | Proposed | 2026-02-04 |
 
 ## Creating New ADRs
 
