@@ -141,3 +141,22 @@ extension_method_test_() ->
                          beamtalk_block:dispatch('unknownMethod', [], fun() -> ok end))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Instance Variable Reflection Tests (BT-164)
+%%% ============================================================================
+
+instVarNames_test() ->
+    %% Primitives have no instance variables
+    ?assertEqual([], beamtalk_block:dispatch('instVarNames', [], fun() -> ok end)),
+    ?assertEqual([], beamtalk_block:dispatch('instVarNames', [], fun(X) -> X end)).
+
+instVarAt_test() ->
+    %% Primitives always return nil for instVarAt:
+    ?assertEqual(nil, beamtalk_block:dispatch('instVarAt', [anyField], fun() -> ok end)),
+    ?assertEqual(nil, beamtalk_block:dispatch('instVarAt', [value], fun(X) -> X * 2 end)).
+
+instVarAt_put_immutable_error_test() ->
+    %% Trying to mutate a primitive should raise an immutable_primitive error
+    ?assertError({beamtalk_error, immutable_primitive, 'Block', 'instVarAt:put:', _, _, _},
+                 beamtalk_block:dispatch('instVarAt:put:', [value, 42], fun() -> ok end)).

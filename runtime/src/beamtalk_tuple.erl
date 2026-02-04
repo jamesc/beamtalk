@@ -21,6 +21,9 @@
 %%% | `unwrapOr:` | [Default] | Extract value or return default |
 %%% | `unwrapOrElse:` | [Block] | Extract value or evaluate block |
 %%% | `asString` | [] | Convert to string |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
@@ -45,6 +48,8 @@
 
 -module(beamtalk_tuple).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -77,6 +82,9 @@ is_builtin('unwrap') -> true;
 is_builtin('unwrapOr:') -> true;
 is_builtin('unwrapOrElse:') -> true;
 is_builtin('asString') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -140,6 +148,20 @@ builtin_dispatch('asString', [], X) ->
     Joined = lists:join(<<", ">>, ElementStrs),
     Result = iolist_to_binary([<<"{">>, Joined, <<"}">>]),
     {ok, Result};
+
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _Tuple) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _Tuple) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], _Tuple) -> 
+    %% Primitives cannot be mutated
+    Error0 = beamtalk_error:new(immutable_primitive, 'Tuple'),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Tuples are immutable. Use assignment (x := newValue) instead.">>),
+    Error = beamtalk_error:with_details(Error2, #{field => Name}),
+    error(Error);
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.

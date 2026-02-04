@@ -101,7 +101,7 @@ repl_integration_test_() ->
                  ];
              false ->
                  %% Skip all tests when daemon is not available
-                 [{"(skipped - daemon not running)", fun() -> ok end}]
+                 [{"(35+ integration tests skipped - daemon not running)", fun() -> ok end}]
          end
      end}.
 
@@ -121,8 +121,16 @@ setup_daemon() ->
             io:format("~n=== Daemon is running, executing integration tests ===~n"),
             true;
         {error, _} ->
-            io:format("~n=== Daemon not running, skipping integration tests ===~n"),
-            io:format("To run: beamtalk daemon start --foreground~n"),
+            io:format("~n"),
+            io:format("╔═══════════════════════════════════════════════════════════╗~n"),
+            io:format("║  ⚠️  WARNING: 35+ INTEGRATION TESTS SKIPPED            ║~n"),
+            io:format("║                                                           ║~n"),
+            io:format("║  Daemon not running. To run integration tests:            ║~n"),
+            io:format("║  $ beamtalk daemon start --foreground                     ║~n"),
+            io:format("║                                                           ║~n"),
+            io:format("║  CI runs these tests automatically ✓                      ║~n"),
+            io:format("╚═══════════════════════════════════════════════════════════╝~n"),
+            io:format("~n"),
             false
     end.
 

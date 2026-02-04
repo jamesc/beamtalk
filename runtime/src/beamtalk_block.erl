@@ -18,6 +18,9 @@
 %%% | `value:value:` | [Arg1, Arg2] | Evaluate block with 2 args |
 %%% | `arity`  | []   | Number of parameters |
 %%% | `asString` | [] | Returns `<<"<Block>">>` |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
@@ -41,6 +44,8 @@
 
 -module(beamtalk_block).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -70,6 +75,9 @@ is_builtin('value:') -> true;
 is_builtin('value:value:') -> true;
 is_builtin('arity') -> true;
 is_builtin('asString') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -113,6 +121,20 @@ builtin_dispatch('arity', [], Block) when is_function(Block) ->
 
 %% Conversion
 builtin_dispatch('asString', [], _Block) -> {ok, <<"<Block>">>};
+
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _Block) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _Block) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], _Block) -> 
+    %% Primitives cannot be mutated
+    Error0 = beamtalk_error:new(immutable_primitive, 'Block'),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Blocks are immutable. Use assignment (x := newValue) instead.">>),
+    Error = beamtalk_error:with_details(Error2, #{field => Name}),
+    error(Error);
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.

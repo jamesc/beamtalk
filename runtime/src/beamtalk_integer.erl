@@ -25,6 +25,9 @@
 %%% | `asString` | [] | Binary representation |
 %%% | `abs`    | []   | Absolute value |
 %%% | `negated` | []  | Negation (-X) |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% **Note:** Arithmetic and comparison operations accept both integers and floats.
 %%% Mixed integer/float operations follow Erlang's numeric tower (result type depends

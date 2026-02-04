@@ -20,6 +20,9 @@
 %%% | `and:`   | [Block] | Lazy AND (short-circuit) |
 %%% | `or:`    | [Block] | Lazy OR (short-circuit) |
 %%% | `asString` | [] | Convert to string |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%

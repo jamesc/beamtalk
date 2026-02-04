@@ -30,6 +30,9 @@
 %%% | `substring:to:` | [Start, End] | Extract substring (1-based, inclusive) |
 %%% | `split:` | [Delim] | Split by delimiter |
 %%% | `asInteger` | [] | Parse as integer (error if invalid) |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
