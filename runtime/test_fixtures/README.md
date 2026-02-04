@@ -1,29 +1,49 @@
-# Beamtalk Test Fixtures
+# Beamtalk Runtime Test Fixtures
 
-This directory contains Beamtalk source files used as test fixtures.
+This directory contains Beamtalk source files compiled for use in runtime unit tests.
+
+## Overview
+
+**Location:** `runtime/test_fixtures/` (BT-239 reorganization)  
+**Purpose:** Pre-compiled BEAM bytecode for `beamtalk_codegen_simulation_tests.erl`  
+**Build:** Automatically compiled by `compile.sh` via rebar3 pre-hook before eunit
+
+## Directory Structure
+
+```
+runtime/test_fixtures/
+├── compile.sh           # Compiles fixtures before tests
+├── logging_counter.bt   # Super keyword test fixture
+└── README.md           # This file
+```
+
+**Note:** `counter.bt` fixture consolidated to `tests/e2e/fixtures/counter.bt` (BT-239)
 
 ## Building Fixtures
 
-The `counter.bt` fixture must be compiled to BEAM bytecode for use in runtime tests:
+Fixtures are compiled automatically by rebar3 before running tests:
 
 ```bash
 # From repository root
-cd tests/fixtures
-erlc build/counter.core
-cp build/counter.beam ../../runtime/test/
+just test-runtime  # Auto-compiles fixtures via pre-hook
+
+# Or manually
+./runtime/test_fixtures/compile.sh
 ```
 
-Or use the compile script:
-
-```bash
-./tests/fixtures/compile.sh
-```
+The script:
+1. Compiles `tests/e2e/fixtures/counter.bt` (unified fixture)
+2. Compiles `runtime/test_fixtures/logging_counter.bt`
+3. Copies resulting `.beam` files to `runtime/_build/*/test/`
 
 ## Fixtures
 
-### counter.bt
+### counter.bt (Unified Fixture - BT-239)
 
-A simple counter actor with the following methods:
+**Source:** `tests/e2e/fixtures/counter.bt`  
+**Syntax:** Modern class syntax (`Actor subclass: Counter`)
+
+A simple counter actor with:
 - `increment` - increments value by 1, returns new value
 - `decrement` - decrements value by 1, returns new value  
 - `getValue` - returns current value
@@ -31,10 +51,13 @@ A simple counter actor with the following methods:
 Used by `beamtalk_codegen_simulation_tests.erl` to test real compiled code generation,
 including `spawn/0` and `spawn/1` that return `#beamtalk_object{}` records.
 
-**Syntax Note:** The fixture uses the current parser syntax (`:=` for assignment, blocks for methods)
-which differs from the planned `=>` method syntax documented in design docs.
+**Consolidation:** Previously duplicated in `tests/fixtures/counter.bt`, now unified
+with E2E fixture to reduce maintenance and confusion (BT-239).
 
 ### logging_counter.bt (BT-108)
+
+**Source:** `runtime/test_fixtures/logging_counter.bt`  
+**Purpose:** Super keyword testing
 
 Demonstrates super keyword for superclass method dispatch in inheritance hierarchy.
 
@@ -55,3 +78,9 @@ Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
 - State is maintained correctly across super calls
 - Child can add new methods alongside overridden ones
 - Super works with unary, keyword, and property access
+
+## References
+
+- Runtime tests: `runtime/test/beamtalk_codegen_simulation_tests.erl`
+- E2E fixtures: `tests/e2e/fixtures/`
+- E2E test cases: `tests/e2e/cases/*.bt`
