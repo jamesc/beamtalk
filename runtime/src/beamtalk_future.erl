@@ -62,7 +62,8 @@
 %%% ```
 
 -module(beamtalk_future).
--export([new/0, resolve/2, reject/2, await/1, await/2,
+-include("beamtalk.hrl").
+-export([new/0, resolve/2, reject/2, await/1, await/2, await_forever/1,
          when_resolved/2, when_rejected/2]).
 
 %% @doc Create a new future in the pending state.
@@ -88,32 +89,51 @@ reject(Future, Reason) ->
     ok.
 
 %% @doc Block the calling process until the future is resolved or rejected.
+%% Uses a default timeout of 30 seconds to prevent indefinite blocking.
 %% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
+%% Throws #beamtalk_error{kind = timeout} if the future doesn't complete in time.
 -spec await(pid()) -> term().
 await(Future) ->
-    Future ! {await, self()},
-    receive
-        {future_resolved, Future, Value} ->
-            Value;
-        {future_rejected, Future, Reason} ->
-            throw({future_rejected, Reason})
-    end.
+    await(Future, 30000).
 
 %% @doc Block the calling process until the future is resolved, rejected, or times out.
-%% Returns {ok, Value} if resolved, {error, Reason} if rejected, or {error, timeout}.
--spec await(pid(), timeout()) -> {ok, term()} | {error, term()}.
+%% Returns the value if resolved, throws {future_rejected, Reason} if rejected,
+%% or throws #beamtalk_error{kind = timeout} if the timeout expires.
+-spec await(pid(), timeout()) -> term().
 await(Future, Timeout) ->
     Future ! {await, self(), Timeout},
     receive
         {future_resolved, Future, Value} ->
-            {ok, Value};
+            Value;
         {future_rejected, Future, Reason} ->
-            {error, Reason};
+            throw({future_rejected, Reason});
         {future_timeout, Future} ->
-            {error, timeout}
+            throw(#beamtalk_error{
+                kind = timeout,
+                class = 'Future',
+                selector = undefined,
+                message = <<"Await timed out">>,
+                hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
+                details = #{}
+            })
     after Timeout ->
-        {error, timeout}
+        throw(#beamtalk_error{
+            kind = timeout,
+            class = 'Future',
+            selector = undefined,
+            message = <<"Await timed out">>,
+            hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
+            details = #{}
+        })
     end.
+
+%% @doc Block the calling process until the future is resolved or rejected.
+%% Waits indefinitely with no timeout. Use this for operations that may take
+%% an arbitrarily long time to complete.
+%% Returns the value if resolved, or throws {future_rejected, Reason} if rejected.
+-spec await_forever(pid()) -> term().
+await_forever(Future) ->
+    await(Future, infinity).
 
 %% @doc Register a callback to be executed when the future is resolved.
 %% If the future is already resolved, the callback is executed immediately.

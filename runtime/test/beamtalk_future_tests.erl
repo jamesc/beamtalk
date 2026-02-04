@@ -13,6 +13,7 @@
 
 -module(beamtalk_future_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% Basic resolve/await tests
 
@@ -235,15 +236,17 @@ await_with_timeout_resolved_test() ->
     
     %% Await with a 500ms timeout (should succeed)
     Result = beamtalk_future:await(Future, 500),
-    ?assertEqual({ok, quick}, Result).
+    ?assertEqual(quick, Result).
 
 await_with_timeout_expired_test() ->
     Future = beamtalk_future:new(),
     
     %% Don't resolve the future
-    %% Await with a 50ms timeout (should timeout)
-    Result = beamtalk_future:await(Future, 50),
-    ?assertEqual({error, timeout}, Result).
+    %% Await with a 50ms timeout (should timeout with structured error)
+    ?assertThrow(
+        #beamtalk_error{kind = timeout, class = 'Future'},
+        beamtalk_future:await(Future, 50)
+    ).
 
 await_with_timeout_rejected_test() ->
     Future = beamtalk_future:new(),
@@ -255,8 +258,43 @@ await_with_timeout_rejected_test() ->
     end),
     
     %% Await with a 500ms timeout (should get rejection, not timeout)
-    Result = beamtalk_future:await(Future, 500),
-    ?assertEqual({error, failed}, Result).
+    ?assertThrow({future_rejected, failed}, beamtalk_future:await(Future, 500)).
+
+await_default_timeout_test() ->
+    Future = beamtalk_future:new(),
+    
+    %% Spawn a task that resolves the future after 100ms
+    spawn(fun() ->
+        timer:sleep(100),
+        beamtalk_future:resolve(Future, within_default_timeout)
+    end),
+    
+    %% Await without explicit timeout (should use 30s default and succeed)
+    Result = beamtalk_future:await(Future),
+    ?assertEqual(within_default_timeout, Result).
+
+await_forever_test() ->
+    Future = beamtalk_future:new(),
+    Parent = self(),
+    
+    %% Spawn a task that resolves after 200ms
+    spawn(fun() ->
+        timer:sleep(200),
+        beamtalk_future:resolve(Future, late_value)
+    end),
+    
+    %% Spawn awaiter with await_forever (should wait indefinitely)
+    spawn(fun() ->
+        Result = beamtalk_future:await_forever(Future),
+        Parent ! {result, Result}
+    end),
+    
+    %% Should receive the result even though it takes a while
+    receive
+        {result, Value} -> ?assertEqual(late_value, Value)
+    after 500 ->
+        ?assert(false)  % Test failed - should have received result
+    end.
 
 %%% Edge cases
 
@@ -376,7 +414,7 @@ concurrent_resolve_await_race_test() ->
     end || _ <- lists:seq(1, NumIterations)],
     
     %% All should have resolved successfully (no timeouts)
-    ?assertEqual(lists:duplicate(NumIterations, {ok, iteration_value}), Results).
+    ?assertEqual(lists:duplicate(NumIterations, iteration_value), Results).
 
 future_chaining_with_callbacks_test() ->
     %% Test chaining futures via callbacks
@@ -411,8 +449,7 @@ error_propagation_through_callbacks_test() ->
     
     %% Wait for chained future to be rejected
     timer:sleep(50),
-    Result = beamtalk_future:await(Future2, 1000),
-    ?assertEqual({error, {propagated, original_error}}, Result).
+    ?assertThrow({future_rejected, {propagated, original_error}}, beamtalk_future:await(Future2, 1000)).
 
 process_cleanup_when_future_abandoned_test() ->
     %% Test that future process stays alive even if creator crashes
@@ -451,7 +488,7 @@ await_on_already_resolved_future_multiple_times_test() ->
     ?assertEqual(persistent_value, beamtalk_future:await(Future)),
     
     %% With timeout too
-    ?assertEqual({ok, persistent_value}, beamtalk_future:await(Future, 100)).
+    ?assertEqual(persistent_value, beamtalk_future:await(Future, 100)).
 
 future_with_large_value_test() ->
     %% Test future with large data value
@@ -498,5 +535,4 @@ reject_without_await_no_crash_test() ->
     ?assert(is_process_alive(Future)),
     
     %% Later await should get the rejection
-    Result = beamtalk_future:await(Future, 100),
-    ?assertEqual({error, unhandled_error}, Result).
+    ?assertThrow({future_rejected, unhandled_error}, beamtalk_future:await(Future, 100)).
