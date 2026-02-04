@@ -23,7 +23,9 @@ gh pr create --repo jamesc/beamtalk
 
 Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to the BEAM virtual machine. The compiler is written in Rust and generates Core Erlang, which is then compiled to BEAM bytecode via erlc.
 
-**Key principle:** Beamtalk is an **interactive-first** language. The live environment and hot code reloading are core to the design, not afterthoughts. See [docs/beamtalk-principles.md](docs/beamtalk-principles.md) for full design philosophy and [docs/beamtalk-language-features.md](docs/beamtalk-language-features.md) for planned syntax and features.
+**Key principle:** Beamtalk is an **interactive-first** language. The live environment and hot code reloading are core to the design, not afterthoughts.
+
+**Important:** While heavily inspired by Smalltalk, Beamtalk makes pragmatic departures from Smalltalk syntax and semantics to work well with BEAM and modern development practices. We're "Smalltalk-like," not Smalltalk-compatible. See [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md) for specific differences, [docs/beamtalk-principles.md](docs/beamtalk-principles.md) for design philosophy, and [docs/beamtalk-language-features.md](docs/beamtalk-language-features.md) for full language specification.
 
 ---
 
