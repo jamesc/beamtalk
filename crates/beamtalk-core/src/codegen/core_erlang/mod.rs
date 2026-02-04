@@ -360,13 +360,42 @@ impl CoreErlangGenerator {
     }
 
     /// Returns the current state variable name for state threading.
+    ///
+    /// When inside a loop body (in_loop_body = true), returns "StateAcc" or "StateAccN".
+    /// Otherwise returns "State" or "StateN".
     pub(super) fn current_state_var(&self) -> String {
-        self.state_threading.current_var()
+        if self.in_loop_body {
+            // Inside loop body - use StateAcc nomenclature
+            if self.state_threading.version() == 0 {
+                "StateAcc".to_string()
+            } else {
+                format!("StateAcc{}", self.state_threading.version())
+            }
+        } else {
+            // Normal context - use State nomenclature
+            self.state_threading.current_var()
+        }
     }
 
     /// Increments the state version and returns the new state variable name.
+    ///
+    /// When inside a loop body (in_loop_body = true), returns "StateAcc1", "StateAcc2", etc.
+    /// Otherwise returns "State1", "State2", etc.
     pub(super) fn next_state_var(&mut self) -> String {
-        self.state_threading.next_var()
+        let next_var = self.state_threading.next_var();
+        if self.in_loop_body {
+            // Replace "State" prefix with "StateAcc"
+            if next_var == "State1" {
+                // First increment in loop body
+                "StateAcc1".to_string()
+            } else if next_var.starts_with("State") {
+                next_var.replace("State", "StateAcc")
+            } else {
+                next_var
+            }
+        } else {
+            next_var
+        }
     }
 
     /// Resets the state version to 0.

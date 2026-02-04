@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Counter actor with methods that use field mutations in control flow
+// Tests BT-98: Field assignments in nested blocks and expressions
+
+Actor subclass: FieldMutationCounter
+  state: value = 0
+
+  getValue => ^self.value
+
+  setValue: v => self.value := v
+
+  // whileTrue: with field mutation
+  incrementWhileTrue: limit =>
+    [self.value < limit] whileTrue: [
+      self.value := self.value + 1
+    ].
+    ^self.value
+
+  // whileFalse: with field mutation
+  decrementWhileFalse =>
+    [self.value == 0] whileFalse: [
+      self.value := self.value - 1
+    ].
+    ^self.value
+
+  // timesRepeat: with field mutation
+  incrementTimesRepeat: n =>
+    n timesRepeat: [
+      self.value := self.value + 1
+    ].
+    ^self.value
+
+  // to:do: with field mutation
+  incrementToDo: start to: end =>
+    start to: end do: [:i |
+      self.value := self.value + 1
+    ].
+    ^self.value
+
+  // do: with field mutation
+  sumArray: items =>
+    items do: [:item |
+      self.value := self.value + item
+    ].
+    ^self.value
+
+  // to:by:do: with field mutation
+  sumRangeBy: start to: end by: step =>
+    start to: end by: step do: [:n |
+      self.value := self.value + n
+    ].
+    ^self.value

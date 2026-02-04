@@ -35,8 +35,9 @@ pub fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
         "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
         | "reject:" => arg_index == 0,
 
-        // Range iteration or fold/reduce - block at index 1
+        // Range iteration or fold/reduce - block at index 1 or 2
         "to:do:" | "inject:into:" => arg_index == 1,
+        "to:by:do:" => arg_index == 2,
 
         // Conditionals - all arguments are control flow blocks
         "ifTrue:" | "ifFalse:" | "ifNil:" | "ifNotNil:" | "ifTrue:ifFalse:" | "ifNil:ifNotNil:" => {
