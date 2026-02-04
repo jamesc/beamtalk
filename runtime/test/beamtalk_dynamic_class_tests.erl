@@ -29,7 +29,24 @@ setup() ->
     end,
     
     %% Wait for Actor class to be registered (may take a moment)
-    wait_for_actor_class(100).
+    wait_for_actor_class(100),
+    
+    %% Return list of dynamically created classes for cleanup
+    [].
+
+teardown(DynamicClasses) ->
+    %% Stop and unregister any dynamically created classes
+    lists:foreach(fun(ClassName) ->
+        case beamtalk_class:whereis_class(ClassName) of
+            undefined ->
+                ok;
+            Pid when is_pid(Pid) ->
+                %% Unlink to avoid crash propagation
+                unlink(Pid),
+                %% Stop the class process
+                gen_server:stop(Pid, normal, 5000)
+        end
+    end, DynamicClasses).
 
 wait_for_actor_class(0) ->
     error(actor_class_not_registered_after_timeout);
@@ -47,39 +64,44 @@ wait_for_actor_class(N) ->
 %%====================================================================
 
 %% Test creating a dynamic class and verifying registration
-create_dynamic_class_test() ->
-    setup(),
-    
-    %% Create a simple dynamic class with one method
-    Result = beamtalk_class:create_subclass('Actor', 'TestDynamicClass', #{
-        instance_variables => [count],
-        instance_methods => #{
-            increment => fun(_Self, [], State) ->
-                Count = maps:get(count, State, 0),
-                NewCount = Count + 1,
-                {reply, NewCount, maps:put(count, NewCount, State)}
-            end
-        }
-    }),
-    
-    ?assertMatch({ok, _Pid}, Result),
-    {ok, ClassPid} = Result,
-    
-    %% Verify class is registered
-    ?assertEqual(ClassPid, beamtalk_class:whereis_class('TestDynamicClass')),
-    
-    %% Verify class metadata
-    ?assertEqual('TestDynamicClass', beamtalk_class:class_name(ClassPid)),
-    ?assertEqual('Actor', beamtalk_class:superclass(ClassPid)),
-    ?assertEqual([count], beamtalk_class:instance_variables(ClassPid)),
-    ?assertEqual([increment], beamtalk_class:methods(ClassPid)).
+create_dynamic_class_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+             %% Create a simple dynamic class with one method
+             Result = beamtalk_class:create_subclass('Actor', 'TestDynamicClass', #{
+                 instance_variables => [count],
+                 instance_methods => #{
+                     increment => fun(_Self, [], State) ->
+                         Count = maps:get(count, State, 0),
+                         NewCount = Count + 1,
+                         {reply, NewCount, maps:put(count, NewCount, State)}
+                     end
+                 }
+             }),
+             
+             ?assertMatch({ok, _Pid}, Result),
+             {ok, ClassPid} = Result,
+             
+             %% Verify class is registered
+             ?assertEqual(ClassPid, beamtalk_class:whereis_class('TestDynamicClass')),
+             
+             %% Verify class metadata
+             ?assertEqual('TestDynamicClass', beamtalk_class:class_name(ClassPid)),
+             ?assertEqual('Actor', beamtalk_class:superclass(ClassPid)),
+             ?assertEqual([count], beamtalk_class:instance_variables(ClassPid)),
+             ?assertEqual([increment], beamtalk_class:methods(ClassPid))
+         end)]
+     end}.
 
 %% Test spawning a dynamic object instance and calling methods
 spawn_dynamic_instance_test() ->
     setup(),
     
-    %% Create dynamic class
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'Counter', #{
+    %% Create dynamic class with unique name
+    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'SpawnTestCounter', #{
         instance_variables => [value],
         instance_methods => #{
             increment => fun(_Self, [], State) ->
@@ -128,7 +150,7 @@ method_not_found_test() ->
     
     %% Call non-existent method
     Result = gen_server:call(InstancePid, {bar, []}),
-    ?assertMatch({error, {method_not_found, bar}}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = bar}}, Result).
 
 %% Test field initialization
 field_initialization_test() ->
@@ -315,7 +337,7 @@ invalid_method_arity_test() ->
     Result = beamtalk_class:create_subclass('Actor', 'BadArity', #{
         instance_variables => [],
         instance_methods => #{
-            badMethod => fun(_State) -> {reply, ok, _State} end  % Arity 1, not 3
+            badMethod => fun(State) -> {reply, ok, State} end  % Arity 1, not 3
         }
     }),
     

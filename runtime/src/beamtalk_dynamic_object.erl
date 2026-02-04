@@ -66,7 +66,6 @@
 -record(state, {
     class_name :: atom(),
     class_pid :: pid(),
-    methods :: #{atom() => fun()},
     fields :: map()
 }).
 
@@ -92,13 +91,11 @@ start_link(Name, ClassName, InitState) ->
 init({ClassName, InitState}) ->
     %% Extract required fields from InitState
     ClassPid = maps:get('__class_pid__', InitState),
-    Methods = maps:get('__methods__', InitState),
     
-    %% Build internal state
+    %% Build internal state (methods stored in fields as '__methods__')
     State = #state{
         class_name = ClassName,
         class_pid = ClassPid,
-        methods = Methods,
         fields = InitState
     },
     {ok, State}.
@@ -168,23 +165,41 @@ dispatch(Selector, Args, Self, State) ->
             try
                 apply(MethodFun, [Self, Args, State])
             catch
-                error:Reason:Stacktrace ->
-                    {error, {method_error, Selector, Reason, Stacktrace}}
+                Class:Reason:_Stacktrace ->
+                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
+                    io:format(standard_error,
+                        "Error in method ~p: ~p:~p~n",
+                        [Selector, Class, Reason]),
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error}
             end;
         error ->
             %% Method not found - check for doesNotUnderstand
-            case maps:find(doesNotUnderstand, Methods) of
+            case maps:find('doesNotUnderstand:args:', Methods) of
                 {ok, DNUFun} ->
-                    %% Call doesNotUnderstand handler
+                    %% Call doesNotUnderstand handler with correct format: [Selector, Args]
                     try
-                        apply(DNUFun, [Self, [Selector | Args], State])
+                        apply(DNUFun, [Self, [Selector, Args], State])
                     catch
-                        error:Reason:Stacktrace ->
-                            {error, {dnu_error, Selector, Reason, Stacktrace}}
+                        Class:Reason:_Stacktrace ->
+                            %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
+                            io:format(standard_error,
+                                "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
+                                [Selector, Class, Reason]),
+                            ClassName = maps:get('__class__', State, unknown),
+                            Error0 = beamtalk_error:new(type_error, ClassName),
+                            Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
+                            {error, Error}
                     end;
                 error ->
-                    %% No doesNotUnderstand - return error
-                    {error, {method_not_found, Selector}}
+                    %% No doesNotUnderstand - method not found is an error
+                    ClassName = maps:get('__class__', State, unknown),
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                    {error, Error}
             end
     end.
 

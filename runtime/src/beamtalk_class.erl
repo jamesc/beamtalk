@@ -145,7 +145,7 @@ new(ClassPid) ->
     new(ClassPid, []).
 
 %% @doc Create a new instance with initialization arguments.
--spec new(pid(), list()) -> {ok, pid()} | {error, term()}.
+-spec new(pid(), list()) -> {ok, #beamtalk_object{}} | {error, term()}.
 new(ClassPid, Args) ->
     gen_server:call(ClassPid, {new, Args}).
 
@@ -291,9 +291,9 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                     case start_link(ClassName, ClassInfo) of
                         {ok, ClassPid} ->
                             {ok, ClassPid};
-                        {error, {already_started, Pid}} ->
-                            %% Class already exists
-                            {ok, Pid};
+                        {error, {already_started, _Pid}} ->
+                            %% Class already exists - return error for consistency
+                            {error, {class_already_exists, ClassName}};
                         Error ->
                             Error
                     end
@@ -376,7 +376,13 @@ handle_call({new, Args}, _From, #class_state{
             %% Compiled class - use module's spawn function
             case erlang:apply(Module, spawn, [Args]) of
                 {ok, Pid} ->
-                    {reply, {ok, Pid}, State};
+                    %% Wrap in beamtalk_object record for consistency
+                    Obj = #beamtalk_object{
+                        class = ClassName,
+                        class_mod = Module,
+                        pid = Pid
+                    },
+                    {reply, {ok, Obj}, State};
                 Error ->
                     {reply, Error, State}
             end
