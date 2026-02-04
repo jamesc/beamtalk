@@ -554,6 +554,65 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates the `has_method/1` function for runtime reflection.
+    ///
+    /// This function enables the `respondsTo:` reflection method to check
+    /// if an actor class implements a particular method. It returns `true`
+    /// if the method exists, `false` otherwise.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'has_method'/1 = fun (Selector) ->
+    ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
+    /// ```
+    pub(super) fn generate_has_method(&mut self, module: &Module) -> Result<()> {
+        writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        // Collect methods from expression-based definitions (legacy)
+        let mut methods: Vec<String> = module
+            .expressions
+            .iter()
+            .filter_map(|expr| {
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let (Expression::Identifier(id), Expression::Block(_)) =
+                        (target.as_ref(), value.as_ref())
+                    {
+                        return Some(id.name.to_string());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // Collect methods from class definitions
+        for class in &module.classes {
+            for method in &class.methods {
+                // Only include primary methods (matching method_table behavior)
+                if method.kind == MethodKind::Primary {
+                    methods.push(method.selector.name().to_string());
+                }
+            }
+        }
+
+        // Generate lists:member call with method list
+        write!(self.output, "call 'lists':'member'(Selector, [")?;
+        for (i, name) in methods.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "'{name}'")?;
+        }
+        writeln!(self.output, "])")?;
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
     /// Generates the `safe_dispatch/3` function with error isolation.
     ///
     /// Per BT-29 design doc (following LFE Flavors pattern), errors in method
