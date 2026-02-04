@@ -64,23 +64,18 @@ impl CoreErlangGenerator {
         //               State, List)
         //           in <continue with State1>
 
+        // Generate: let List = <receiver> in 
+        //           let Lambda = fun (Item, StateAcc) -> body in
+        //           let State{n} = call 'lists':'foldl'(Lambda, initial, List) in <continuation>
         write!(self.output, "let ")?;
         let list_var = self.fresh_temp_var("temp");
         write!(self.output, "{list_var} = ")?;
         self.generate_expression(receiver)?;
 
+        // Bind lambda to a variable (Core Erlang requires this for foldl)
         write!(self.output, " in let ")?;
-        let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(&Expression::Block(body.clone()))?;
-
-        // Use foldl to thread state through list iteration
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = call 'lists':'foldl'(")?;
-
-        // Generate lambda: fun (Item, StateAcc) -> ... end
-        write!(self.output, "fun (")?;
+        let lambda_var = self.fresh_temp_var("temp");
+        write!(self.output, "{lambda_var} = fun (")?;
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
         write!(self.output, "{item_var}, StateAcc) -> ")?;
@@ -88,10 +83,15 @@ impl CoreErlangGenerator {
         // Generate body with state threading
         self.generate_list_do_body_with_threading(body, &item_var)?;
 
-        // Close the lambda
-        write!(self.output, " end")?;
-
-        write!(self.output, ", {}, {list_var})", self.current_state_var())?;
+        // Call foldl with the lambda variable
+        write!(self.output, " in let ")?;
+        // Capture current state BEFORE incrementing for the foldl result
+        let initial_state = self.current_state_var();
+        let new_state = self.next_state_var();
+        write!(
+            self.output,
+            "{new_state} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var})"
+        )?;
 
         Ok(())
     }
@@ -278,23 +278,22 @@ impl CoreErlangGenerator {
         write!(self.output, "{init_var} = ")?;
         self.generate_expression(initial)?;
 
+        // Bind lambda to a variable (Core Erlang requires this for foldl)
         write!(self.output, " in let ")?;
-        let result_var = self.fresh_temp_var("temp");
-        write!(self.output, "{result_var} = call 'lists':'foldl'(")?;
-
-        // Generate lambda: fun (Item, {Acc, StateAcc}) -> ... end
-        write!(self.output, "fun (Item, {{Acc, StateAcc}}) -> ")?;
+        let lambda_var = self.fresh_temp_var("temp");
+        write!(self.output, "{lambda_var} = fun (Item, {{Acc, StateAcc}}) -> ")?;
 
         // Generate body with state threading
         self.generate_list_inject_body_with_threading(body)?;
 
-        // Close the lambda
-        write!(self.output, " end")?;
-
+        // Call foldl with the lambda variable
+        write!(self.output, " in let ")?;
+        // Capture current state BEFORE incrementing for the foldl result
+        let initial_state = self.current_state_var();
+        let result_var = self.fresh_temp_var("temp");
         write!(
             self.output,
-            ", {{{init_var}, {}}}, {list_var})",
-            self.current_state_var()
+            "{result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {list_var})"
         )?;
 
         // Unpack result
