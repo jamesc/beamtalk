@@ -59,8 +59,16 @@ children_are_permanent_test() ->
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     ?assertEqual([permanent, permanent, permanent], RestartTypes).
 
-%%% Child ordering tests - REMOVED
-%%% (Only one child now, so no ordering to test)
+%%% Child ordering tests
+%%% Order matters: bootstrap must start before stdlib (which registers classes),
+%%% and stdlib must complete before instances tracking starts.
+
+children_ordered_correctly_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
+    
+    %% Verify ordering: bootstrap -> stdlib -> instances
+    Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
+    ?assertEqual([beamtalk_bootstrap, beamtalk_stdlib, beamtalk_instances], Ids).
 
 %%% Child specifications tests
 

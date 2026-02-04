@@ -16,7 +16,7 @@
 %%% | UndefinedObject | Object | beamtalk_nil |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
-%%% | Beamtalk | Object | (inline) |
+%%% | Beamtalk | Object | beamtalk_stdlib |
 %%%
 %%% ## Usage
 %%%
@@ -29,6 +29,9 @@
 -module(beamtalk_stdlib).
 
 -export([start_link/0, init/0, init/1]).
+
+%% Beamtalk class dispatch - implements class methods for the Beamtalk global
+-export([dispatch/3, has_method/1]).
 
 %% @doc Start the stdlib initializer as a supervised process.
 %%
@@ -302,3 +305,47 @@ register_class(ClassName, ClassInfo) ->
             %% Class already registered (e.g., from bootstrap)
             {ok, ClassName}
     end.
+
+%%% ============================================================================
+%%% Beamtalk Class Method Dispatch
+%%% ============================================================================
+
+%% @doc Dispatch a class method on the Beamtalk global class.
+%%
+%% The Beamtalk class provides system reflection methods:
+%% - allClasses: Returns list of all registered class names
+%% - classNamed: Look up a class by name (returns class pid or nil)
+%% - globals: Returns global namespace (placeholder - returns empty map)
+%% - version: Returns Beamtalk version string
+-spec dispatch(atom(), list(), term()) -> term().
+dispatch(allClasses, [], _Receiver) ->
+    %% Return list of all registered class names
+    Pids = beamtalk_class:all_classes(),
+    [beamtalk_class:class_name(Pid) || Pid <- Pids];
+
+dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
+    %% Look up a class by name, return pid or nil
+    case beamtalk_class:whereis_class(ClassName) of
+        undefined -> nil;
+        Pid -> Pid
+    end;
+
+dispatch(globals, [], _Receiver) ->
+    %% Placeholder - global namespace not yet implemented
+    #{};
+
+dispatch(version, [], _Receiver) ->
+    %% Return Beamtalk version
+    <<"0.1.0">>;
+
+dispatch(Selector, Args, _Receiver) ->
+    %% Unknown method
+    error({does_not_understand, 'Beamtalk', Selector, length(Args)}).
+
+%% @doc Check if the Beamtalk class responds to the given selector.
+-spec has_method(atom()) -> boolean().
+has_method(allClasses) -> true;
+has_method('classNamed:') -> true;
+has_method(globals) -> true;
+has_method(version) -> true;
+has_method(_) -> false.
