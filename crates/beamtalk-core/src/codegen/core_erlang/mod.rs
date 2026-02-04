@@ -1751,6 +1751,60 @@ end
     }
 
     #[test]
+    fn test_generate_await_with_timeout() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: future await: 5000
+        let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
+        let selector = MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "await:".into(),
+            span: Span::new(9, 15),
+        }]);
+        let timeout = Expression::Literal(Literal::Integer(5000), Span::new(16, 20));
+
+        let result = generator.generate_message_send(&receiver, &selector, &[timeout]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Should call beamtalk_future:await/2 with timeout
+        assert!(
+            output.contains("beamtalk_future':'await'("),
+            "Should call beamtalk_future:await(). Got: {output}"
+        );
+        assert!(
+            output.contains("5000"),
+            "Should include timeout value. Got: {output}"
+        );
+        assert!(
+            !output.contains("gen_server':'cast'"),
+            "Should NOT use gen_server:cast for await. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_await_forever() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: future awaitForever
+        let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
+        let selector = MessageSelector::Unary("awaitForever".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Should call beamtalk_future:await_forever/1
+        assert!(
+            output.contains("beamtalk_future':'await_forever'("),
+            "Should call beamtalk_future:await_forever(). Got: {output}"
+        );
+        assert!(
+            !output.contains("gen_server':'cast'"),
+            "Should NOT use gen_server:cast for awaitForever. Got: {output}"
+        );
+    }
+
+    #[test]
     fn test_generate_binary_op_is_synchronous() {
         let mut generator = CoreErlangGenerator::new("test");
 
