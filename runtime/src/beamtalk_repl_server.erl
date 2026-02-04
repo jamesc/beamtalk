@@ -300,9 +300,6 @@ term_to_json(Value) when is_tuple(Value) ->
         {future_rejected, Reason} ->
             %% Future that was rejected - format the reason as error message
             iolist_to_binary([<<"#Future<rejected: ">>, format_rejection_reason(Reason), <<">">>]);
-        {unknown_message, Selector, ClassName} ->
-            %% Old-style doesNotUnderstand error (for backward compatibility)
-            iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
         _ ->
             %% Format generic tuple with marker
             #{<<"__tuple__">> => [term_to_json(E) || E <- tuple_to_list(Value)]}
@@ -316,8 +313,6 @@ term_to_json(Value) ->
 -spec format_rejection_reason(term()) -> iolist().
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
-format_rejection_reason({unknown_message, Selector, ClassName}) ->
-    iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
 format_rejection_reason(Reason) ->
     %% Fallback: format arbitrary rejection reasons as printable terms
     iolist_to_binary(io_lib:format("~p", [Reason])).
@@ -330,9 +325,6 @@ format_rejection_reason(Reason) ->
 format_error_message(#beamtalk_error{} = Error) ->
     %% Format structured beamtalk_error using the error helper
     iolist_to_binary(beamtalk_error:format(Error));
-format_error_message({unknown_message, Selector, ClassName}) ->
-    %% Old-style doesNotUnderstand error (for backward compatibility)
-    iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
 format_error_message(empty_expression) ->
     <<"Empty expression">>;
 format_error_message(timeout) ->

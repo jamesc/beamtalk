@@ -3,6 +3,7 @@
 
 -module(beamtalk_integer_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -46,7 +47,7 @@ division_by_zero_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Division by zero raises does_not_understand", fun() ->
             %% Division by zero should not match the guard and fall through to not_found
-            ?assertError({does_not_understand, 'Integer', '/', 1}, 
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Integer', selector = '/'}, 
                          beamtalk_integer:dispatch('/', [0], 42))
         end}
     ]}.
@@ -88,9 +89,9 @@ comparison_type_safety_test() ->
     ?assertEqual(false, beamtalk_integer:dispatch('=', ['atom'], 42)),
     
     %% Ordering comparisons with non-numbers should raise does_not_understand
-    ?assertError({does_not_understand, 'Integer', '<', 1},
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Integer', selector = '<'},
                  beamtalk_integer:dispatch('<', [<<"42">>], 42)),
-    ?assertError({does_not_understand, 'Integer', '>', 1},
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Integer', selector = '>'},
                  beamtalk_integer:dispatch('>', ['atom'], 42)).
 
 %%% ============================================================================
@@ -133,7 +134,7 @@ negated_test() ->
 does_not_understand_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Integer', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Integer', selector = 'unknownMethod'},
                          beamtalk_integer:dispatch('unknownMethod', [], 42))
         end}
     ]}.

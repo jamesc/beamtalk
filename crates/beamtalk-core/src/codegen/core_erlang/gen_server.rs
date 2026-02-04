@@ -742,7 +742,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "%% No DNU handler - return unknown_message error"
+            "%% No DNU handler - return #beamtalk_error{{}} record"
         )?;
         self.write_indent()?;
         writeln!(
@@ -752,8 +752,35 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "{{'error', {{'unknown_message', OtherSelector, ClassName}}, State}}"
+            "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in"
+        )?;
+        self.write_indent()?;
+        // Generate hint message as Core Erlang binary
+        let hint = "Check spelling or use 'respondsTo:' to verify method exists";
+        let mut hint_binary = String::new();
+        for (i, ch) in hint.chars().enumerate() {
+            if i > 0 {
+                hint_binary.push(',');
+            }
+            write!(
+                &mut hint_binary,
+                "#<{}>(8,1,'integer',['unsigned'|['big']])",
+                ch as u32
+            )?;
+        }
+        writeln!(self.output, "let HintMsg = #{{{hint_binary}}}# in",)?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'error', Error, State}}")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;

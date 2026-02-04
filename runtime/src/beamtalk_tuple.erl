@@ -108,7 +108,9 @@ builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X)
 builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
   when not is_list(ArgList) ->
     %% Type error: ArgList must be a list (consistent with actor behavior)
-    error({type_error, list, ArgList});
+    Error0 = beamtalk_error:new(type_error, 'Tuple'),
+    Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+    error(Error);
 
 
 %% Size
@@ -185,5 +187,8 @@ does_not_understand(Selector, Args, Value) ->
         {ok, Fun, _Owner} -> 
             Fun(Args, Value);
         not_found -> 
-            error({does_not_understand, 'Tuple', Selector, length(Args)})
+            Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+            error(Error)
     end.

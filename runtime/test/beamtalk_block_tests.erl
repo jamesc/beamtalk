@@ -3,6 +3,7 @@
 
 -module(beamtalk_block_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -87,15 +88,15 @@ as_string_test() ->
 value_arity_mismatch_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Calling value on 1-arg block raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Block', 'value', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Block', selector = 'value'},
                          beamtalk_block:dispatch('value', [], fun(X) -> X end))
         end},
         {"Calling value: on 0-arg block raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Block', 'value:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Block', selector = 'value:'},
                          beamtalk_block:dispatch('value:', [42], fun() -> ok end))
         end},
         {"Calling value:value: on 1-arg block raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Block', 'value:value:', 2},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Block', selector = 'value:value:'},
                          beamtalk_block:dispatch('value:value:', [1, 2], fun(X) -> X end))
         end}
     ]}.
@@ -137,7 +138,7 @@ extension_method_test_() ->
         end},
         
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Block', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Block', selector = 'unknownMethod'},
                          beamtalk_block:dispatch('unknownMethod', [], fun() -> ok end))
         end}
     ]}.

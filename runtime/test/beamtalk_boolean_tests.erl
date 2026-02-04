@@ -3,6 +3,7 @@
 
 -module(beamtalk_boolean_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -154,7 +155,7 @@ extension_method_test_() ->
         end},
         
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Boolean', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Boolean', selector = 'unknownMethod'},
                          beamtalk_boolean:dispatch('unknownMethod', [], true))
         end}
     ]}.
@@ -166,11 +167,11 @@ extension_method_test_() ->
 type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Non-function argument to ifTrue: raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Boolean', 'ifTrue:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Boolean', selector = 'ifTrue:'},
                          beamtalk_boolean:dispatch('ifTrue:', [42], true))
         end},
         {"Non-function argument to and: raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Boolean', 'and:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Boolean', selector = 'and:'},
                          beamtalk_boolean:dispatch('and:', [42], true))
         end}
     ]}.
