@@ -13,7 +13,8 @@ start(_StartType, _StartArgs) ->
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
     
-    %% Start the runtime supervisor tree (which starts beamtalk_bootstrap and pg)
+    %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
+    %% and beamtalk_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     beamtalk_runtime_sup:start_link().
 
 %% @private
