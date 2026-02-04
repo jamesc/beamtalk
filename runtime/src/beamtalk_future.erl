@@ -108,23 +108,9 @@ await(Future, Timeout) ->
         {future_rejected, Future, Reason} ->
             throw({future_rejected, Reason});
         {future_timeout, Future} ->
-            throw(#beamtalk_error{
-                kind = timeout,
-                class = 'Future',
-                selector = undefined,
-                message = <<"Await timed out">>,
-                hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
-                details = #{}
-            })
+            throw(make_timeout_error())
     after Timeout ->
-        throw(#beamtalk_error{
-            kind = timeout,
-            class = 'Future',
-            selector = undefined,
-            message = <<"Await timed out">>,
-            hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
-            details = #{}
-        })
+        throw(make_timeout_error())
     end.
 
 %% @doc Block the calling process until the future is resolved or rejected.
@@ -298,3 +284,15 @@ execute_callback(Callback, Value) ->
                     [Class, Reason])
         end
     end).
+
+%% @private
+%% Create a timeout error record with consistent message and hint
+make_timeout_error() ->
+    #beamtalk_error{
+        kind = timeout,
+        class = 'Future',
+        selector = undefined,
+        message = <<"Await timed out">>,
+        hint = <<"Use 'await: duration' for longer timeout, or 'awaitForever' for no timeout">>,
+        details = #{}
+    }.

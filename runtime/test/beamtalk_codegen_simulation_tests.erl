@@ -441,7 +441,11 @@ async_future_timeout_behavior_test() ->
     
     %% Await with short timeout should throw structured error
     ?assertThrow(
-        #beamtalk_error{kind = timeout, class = 'Future'},
+        #beamtalk_error{
+            kind = timeout,
+            class = 'Future',
+            message = <<"Await timed out">>
+        },
         beamtalk_future:await(Future, 100)
     ),
     

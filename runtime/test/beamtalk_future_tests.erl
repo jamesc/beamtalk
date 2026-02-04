@@ -244,7 +244,11 @@ await_with_timeout_expired_test() ->
     %% Don't resolve the future
     %% Await with a 50ms timeout (should timeout with structured error)
     ?assertThrow(
-        #beamtalk_error{kind = timeout, class = 'Future'},
+        #beamtalk_error{
+            kind = timeout,
+            class = 'Future',
+            message = <<"Await timed out">>
+        },
         beamtalk_future:await(Future, 50)
     ).
 
@@ -293,7 +297,7 @@ await_forever_test() ->
     receive
         {result, Value} -> ?assertEqual(late_value, Value)
     after 500 ->
-        ?assert(false)  % Test failed - should have received result
+        ?assert(false andalso "Test failed - should have received result")
     end.
 
 %%% Edge cases
