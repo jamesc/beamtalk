@@ -188,6 +188,8 @@ cargo clean  # Use `just clean` instead in devcontainer
 
 ### REPL Usage
 
+**New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
+
 ```text
 Beamtalk v0.1.0
 Type :help for available commands, :exit to quit.

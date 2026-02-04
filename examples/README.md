@@ -1,52 +1,76 @@
 # Beamtalk Examples
 
-This directory contains example Beamtalk programs demonstrating language features.
+This directory contains example Beamtalk programs to help you learn the language.
 
-## Using Examples in the REPL
+## Getting Started
 
-You can load these examples into the REPL using the `:load` command:
+**New to Beamtalk?** Start with the [REPL Tutorial](repl-tutorial.md)!
 
-```
+The tutorial walks you through:
+- Starting the REPL
+- Basic expressions and variables
+- Loading files
+- Working with actors
+- Using REPL commands
+
+## Examples
+
+### Simple Examples
+
+- **counter.bt** - Basic variable assignment and arithmetic
+  ```bash
+  beamtalk repl
+  > :load examples/counter.bt
+  > count
+  > count + 1
+  ```
+
+- **hello.bt** - Minimal example showing file loading
+  ```bash
+  beamtalk repl
+  > :load examples/hello.bt
+  > message
+  ```
+
+### Advanced Examples
+
+- **super_example.bt** - Inheritance and super keyword usage
+- **protoobject_proxy.bt** - Proxy pattern with message forwarding
+
+## Running Examples
+
+### In the REPL
+
+```bash
 $ beamtalk repl
-Beamtalk v0.1.0
-Type :help for available commands, :exit to quit.
-
-Connected to REPL backend.
-
-> :load examples/hello.bt
-Loaded
-> :reload
-Reloaded
+> :load examples/<filename>.bt
 ```
 
-## Available Examples
+### Compiling to BEAM
 
-### hello.bt
-Simple message assignment demonstrating basic expressions and string literals.
-
-```beamtalk
-message := "Hello from loaded file!"
+```bash
+$ beamtalk build examples/<filename>.bt
 ```
 
-### counter.bt
-Counter example with assignment and arithmetic.
+## Documentation
 
-```beamtalk
-count := 0
-count + 1
-```
+- **[REPL Tutorial](repl-tutorial.md)** - Interactive tutorial for beginners
+- **[Language Features](../docs/beamtalk-language-features.md)** - Complete syntax reference
+- **[Design Principles](../docs/beamtalk-principles.md)** - Philosophy and design goals
+- **[Architecture](../docs/beamtalk-architecture.md)** - Compiler and runtime overview
 
-## Future Examples
+## Contributing Examples
 
-When class definitions are added to the language, examples will include:
-- Actor-based classes (Counter, Calculator, etc.)
-- Message sending patterns
-- Inheritance and polymorphism
-- Collection operations
+When adding new examples:
 
-## Notes
+1. Include copyright header
+2. Add clear comments explaining what the code does
+3. Reference the example in this README
+4. Test that it loads and runs correctly in the REPL
+5. Keep examples focused on one concept
 
-- Examples currently generate actor-based gen_server modules
-- Class metadata will be extracted once class definitions are added to the AST
-- Loaded modules persist for the REPL session (unlike eval expressions)
-- Module names use the file basename directly (e.g., `hello.bt` → `hello`)
+## Getting Help
+
+- Type `:help` in the REPL for command reference
+- See main `README.md` for installation and setup
+- Report issues at: https://github.com/jamesc/beamtalk/issues
