@@ -280,7 +280,7 @@ Skip `erlc` entirely and emit `.beam` files directly from Rust.
 
    Reimplementing these would take years. Skipping them would produce slower code.
 
-4. **No ecosystem precedent**: Every BEAM language (Elixir, Gleam, LFE, Clojerl, Erlog) uses `erlc` or Erlang's compiler module. None generate BEAM directly. This is a strong signal.
+4. **No ecosystem precedent**: Every BEAM language (Elixir, Gleam, LFE, Clojerl, Alpaca, Efene) uses `erlc` or Erlang's compiler module. None generate BEAM directly. This is a strong signal.
 
 5. **Debugging nightmare**: BEAM bytecode issues are much harder to debug than Core Erlang syntax errors. `erlc` provides excellent error messages.
 
