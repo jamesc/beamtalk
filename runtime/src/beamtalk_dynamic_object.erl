@@ -109,6 +109,10 @@ handle_call({Selector, Args}, _From, State) ->
         {reply, Result, NewFields} ->
             NewState = State#state{fields = NewFields},
             {reply, Result, NewState};
+        {noreply, NewFields} ->
+            %% Method doesn't return a value in sync context - return nil
+            NewState = State#state{fields = NewFields},
+            {reply, nil, NewState};
         {error, Reason} ->
             {reply, {error, Reason}, State}
     end;

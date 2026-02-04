@@ -272,27 +272,34 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
             InstanceVars = maps:get(instance_variables, ClassSpec, []),
             InstanceMethods = maps:get(instance_methods, ClassSpec, #{}),
             
-            %% Build ClassInfo compatible with beamtalk_class
-            ClassInfo = #{
-                name => ClassName,
-                module => beamtalk_dynamic_object,  % All dynamic classes use this behavior
-                superclass => SuperclassName,
-                instance_methods => convert_methods_to_info(InstanceMethods),
-                instance_variables => InstanceVars,
-                class_methods => #{},
-                %% Store the actual closures in a custom field
-                dynamic_methods => InstanceMethods
-            },
-            
-            %% Register as a class process
-            case start_link(ClassName, ClassInfo) of
-                {ok, ClassPid} ->
-                    {ok, ClassPid};
-                {error, {already_started, Pid}} ->
-                    %% Class already exists
-                    {ok, Pid};
-                Error ->
-                    Error
+            %% Validate and convert methods
+            try convert_methods_to_info(InstanceMethods) of
+                MethodInfo ->
+                    %% Build ClassInfo compatible with beamtalk_class
+                    ClassInfo = #{
+                        name => ClassName,
+                        module => beamtalk_dynamic_object,  % All dynamic classes use this behavior
+                        superclass => SuperclassName,
+                        instance_methods => MethodInfo,
+                        instance_variables => InstanceVars,
+                        class_methods => #{},
+                        %% Store the actual closures in a custom field
+                        dynamic_methods => InstanceMethods
+                    },
+                    
+                    %% Register as a class process
+                    case start_link(ClassName, ClassInfo) of
+                        {ok, ClassPid} ->
+                            {ok, ClassPid};
+                        {error, {already_started, Pid}} ->
+                            %% Class already exists
+                            {ok, Pid};
+                        Error ->
+                            Error
+                    end
+            catch
+                error:ErrorReason ->
+                    {error, ErrorReason}
             end
     end.
 
@@ -480,9 +487,14 @@ notify_instances(_ClassName, _NewMethods) ->
 %% This allows dynamic classes to register with the same structure as compiled classes.
 -spec convert_methods_to_info(#{selector() => fun()}) -> #{selector() => method_info()}.
 convert_methods_to_info(Methods) ->
-    maps:map(fun(_Selector, Fun) ->
-        %% Extract arity from function (dynamic methods are arity 3: Self, Args, State)
+    maps:map(fun(Selector, Fun) ->
+        %% Extract arity from function (dynamic methods must be arity 3: Self, Args, State)
         {arity, Arity} = erlang:fun_info(Fun, arity),
+        %% Validate that method has correct arity
+        case Arity of
+            3 -> ok;
+            _ -> error({invalid_method_arity, Selector, Arity, expected_3})
+        end,
         #{
             arity => Arity,
             block => Fun

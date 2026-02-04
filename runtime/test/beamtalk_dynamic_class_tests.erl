@@ -306,3 +306,18 @@ class_introspection_test() ->
     ?assert(lists:member(foo, Methods)),
     ?assert(lists:member(baz, Methods)),
     ?assertEqual(2, length(Methods)).
+
+%% Test invalid method arity rejection
+invalid_method_arity_test() ->
+    setup(),
+    
+    %% Try to create class with wrong arity method (should fail)
+    Result = beamtalk_class:create_subclass('Actor', 'BadArity', #{
+        instance_variables => [],
+        instance_methods => #{
+            badMethod => fun(_State) -> {reply, ok, _State} end  % Arity 1, not 3
+        }
+    }),
+    
+    %% Should fail with arity error
+    ?assertMatch({error, {invalid_method_arity, badMethod, 1, expected_3}}, Result).
