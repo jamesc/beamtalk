@@ -110,15 +110,14 @@ format_response_tuple_test() ->
 
 format_response_future_rejected_test() ->
     %% Regression test: ensure {future_rejected, Reason} can be formatted without crashing
-    %% (even though these are now returned as errors, not results, in normal REPL flow)
-    %% This test guards against crashes when term_to_json tries to embed maps in iolists
-    Error = {unknown_message, increment, 'Counter'},
+    %% After BT-240, actors return #beamtalk_error{} records instead of tuples
+    Error0 = beamtalk_error:new(does_not_understand, 'Counter'),
+    Error = beamtalk_error:with_selector(Error0, increment),
     Response = beamtalk_repl_server:format_response({future_rejected, Error}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     %% Should be formatted as #Future<rejected: ...> with user-friendly message
     ?assert(binary:match(Value, <<"#Future<rejected: ">>) =/= nomatch),
-    %% The unknown_message is formatted as "ClassName does not understand 'Selector'"
     ?assert(binary:match(Value, <<"Counter">>) =/= nomatch),
     ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
     ?assert(binary:match(Value, <<"increment">>) =/= nomatch).
