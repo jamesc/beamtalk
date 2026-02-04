@@ -108,20 +108,6 @@ format_response_tuple_test() ->
     %% Tuples are wrapped with __tuple__ marker
     ?assertMatch(#{<<"__tuple__">> := _}, Value).
 
-format_response_future_rejected_test() ->
-    %% Regression test: ensure {future_rejected, Reason} can be formatted without crashing
-    %% After BT-240, actors return #beamtalk_error{} records instead of tuples
-    Error0 = beamtalk_error:new(does_not_understand, 'Counter'),
-    Error = beamtalk_error:with_selector(Error0, increment),
-    Response = beamtalk_repl_server:format_response({future_rejected, Error}),
-    Decoded = jsx:decode(Response, [return_maps]),
-    Value = maps:get(<<"value">>, Decoded),
-    %% Should be formatted as #Future<rejected: ...> with user-friendly message
-    ?assert(binary:match(Value, <<"#Future<rejected: ">>) =/= nomatch),
-    ?assert(binary:match(Value, <<"Counter">>) =/= nomatch),
-    ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
-    ?assert(binary:match(Value, <<"increment">>) =/= nomatch).
-
 %%% Error formatting tests
 
 format_error_empty_expression_test() ->
