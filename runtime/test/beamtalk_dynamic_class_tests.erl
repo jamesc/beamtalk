@@ -243,3 +243,66 @@ async_message_test() ->
     %% Await result
     Result = beamtalk_future:await(FuturePid),
     ?assertEqual(10, Result).
+
+%% Test REPL-style usage (documenting the API for interactive use)
+repl_style_usage_test() ->
+    setup(),
+    
+    %% This test demonstrates how to use dynamic classes from the REPL
+    %% Users would type these expressions interactively
+    
+    %% Step 1: Create a dynamic class (use unique name to avoid collisions)
+    ClassPid = element(2, beamtalk_class:create_subclass('Actor', 'REPLCounter', #{
+        instance_variables => [count],
+        instance_methods => #{
+            increment => fun(_Self, [], State) ->
+                Count = maps:get(count, State, 0),
+                {reply, Count + 1, maps:put(count, Count + 1, State)}
+            end,
+            getValue => fun(_Self, [], State) ->
+                Count = maps:get(count, State, 0),
+                {reply, Count, State}
+            end
+        }
+    })),
+    
+    %% Step 2: Spawn an instance
+    CounterObj = element(2, beamtalk_class:new(ClassPid, [#{count => 0}])),
+    CounterPid = CounterObj#beamtalk_object.pid,
+    
+    %% Verify class was registered correctly
+    ?assertEqual([getValue, increment], lists:sort(beamtalk_class:methods(ClassPid))),
+    
+    %% Step 3: Send messages to the instance
+    ?assertEqual(0, gen_server:call(CounterPid, {getValue, []})),
+    ?assertEqual(1, gen_server:call(CounterPid, {increment, []})),
+    ?assertEqual(1, gen_server:call(CounterPid, {getValue, []})),
+    ?assertEqual(2, gen_server:call(CounterPid, {increment, []})),
+    ?assertEqual(2, gen_server:call(CounterPid, {getValue, []})).
+    
+%% Test dynamic class lookup and introspection
+class_introspection_test() ->
+    setup(),
+    
+    %% Create a dynamic class
+    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'TestClass', #{
+        instance_variables => [x, y, z],
+        instance_methods => #{
+            foo => fun(_Self, [], State) -> {reply, bar, State} end,
+            baz => fun(_Self, [N], State) -> {reply, N * 2, State} end
+        }
+    }),
+    
+    %% Test class lookup
+    ?assertEqual(ClassPid, beamtalk_class:whereis_class('TestClass')),
+    
+    %% Test class introspection
+    ?assertEqual('TestClass', beamtalk_class:class_name(ClassPid)),
+    ?assertEqual('Actor', beamtalk_class:superclass(ClassPid)),
+    ?assertEqual([x, y, z], beamtalk_class:instance_variables(ClassPid)),
+    
+    %% Test method enumeration (order may vary)
+    Methods = beamtalk_class:methods(ClassPid),
+    ?assert(lists:member(foo, Methods)),
+    ?assert(lists:member(baz, Methods)),
+    ?assertEqual(2, length(Methods)).
