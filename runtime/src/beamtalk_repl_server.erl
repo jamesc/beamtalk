@@ -85,7 +85,8 @@ parse_request(Data) when is_binary(Data) ->
             {ok, _Other} ->
                 {error, {invalid_request, unknown_type}};
             {error, _Reason} ->
-                %% Not JSON, treat as raw expression for backwards compatibility
+                %% Not JSON, treat as raw expression for robustness
+                %% Supports manual testing (e.g., netcat) and third-party tools
                 case Trimmed of
                     <<>> -> {error, empty_expression};
                     _ -> {eval, binary_to_list(Trimmed)}
