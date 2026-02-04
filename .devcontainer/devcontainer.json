@@ -21,6 +21,7 @@
         "usernamehw.errorlens",
         "erlang-ls.erlang-ls",
         "github.copilot",
+        "github.copilot-chat",
         "github.vscode-github-actions",
         "github.vscode-pull-request-github",
         "linear.linear",
