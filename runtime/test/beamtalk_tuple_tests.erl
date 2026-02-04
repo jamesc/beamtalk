@@ -3,6 +3,7 @@
 
 -module(beamtalk_tuple_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -47,11 +48,11 @@ at_test() ->
 at_out_of_bounds_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Out of bounds access raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Tuple', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
                          beamtalk_tuple:dispatch('at:', [0], {a, b})),
-            ?assertError({does_not_understand, 'Tuple', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
                          beamtalk_tuple:dispatch('at:', [3], {a, b})),
-            ?assertError({does_not_understand, 'Tuple', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
                          beamtalk_tuple:dispatch('at:', [-1], {a, b}))
         end}
     ]}.
@@ -59,7 +60,7 @@ at_out_of_bounds_test_() ->
 at_empty_tuple_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Empty tuple access raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Tuple', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
                          beamtalk_tuple:dispatch('at:', [1], {}))
         end}
     ]}.
@@ -102,7 +103,7 @@ unwrap_error_test() ->
 unwrap_invalid_pattern_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Unwrap on non-result tuple raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Tuple', 'unwrap', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
                          beamtalk_tuple:dispatch('unwrap', [], {a, b}))
         end}
     ]}.
@@ -187,7 +188,7 @@ extension_method_test_() ->
         end},
         
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Tuple', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unknownMethod'},
                          beamtalk_tuple:dispatch('unknownMethod', [], {a, b}))
         end}
     ]}.
@@ -199,7 +200,7 @@ extension_method_test_() ->
 type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Non-function argument to unwrapOrElse: raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'Tuple', 'unwrapOrElse:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'},
                          beamtalk_tuple:dispatch('unwrapOrElse:', [42], {error, reason}))
         end}
     ]}.

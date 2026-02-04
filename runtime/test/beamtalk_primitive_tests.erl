@@ -390,5 +390,5 @@ perform_withArgs_invalid_args_type_on_primitive_test() ->
     %% Test perform:withArgs: with non-list ArgList on primitive
     %% Should raise type_error, not does_not_understand
     %% This ensures consistency with actor behavior
-    ?assertError({type_error, list, 42}, 
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Integer', selector = 'perform:withArgs:'}, 
                  beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).

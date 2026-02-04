@@ -3,6 +3,7 @@
 
 -module(beamtalk_nil_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -119,7 +120,7 @@ extension_method_test_() ->
         end},
         
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'UndefinedObject', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'UndefinedObject', selector = 'unknownMethod'},
                          beamtalk_nil:dispatch('unknownMethod', [], nil))
         end}
     ]}.
@@ -131,11 +132,11 @@ extension_method_test_() ->
 type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Non-function argument to ifNil: raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'UndefinedObject', 'ifNil:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'UndefinedObject', selector = 'ifNil:'},
                          beamtalk_nil:dispatch('ifNil:', [42], nil))
         end},
         {"Non-function argument to ifNil:ifNotNil: raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'UndefinedObject', 'ifNil:ifNotNil:', 2},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'UndefinedObject', selector = 'ifNil:ifNotNil:'},
                          beamtalk_nil:dispatch('ifNil:ifNotNil:', [42, fun() -> ok end], nil))
         end}
     ]}.

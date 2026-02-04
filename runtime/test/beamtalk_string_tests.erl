@@ -3,6 +3,7 @@
 
 -module(beamtalk_string_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Cleanup
@@ -104,9 +105,9 @@ concatenation_keyword_test() ->
 concatenation_type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Concatenation with non-binary should raise does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', '++', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = '++'},
                          beamtalk_string:dispatch('++', [42], <<"hello">>)),
-            ?assertError({does_not_understand, 'String', 'concat:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'concat:'},
                          beamtalk_string:dispatch('concat:', ['atom'], <<"hello">>))
         end}
     ]}.
@@ -133,11 +134,11 @@ at_utf8_test() ->
 at_out_of_bounds_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Out of bounds access should raise does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'at:'},
                          beamtalk_string:dispatch('at:', [0], <<"hello">>)),
-            ?assertError({does_not_understand, 'String', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'at:'},
                          beamtalk_string:dispatch('at:', [6], <<"hello">>)),
-            ?assertError({does_not_understand, 'String', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'at:'},
                          beamtalk_string:dispatch('at:', [-1], <<"hello">>))
         end}
     ]}.
@@ -145,7 +146,7 @@ at_out_of_bounds_test_() ->
 at_empty_string_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Empty string access raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'at:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'at:'},
                          beamtalk_string:dispatch('at:', [1], <<>>))
         end}
     ]}.
@@ -170,7 +171,7 @@ includes_empty_string_test() ->
 includes_type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"includes with non-binary should raise does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'includes:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'includes:'},
                          beamtalk_string:dispatch('includes:', [42], <<"hello">>))
         end}
     ]}.
@@ -241,7 +242,7 @@ replace_utf8_test() ->
 replace_empty_pattern_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Empty pattern raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'replace:with:', 2},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'replace:with:'},
                          beamtalk_string:dispatch('replace:with:', [<<>>, <<"x">>], <<"hello">>))
         end}
     ]}.
@@ -271,9 +272,9 @@ substring_utf8_test() ->
 substring_invalid_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Invalid range raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'substring:to:', 2},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'substring:to:'},
                          beamtalk_string:dispatch('substring:to:', [0, 3], <<"hello">>)),
-            ?assertError({does_not_understand, 'String', 'substring:to:', 2},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'substring:to:'},
                          beamtalk_string:dispatch('substring:to:', [10, 20], <<"hello">>))
         end}
     ]}.
@@ -299,7 +300,7 @@ split_no_match_test() ->
 split_empty_delimiter_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Empty delimiter raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'split:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'split:'},
                          beamtalk_string:dispatch('split:', [<<>>], <<"abc">>))
         end}
     ]}.
@@ -307,7 +308,7 @@ split_empty_delimiter_test_() ->
 split_type_safety_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"split with non-binary should raise does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'split:', 1},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'split:'},
                          beamtalk_string:dispatch('split:', [42], <<"hello">>))
         end}
     ]}.
@@ -325,13 +326,13 @@ as_integer_test() ->
 as_integer_invalid_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
         {"Invalid integer should raise does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'asInteger', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'asInteger'},
                          beamtalk_string:dispatch('asInteger', [], <<"hello">>)),
-            ?assertError({does_not_understand, 'String', 'asInteger', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'asInteger'},
                          beamtalk_string:dispatch('asInteger', [], <<"3.14">>)),
-            ?assertError({does_not_understand, 'String', 'asInteger', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'asInteger'},
                          beamtalk_string:dispatch('asInteger', [], <<>>)),
-            ?assertError({does_not_understand, 'String', 'asInteger', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'asInteger'},
                          beamtalk_string:dispatch('asInteger', [], <<"  42  ">>))
         end}
     ]}.
@@ -380,7 +381,7 @@ extension_method_test_() ->
         end},
         
         {"Unknown method raises does_not_understand", fun() ->
-            ?assertError({does_not_understand, 'String', 'unknownMethod', 0},
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'String', selector = 'unknownMethod'},
                          beamtalk_string:dispatch('unknownMethod', [], <<"hello">>))
         end}
     ]}.

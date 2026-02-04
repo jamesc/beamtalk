@@ -100,7 +100,9 @@ builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X)
 builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
   when not is_list(ArgList) ->
     %% Type error: ArgList must be a list (consistent with actor behavior)
-    error({type_error, list, ArgList});
+    Error0 = beamtalk_error:new(type_error, 'UndefinedObject'),
+    Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+    error(Error);
 
 
 %% Nil checking
@@ -149,5 +151,8 @@ does_not_understand(Selector, Args, nil) ->
         {ok, Fun, _Owner} -> 
             Fun(Args, nil);
         not_found -> 
-            error({does_not_understand, 'UndefinedObject', Selector, length(Args)})
+            Error0 = beamtalk_error:new(does_not_understand, 'UndefinedObject'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+            error(Error)
     end.
