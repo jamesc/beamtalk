@@ -44,7 +44,7 @@ ctrlc = "3"
 libc = "0.2"
 
 # Line editing
-rustyline = { version = "15", features = ["derive"] }
+rustyline = { version = "17", features = ["derive"] }
 
 # Testing
 insta = { version = "1", features = ["yaml"] }
