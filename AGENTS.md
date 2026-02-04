@@ -628,20 +628,25 @@ For more details, see [About Agent Skills](https://docs.github.com/en/copilot/co
 ## Repository Structure
 
 ```
-beamtalk/
-├── crates/
-│   ├── beamtalk-core/     # Lexer, parser, AST, type checking, codegen
-│   ├── beamtalk-cli/      # Command-line interface
-│   └── beamtalk-lsp/      # Language server (future)
-├── lib/                    # Beamtalk standard library (.bt files)
-├── runtime/
-│   ├── src/               # Erlang runtime modules
-│   └── test/              # Erlang unit tests (EUnit)
-├── test-package-compiler/  # Snapshot test harness
-├── tests/
-│   └── e2e/cases/         # Real E2E tests (.bt source files)
-├── docs/                   # Documentation
-└── examples/               # Example beamtalk programs
+runtime/
+├── src/                   # Runtime source
+├── test/                  # Runtime unit tests (*.erl)
+└── test_fixtures/         # Fixtures for runtime tests (BT-239)
+    ├── logging_counter.bt
+    ├── compile.sh         # Auto-compiles fixtures via rebar3 pre-hook
+    ├── build/
+    └── README.md
+
+tests/
+└── e2e/
+    ├── cases/             # E2E test cases (*.bt)
+    └── fixtures/          # E2E fixtures
+        └── counter.bt     # CANONICAL counter implementation (BT-239)
+
+examples/
+├── counter.bt             # Simple working example for REPL
+├── hello.bt              # Minimal example
+└── repl-tutorial.md      # Beginner tutorial (BT-239)
 ```
 
 ### Test Organization - CRITICAL DISTINCTION
@@ -657,10 +662,11 @@ beamtalk/
 
 #### 2. Codegen Simulation Tests  
 **Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
-- Tests using **real compiled Beamtalk code** from `tests/fixtures/counter.bt`
+- Tests using **real compiled Beamtalk code** from `tests/e2e/fixtures/counter.bt` (unified fixture - BT-239)
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
+- Fixtures stored in `runtime/test_fixtures/` and compiled by `test_fixtures/compile.sh`
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests
@@ -668,9 +674,23 @@ beamtalk/
 - Actual Beamtalk source files (`.bt` extension)
 - Compiled by the real compiler (lexer → parser → codegen → erlc)
 - Executed on BEAM and validated against expected results
+- E2E fixtures in `tests/e2e/fixtures/` (including canonical `counter.bt`)
 - **These are the TRUE end-to-end tests**
 
 **When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/test/`.**
+
+#### Test Fixture Organization (BT-239)
+
+**Runtime fixtures:** `runtime/test_fixtures/`
+- Colocated with runtime tests for better locality
+- Compiled by `test_fixtures/compile.sh` (rebar3 pre-hook)
+- Currently: `logging_counter.bt` (super keyword tests)
+- Note: `counter.bt` consolidated to E2E fixture
+
+**E2E fixtures:** `tests/e2e/fixtures/`
+- Used by E2E test cases
+- `counter.bt` is the canonical Counter implementation
+- Also used by runtime tests (unified fixture)
 
 ---
 
