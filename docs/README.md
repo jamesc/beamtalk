@@ -2,6 +2,8 @@
 
 Welcome to the Beamtalk documentation! This guide will help you navigate the design documents and understand how Beamtalk brings Smalltalk's live programming philosophy to the BEAM virtual machine.
 
+**Important:** Beamtalk is Smalltalk-**inspired**, not Smalltalk-**compatible**. We preserve Smalltalk's core ideas (message passing, live environment, uniform syntax) while making pragmatic changes for BEAM and modern development. See [Syntax Rationale](beamtalk-syntax-rationale.md) for details.
+
 ---
 
 ## Quick Start
@@ -137,7 +139,7 @@ See [AGENTS.md](../AGENTS.md) in the repository root for:
 
 Beamtalk is a Smalltalk/Newspeak-inspired language targeting the BEAM (Erlang VM). It combines:
 
-- **Smalltalk's simplicity** — Everything is a message send
+- **Smalltalk's simplicity** — Everything is a message send (with pragmatic BEAM adaptations)
 - **BEAM's reliability** — Lightweight processes, fault tolerance, hot code reload
 - **Live development** — No compile-deploy-restart cycle
 
