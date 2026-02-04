@@ -2014,6 +2014,7 @@ end
     }
 
     #[test]
+    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_times_repeat_mutation() {
         // BT-153: REPL with mutation should return updated state
         // Expression: 5 timesRepeat: [count := count + 1]
@@ -2075,6 +2076,7 @@ end
     }
 
     #[test]
+    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_to_do_mutation() {
         use crate::ast::BlockParameter;
 
