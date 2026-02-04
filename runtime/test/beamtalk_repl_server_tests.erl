@@ -7,6 +7,7 @@
 
 -module(beamtalk_repl_server_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%====================================================================
 %% Tests
@@ -376,39 +377,22 @@ format_error_beamtalk_error_with_hint_test() ->
     ?assert(binary:match(Message, <<"Hint:">>) =/= nomatch),
     ?assert(binary:match(Message, <<"Check spelling">>) =/= nomatch).
 
-%% Test format_error_message with {unknown_message, Selector, ClassName} tuple
-format_error_unknown_message_test() ->
-    Response = beamtalk_repl_server:format_error({unknown_message, super, 'Counter'}),
-    Decoded = jsx:decode(Response, [return_maps]),
-    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
-    Message = maps:get(<<"message">>, Decoded),
-    ?assert(binary:match(Message, <<"Counter">>) =/= nomatch),
-    ?assert(binary:match(Message, <<"does not understand">>) =/= nomatch),
-    ?assert(binary:match(Message, <<"'super'">>) =/= nomatch).
-
-%% Test term_to_json with {unknown_message, Selector, ClassName} tuple
-format_response_unknown_message_tuple_test() ->
-    Response = beamtalk_repl_server:format_response({unknown_message, typo, 'String'}),
+%% Test term_to_json with #beamtalk_error{} record
+format_response_beamtalk_error_test() ->
+    Error0 = beamtalk_error:new(does_not_understand, 'String'),
+    Error = beamtalk_error:with_selector(Error0, typo),
+    Response = beamtalk_repl_server:format_response(Error),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"String">>) =/= nomatch),
     ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
     ?assert(binary:match(Value, <<"'typo'">>) =/= nomatch).
 
-%% Test format_response with {future_rejected, Reason} where Reason is #beamtalk_error{}
+%% Test format_response with {future_rejected, #beamtalk_error{}}
 format_response_future_rejected_beamtalk_error_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Counter'),
-    ErrorWithSelector = beamtalk_error:with_selector(Error, increment),
-    Response = beamtalk_repl_server:format_response({future_rejected, ErrorWithSelector}),
-    Decoded = jsx:decode(Response, [return_maps]),
-    Value = maps:get(<<"value">>, Decoded),
-    ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
-    ?assert(binary:match(Value, <<"Counter">>) =/= nomatch),
-    ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch).
-
-%% Test format_response with {future_rejected, {unknown_message, ...}}
-format_response_future_rejected_unknown_message_test() ->
-    Response = beamtalk_repl_server:format_response({future_rejected, {unknown_message, badMethod, 'Actor'}}),
+    Error0 = beamtalk_error:new(does_not_understand, 'Actor'),
+    Error = beamtalk_error:with_selector(Error0, badMethod),
+    Response = beamtalk_repl_server:format_response({future_rejected, Error}),
     Decoded = jsx:decode(Response, [return_maps]),
     Value = maps:get(<<"value">>, Decoded),
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
