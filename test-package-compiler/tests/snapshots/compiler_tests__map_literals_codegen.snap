@@ -28,10 +28,16 @@ module 'map_literals' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 
 
 'new'/0 = fun () ->
-    call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawn, not new'})
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'erlang':'error'(Error2)
 
 'new'/1 = fun (_InitArgs) ->
-    call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawnWith:, not new:'})
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'erlang':'error'(Error2)
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{

@@ -139,14 +139,17 @@ impl CoreErlangGenerator {
     /// Generates the `new/0` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new` - they must use `spawn`.
-    /// This function generates a method that throws a clear error when called.
+    /// This function generates a method that throws a structured #beamtalk_error{}
+    /// record with kind=instantiation_error.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'new'/0 = fun () ->
-    ///     call 'erlang':'error'({'actor_instantiation_error',
-    ///                            'Actors must use spawn, not new'})
+    ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+    ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
+    ///     call 'erlang':'error'(Error2)
     /// ```
     pub(super) fn generate_actor_new_error_method(&mut self) -> Result<()> {
         writeln!(self.output, "'new'/0 = fun () ->")?;
@@ -154,8 +157,19 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "call 'erlang':'error'({{'actor_instantiation_error', 'Actors must use spawn, not new'}})"
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in"
+        )?;
+        self.write_indent()?;
+        write!(self.output, "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ")?;
+        self.generate_binary_string("Use spawn instead")?;
+        writeln!(self.output, ") in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
         self.indent -= 1;
 
         Ok(())
@@ -164,14 +178,17 @@ impl CoreErlangGenerator {
     /// Generates the `new/1` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
-    /// This function generates a method that throws a clear error when called.
+    /// This function generates a method that throws a structured #beamtalk_error{}
+    /// record with kind=instantiation_error.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'new'/1 = fun (_InitArgs) ->
-    ///     call 'erlang':'error'({'actor_instantiation_error',
-    ///                            'Actors must use spawnWith:, not new:'})
+    ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
+    ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
+    ///     call 'erlang':'error'(Error2)
     /// ```
     pub(super) fn generate_actor_new_with_args_error_method(&mut self) -> Result<()> {
         writeln!(self.output, "'new'/1 = fun (_InitArgs) ->")?;
@@ -179,10 +196,40 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "call 'erlang':'error'({{'actor_instantiation_error', 'Actors must use spawnWith:, not new:'}})"
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in"
+        )?;
+        self.write_indent()?;
+        write!(self.output, "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ")?;
+        self.generate_binary_string("Use spawnWith: instead")?;
+        writeln!(self.output, ") in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
         self.indent -= 1;
 
+        Ok(())
+    }
+
+    /// Helper to generate a binary string literal in Core Erlang format.
+    ///
+    /// Generates: #{#<char1>(...), #<char2>(...), ...}#
+    fn generate_binary_string(&mut self, s: &str) -> Result<()> {
+        write!(self.output, "#{{")?;
+        for (i, ch) in s.chars().enumerate() {
+            if i > 0 {
+                write!(self.output, ",")?;
+            }
+            write!(
+                self.output,
+                "#<{}>(8,1,'integer',['unsigned'|['big']])",
+                ch as u32
+            )?;
+        }
+        write!(self.output, "}}#")?;
         Ok(())
     }
 

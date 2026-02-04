@@ -1972,6 +1972,7 @@ end
     #[test]
     fn test_generate_actor_new_error_methods() {
         // BT-217: Actor classes must export and generate new/0 and new/1 error methods
+        // using structured #beamtalk_error{} records
         use crate::ast::*;
 
         let module = Module::new(vec![], Span::new(0, 0));
@@ -1981,17 +1982,16 @@ end
         assert!(code.contains("'new'/0"));
         assert!(code.contains("'new'/1"));
 
-        // Check that new/0 function exists and throws actor_instantiation_error
+        // Check that new/0 function exists and uses beamtalk_error
         assert!(code.contains("'new'/0 = fun () ->"));
-        assert!(code.contains(
-            "call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawn, not new'})"
-        ));
+        assert!(code.contains("call 'beamtalk_error':'new'('instantiation_error', 'Actor')"));
+        assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new')"));
+        assert!(code.contains("call 'beamtalk_error':'with_hint'(Error1,"));
+        assert!(code.contains("call 'erlang':'error'(Error2)"));
 
-        // Check that new/1 function exists and throws actor_instantiation_error
+        // Check that new/1 function exists and uses beamtalk_error
         assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));
-        assert!(code.contains(
-            "call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawnWith:, not new:'})"
-        ));
+        assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new:')"));
     }
 
     #[test]

@@ -44,7 +44,7 @@
 %%
 %% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
 -record(beamtalk_error, {
-    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited | timeout
+    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited | timeout | instantiation_error
     class   :: atom(),              % 'Integer', 'Counter', 'String'
     selector:: atom() | undefined,  % method that failed
     message :: binary(),            % human-readable explanation

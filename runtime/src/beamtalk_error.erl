@@ -113,6 +113,10 @@ generate_message(future_not_awaited, _Class, undefined) ->
     iolist_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
     iolist_to_binary(io_lib:format("Sent '~s' to a Future", [Selector]));
+generate_message(instantiation_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Cannot instantiate ~s", [Class]));
+generate_message(instantiation_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Cannot call '~s' on ~s", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
