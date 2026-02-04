@@ -268,7 +268,7 @@ handle_info({client_request, Request, ClientPid}, State) ->
                     io:format(standard_error,
                               "REPL eval error:~nClass: ~p~nReason: ~p~nStack: ~p~nExpression: ~p~n",
                               [Class, CrashReason, lists:sublist(Stack, 5), Expression]),
-                    ClientPid ! {response, beamtalk_repl_server:format_error({eval_crash, Class, CrashReason})},
+                    ClientPid ! {response, beamtalk_repl_server:format_error({eval_error, Class, CrashReason})},
                     {noreply, State}
             end;
         {clear_bindings} ->

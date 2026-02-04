@@ -319,7 +319,8 @@ format_rejection_reason(#beamtalk_error{} = Error) ->
 format_rejection_reason({unknown_message, Selector, ClassName}) ->
     iolist_to_binary(io_lib:format("~s does not understand '~s'", [ClassName, Selector]));
 format_rejection_reason(Reason) ->
-    term_to_json(Reason).
+    %% Fallback: format arbitrary rejection reasons as printable terms
+    iolist_to_binary(io_lib:format("~p", [Reason])).
 
 %%% Error Formatting
 
