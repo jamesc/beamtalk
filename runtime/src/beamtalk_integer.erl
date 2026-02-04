@@ -25,6 +25,9 @@
 %%% | `asString` | [] | Binary representation |
 %%% | `abs`    | []   | Absolute value |
 %%% | `negated` | []  | Negation (-X) |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% **Note:** Arithmetic and comparison operations accept both integers and floats.
 %%% Mixed integer/float operations follow Erlang's numeric tower (result type depends
@@ -57,6 +60,8 @@
 
 -module(beamtalk_integer).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -112,6 +117,9 @@ is_builtin('perform:withArgs:') -> true;
 is_builtin('asString') -> true;
 is_builtin('abs') -> true;
 is_builtin('negated') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -161,8 +169,26 @@ builtin_dispatch('asString', [], X) -> {ok, integer_to_binary(X)};
 builtin_dispatch('abs', [], X) -> {ok, abs(X)};
 builtin_dispatch('negated', [], X) -> {ok, -X};
 
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _X) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _X) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], _X) -> 
+    error(immutable_primitive_error('Integer', Name));
+
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Integer.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Integers are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), integer()) -> term().
