@@ -97,7 +97,7 @@ gh api repos/{owner}/{repo}/issues/{pr}/comments --jq '.[] | {id, body, user: .u
 
 ## Project Context
 
-This is the Beamtalk compiler project - a Smalltalk-inspired language targeting the BEAM VM. See [AGENTS.md](../AGENTS.md) for full development guidelines.
+This is the Beamtalk compiler project - a Smalltalk-**like** language targeting the BEAM VM. While heavily inspired by Smalltalk's syntax and philosophy, Beamtalk makes pragmatic departures for BEAM compatibility and modern ergonomics. See [AGENTS.md](../AGENTS.md) for full development guidelines and [docs/beamtalk-syntax-rationale.md](../docs/beamtalk-syntax-rationale.md) for specific differences from Smalltalk.
 
 ## Allowed Commands
 

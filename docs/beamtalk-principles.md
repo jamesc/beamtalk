@@ -83,7 +83,7 @@ Source code lives in the **filesystem**, not in a binary image.
 
 ## 6. Messages All The Way Down
 
-**Everything** is a message send, following Smalltalk/Newspeak philosophy.
+**Everything** is a message send, following Smalltalk/Newspeak philosophy (with pragmatic BEAM-specific adaptations—see [Syntax Rationale](beamtalk-syntax-rationale.md)).
 
 - No special syntax for "primitives" - even `+` is a message
 - Control flow via messages to booleans and blocks
@@ -96,7 +96,7 @@ Source code lives in the **filesystem**, not in a binary image.
 
 ## 7. Async-First, Sync When Needed
 
-Message sends are **asynchronous by default**, returning futures (like Newspeak, unlike Smalltalk).
+Message sends are **asynchronous by default**, returning futures (like Newspeak, unlike traditional Smalltalk).
 
 - Default sends return immediately with a **future/promise**, not a value
 - Actors don't block waiting for responses - they continue processing
@@ -210,7 +210,7 @@ Following Anders Hejlsberg's TypeScript principle: the compiler IS the language 
 
 ## Non-Goals (For Now)
 
-- **Full Smalltalk compatibility** - We take inspiration, not syntax/semantics wholesale
+- **Full Smalltalk compatibility** - We're Smalltalk-**like**, not Smalltalk-**compatible**. We take inspiration but make pragmatic changes for BEAM and modern development.
 - **Image snapshots** - BEAM's approach to persistence is different and better for distributed systems
 - **Single-threaded semantics** - BEAM is concurrent by nature; embrace it
 - **Mandatory static typing** - Dynamic by default; optional types come later

@@ -30,3 +30,10 @@ Dockerfile text eol=lf
 
 # Binary files
 *.beam binary
+
+# GitHub Linguist - mark files for proper detection
+*.env.example linguist-generated=false
+docs/** linguist-documentation
+
+# Diff display
+*.md diff=markdown
