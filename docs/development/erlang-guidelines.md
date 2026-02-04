@@ -120,6 +120,92 @@ init([]) ->
 - Set reasonable restart intensity (5 restarts in 10 seconds)
 - Prefer `gen_statem` over deprecated `gen_fsm`
 
+---
+
+## Error Handling - CRITICAL
+
+**NO bare tuple errors EVER!** All errors MUST use the structured `#beamtalk_error{}` system.
+
+### Structured Error Records
+
+All Beamtalk errors use `#beamtalk_error{}` records from `runtime/include/beamtalk.hrl`:
+
+```erlang
+-include("beamtalk.hrl").
+
+%% Creating errors in runtime Erlang code
+Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+Error1 = beamtalk_error:with_selector(Error0, 'foo'),
+Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
+Error3 = beamtalk_error:with_details(Error2, #{arity => 0}),
+error(Error3).
+```
+
+### Generated Core Erlang Errors
+
+When generating Core Erlang, ALWAYS use `beamtalk_error` module calls:
+
+```erlang
+%% ❌ WRONG - bare tuple errors are FORBIDDEN
+call 'erlang':'error'({'some_error', 'message'})
+call 'erlang':'error'('simple_atom')
+
+%% ✅ RIGHT - structured error
+let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
+call 'erlang':'error'(Error2)
+```
+
+### Error Kinds
+
+| Kind | When | Class Example |
+|------|------|---------------|
+| `does_not_understand` | Unknown method | `'Integer'`, `'Counter'` |
+| `immutable_value` | Mutation attempt on primitive | `'Integer'`, `'String'` |
+| `type_error` | Wrong argument type | Any class |
+| `arity_mismatch` | Wrong argument count | Any class |
+| `instantiation_error` | Wrong instantiation method | `'Actor'` |
+| `future_not_awaited` | Message sent to Future | `'Future'` |
+| `timeout` | Operation timeout | Any class |
+
+### Helper for Binary Strings in Core Erlang
+
+When generating hints in Core Erlang, use the binary literal format:
+
+```erlang
+%% Binary "Use spawn instead" in Core Erlang
+#{#<85>(8,1,'integer',['unsigned'|['big']]),
+  #<115>(8,1,'integer',['unsigned'|['big']]),
+  %% ... one entry per character
+  #<100>(8,1,'integer',['unsigned'|['big']])}#
+```
+
+Or use a helper function in the codegen to generate this automatically.
+
+### Benefits
+
+1. **Consistency** - All errors have same structure
+2. **Tooling** - Can pattern match on `kind`, `class`, `selector`
+3. **User Experience** - Hints provide actionable guidance
+4. **Debugging** - Details map stores context without breaking format
+5. **Future-proof** - Easy to add metadata without breaking changes
+
+### Example Complete Error
+
+```erlang
+#beamtalk_error{
+    kind = instantiation_error,
+    class = 'Actor',
+    selector = 'new',
+    message = <<"Cannot call 'new' on Actor">>,
+    hint = <<"Use spawn instead">>,
+    details = #{}
+}
+```
+
+---
+
 ### Message Protocols
 
 ```erlang
