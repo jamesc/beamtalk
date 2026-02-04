@@ -289,6 +289,11 @@ dispatch(Selector, Args, Self, State) ->
             [Name] = Args,
             Result = maps:get(Name, State, nil),
             {reply, Result, State};
+        'instVarAt:put:' when length(Args) =:= 2 ->
+            %% Write instance variable by name, returns Self
+            [Name, Value] = Args,
+            NewState = maps:put(Name, Value, State),
+            {reply, Self, NewState};
         perform when length(Args) =:= 1 ->
             %% Dynamic message send with no arguments
             %% obj perform: #increment  => obj increment

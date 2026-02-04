@@ -69,6 +69,8 @@
 -module(beamtalk_string).
 -export([dispatch/3, has_method/1]).
 
+-include("beamtalk.hrl").
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -128,6 +130,9 @@ is_builtin('replace:with:') -> true;
 is_builtin('substring:to:') -> true;
 is_builtin('split:') -> true;
 is_builtin('asInteger') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -269,6 +274,20 @@ builtin_dispatch('asInteger', [], X) ->
     catch
         error:badarg -> not_found  % Will trigger does_not_understand
     end;
+
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _X) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _X) when length([_Name]) =:= 1 -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], _X) -> 
+    %% Primitives cannot be mutated
+    Error0 = beamtalk_error:new(immutable_primitive, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Strings are immutable. Use assignment (x := newValue) instead.">>),
+    Error = beamtalk_error:with_details(Error2, #{field => Name}),
+    error(Error);
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.

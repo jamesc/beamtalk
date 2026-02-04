@@ -747,6 +747,36 @@ instVarAt_nonexistent_variable_test() ->
     
     gen_server:stop(Counter).
 
+instVarAt_put_test() ->
+    %% Test instVarAt:put: to write instance variable (BT-164)
+    {ok, Counter} = test_counter:start_link(42),
+    
+    %% Read initial value
+    InitialValue = gen_server:call(Counter, {instVarAt, [value]}),
+    ?assertEqual(42, InitialValue),
+    
+    %% Write new value using instVarAt:put: (returns Self)
+    Self = gen_server:call(Counter, {'instVarAt:put:', [value, 99]}),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Self),
+    
+    %% Verify the value was updated
+    NewValue = gen_server:call(Counter, {instVarAt, [value]}),
+    ?assertEqual(99, NewValue),
+    
+    %% Write a new instance variable that didn't exist
+    Self2 = gen_server:call(Counter, {'instVarAt:put:', [newField, <<"hello">>]}),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Self2),
+    
+    %% Verify the new field exists
+    NewFieldValue = gen_server:call(Counter, {instVarAt, [newField]}),
+    ?assertEqual(<<"hello">>, NewFieldValue),
+    
+    %% Verify it appears in instVarNames
+    VarNames = gen_server:call(Counter, {instVarNames, []}),
+    ?assert(lists:member(newField, VarNames)),
+    
+    gen_server:stop(Counter).
+
 reflection_combined_test() ->
     %% Combined test: use reflection to discover and access instance variables
     {ok, Counter} = test_counter:start_link(123),
