@@ -91,7 +91,7 @@ test-e2e:
 test-all: test-rust test-e2e test-runtime
 
 # Run Erlang runtime unit tests
-# Note: Runs 227 tests. Some super-related tests may fail (known issue - BT-XXX)
+# Note: Runs 227 tests. Some super-related tests may fail (known issue - BT-235)
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
