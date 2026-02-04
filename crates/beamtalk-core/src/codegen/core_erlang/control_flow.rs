@@ -359,12 +359,21 @@ impl CoreErlangGenerator {
                 self.generate_field_assignment_open(expr)?;
 
                 if is_last {
-                    // Last expression is a field assignment - the accumulator value is
-                    // the RHS of the assignment (already stored in _Val), but we need
-                    // to extract it. For now, we'll just use the last _Val temp var.
-                    // However, this is a degenerate case - inject:into: should return
-                    // the accumulator value, not perform a field assignment as the last expr.
-                    // We'll close with a tuple containing the state.
+                    // LIMITATION: If the last expression in inject:into: is a field assignment,
+                    // we return the assigned value (_Val) as the accumulator, not a computed value.
+                    // This is a degenerate case - idiomatic inject:into: blocks should compute
+                    // and return an accumulator value, with field assignments being side effects.
+                    //
+                    // Example degenerate case:
+                    //   items inject: 0 into: [:acc :item | self.field := acc + item]
+                    //   => Returns the last assigned value, not the accumulator
+                    //
+                    // Correct usage:
+                    //   items inject: 0 into: [:acc :item |
+                    //     self.count := self.count + 1.
+                    //     acc + item
+                    //   ]
+                    //   => Returns the accumulator (acc + item), field mutation is side effect
                     let final_state = self.current_state_var();
                     write!(self.output, "{{_Val, {final_state}}}")?;
                 } else {
