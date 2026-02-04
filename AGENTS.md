@@ -666,7 +666,8 @@ examples/
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
-- Fixtures stored in `runtime/test_fixtures/` and compiled by `test_fixtures/compile.sh`
+- Fixtures: `logging_counter.bt` stored in `runtime/test_fixtures/`, `counter.bt` sourced from E2E fixtures
+- Compiled by `runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests

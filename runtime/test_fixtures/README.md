@@ -67,7 +67,6 @@ Methods:
 - `increment` - increments logCount, calls `super increment`, returns value
 - `getValue` - calls `super getValue` (tests super with different method)
 - `getLogCount` - returns current logCount (new method added by subclass)
-- `set:` - calls `super set:` with argument (tests super with keyword messages)
 
 State variables:
 - `value` - inherited from Counter

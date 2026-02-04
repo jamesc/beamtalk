@@ -93,6 +93,15 @@ Reloaded examples/hello.bt
 
 Beamtalk is built on the actor model. Actors are objects that run concurrently and communicate via messages.
 
+**Note:** To try the examples below, you'll first need to load an actor class. The Counter actor is available in the E2E test fixtures:
+
+```beamtalk
+> :load tests/e2e/fixtures/counter.bt
+Loaded tests/e2e/fixtures/counter.bt
+```
+
+Now you can create and interact with Counter actors:
+
 ### Spawning Actors
 
 Create a new actor instance:
