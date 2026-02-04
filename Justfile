@@ -106,6 +106,11 @@ test-runtime:
     # rebar3 eunit exits with 1 if tests are skipped, check actual failures
     if ! OUTPUT=$(rebar3 eunit --module="${MODULES}" 2>&1); then
         echo "$OUTPUT"
+        # Only accept exit if it's a test failure (not compilation/config error)
+        if ! echo "$OUTPUT" | grep -qE "(Failed|Passed):"; then
+            echo "❌ rebar3 failed without test results (compilation/config error?)"
+            exit 1
+        fi
         # Allow up to 6 known failures (BT-235 super dispatch tests)
         if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
             echo "❌ More than 6 tests failed! (Expected failures: 6 super tests from BT-235)"
@@ -167,13 +172,33 @@ coverage-runtime:
 
 # Open Rust coverage report in browser
 coverage-open:
-    @echo "🌐 Opening Rust coverage report..."
-    $$BROWSER target/llvm-cov/html/index.html
+    #!/usr/bin/env bash
+    echo "🌐 Opening Rust coverage report..."
+    if [ -n "${BROWSER-}" ]; then
+        "$BROWSER" target/llvm-cov/html/index.html
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open target/llvm-cov/html/index.html
+    elif command -v open >/dev/null 2>&1; then
+        open target/llvm-cov/html/index.html
+    else
+        echo "❌ No browser found. Set BROWSER env var or install xdg-open/open"
+        echo "   Report: target/llvm-cov/html/index.html"
+    fi
 
 # Open Erlang runtime coverage report in browser
 coverage-runtime-open:
-    @echo "🌐 Opening Erlang coverage report..."
-    $$BROWSER runtime/_build/test/cover/index.html
+    #!/usr/bin/env bash
+    echo "🌐 Opening Erlang coverage report..."
+    if [ -n "${BROWSER-}" ]; then
+        "$BROWSER" runtime/_build/test/cover/index.html
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open runtime/_build/test/cover/index.html
+    elif command -v open >/dev/null 2>&1; then
+        open runtime/_build/test/cover/index.html
+    else
+        echo "❌ No browser found. Set BROWSER env var or install xdg-open/open"
+        echo "   Report: runtime/_build/test/cover/index.html"
+    fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Clean Tasks
@@ -182,7 +207,7 @@ coverage-runtime-open:
 # Clean Rust build artifacts (works with Docker volume mounts)
 clean:
     @echo "🧹 Cleaning Rust artifacts..."
-    @rm -rf target/{*,.*} 2>/dev/null || true
+    @if [ -d target ]; then find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +; fi 2>/dev/null || true
     @echo "  ✅ Cleaned target/"
 
 # Clean Erlang build artifacts
@@ -191,14 +216,21 @@ clean-erlang:
     cd runtime && rebar3 clean
     @echo "  ✅ Cleaned runtime/_build/"
 
-# Deep clean (removes all caches, coverage, etc.)
+# Deep clean (removes repo-local caches, coverage, examples)
 deep-clean: clean clean-erlang
-    @echo "🧹 Deep cleaning..."
-    @rm -rf ~/.cargo/registry/cache 2>/dev/null || true
+    @echo "🧹 Deep cleaning repo artifacts..."
     @rm -rf runtime/_build 2>/dev/null || true
     @rm -rf target/llvm-cov 2>/dev/null || true
     @rm -rf examples/build 2>/dev/null || true
     @echo "  ✅ Deep clean complete"
+
+# Purge global Cargo cache (affects all Rust projects!)
+purge-cargo-cache:
+    @echo "⚠️  This will delete ~/.cargo/registry/cache (affects all Rust projects)"
+    @echo "Press Enter to continue or Ctrl+C to cancel..."
+    @read _
+    @rm -rf ~/.cargo/registry/cache 2>/dev/null || true
+    @echo "  ✅ Cargo cache purged"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Development

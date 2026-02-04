@@ -114,7 +114,7 @@ This project uses **Just** as the primary build tool. Use Just commands for all 
 
 ```bash
 just --list    # See all available commands
-just ci        # Run all CI checks (build + lint + test)
+just ci        # Run all CI checks (build + lint + test + test-e2e)
 just build     # Build Rust + Erlang runtime
 just test      # Run fast tests (unit + integration, ~10s)
 just test-e2e  # Run E2E tests (slow, ~50s)

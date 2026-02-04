@@ -501,8 +501,8 @@ cargo clean
 # ✅ Works in devcontainer
 just clean
 
-# Or manually
-rm -rf target/{*,.*} 2>/dev/null
+# Or manually (safe pattern that avoids .. expansion)
+find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 ```
 
 #### Devcontainer won't start
