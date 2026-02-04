@@ -26,7 +26,7 @@
 %%% | `abs`    | []   | Absolute value |
 %%% | `negated` | []  | Negation (-X) |
 %%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
-%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
 %%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% **Note:** Arithmetic and comparison operations accept both integers and floats.
@@ -176,15 +176,19 @@ builtin_dispatch('instVarNames', [], _X) ->
 builtin_dispatch('instVarAt', [_Name], _X) -> 
     {ok, nil};
 builtin_dispatch('instVarAt:put:', [Name, _Value], _X) -> 
-    %% Primitives cannot be mutated
-    Error0 = beamtalk_error:new(immutable_primitive, 'Integer'),
-    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Integers are immutable. Use assignment (x := newValue) instead.">>),
-    Error = beamtalk_error:with_details(Error2, #{field => Name}),
-    error(Error);
+    error(immutable_primitive_error('Integer', Name));
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Integer.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Integers are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), integer()) -> term().

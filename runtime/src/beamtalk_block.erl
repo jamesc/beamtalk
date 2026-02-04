@@ -19,7 +19,7 @@
 %%% | `arity`  | []   | Number of parameters |
 %%% | `asString` | [] | Returns `<<"<Block>">>` |
 %%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
-%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
 %%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
@@ -129,15 +129,19 @@ builtin_dispatch('instVarNames', [], _Block) ->
 builtin_dispatch('instVarAt', [_Name], _Block) -> 
     {ok, nil};
 builtin_dispatch('instVarAt:put:', [Name, _Value], _Block) -> 
-    %% Primitives cannot be mutated
-    Error0 = beamtalk_error:new(immutable_primitive, 'Block'),
-    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Blocks are immutable. Use assignment (x := newValue) instead.">>),
-    Error = beamtalk_error:with_details(Error2, #{field => Name}),
-    error(Error);
+    error(immutable_primitive_error('Block', Name));
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Block.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Blocks are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), function()) -> term().

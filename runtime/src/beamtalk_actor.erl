@@ -289,28 +289,43 @@ dispatch(Selector, Args, Self, State) ->
             [Name] = Args,
             Result = maps:get(Name, State, nil),
             {reply, Result, State};
-        'instVarAt:put:' when length(Args) =:= 2 ->
+        'instVarAt:put:' ->
             %% Write instance variable by name, returns Self
-            [Name, Value] = Args,
-            NewState = maps:put(Name, Value, State),
-            {reply, Self, NewState};
-        perform when length(Args) =:= 1 ->
+            case Args of
+                [Name, Value] ->
+                    NewState = maps:put(Name, Value, State),
+                    {reply, Self, NewState};
+                _ ->
+                    ClassName = maps:get('__class__', State, unknown),
+                    error({does_not_understand, ClassName, 'instVarAt:put:', length(Args)})
+            end;
+        perform ->
             %% Dynamic message send with no arguments
             %% obj perform: #increment  => obj increment
-            [TargetSelector] = Args,
-            dispatch(TargetSelector, [], Self, State);
-        'perform:withArgs:' when length(Args) =:= 2 ->
+            case Args of
+                [TargetSelector] when is_atom(TargetSelector) ->
+                    dispatch(TargetSelector, [], Self, State);
+                _ ->
+                    ClassName = maps:get('__class__', State, unknown),
+                    error({does_not_understand, ClassName, perform, length(Args)})
+            end;
+        'perform:withArgs:' ->
             %% Dynamic message send with argument array
             %% obj perform: #'at:put:' withArgs: [1, 'x']  => obj at: 1 put: 'x'
-            [TargetSelector, ArgList] = Args,
-            when_list(ArgList,
-                fun() -> dispatch(TargetSelector, ArgList, Self, State) end,
-                fun() ->
+            case Args of
+                [TargetSelector, ArgList] when is_atom(TargetSelector) ->
+                    when_list(ArgList,
+                        fun() -> dispatch(TargetSelector, ArgList, Self, State) end,
+                        fun() ->
+                            ClassName = maps:get('__class__', State, unknown),
+                            Error0 = beamtalk_error:new(type_error, ClassName),
+                            Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                            {error, Error, State}
+                        end);
+                _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
-                    {error, Error, State}
-                end);
+                    error({does_not_understand, ClassName, 'perform:withArgs:', length(Args)})
+            end;
         _ ->
             %% Not a built-in method, check user-defined methods
             dispatch_user_method(Selector, Args, Self, State)

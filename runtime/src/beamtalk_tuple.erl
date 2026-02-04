@@ -22,7 +22,7 @@
 %%% | `unwrapOrElse:` | [Block] | Extract value or evaluate block |
 %%% | `asString` | [] | Convert to string |
 %%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
-%%% | `instVarAt:` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
 %%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
@@ -156,15 +156,19 @@ builtin_dispatch('instVarNames', [], _Tuple) ->
 builtin_dispatch('instVarAt', [_Name], _Tuple) -> 
     {ok, nil};
 builtin_dispatch('instVarAt:put:', [Name, _Value], _Tuple) -> 
-    %% Primitives cannot be mutated
-    Error0 = beamtalk_error:new(immutable_primitive, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Tuples are immutable. Use assignment (x := newValue) instead.">>),
-    Error = beamtalk_error:with_details(Error2, #{field => Name}),
-    error(Error);
+    error(immutable_primitive_error('Tuple', Name));
 
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Tuple.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Tuples are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Format a single tuple element for string representation.
 -spec format_element(term()) -> binary().
