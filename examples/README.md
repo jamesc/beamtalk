@@ -17,14 +17,6 @@ The tutorial walks you through:
 
 ### Simple Examples
 
-- **counter.bt** - Basic variable assignment and arithmetic
-  ```bash
-  beamtalk repl
-  > :load examples/counter.bt
-  > count
-  > count + 1
-  ```
-
 - **hello.bt** - Minimal example showing file loading
   ```bash
   beamtalk repl
@@ -32,9 +24,21 @@ The tutorial walks you through:
   > message
   ```
 
+- **counter.bt** - Counter actor with state and methods
+  ```bash
+  beamtalk repl
+  > :load examples/counter.bt
+  > c := Counter spawn
+  > c increment
+  > c increment
+  > c getValue
+  2
+  ```
+
 ### Advanced Examples
 
 - **super_example.bt** - Inheritance and super keyword usage
+- **logging_counter.bt** - Subclassing Counter with logging behavior
 - **protoobject_proxy.bt** - Proxy pattern with message forwarding
 
 ## Running Examples
