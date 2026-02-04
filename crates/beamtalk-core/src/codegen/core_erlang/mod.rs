@@ -1916,6 +1916,31 @@ end
     }
 
     #[test]
+    fn test_generate_actor_new_error_methods() {
+        // BT-217: Actor classes must export and generate new/0 and new/1 error methods
+        use crate::ast::*;
+
+        let module = Module::new(vec![], Span::new(0, 0));
+        let code = generate_with_name(&module, "test_actor").expect("codegen should succeed");
+
+        // Check that new/0 and new/1 are exported
+        assert!(code.contains("'new'/0"));
+        assert!(code.contains("'new'/1"));
+
+        // Check that new/0 function exists and throws actor_instantiation_error
+        assert!(code.contains("'new'/0 = fun () ->"));
+        assert!(code.contains(
+            "call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawn, not new'})"
+        ));
+
+        // Check that new/1 function exists and throws actor_instantiation_error
+        assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));
+        assert!(code.contains(
+            "call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawnWith:, not new:'})"
+        ));
+    }
+
+    #[test]
     fn test_generate_repl_module_aliases_state_to_bindings() {
         // BT-57: REPL modules must alias State to Bindings for identifier lookups
         let expression = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));

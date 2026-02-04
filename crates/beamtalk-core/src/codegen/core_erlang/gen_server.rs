@@ -146,7 +146,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'new'/0 = fun () ->
     ///     call 'erlang':'error'({'actor_instantiation_error',
-    ///                            <<"Actors must use spawn, not new">>})
+    ///                            'Actors must use spawn, not new'})
     /// ```
     pub(super) fn generate_actor_new_error_method(&mut self) -> Result<()> {
         writeln!(self.output, "'new'/0 = fun () ->")?;
@@ -171,7 +171,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'new'/1 = fun (_InitArgs) ->
     ///     call 'erlang':'error'({'actor_instantiation_error',
-    ///                            <<"Actors must use spawnWith:, not new:">>})
+    ///                            'Actors must use spawnWith:, not new:'})
     /// ```
     pub(super) fn generate_actor_new_with_args_error_method(&mut self) -> Result<()> {
         writeln!(self.output, "'new'/1 = fun (_InitArgs) ->")?;
