@@ -95,30 +95,27 @@ _clean-daemon-state:
     @rm -f ~/.beamtalk/daemon.sock ~/.beamtalk/daemon.lock 2>/dev/null || true
 
 # Run Erlang runtime unit tests
-# Note: Runs 400+ tests across all runtime modules
+# Note: Auto-discovers all *_tests modules. New test files are included automatically.
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
     echo "🧪 Running Erlang runtime unit tests..."
-    # All non-integration test modules
-    MODULES="beamtalk_actor_tests,beamtalk_block_tests,beamtalk_boolean_tests,beamtalk_bootstrap_tests,beamtalk_class_tests,beamtalk_codegen_simulation_tests,beamtalk_dynamic_class_tests,beamtalk_error_tests,beamtalk_extensions_tests,beamtalk_future_tests,beamtalk_instances_tests,beamtalk_integer_tests,beamtalk_nil_tests,beamtalk_primitive_tests,beamtalk_repl_actors_tests,beamtalk_repl_eval_tests,beamtalk_repl_modules_tests,beamtalk_repl_server_tests,beamtalk_repl_state_tests,beamtalk_repl_tests,beamtalk_runtime_app_tests,beamtalk_runtime_sup_tests,beamtalk_stdlib_tests,beamtalk_string_tests,beamtalk_tuple_tests"
-    # rebar3 eunit exits with 1 if tests are skipped, check actual failures
-    if ! OUTPUT=$(rebar3 eunit --module="${MODULES}" 2>&1); then
+    # rebar3 auto-discovers all *_tests.erl modules
+    # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
+    if ! OUTPUT=$(rebar3 eunit 2>&1); then
         echo "$OUTPUT"
         # Only accept exit if it's a test failure (not compilation/config error)
         if ! echo "$OUTPUT" | grep -qE "(Failed|Passed):"; then
             echo "❌ rebar3 failed without test results (compilation/config error?)"
             exit 1
         fi
-        # Allow up to 12 known failures:
-        # - 6 super dispatch tests (BT-235)
-        # - 4 extensions tests with EUnit setup issues (test framework structure)
-        if echo "$OUTPUT" | grep -qE "Failed: (1[3-9]|[2-9][0-9]+)\."; then
-            echo "❌ More than 12 tests failed! Check for regressions."
+        # Allow up to 6 known failures (BT-235 super dispatch tests)
+        if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
+            echo "❌ More than 6 tests failed! Check for regressions."
             exit 1
         fi
-        echo "⚠️  Known test failures (BT-235 super dispatch + extensions EUnit structure)"
+        echo "⚠️  Known test failures (BT-235 - super dispatch)"
     else
         echo "$OUTPUT"
     fi
@@ -151,19 +148,18 @@ coverage-rust:
     @echo "  📁 HTML report: target/llvm-cov/html/index.html"
 
 # Generate Erlang runtime coverage
+# Note: Auto-discovers all *_tests modules. New test files are included automatically.
 coverage-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    # All non-integration test modules
-    MODULES="beamtalk_actor_tests,beamtalk_block_tests,beamtalk_boolean_tests,beamtalk_bootstrap_tests,beamtalk_class_tests,beamtalk_codegen_simulation_tests,beamtalk_dynamic_class_tests,beamtalk_error_tests,beamtalk_extensions_tests,beamtalk_future_tests,beamtalk_instances_tests,beamtalk_integer_tests,beamtalk_nil_tests,beamtalk_primitive_tests,beamtalk_repl_actors_tests,beamtalk_repl_eval_tests,beamtalk_repl_modules_tests,beamtalk_repl_server_tests,beamtalk_repl_state_tests,beamtalk_repl_tests,beamtalk_runtime_app_tests,beamtalk_runtime_sup_tests,beamtalk_stdlib_tests,beamtalk_string_tests,beamtalk_tuple_tests"
-    # rebar3 eunit exits with 1 if tests are skipped, check actual failures
-    if ! OUTPUT=$(rebar3 eunit --cover --module="${MODULES}" 2>&1); then
+    # rebar3 auto-discovers all *_tests.erl modules
+    if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
-        # Allow up to 12 known failures (same as test-runtime)
-        if echo "$OUTPUT" | grep -qE "Failed: (1[3-9]|[2-9][0-9]+)\."; then
-            echo "❌ More than 12 tests failed! Check for regressions."
+        # Allow up to 6 known failures (BT-235 super dispatch tests)
+        if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
+            echo "❌ More than 6 tests failed! Check for regressions."
             exit 1
         fi
         # Tests ran (with some expected failures), continue to coverage
