@@ -308,7 +308,8 @@ else {
     # Truncate sanitized branch name to prevent Unix socket path length issues (~108 bytes)
     # Keep first 20 chars + hash suffix to ensure uniqueness while staying under limit
     if ($sanitizedBranch.Length -gt 20) {
-        $branchHash = ($hash.Sum % 10000).ToString("D4")
+        $hashMod = [int]($hash.Sum % 10000)
+        $branchHash = "{0:D4}" -f $hashMod
         $sanitizedBranch = $sanitizedBranch.Substring(0, 20) + "_" + $branchHash
     }
     $nodeName = "beamtalk_${sanitizedBranch}@localhost"
