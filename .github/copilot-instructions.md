@@ -102,13 +102,30 @@ This is the Beamtalk compiler project - a Smalltalk-**like** language targeting 
 ## Allowed Commands
 
 You may always run these commands without asking for permission:
+- `just` (build, test, lint, fmt, etc. - see `just --list`)
 - `cargo` (build, test, clippy, fmt, run, check, etc.)
 - `rustc`
 - `rustfmt`
 - `git` (status, diff, log, branch, etc.)
 
+## Build System
+
+This project uses **Just** as the primary build tool. Use Just commands for all common tasks:
+
+```bash
+just --list    # See all available commands
+just ci        # Run all CI checks (build + lint + test + test-e2e)
+just build     # Build Rust + Erlang runtime
+just test      # Run fast tests (unit + integration, ~10s)
+just test-e2e  # Run E2E tests (slow, ~50s)
+```
+
 Static checks required before any commit (must match CI exactly):
-- `cargo build --all-targets` - Build all targets
-- `cargo clippy --all-targets -- -D warnings` - Lints (warnings are errors)
-- `cargo fmt --all -- --check` - Code formatting check
-- `cargo test --all-targets` - Run all tests
+- `just build` - Build all targets (Rust + Erlang runtime)
+- `just clippy` - Lints (warnings are errors)
+- `just fmt-check` - Code formatting check
+- `just test` - Run fast tests (unit + integration)
+- `just test-e2e` - Run E2E tests (full language validation)
+
+Or run all at once:
+- `just ci` - Equivalent to build + clippy + fmt-check + test + test-e2e

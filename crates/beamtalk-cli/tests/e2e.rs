@@ -21,12 +21,17 @@
 //!
 //! # Running Tests
 //!
+//! This test is `#[ignore]` by default due to slow startup (~50s).
+//!
 //! ```bash
-//! # Run just E2E tests
-//! cargo test --test e2e
+//! # Recommended: Use Just
+//! just test-e2e
+//!
+//! # Or run with cargo (must pass --ignored)
+//! cargo test --test e2e -- --ignored
 //!
 //! # Run with verbose output
-//! cargo test --test e2e -- --nocapture
+//! cargo test --test e2e -- --ignored --nocapture
 //! ```
 
 use serial_test::serial;
@@ -611,7 +616,11 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// Main E2E test entry point.
 /// Uses `#[serial(e2e)]` to prevent parallel E2E test runs that compile
 /// Beamtalk files and run escript, which can conflict with shared build artifacts.
+///
+/// Note: Ignored by default due to slow execution (~50s for 316 test cases).
+/// Run explicitly with: `cargo test --test e2e -- --ignored` or `just test-e2e`
 #[test]
+#[ignore = "slow test - run with `just test-e2e`"]
 #[serial(e2e)]
 fn e2e_language_tests() {
     // Check if test cases directory exists

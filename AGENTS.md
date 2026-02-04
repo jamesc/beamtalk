@@ -690,6 +690,31 @@ Detailed coding standards and task guides are in `docs/development/`:
 
 ### Static Verification (CI Commands)
 
+This project uses **Just** for build orchestration:
+
+```bash
+just --list                  # See all available commands
+
+# Common development commands
+just build                   # Build Rust + Erlang runtime
+just test                    # Run fast tests (~10s)
+just test-e2e                # Run E2E tests (~50s)
+just ci                      # Run all CI checks
+
+# Individual checks
+just fmt                     # Format all code
+just fmt-check               # Verify formatting
+just clippy                  # Lints (warnings = errors)
+just test-rust               # Rust tests only
+just test-runtime            # Erlang runtime tests only
+
+# Advanced
+just test-all                # All tests (unit + E2E + runtime)
+just clean                   # Clean build artifacts (works with Docker volumes)
+just coverage                # Generate coverage reports
+```
+
+**Raw cargo/rebar3 commands** (if needed):
 ```bash
 cargo fmt --all                           # Format all crates
 cargo fmt --all -- --check                # Verify formatting

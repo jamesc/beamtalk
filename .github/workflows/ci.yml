@@ -33,6 +33,9 @@ jobs:
           otp-version: '27.0'
           rebar3-version: '3.23'
 
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -44,35 +47,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build
-        run: cargo build --all-targets
+      - name: Build Rust
+        run: just build-rust
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: just clippy
 
       - name: Format check
-        run: cargo fmt --all -- --check
+        run: just fmt-check
 
-      - name: Test
-        run: cargo test --all-targets -- --skip erlang_runtime_unit_tests
+      - name: Test Rust (unit + integration)
+        run: just test-rust
+
+      - name: Test E2E (full pipeline)
+        run: just test-e2e
 
       - name: Test Erlang runtime (unit tests)
-        run: |
-          cd runtime
-          # rebar3 eunit exits with 1 if tests are skipped, check actual failures
-          set +e  # Don't exit on error
-          OUTPUT=$(rebar3 eunit 2>&1)
-          EXIT_CODE=$?
-          echo "$OUTPUT"
-          
-          # Check if any tests actually failed (Failed: N where N > 0)
-          if echo "$OUTPUT" | grep -q "Failed: [1-9]"; then
-            echo "Tests failed!"
-            exit 1
-          fi
-          
-          # All tests passed (even if some skipped), success
-          exit 0
+        run: just test-runtime
 
       - name: Test Erlang runtime (integration tests)
         run: |
@@ -128,6 +119,9 @@ jobs:
           otp-version: '27.0'
           rebar3-version: '3.23'
 
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -143,34 +137,13 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Generate Rust coverage
+      - name: Generate Rust coverage (Cobertura format for action)
         run: |
           # Generate Cobertura format (for CodeCoverageSummary action)
-          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml \
-            -- --skip commands::build::tests::test_build_single_file \
-               --skip commands::build::tests::test_build_multiple_files \
-               --skip commands::run::tests::test_run_calls_build \
-               --skip erlang_runtime_unit_tests
+          cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml
 
-      - name: Generate Erlang coverage
-        run: |
-          cd runtime
-          # Run eunit with coverage (exits with 1 if tests skipped, but that's ok)
-          set +e  # Don't exit on error
-          OUTPUT=$(rebar3 eunit --cover 2>&1)
-          EXIT_CODE=$?
-          echo "$OUTPUT"
-          
-          # Check if any tests actually failed (Failed: N where N > 0)
-          if echo "$OUTPUT" | grep -q "Failed: [1-9]"; then
-            echo "Tests failed!"
-            exit 1
-          fi
-          
-          # Tests passed, now generate coverage reports
-          set -e  # Exit on error for coverage commands
-          rebar3 cover --verbose
-          rebar3 covertool generate
+      - name: Generate Erlang runtime coverage
+        run: just coverage-runtime
 
       - name: Rust Coverage Summary
         id: rust_coverage
@@ -203,7 +176,7 @@ jobs:
           indicators: true
           thresholds: '60 70'
 
-      - name: Preserve Erlang Coverage Report
+      - name: Preserve Erlang Runtime Coverage Report
         run: |
           # Rename Erlang coverage report for clarity
           if [ -f code-coverage-results.md ]; then

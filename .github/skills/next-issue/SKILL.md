@@ -78,9 +78,9 @@ Begin working on the issue, following AGENTS.md guidelines.
 
 After each significant change, run:
 ```bash
-cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+just ci
 ```
-These are the exact same checks that run in CI (see `.github/workflows/ci.yml`).
+This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
 
 ### 9. Commit Often
 

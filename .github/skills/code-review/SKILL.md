@@ -30,12 +30,9 @@ Perform a **deep, thorough code review** focused on **shipping high-quality code
 
 5. **Verify tests pass**: Run the test suite to ensure changes don't break anything:
    ```bash
-   cargo build --all-targets && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check && cargo test --all-targets
+   just ci
    ```
-   For runtime changes:
-   ```bash
-   cd runtime && rebar3 eunit
-   ```
+   This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
 
 6. **Implement recommended suggestions**: For anything that can be done well in <2 hours, implement it directly. This includes:
    - Fixing bugs and edge cases

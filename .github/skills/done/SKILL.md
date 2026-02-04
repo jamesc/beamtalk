@@ -25,12 +25,9 @@ When activated, execute this workflow to complete work and push:
 
 3. **Run static checks**:
    ```bash
-   cargo build --all-targets
-   cargo clippy --all-targets -- -D warnings
-   cargo fmt --all -- --check
-   cargo test --all-targets
+   just ci
    ```
-   These must match exactly what CI runs (see `.github/workflows/ci.yml`).
+   This runs all CI checks (build, clippy, fmt-check, test, test-e2e) that must match exactly what CI runs.
    If any check fails, report the errors and stop.
 
 4. **Stage changes**:
