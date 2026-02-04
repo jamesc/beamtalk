@@ -173,93 +173,13 @@ format_modules(ModulesWithInfo) ->
 %% Only supports the subset of JSON needed for REPL protocol.
 -spec parse_json(binary()) -> {ok, map()} | {error, term()}.
 parse_json(Data) ->
-    %% Very basic JSON parsing - just extract type and expression
-    %% A proper implementation would use a JSON library
-    case Data of
-        <<"{", _/binary>> ->
-            parse_json_object(Data);
-        _ ->
-            {error, not_json}
-    end.
-
-%% @private
-parse_json_object(Data) ->
-    %% Extract key-value pairs from JSON object
-    %% This is a simplified parser that handles our specific protocol
+    %% Use jsx library for proper JSON parsing
     try
-        %% Remove outer braces and whitespace
-        Inner = string:trim(binary:part(Data, 1, byte_size(Data) - 2)),
-        %% Split into key-value pairs
-        Pairs = parse_json_pairs(Inner, #{}),
-        {ok, Pairs}
+        Decoded = jsx:decode(Data, [return_maps]),
+        {ok, Decoded}
     catch
         _:_ ->
-            {error, invalid_json}
-    end.
-
-%% @private
-parse_json_pairs(<<>>, Acc) ->
-    Acc;
-parse_json_pairs(Data, Acc) ->
-    %% Find key
-    case binary:match(Data, <<":">>) of
-        nomatch ->
-            Acc;
-        {ColonPos, _} ->
-            KeyPart = binary:part(Data, 0, ColonPos),
-            Key = extract_string(string:trim(KeyPart)),
-            %% Find value
-            Rest = string:trim(binary:part(Data, ColonPos + 1, byte_size(Data) - ColonPos - 1)),
-            {Value, Remaining} = extract_value(Rest),
-            NewAcc = maps:put(Key, Value, Acc),
-            %% Continue with remaining pairs
-            RemainingTrimmed = string:trim(Remaining),
-            case RemainingTrimmed of
-                <<",", More/binary>> ->
-                    parse_json_pairs(string:trim(More), NewAcc);
-                _ ->
-                    NewAcc
-            end
-    end.
-
-%% @private
-extract_string(Data) ->
-    %% Remove quotes from string
-    case Data of
-        <<"\"", Rest/binary>> ->
-            %% Find closing quote
-            case binary:match(Rest, <<"\"">>)  of
-                {Pos, _} -> binary:part(Rest, 0, Pos);
-                nomatch -> Rest
-            end;
-        _ ->
-            Data
-    end.
-
-%% @private
-extract_value(Data) ->
-    case Data of
-        <<"\"", _/binary>> ->
-            %% String value - find closing quote
-            Rest = binary:part(Data, 1, byte_size(Data) - 1),
-            case binary:match(Rest, <<"\"">>)  of
-                {Pos, _} ->
-                    Value = binary:part(Rest, 0, Pos),
-                    Remaining = binary:part(Rest, Pos + 1, byte_size(Rest) - Pos - 1),
-                    {Value, Remaining};
-                nomatch ->
-                    {Rest, <<>>}
-            end;
-        _ ->
-            %% Other value - read until comma or end
-            case binary:match(Data, <<",">>) of
-                {Pos, _} ->
-                    Value = string:trim(binary:part(Data, 0, Pos)),
-                    Remaining = binary:part(Data, Pos, byte_size(Data) - Pos),
-                    {Value, Remaining};
-                nomatch ->
-                    {string:trim(Data), <<>>}
-            end
+            {error, not_json}
     end.
 
 %%% JSON Formatting
