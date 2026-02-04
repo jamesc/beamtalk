@@ -339,6 +339,11 @@ parse_request_string_literal_with_escaped_quotes_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"\\\"hello\\\"\"}">>,
     ?assertEqual({eval, "\"hello\""}, beamtalk_repl_server:parse_request(Request)).
 
+parse_request_malformed_json_test() ->
+    %% Malformed JSON should fall back to raw expression (backwards compatibility)
+    Request = <<"{\"type\": incomplete">>,
+    ?assertEqual({eval, "{\"type\": incomplete"}, beamtalk_repl_server:parse_request(Request)).
+
 parse_request_unicode_test() ->
     %% Test with unicode characters
     Request = <<"{\"type\": \"eval\", \"expression\": \"greeting := \\\"你好\\\"\"}">>,

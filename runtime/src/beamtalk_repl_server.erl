@@ -169,8 +169,7 @@ format_modules(ModulesWithInfo) ->
 %%% JSON Parsing
 
 %% @private
-%% Simple JSON parser for requests.
-%% Only supports the subset of JSON needed for REPL protocol.
+%% Parse JSON requests using jsx library.
 -spec parse_json(binary()) -> {ok, map()} | {error, term()}.
 parse_json(Data) ->
     %% Use jsx library for proper JSON parsing
