@@ -67,17 +67,9 @@ When activated, execute this workflow to update main and merge it into the curre
 
 9. **Verify resolution**:
    ```bash
-   # Build and test
-   cargo build --all-targets
-   cargo clippy --all-targets -- -D warnings
-   cargo fmt --all -- --check
-   cargo test --all-targets
+   just ci
    ```
-   
-   If Erlang runtime was modified:
-   ```bash
-   cd runtime && rebar3 eunit
-   ```
+   This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
    
    If tests fail, review and fix the merge resolution.
 

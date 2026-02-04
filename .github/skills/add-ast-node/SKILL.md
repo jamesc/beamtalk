@@ -30,7 +30,7 @@ Follow this workflow when adding a new AST node type to the compiler:
 
 5. **Add snapshot tests** in `test-package-compiler/cases/`
    - Create a new `.bt` file with example usage
-   - Run `cargo test` to generate snapshots
+   - Run `just test-rust` to generate snapshots
    - Review and accept snapshots with `cargo insta review`
 
 ## Key Requirements
