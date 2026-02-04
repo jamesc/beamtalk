@@ -77,10 +77,7 @@ fn erlang_runtime_unit_tests() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     if stdout.contains("Failed:") {
         // Extract failure count
-        if let Some(caps) = stdout
-            .lines()
-            .find(|l| l.contains("Failed:"))
-        {
+        if let Some(caps) = stdout.lines().find(|l| l.contains("Failed:")) {
             // Parse "Failed: N."
             if caps.contains("Failed: 0.") {
                 // All tests passed
@@ -94,9 +91,7 @@ fn erlang_runtime_unit_tests() {
                 // Known failures from BT-235
                 eprintln!("⚠️  Known test failures (BT-235 - super dispatch)");
             } else {
-                panic!(
-                    "More than 6 tests failed! Check for regressions.\nOutput:\n{stdout}"
-                );
+                panic!("More than 6 tests failed! Check for regressions.\nOutput:\n{stdout}");
             }
         }
     } else if !output.status.success() {
