@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 
-**A live, interactive Smalltalk for the BEAM VM**
+**A live, interactive Smalltalk-like language for the BEAM VM**
 
-Beamtalk brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. Write code in a running system, hot-reload modules without restarts, and scale to millions of concurrent actors.
+Beamtalk brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. While inspired by Smalltalk's syntax and philosophy, Beamtalk makes pragmatic choices for modern development (see [Syntax Rationale](docs/beamtalk-syntax-rationale.md)). Write code in a running system, hot-reload modules without restarts, and scale to millions of concurrent actors.
 
 ```beamtalk
 // Spawn an actor with state
@@ -601,7 +601,7 @@ The compiler is written in **Rust** and generates **Core Erlang**, which compile
 
 Beamtalk combines ideas from:
 
-- **Smalltalk/Newspeak** — Live programming, message-based syntax, reflection
+- **Smalltalk/Newspeak** — Live programming, message-based syntax, reflection (inspiration, not strict compatibility)
 - **Erlang/BEAM** — Actors, fault tolerance, hot code reload, distribution
 - **Elixir** — Pipe operator, protocols, comprehensions, with blocks
 - **Gleam** — Result types, exhaustive pattern matching

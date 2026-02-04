@@ -2,6 +2,8 @@
 
 **Status:** Complete - Syntax design decisions finalized
 
+> **tl;dr** — Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**. We use Smalltalk's message-passing syntax with modern pragmatic improvements: `//` comments, standard math precedence, optional statement terminators, field access, and string interpolation. This makes Beamtalk familiar to Smalltalkers while removing friction for modern developers.
+
 This document explains the syntax choices for Beamtalk: why we keep certain Smalltalk conventions and why we diverge from others.
 
 See [beamtalk-language-features.md](beamtalk-language-features.md) for the complete syntax specification.
@@ -13,6 +15,8 @@ See [beamtalk-language-features.md](beamtalk-language-features.md) for the compl
 **Keep the soul of Smalltalk, remove the friction.**
 
 Smalltalk's message-passing syntax is its core innovation — code reads like English, with named parameters built into the language. We preserve this. But some historical choices create unnecessary friction for developers in 2026. We fix those.
+
+**Result:** Beamtalk is Smalltalk-**inspired**, not Smalltalk-**compatible**. If you need full Smalltalk-80 semantics, use Pharo or Squeak. If you want Smalltalk's elegance on BEAM with modern ergonomics, use Beamtalk.
 
 ---
 

@@ -32,7 +32,7 @@ This document presents a domain-driven design (DDD) analysis of the Beamtalk com
 
 ## Overview
 
-Beamtalk is a live, interactive Smalltalk for the BEAM VM that brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. The system comprises two major subsystems:
+Beamtalk is a live, interactive Smalltalk-like language for the BEAM VM that brings Smalltalk's legendary live programming experience to Erlang's battle-tested runtime. While inspired by Smalltalk's syntax and philosophy, Beamtalk makes pragmatic choices for BEAM compatibility (see [Syntax Rationale](beamtalk-syntax-rationale.md)). The system comprises two major subsystems:
 
 1. **Compiler** (Rust) - Compiles `.bt` source to BEAM bytecode via Core Erlang
 2. **Runtime** (Erlang) - Provides actor execution, futures, class registry, and REPL
