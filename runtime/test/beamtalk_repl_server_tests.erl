@@ -349,3 +349,79 @@ parse_request_unicode_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"greeting := \\\"你好\\\"\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
     ?assertMatch({eval, _}, Result).
+
+%%% BT-238: New error formatting tests
+
+%% Test format_error_message with #beamtalk_error{} record
+format_error_beamtalk_error_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Counter'),
+    ErrorWithSelector = beamtalk_error:with_selector(Error, super),
+    Response = beamtalk_repl_server:format_error(ErrorWithSelector),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Counter">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"does not understand">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"'super'">>) =/= nomatch).
+
+%% Test format_error_message with #beamtalk_error{} with hint
+format_error_beamtalk_error_with_hint_test() ->
+    Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+    Error1 = beamtalk_error:with_selector(Error0, foo),
+    Error = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
+    Response = beamtalk_repl_server:format_error(Error),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Integer">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"Hint:">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"Check spelling">>) =/= nomatch).
+
+%% Test format_error_message with {unknown_message, Selector, ClassName} tuple
+format_error_unknown_message_test() ->
+    Response = beamtalk_repl_server:format_error({unknown_message, super, 'Counter'}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Counter">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"does not understand">>) =/= nomatch),
+    ?assert(binary:match(Message, <<"'super'">>) =/= nomatch).
+
+%% Test term_to_json with {unknown_message, Selector, ClassName} tuple
+format_response_unknown_message_tuple_test() ->
+    Response = beamtalk_repl_server:format_response({unknown_message, typo, 'String'}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assert(binary:match(Value, <<"String">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"'typo'">>) =/= nomatch).
+
+%% Test format_response with {future_rejected, Reason} where Reason is #beamtalk_error{}
+format_response_future_rejected_beamtalk_error_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Counter'),
+    ErrorWithSelector = beamtalk_error:with_selector(Error, increment),
+    Response = beamtalk_repl_server:format_response({future_rejected, ErrorWithSelector}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"Counter">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch).
+
+%% Test format_response with {future_rejected, {unknown_message, ...}}
+format_response_future_rejected_unknown_message_test() ->
+    Response = beamtalk_repl_server:format_response({future_rejected, {unknown_message, badMethod, 'Actor'}}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"Actor">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"does not understand">>) =/= nomatch),
+    ?assert(binary:match(Value, <<"'badMethod'">>) =/= nomatch).
+
+%% Test format_rejection_reason fallback with arbitrary term
+format_rejection_reason_fallback_test() ->
+    %% Test that the fallback can handle arbitrary terms without crashing
+    Result = beamtalk_repl_server:format_response({future_rejected, {custom_error, some, data}}),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    %% Should format the tuple with ~p
+    ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
+    ?assert(is_binary(Value)).
