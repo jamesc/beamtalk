@@ -147,14 +147,42 @@ See [Beamtalk for Agents](docs/beamtalk-for-agents.md) for detailed use cases.
 
 ### Build & Run
 
+#### Using Just (Recommended)
+
+The project includes a [Justfile](Justfile) with common tasks:
+
 ```bash
-# Clone and build
+# Clone and setup
 git clone https://github.com/jamesc/beamtalk.git
 cd beamtalk
+
+# Install Just (if not already installed)
+cargo install just
+
+# See all available tasks
+just --list
+
+# Run CI checks (build, lint, test)
+just ci
+
+# Start the REPL
+just repl
+
+# Clean build artifacts (works with Docker volumes)
+just clean
+```
+
+#### Using Cargo Directly
+
+```bash
+# Build
 cargo build
 
 # Start the REPL
 cargo run -- repl
+
+# Clean (note: fails in devcontainer due to volume mount)
+cargo clean  # Use `just clean` instead in devcontainer
 ```
 
 ### REPL Usage
@@ -430,6 +458,7 @@ ssh-add ~/.ssh/id_ed25519_signing
 | `cargo` | Latest | Rust package manager |
 | `clippy` | Latest | Rust linter |
 | `rustfmt` | Latest | Rust code formatter |
+| `just` | Latest | Task runner (alternative to Make) |
 | `erlc` | OTP 26+ | Erlang compiler |
 | `erl` | OTP 26+ | Erlang runtime |
 | `rebar3` | Latest | Erlang build tool |
@@ -460,6 +489,21 @@ Automatically installed in devcontainer:
 - `linear.linear` — Linear issue tracking
 
 ### Troubleshooting
+
+#### `cargo clean` fails with "Device or resource busy"
+
+The `target/` directory is mounted as a Docker volume for performance. Use `just clean` instead:
+
+```bash
+# ❌ Fails in devcontainer
+cargo clean
+
+# ✅ Works in devcontainer
+just clean
+
+# Or manually
+rm -rf target/{*,.*} 2>/dev/null
+```
 
 #### Devcontainer won't start
 

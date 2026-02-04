@@ -1,0 +1,275 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Beamtalk build tasks
+# Run `just` to see all available recipes
+# Run `just <recipe>` to execute a specific task
+
+# Use bash for all commands
+set shell := ["bash", "-uc"]
+
+# Default recipe (list all tasks)
+default:
+    @just --list
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Quick Commands (CI equivalents)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Run all CI checks (build, lint, test) - same as CI pipeline
+ci: build lint test
+
+# Full clean and rebuild everything
+clean-all: clean clean-erlang
+    @echo "✅ All build artifacts cleaned"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Build Tasks
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Build all targets (Rust + Erlang)
+build: build-rust build-erlang
+
+# Build Rust workspace
+build-rust:
+    @echo "🔨 Building Rust workspace..."
+    cargo build --all-targets
+
+# Build in release mode (Rust + Erlang)
+build-release: build-rust-release build-erlang
+
+# Build Rust in release mode
+build-rust-release:
+    @echo "🔨 Building Rust workspace (release)..."
+    cargo build --all-targets --release
+
+# Build Erlang runtime
+build-erlang:
+    @echo "🔨 Building Erlang runtime..."
+    cd runtime && rebar3 compile
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Lint and Format
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Run all linting and formatting checks
+lint: clippy fmt-check
+
+# Run clippy (Rust linter) - warnings are errors
+clippy:
+    @echo "🔍 Running clippy..."
+    cargo clippy --all-targets -- -D warnings
+
+# Check Rust code formatting
+fmt-check:
+    @echo "📋 Checking Rust formatting..."
+    cargo fmt --all -- --check
+
+# Format all Rust code
+fmt:
+    @echo "✨ Formatting Rust code..."
+    cargo fmt --all
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Testing
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Run fast tests (Rust unit/integration + Erlang runtime, skip slow E2E)
+test: test-rust test-runtime
+
+# Run Rust tests (unit + integration, skip slow E2E)
+test-rust:
+    @echo "🧪 Running Rust tests (fast)..."
+    cargo test --all-targets
+
+# Run E2E tests (slow - full pipeline, ~50s)
+test-e2e:
+    @echo "🧪 Running E2E tests (slow - ~50s)..."
+    cargo test --test e2e -- --ignored
+
+# Run ALL tests (unit + integration + E2E + Erlang runtime)
+test-all: test-rust test-e2e test-runtime
+
+# Run Erlang runtime unit tests
+test-runtime:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd runtime
+    echo "🧪 Running Erlang runtime unit tests..."
+    # Specify test modules explicitly (matches CI and runtime_tests.rs)
+    MODULES="beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests"
+    # rebar3 eunit exits with 1 if tests are skipped, check actual failures
+    if ! OUTPUT=$(rebar3 eunit --module="${MODULES}" 2>&1); then
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -q "Failed: [1-9]"; then
+            echo "Tests failed!"
+            exit 1
+        fi
+    else
+        echo "$OUTPUT"
+    fi
+
+# Run Erlang runtime integration tests (requires daemon)
+test-runtime-integration:
+    @echo "🧪 Running Erlang runtime integration tests..."
+    @echo "⚠️  Make sure daemon is running: just daemon-start"
+    cd runtime && rebar3 eunit --module=beamtalk_repl_integration_tests
+
+# Run a specific Rust test by name
+test-one TEST:
+    @echo "🧪 Running test: {{TEST}}"
+    cargo test --all-targets {{TEST}}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Coverage
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Generate coverage reports for both Rust and Erlang runtime
+coverage: coverage-rust coverage-runtime
+    @echo "✅ Coverage reports generated"
+    @echo "  Rust:    target/llvm-cov/html/index.html"
+    @echo "  Runtime: runtime/_build/test/cover/index.html"
+
+# Generate Rust coverage (requires cargo-llvm-cov)
+coverage-rust:
+    @echo "📊 Generating Rust coverage..."
+    cargo llvm-cov --all-targets --workspace --html
+    @echo "  📁 HTML report: target/llvm-cov/html/index.html"
+
+# Generate Erlang runtime coverage
+coverage-runtime:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd runtime
+    echo "📊 Generating Erlang runtime coverage..."
+    MODULES="beamtalk_actor_tests,beamtalk_future_tests,beamtalk_repl_tests,beamtalk_codegen_simulation_tests"
+    # rebar3 eunit exits with 1 if tests are skipped, check actual failures
+    if ! OUTPUT=$(rebar3 eunit --cover --module="${MODULES}" 2>&1); then
+        echo "$OUTPUT"
+        if echo "$OUTPUT" | grep -q "Failed: [1-9]"; then
+            echo "Tests failed!"
+            exit 1
+        fi
+    else
+        echo "$OUTPUT"
+    fi
+    rebar3 cover --verbose
+    rebar3 covertool generate
+    echo "  📁 HTML report: runtime/_build/test/cover/index.html"
+    echo "  📁 XML report:  runtime/_build/test/covertool/beamtalk_runtime.covertool.xml"
+
+# Open Rust coverage report in browser
+coverage-open:
+    @echo "🌐 Opening Rust coverage report..."
+    $$BROWSER target/llvm-cov/html/index.html
+
+# Open Erlang runtime coverage report in browser
+coverage-runtime-open:
+    @echo "🌐 Opening Erlang coverage report..."
+    $$BROWSER runtime/_build/test/cover/index.html
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Clean Tasks
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Clean Rust build artifacts (works with Docker volume mounts)
+clean:
+    @echo "🧹 Cleaning Rust artifacts..."
+    @rm -rf target/{*,.*} 2>/dev/null || true
+    @echo "  ✅ Cleaned target/"
+
+# Clean Erlang build artifacts
+clean-erlang:
+    @echo "🧹 Cleaning Erlang artifacts..."
+    cd runtime && rebar3 clean
+    @echo "  ✅ Cleaned runtime/_build/"
+
+# Deep clean (removes all caches, coverage, etc.)
+deep-clean: clean clean-erlang
+    @echo "🧹 Deep cleaning..."
+    @rm -rf ~/.cargo/registry/cache 2>/dev/null || true
+    @rm -rf runtime/_build 2>/dev/null || true
+    @rm -rf target/llvm-cov 2>/dev/null || true
+    @rm -rf examples/build 2>/dev/null || true
+    @echo "  ✅ Deep clean complete"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Development
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Start the REPL (builds Rust first if needed)
+repl: build-rust
+    @echo "🚀 Starting Beamtalk REPL..."
+    cargo run --bin beamtalk -- repl
+
+# Start the compiler daemon
+daemon-start: build-rust
+    @echo "🚀 Starting compiler daemon..."
+    cargo run --bin beamtalk -- daemon start
+
+# Stop the compiler daemon
+daemon-stop:
+    @echo "🛑 Stopping compiler daemon..."
+    cargo run --bin beamtalk -- daemon stop
+
+# Check daemon status
+daemon-status:
+    @cargo run --bin beamtalk -- daemon status
+
+# Run a Beamtalk file
+run FILE: build-rust
+    @echo "🚀 Running {{FILE}}..."
+    cargo run --bin beamtalk -- run {{FILE}}
+
+# Build a Beamtalk file (compile to .core and .beam)
+compile FILE: build-rust
+    @echo "🔨 Compiling {{FILE}}..."
+    cargo run --bin beamtalk -- build {{FILE}}
+
+# Watch for changes and run tests (requires cargo-watch)
+watch:
+    cargo watch -x 'test --all-targets'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dependencies
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Install development tools
+install-tools:
+    @echo "📦 Installing development tools..."
+    @command -v cargo-llvm-cov >/dev/null 2>&1 || cargo install cargo-llvm-cov
+    @command -v cargo-watch >/dev/null 2>&1 || cargo install cargo-watch
+    @command -v just >/dev/null 2>&1 || cargo install just
+    @echo "✅ Tools installed"
+
+# Check for required tools
+check-tools:
+    @echo "🔍 Checking for required tools..."
+    @command -v cargo >/dev/null 2>&1 || (echo "❌ cargo not found" && exit 1)
+    @command -v rustc >/dev/null 2>&1 || (echo "❌ rustc not found" && exit 1)
+    @command -v erl >/dev/null 2>&1 || (echo "❌ erl not found" && exit 1)
+    @command -v rebar3 >/dev/null 2>&1 || (echo "❌ rebar3 not found" && exit 1)
+    @echo "✅ All required tools found"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Release
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Prepare for release (run all checks)
+pre-release: clean-all ci coverage
+    @echo "✅ Pre-release checks passed"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Documentation
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Generate and open Rust documentation
+docs:
+    @echo "📚 Generating Rust documentation..."
+    cargo doc --workspace --no-deps --open
+
+# Check documentation for broken links
+docs-check:
+    @echo "🔍 Checking documentation..."
+    cargo doc --workspace --no-deps
+

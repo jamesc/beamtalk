@@ -30,7 +30,11 @@ const UNIT_TEST_MODULES: &str = "beamtalk_actor_tests,beamtalk_future_tests,beam
 
 /// Uses `#[serial(erlang_runtime)]` to prevent parallel rebar3 eunit runs
 /// in the same runtime/ directory, which can cause build conflicts.
+///
+/// Note: This test is ignored by default. Use `just test-runtime` to run
+/// Erlang runtime tests, or `just test` to run both Rust and runtime tests.
 #[test]
+#[ignore]
 #[serial(erlang_runtime)]
 fn erlang_runtime_unit_tests() {
     let runtime_dir = find_runtime_dir();
