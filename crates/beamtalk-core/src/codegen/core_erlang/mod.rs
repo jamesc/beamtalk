@@ -462,7 +462,7 @@ impl CoreErlangGenerator {
         // Module header with expanded exports per BT-29
         let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
                             'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
-                            'method_table'/0, 'spawn'/0, 'spawn'/1";
+                            'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1";
 
         if has_classes {
             writeln!(
@@ -527,6 +527,10 @@ impl CoreErlangGenerator {
 
         // Generate method table
         self.generate_method_table(module)?;
+        writeln!(self.output)?;
+
+        // Generate has_method/1 for reflection (BT-242)
+        self.generate_has_method(module)?;
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
