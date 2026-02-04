@@ -1,11 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Simple counter example for testing :load command
-// This will be compiled and loaded into the REPL
+// Simple counter example for REPL tutorial
+// This demonstrates basic Beamtalk syntax: variables and arithmetic
+//
+// Try loading this in the REPL:
+//   $ beamtalk repl
+//   > :load examples/counter.bt
+//   > count
+//   > count + 1
+//   > count * 2
+//
+// See examples/repl-tutorial.md for a full beginner's guide
 
-// Create a simple counter value
+// Create a counter variable
 count := 0
-
-// Increment function (will be replaced with proper methods when classes are added)
-count + 1
