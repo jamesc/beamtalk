@@ -55,3 +55,27 @@ exports_required_callbacks_test() ->
     Exports = beamtalk_runtime_app:module_info(exports),
     ?assert(lists:member({start, 2}, Exports)),
     ?assert(lists:member({stop, 1}, Exports)).
+
+%%% Stdlib auto-loading tests
+
+beamtalk_module_loaded_after_start_test() ->
+    %% Verify beamtalk module is loaded after application start
+    {ok, Pid} = beamtalk_runtime_app:start(normal, []),
+    
+    %% Check beamtalk module is loaded
+    ?assertMatch({file, _}, code:is_loaded(beamtalk)),
+    
+    %% Verify we can call beamtalk:allClasses/0
+    Classes = beamtalk:allClasses(),
+    ?assert(is_list(Classes)),
+    ?assert(length(Classes) > 0),
+    
+    %% Clean up
+    unlink(Pid),
+    Ref = monitor(process, Pid),
+    exit(Pid, shutdown),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 ->
+        error(supervisor_cleanup_timeout)
+    end.

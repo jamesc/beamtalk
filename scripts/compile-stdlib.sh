@@ -19,6 +19,7 @@
 # with the beamtalk_class registry when loaded.
 
 set -e
+set -o pipefail
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -27,13 +28,19 @@ cd "$REPO_ROOT"
 
 echo "Compiling standard library..."
 
-# Check if beamtalk binary exists
+# Check if beamtalk binary exists, build if missing
 if [ ! -f "./target/debug/beamtalk" ] && [ ! -f "./target/release/beamtalk" ]; then
-    echo "  Error: beamtalk binary not found. Run 'cargo build' first."
-    exit 1
+    echo "  Beamtalk binary not found. Building..."
+    cargo build --bin beamtalk --quiet 2>&1 | grep -v "Compiling\|Finished" || true
+    
+    # Verify build succeeded
+    if [ ! -f "./target/debug/beamtalk" ] && [ ! -f "./target/release/beamtalk" ]; then
+        echo "  Error: Failed to build beamtalk binary."
+        exit 1
+    fi
 fi
 
-# Use whichever binary exists
+# Use whichever binary exists (prefer release for speed)
 if [ -f "./target/release/beamtalk" ]; then
     BEAMTALK="./target/release/beamtalk"
 else
@@ -55,35 +62,51 @@ for btfile in "${STDLIB_FILES[@]}"; do
     filename=$(basename "$btfile" .bt)
     echo "  Building $btfile..."
     
-    # Compile to Core Erlang (outputs to lib/build/ by default)
-    # Note: beamtalk build may report errors even on success due to erlc warnings
-    # We check for the .core file existence instead of exit code
-    $BEAMTALK build "$btfile" 2>&1 | grep -v "Failed to compile Core Erlang" || true
+    # Clean stale artifacts to avoid masking compilation failures
+    rm -f "lib/build/$filename.core" "lib/build/$filename.beam"
     
-    # Compile Core Erlang to BEAM if .core file exists
-    if [ -f "lib/build/$filename.core" ]; then
-        (cd lib/build && erlc "$filename.core")
-        if [ -f "lib/build/$filename.beam" ]; then
-            echo "    ✓ Compiled $filename.beam"
-        else
-            echo "    ✗ Failed to compile Core Erlang to BEAM: $btfile"
-            exit 1
-        fi
-    else
+    # Compile to Core Erlang (outputs to lib/build/ by default)
+    # Note: beamtalk build may report "Compilation failed" even on success due to erlc warnings
+    # We verify success by checking for the .core file
+    $BEAMTALK build "$btfile" > /dev/null 2>&1 || true
+    
+    # Verify Core Erlang was generated
+    if [ ! -f "lib/build/$filename.core" ]; then
         echo "    ✗ Failed to generate Core Erlang: $btfile"
+        $BEAMTALK build "$btfile"  # Show error output
+        exit 1
+    fi
+    
+    # Compile Core Erlang to BEAM
+    (cd lib/build && erlc "$filename.core")
+    if [ -f "lib/build/$filename.beam" ]; then
+        echo "    ✓ Compiled $filename.beam"
+    else
+        echo "    ✗ Failed to compile Core Erlang to BEAM: $btfile"
         exit 1
     fi
 done
 
 # Copy to rebar3 build ebin directories
+# Ensure at least the default profile ebin exists (for clean builds)
+DEFAULT_EBIN="runtime/_build/default/lib/beamtalk_runtime/ebin"
+mkdir -p "$DEFAULT_EBIN"
+
+copied_count=0
 for beam_file in lib/build/*.beam; do
     filename=$(basename "$beam_file")
     for ebin_dir in runtime/_build/*/lib/beamtalk_runtime/ebin; do
         if [ -d "$ebin_dir" ]; then
             cp "$beam_file" "$ebin_dir/"
             echo "    ✓ Copied $filename to $ebin_dir/"
+            copied_count=$((copied_count + 1))
         fi
     done
 done
+
+if [ $copied_count -eq 0 ]; then
+    echo "    ✗ Error: No target ebin directories found to copy stdlib modules"
+    exit 1
+fi
 
 echo "Standard library compilation complete!"
