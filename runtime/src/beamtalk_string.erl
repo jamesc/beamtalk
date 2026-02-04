@@ -279,7 +279,7 @@ builtin_dispatch('asInteger', [], X) ->
 %% Primitives are immutable and have no instance variables
 builtin_dispatch('instVarNames', [], _X) -> 
     {ok, []};
-builtin_dispatch('instVarAt', [_Name], _X) when length([_Name]) =:= 1 -> 
+builtin_dispatch('instVarAt', [_Name], _X) -> 
     {ok, nil};
 builtin_dispatch('instVarAt:put:', [Name, _Value], _X) -> 
     %% Primitives cannot be mutated
