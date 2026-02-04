@@ -118,11 +118,11 @@ format_error(Reason) ->
         Message = format_error_message(Reason),
         jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message})
     catch
-        Class:Error:Stack ->
+        Class:FormatError:Stack ->
             %% Log formatting failure for debugging
             io:format(standard_error,
                       "Failed to format error:~nClass: ~p~nError: ~p~nStack: ~p~nReason: ~p~n",
-                      [Class, Error, lists:sublist(Stack, 3), Reason]),
+                      [Class, FormatError, lists:sublist(Stack, 5), Reason]),
             %% Return fallback error response
             jsx:encode(#{<<"type">> => <<"error">>, 
                         <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
@@ -313,6 +313,7 @@ term_to_json(Value) ->
 
 %% @private
 %% Format a rejection reason for display in #Future<rejected: ...>
+-spec format_rejection_reason(term()) -> iolist().
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason({unknown_message, Selector, ClassName}) ->
