@@ -2,7 +2,7 @@
 
 How Beamtalk maps Smalltalk's "everything is an object" philosophy to the BEAM virtual machine.
 
-This document analyzes the feasibility of full Smalltalk object reification on BEAM and recommends pragmatic design decisions for Beamtalk.
+This document analyzes the feasibility of Smalltalk-style object reification on BEAM and recommends pragmatic design decisions for Beamtalk. **Note:** Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**—we make pragmatic trade-offs for BEAM's architecture.
 
 **Related documents:**
 - [Design Principles](beamtalk-principles.md) — Core philosophy (actors, async-first, hot reload)
