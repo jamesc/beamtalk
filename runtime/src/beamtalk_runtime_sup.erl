@@ -31,6 +31,15 @@ init([]) ->
             type => worker,
             modules => [beamtalk_bootstrap]
         },
+        %% Then register stdlib primitive classes (Integer, String, etc.)
+        #{
+            id => beamtalk_stdlib,
+            start => {beamtalk_stdlib, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_stdlib]
+        },
         %% Then start instance tracking
         #{
             id => beamtalk_instances,

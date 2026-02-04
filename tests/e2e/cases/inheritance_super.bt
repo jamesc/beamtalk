@@ -51,10 +51,11 @@ c class
 // => Counter
 
 // Counter methods work (no super involved)
-c increment await
+// Auto-await: REPL automatically awaits actor message futures
+c increment
 // => 1
 
-c getValue await
+c getValue
 // => 1
 
 // ===========================================================================
