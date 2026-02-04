@@ -4,8 +4,8 @@
 %%% @doc Tests for compiler-generated code patterns using real compiled Beamtalk.
 %%%
 %%% These tests verify runtime behavior by using the counter module compiled
-%%% from tests/fixtures/counter.bt. This tests the actual code generation,
-%%% not simulated patterns.
+%%% from tests/e2e/fixtures/counter.bt (unified fixture - BT-239). This tests 
+%%% the actual code generation, not simulated patterns.
 %%%
 %%% **Note:** These are NOT true end-to-end tests. For real E2E tests that
 %%% compile actual Beamtalk source files in full, see `tests/e2e/cases/*.bt`.
@@ -36,7 +36,8 @@
 %%% ===========================================================================
 
 %% Note: For spawn/0 and spawn/1 tests, we use the real compiled counter module
-%% from tests/fixtures/counter.bt which generates actual #beamtalk_object{} records.
+%% from tests/e2e/fixtures/counter.bt (unified fixture - BT-239) which generates 
+%% actual #beamtalk_object{} records.
 %%
 %% For other tests that need manual state manipulation (async, cascade, etc.),
 %% we use simulated state structures below.
@@ -87,7 +88,7 @@ counter_divide([N], State) ->
 %%%
 %%% spawn/0 tests (Counter spawn)
 %%% 
-%%% Tests use counter:spawn() from compiled tests/fixtures/counter.bt
+%%% Tests use counter:spawn() from compiled tests/e2e/fixtures/counter.bt
 %%% which returns {beamtalk_object, 'Counter', counter, Pid}
 %%% ===========================================================================
 

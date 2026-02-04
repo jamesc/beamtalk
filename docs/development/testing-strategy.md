@@ -284,7 +284,7 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 **Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
 
 **What they test:**
-- `spawn/0` and `spawn/1` tests use **real compiled `counter.bt`**
+- `spawn/0` and `spawn/1` tests use **real compiled `counter.bt`** (unified E2E fixture - BT-239)
   - Validates actual `#beamtalk_object{}` record generation
   - Tests `counter:spawn()` from compiled module
 - Other tests use simulated state for complex scenarios
@@ -293,18 +293,18 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 - Interaction between multiple actors
 
 **Test Fixtures:** Compiled automatically by rebar3 pre-hook
-- Source: `tests/fixtures/counter.bt`
-- Compiled by: `tests/fixtures/compile.sh` (runs automatically)
-- Output: `runtime/test/counter.beam`
+- Source: `tests/e2e/fixtures/counter.bt` (canonical implementation - BT-239)
+- Compiled by: `runtime/test_fixtures/compile.sh` (runs automatically)
+- Output: `runtime/_build/*/test/counter.beam`
 - **No manual compilation needed** - hook runs before every `rebar3 eunit`
 
 **Compilation Workflow:**
 ```
 Developer runs: cargo test OR rebar3 eunit
   └─> cargo build (if needed) - creates ./target/debug/beamtalk
-  └─> rebar3 pre-hook runs: tests/fixtures/compile.sh
-      └─> Uses ./target/debug/beamtalk to compile tests/fixtures/*.bt
-      └─> Copies *.beam to runtime/test/
+  └─> rebar3 pre-hook runs: runtime/test_fixtures/compile.sh
+      └─> Uses ./target/debug/beamtalk to compile tests/e2e/fixtures/counter.bt
+      └─> Copies counter.beam to runtime/_build/*/test/
   └─> Tests run with compiled fixtures available
 ```
 
