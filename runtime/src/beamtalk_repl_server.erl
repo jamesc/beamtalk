@@ -177,7 +177,11 @@ parse_json(Data) ->
         Decoded = jsx:decode(Data, [return_maps]),
         {ok, Decoded}
     catch
-        _:_ ->
+        Class:Reason:Stack ->
+            %% Log parse failures for debugging REPL protocol issues
+            io:format(standard_error, 
+                      "JSON parse failed:~nClass: ~p~nReason: ~p~nStack: ~p~nData: ~p~n",
+                      [Class, Reason, lists:sublist(Stack, 3), Data]),
             {error, not_json}
     end.
 
