@@ -64,7 +64,7 @@ impl CoreErlangGenerator {
         //               State, List)
         //           in <continue with State1>
 
-        // Generate: let List = <receiver> in 
+        // Generate: let List = <receiver> in
         //           let Lambda = fun (Item, StateAcc) -> body in
         //           let State{n} = call 'lists':'foldl'(Lambda, initial, List) in <continuation>
         write!(self.output, "let ")?;
@@ -284,7 +284,10 @@ impl CoreErlangGenerator {
         // Bind lambda to a variable (Core Erlang requires this for foldl)
         write!(self.output, " in let ")?;
         let lambda_var = self.fresh_temp_var("temp");
-        write!(self.output, "{lambda_var} = fun (Item, {{Acc, StateAcc}}) -> ")?;
+        write!(
+            self.output,
+            "{lambda_var} = fun (Item, {{Acc, StateAcc}}) -> "
+        )?;
 
         // Generate body with state threading
         self.generate_list_inject_body_with_threading(body)?;

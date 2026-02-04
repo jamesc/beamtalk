@@ -1110,7 +1110,7 @@ impl CoreErlangGenerator {
                 self.generate_field_assignment_open(expr)?;
             } else if Self::is_state_threading_control_flow(expr) {
                 // Control flow that threads state: bind result to the next state variable
-                // 
+                //
                 // We need to:
                 // 1. Write "let State1 = " (using NEXT state name)
                 // 2. Generate expression which uses CURRENT state (State)

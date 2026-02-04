@@ -95,7 +95,6 @@ impl StateThreading {
         self.version = 0;
     }
 
-
     /// Sets the version to a specific value.
     ///
     /// This is used when saving/restoring version across nested contexts.
