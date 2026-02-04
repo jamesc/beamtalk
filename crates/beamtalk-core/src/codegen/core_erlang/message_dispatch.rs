@@ -333,6 +333,42 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// Checks if an expression is a control flow construct that handles its own state threading.
+    ///
+    /// These expressions (do:, inject:into:, whileTrue:, etc.) internally manage state
+    /// and should NOT be wrapped in `let _seq = ... in` bindings.
+    pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
+        match expr {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                ..
+            } => {
+                // Check for control flow selectors that thread state
+                let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                matches!(
+                    selector.as_str(),
+                    "do:"
+                        | "collect:"
+                        | "select:"
+                        | "reject:"
+                        | "inject:into:"
+                        | "whileTrue:"
+                        | "whileFalse:"
+                        | "to:do:"
+                        | "to:by:do:"
+                )
+            }
+            Expression::MessageSend {
+                selector: MessageSelector::Unary(name),
+                ..
+            } => {
+                // Check for unary control flow
+                matches!(name.as_str(), "whileTrue" | "whileFalse" | "timesRepeat")
+            }
+            _ => false,
+        }
+    }
+
     /// Generates the opening part of a field assignment with state threading.
     ///
     /// For `self.field := value`, generates:

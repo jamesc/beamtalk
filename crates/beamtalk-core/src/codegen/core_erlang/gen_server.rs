@@ -1108,10 +1108,31 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
+            } else if Self::is_state_threading_control_flow(expr) {
+                // Control flow that threads state: bind result to the next state variable
+                // 
+                // We need to:
+                // 1. Write "let State1 = " (using NEXT state name)
+                // 2. Generate expression which uses CURRENT state (State)
+                // 3. Write " in "
+                //
+                // The trick: calculate next state name without incrementing yet,
+                // generate expression (which uses current state), then increment.
+                let next_version = self.state_version() + 1;
+                let new_state = if next_version == 1 {
+                    "State1".to_string()
+                } else {
+                    format!("State{next_version}")
+                };
+                write!(self.output, "let {new_state} = ")?;
+                self.generate_expression(expr)?;
+                // Now actually increment the version so subsequent code uses State1
+                let _ = self.next_state_var();
+                write!(self.output, " in ")?;
             } else {
-                // Non-field-assignment intermediate expression: just generate it
-                // If it performs state threading (e.g., control flow), it will update
-                // the state version internally. Otherwise, we ignore its return value.
+                // Regular intermediate expression: wrap in let to discard value
+                let tmp_var = self.fresh_temp_var("seq");
+                write!(self.output, "let {tmp_var} = ")?;
                 self.generate_expression(expr)?;
                 write!(self.output, " in ")?;
             }

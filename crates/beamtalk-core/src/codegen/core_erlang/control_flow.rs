@@ -83,15 +83,18 @@ impl CoreErlangGenerator {
         // Generate body with state threading
         self.generate_list_do_body_with_threading(body, &item_var)?;
 
-        // Call foldl with the lambda variable
-        write!(self.output, " in let ")?;
-        // Capture current state BEFORE incrementing for the foldl result
+        // Capture current state before the foldl call
         let initial_state = self.current_state_var();
-        let new_state = self.next_state_var();
+
+        // Call foldl with the lambda variable - returns the final state
+        // The caller will bind this result to the appropriate state variable
         write!(
             self.output,
-            "{new_state} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var}) in 'nil'"
+            " in call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var})"
         )?;
+
+        // Note: Do NOT increment state version here - the caller does that
+        // when binding the result to the state variable
 
         Ok(())
     }
