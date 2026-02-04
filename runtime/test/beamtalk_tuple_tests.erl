@@ -203,3 +203,22 @@ type_safety_test_() ->
                          beamtalk_tuple:dispatch('unwrapOrElse:', [42], {error, reason}))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Instance Variable Reflection Tests (BT-164)
+%%% ============================================================================
+
+instVarNames_test() ->
+    %% Primitives have no instance variables
+    ?assertEqual([], beamtalk_tuple:dispatch('instVarNames', [], {a, b})),
+    ?assertEqual([], beamtalk_tuple:dispatch('instVarNames', [], {})).
+
+instVarAt_test() ->
+    %% Primitives always return nil for instVarAt:
+    ?assertEqual(nil, beamtalk_tuple:dispatch('instVarAt', [anyField], {ok, 42})),
+    ?assertEqual(nil, beamtalk_tuple:dispatch('instVarAt', [value], {a, b, c})).
+
+instVarAt_put_immutable_error_test() ->
+    %% Trying to mutate a primitive should raise an immutable_primitive error
+    ?assertError({beamtalk_error, immutable_primitive, 'Tuple', 'instVarAt:put:', _, _, _},
+                 beamtalk_tuple:dispatch('instVarAt:put:', [value, 99], {a, b})).

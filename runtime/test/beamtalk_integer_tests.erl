@@ -217,3 +217,21 @@ mixed_integer_float_test() ->
     %% Arithmetic with float should work (Erlang handles mixed arithmetic)
     ?assertEqual(50.5, beamtalk_integer:dispatch('+', [8.5], 42)),
     ?assertEqual(5.0, beamtalk_integer:dispatch('/', [8.4], 42)).
+
+%%% ============================================================================
+%%% Instance Variable Reflection Tests (BT-164)
+%%% ============================================================================
+
+instVarNames_test() ->
+    %% Primitives have no instance variables
+    ?assertEqual([], beamtalk_integer:dispatch('instVarNames', [], 42)).
+
+instVarAt_test() ->
+    %% Primitives always return nil for instVarAt:
+    ?assertEqual(nil, beamtalk_integer:dispatch('instVarAt', [anyField], 42)),
+    ?assertEqual(nil, beamtalk_integer:dispatch('instVarAt', [value], 123)).
+
+instVarAt_put_immutable_error_test() ->
+    %% Trying to mutate a primitive should raise an immutable_primitive error
+    ?assertError({beamtalk_error, immutable_primitive, 'Integer', 'instVarAt:put:', _, _, _},
+                 beamtalk_integer:dispatch('instVarAt:put:', [value, 99], 42)).

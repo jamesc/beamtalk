@@ -20,6 +20,9 @@
 %%% | `and:`   | [Block] | Lazy AND (short-circuit) |
 %%% | `or:`    | [Block] | Lazy OR (short-circuit) |
 %%% | `asString` | [] | Convert to string |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
@@ -43,6 +46,8 @@
 
 -module(beamtalk_boolean).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -77,6 +82,9 @@ is_builtin('not') -> true;
 is_builtin('and:') -> true;
 is_builtin('or:') -> true;
 is_builtin('asString') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -151,8 +159,26 @@ builtin_dispatch('or:', [_Block], true) ->
 builtin_dispatch('asString', [], true) -> {ok, <<"true">>};
 builtin_dispatch('asString', [], false) -> {ok, <<"false">>};
 
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _Value) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _Value) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _NewValue], _Value) -> 
+    error(immutable_primitive_error('Boolean', Name));
+
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Boolean.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Booleans are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), boolean()) -> term().

@@ -30,6 +30,9 @@
 %%% | `substring:to:` | [Start, End] | Extract substring (1-based, inclusive) |
 %%% | `split:` | [Delim] | Split by delimiter |
 %%% | `asInteger` | [] | Parse as integer (error if invalid) |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
@@ -68,6 +71,8 @@
 
 -module(beamtalk_string).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -128,6 +133,9 @@ is_builtin('replace:with:') -> true;
 is_builtin('substring:to:') -> true;
 is_builtin('split:') -> true;
 is_builtin('asInteger') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -270,8 +278,26 @@ builtin_dispatch('asInteger', [], X) ->
         error:badarg -> not_found  % Will trigger does_not_understand
     end;
 
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], _X) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], _X) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], _X) -> 
+    error(immutable_primitive_error('String', Name));
+
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for String.
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Strings are immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), binary()) -> term().
