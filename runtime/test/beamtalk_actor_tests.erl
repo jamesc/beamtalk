@@ -298,14 +298,16 @@ method_throws_exception_async_test() ->
     gen_server:cast(Actor, {throwError, [], Future}),
     
     %% Future should be rejected with the error
-    Result = beamtalk_future:await(Future, 1000),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = type_error, selector = throwError}},
+        beamtalk_future:await(Future, 1000)
+    ),
     
     %% Verify actor still works after exception
     NormalFuture = beamtalk_future:new(),
     gen_server:cast(Actor, {normalMethod, [], NormalFuture}),
     NormalResult = beamtalk_future:await(NormalFuture, 1000),
-    ?assertEqual({ok, ok}, NormalResult),
+    ?assertEqual(ok, NormalResult),
     
     gen_server:stop(Actor).
 
@@ -330,8 +332,10 @@ invalid_method_not_function_async_test() ->
     gen_server:cast(Actor, {notAFunction, [], Future}),
     
     %% Future should be rejected
-    Result = beamtalk_future:await(Future, 1000),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = notAFunction}}, Result),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = type_error, selector = notAFunction}},
+        beamtalk_future:await(Future, 1000)
+    ),
     
     gen_server:stop(Actor).
 

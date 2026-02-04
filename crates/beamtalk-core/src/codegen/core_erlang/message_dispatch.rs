@@ -150,6 +150,19 @@ impl CoreErlangGenerator {
             if name == "await" && arguments.is_empty() {
                 return self.generate_await(receiver);
             }
+
+            // Special case: "awaitForever" is an infinite-wait operation on a future
+            if name == "awaitForever" && arguments.is_empty() {
+                return self.generate_await_forever(receiver);
+            }
+        }
+
+        // Special case: "await:" keyword message with timeout
+        // This awaits a future with an explicit timeout value
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
+                return self.generate_await_with_timeout(receiver, &arguments[0]);
+            }
         }
 
         // Special case: "spawnWith:" keyword message on a class/identifier

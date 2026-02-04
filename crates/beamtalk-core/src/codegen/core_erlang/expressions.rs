@@ -291,13 +291,45 @@ impl CoreErlangGenerator {
     /// Generates await expression.
     ///
     /// Delegates to `beamtalk_future:await/1` which blocks until the future
-    /// is resolved or rejected:
+    /// is resolved or rejected (with 30-second default timeout):
     /// ```erlang
     /// call 'beamtalk_future':'await'(Future)
     /// ```
     pub(super) fn generate_await(&mut self, future: &Expression) -> Result<()> {
-        // Delegate to beamtalk_future:await/1, which blocks until resolution/rejection
+        // Delegate to beamtalk_future:await/1, which uses 30s default timeout
         write!(self.output, "call 'beamtalk_future':'await'(")?;
+        self.generate_expression(future)?;
+        write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates await with explicit timeout.
+    ///
+    /// Delegates to `beamtalk_future:await/2` with an explicit timeout value:
+    /// ```erlang
+    /// call 'beamtalk_future':'await'(Future, Timeout)
+    /// ```
+    pub(super) fn generate_await_with_timeout(
+        &mut self,
+        future: &Expression,
+        timeout: &Expression,
+    ) -> Result<()> {
+        write!(self.output, "call 'beamtalk_future':'await'(")?;
+        self.generate_expression(future)?;
+        write!(self.output, ", ")?;
+        self.generate_expression(timeout)?;
+        write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates awaitForever expression.
+    ///
+    /// Delegates to `beamtalk_future:await_forever/1` which waits indefinitely:
+    /// ```erlang
+    /// call 'beamtalk_future':'await_forever'(Future)
+    /// ```
+    pub(super) fn generate_await_forever(&mut self, future: &Expression) -> Result<()> {
+        write!(self.output, "call 'beamtalk_future':'await_forever'(")?;
         self.generate_expression(future)?;
         write!(self.output, ")")?;
         Ok(())

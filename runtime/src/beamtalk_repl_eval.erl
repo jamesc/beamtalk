@@ -16,6 +16,7 @@
 
 -module(beamtalk_repl_eval).
 
+-include("beamtalk.hrl").
 -include_lib("kernel/include/file.hrl").
 
 -export([do_eval/2, handle_load/2]).
@@ -635,12 +636,13 @@ maybe_await_future(Value) when is_pid(Value) ->
         {future_timeout, Value} ->
             %% Future explicitly timed out waiting for resolution.
             %% This confirms it IS a future. Try a longer await.
-            case beamtalk_future:await(Value, 5000) of
-                {ok, AwaitedValue} ->
-                    AwaitedValue;
-                {error, timeout} ->
+            try beamtalk_future:await(Value, 5000) of
+                AwaitedValue ->
+                    AwaitedValue
+            catch
+                throw:#beamtalk_error{kind = timeout} ->
                     {future_timeout, Value};
-                {error, Reason} ->
+                throw:{future_rejected, Reason} ->
                     {future_rejected, Reason}
             end
     after TestTimeout + 50 ->

@@ -128,14 +128,84 @@ The beamtalk codebase follows strict architectural principles for code organizat
 - Panic on user input (malformed source, invalid args, missing files)
 - Add dependencies without security review and commit message justification
 - Use `unwrap()` on user input
+- **Use bare tuple errors** - ALL errors MUST use `#beamtalk_error{}` records
 
 ✅ **ALWAYS:**
 - Return `(Result, Vec<Diagnostic>)` or equivalent for user-facing operations
 - Validate file paths and buffer boundaries
 - Document unsafe code with `// SAFETY:` comment explaining invariants
 - Run `cargo audit` before releases
+- **Use structured errors** - `beamtalk_error:new/with_selector/with_hint` in all code
 
 See full guide: [docs/development/architecture-principles.md](docs/development/architecture-principles.md)
+
+---
+
+## Error Handling - CRITICAL RULES
+
+**NO bare tuple errors EVER!** All errors in the beamtalk codebase MUST use the structured `#beamtalk_error{}` system.
+
+### Structured Error System
+
+All errors use `#beamtalk_error{}` records defined in `runtime/include/beamtalk.hrl`:
+
+```erlang
+-record(beamtalk_error, {
+    kind    :: atom(),              % does_not_understand | immutable_value | type_error | instantiation_error | ...
+    class   :: atom(),              % 'Integer', 'Counter', 'Actor'  
+    selector:: atom() | undefined,  % method that failed
+    message :: binary(),            % human-readable explanation
+    hint    :: binary() | undefined,% actionable suggestion
+    details :: map()                % additional context
+}).
+```
+
+### In Runtime Erlang Code
+
+Use `beamtalk_error` module helpers:
+
+```erlang
+Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
+Error1 = beamtalk_error:with_selector(Error0, 'foo'),
+Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
+error(Error2)
+```
+
+### In Generated Core Erlang Code
+
+Codegen MUST use `beamtalk_error` calls:
+
+```erlang
+%% ❌ WRONG - bare tuple (never do this!)
+call 'erlang':'error'({'some_error', 'message'})
+
+%% ✅ RIGHT - structured error
+let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
+call 'erlang':'error'(Error2)
+```
+
+### Error Kinds
+
+| Kind | When | Example |
+|------|------|---------|
+| `does_not_understand` | Unknown method | `42 foo` |
+| `immutable_value` | Mutation on primitive | `42 instVarAt:put:` |
+| `type_error` | Wrong argument type | `"hello" + 42` |
+| `arity_mismatch` | Wrong argument count | Missing/extra args |
+| `instantiation_error` | Wrong instantiation | `Actor new` (use `spawn`) |
+| `future_not_awaited` | Message to Future | `(future) size` |
+| `timeout` | Operation timeout | Await exceeds deadline |
+
+### Benefits of Structured Errors
+
+1. **Consistent tooling** - Pattern match on kind/class/selector
+2. **Better UX** - Actionable hints guide users
+3. **Rich context** - Details map for debugging
+4. **Future-proof** - Easy to add metadata without breaking changes
+
+See full error taxonomy: [docs/internal/design-self-as-object.md](docs/internal/design-self-as-object.md#38-error-handling-taxonomy)
 
 ---
 

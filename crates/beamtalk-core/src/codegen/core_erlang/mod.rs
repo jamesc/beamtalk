@@ -489,9 +489,11 @@ impl CoreErlangGenerator {
         let has_classes = !module.classes.is_empty();
 
         // Module header with expanded exports per BT-29
+        // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
+        // BT-242: Add 'has_method'/1 export for reflection
         let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
                             'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
-                            'method_table'/0, 'spawn'/0, 'spawn'/1";
+                            'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1";
 
         if has_classes {
             writeln!(
@@ -526,6 +528,12 @@ impl CoreErlangGenerator {
         self.generate_spawn_with_args_function(module)?;
         writeln!(self.output)?;
 
+        // BT-217: Generate new/0 and new/1 error methods for actors
+        self.generate_actor_new_error_method()?;
+        writeln!(self.output)?;
+        self.generate_actor_new_with_args_error_method()?;
+        writeln!(self.output)?;
+
         // Generate init/1 function
         self.generate_init_function(module)?;
         writeln!(self.output)?;
@@ -556,6 +564,10 @@ impl CoreErlangGenerator {
 
         // Generate method table
         self.generate_method_table(module)?;
+        writeln!(self.output)?;
+
+        // Generate has_method/1 for reflection (BT-242)
+        self.generate_has_method(module)?;
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
@@ -1773,6 +1785,60 @@ end
     }
 
     #[test]
+    fn test_generate_await_with_timeout() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: future await: 5000
+        let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
+        let selector = MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "await:".into(),
+            span: Span::new(9, 15),
+        }]);
+        let timeout = Expression::Literal(Literal::Integer(5000), Span::new(16, 20));
+
+        let result = generator.generate_message_send(&receiver, &selector, &[timeout]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Should call beamtalk_future:await/2 with timeout
+        assert!(
+            output.contains("beamtalk_future':'await'("),
+            "Should call beamtalk_future:await(). Got: {output}"
+        );
+        assert!(
+            output.contains("5000"),
+            "Should include timeout value. Got: {output}"
+        );
+        assert!(
+            !output.contains("gen_server':'cast'"),
+            "Should NOT use gen_server:cast for await. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_await_forever() {
+        let mut generator = CoreErlangGenerator::new("test");
+
+        // Build: future awaitForever
+        let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
+        let selector = MessageSelector::Unary("awaitForever".into());
+
+        let result = generator.generate_message_send(&receiver, &selector, &[]);
+        assert!(result.is_ok());
+
+        let output = &generator.output;
+        // Should call beamtalk_future:await_forever/1
+        assert!(
+            output.contains("beamtalk_future':'await_forever'("),
+            "Should call beamtalk_future:await_forever(). Got: {output}"
+        );
+        assert!(
+            !output.contains("gen_server':'cast'"),
+            "Should NOT use gen_server:cast for awaitForever. Got: {output}"
+        );
+    }
+
+    #[test]
     fn test_generate_binary_op_is_synchronous() {
         let mut generator = CoreErlangGenerator::new("test");
 
@@ -1935,6 +2001,31 @@ end
         // Check that InitArgs is merged into DefaultState
         assert!(code.contains("call 'maps':'merge'(DefaultState, InitArgs)"));
         assert!(code.contains("{'ok', FinalState}"));
+    }
+
+    #[test]
+    fn test_generate_actor_new_error_methods() {
+        // BT-217: Actor classes must export and generate new/0 and new/1 error methods
+        // using structured #beamtalk_error{} records
+        use crate::ast::*;
+
+        let module = Module::new(vec![], Span::new(0, 0));
+        let code = generate_with_name(&module, "test_actor").expect("codegen should succeed");
+
+        // Check that new/0 and new/1 are exported
+        assert!(code.contains("'new'/0"));
+        assert!(code.contains("'new'/1"));
+
+        // Check that new/0 function exists and uses beamtalk_error
+        assert!(code.contains("'new'/0 = fun () ->"));
+        assert!(code.contains("call 'beamtalk_error':'new'('instantiation_error', 'Actor')"));
+        assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new')"));
+        assert!(code.contains("call 'beamtalk_error':'with_hint'(Error1,"));
+        assert!(code.contains("call 'erlang':'error'(Error2)"));
+
+        // Check that new/1 function exists and uses beamtalk_error
+        assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));
+        assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new:')"));
     }
 
     #[test]
