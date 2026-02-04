@@ -49,7 +49,8 @@
   // because ${localEnv:...} variable substitution doesn't work reliably with devcontainer CLI
   "mounts": [
     "source=beamtalk-cargo-cache,target=/usr/local/cargo/registry,type=volume",
-    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
+    "source=${localWorkspaceFolderBasename}-target-cache,target=${containerWorkspaceFolder}/target,type=volume",
+    "source=beamtalk-copilot-state,target=/home/vscode/.copilot,type=volume"
   ],
   // ═══════════════════════════════════════════════════════════════════════════
   // DEVELOPMENT WORKFLOWS
