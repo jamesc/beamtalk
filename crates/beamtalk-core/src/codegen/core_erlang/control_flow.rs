@@ -119,19 +119,32 @@ impl CoreErlangGenerator {
         self.in_loop_body = true;
 
         // Generate the body expression(s), threading state through assignments
+        // Note: generate_field_assignment_open already writes trailing " in "
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                // Output the current state variable (which is the one just created)
-                write!(self.output, "{}", self.current_state_var())?;
+
+                if is_last {
+                    // Last expression: close with the final state variable
+                    write!(self.output, "{}", self.current_state_var())?;
+                }
+                // Otherwise, the trailing " in " from generate_field_assignment_open
+                // allows the next expression to become the body
             } else {
+                // Non-assignment expression
+                if i > 0 {
+                    // Sequence with previous expression using let _ = ... in
+                    write!(self.output, "let _ = ")?;
+                }
                 self.generate_expression(expr)?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
             }
         }
 
@@ -334,31 +347,54 @@ impl CoreErlangGenerator {
         self.in_loop_body = true;
 
         // Generate the body expression(s), threading state through assignments
+        // Note: generate_field_assignment_open already writes trailing " in "
         let mut has_mutations = false;
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                // Output the current state variable (which is the one just created)
-                write!(self.output, "{}", self.current_state_var())?;
-            } else {
-                self.generate_expression(expr)?;
-            }
-        }
 
-        // Return {NewAcc, NewState}
-        if has_mutations {
-            let final_state = format!("StateAcc{}", self.state_version());
-            // The last expression is the new accumulator value
-            write!(self.output, " in {{<last expression>, {final_state}}}")?;
-        } else {
-            write!(self.output, " in {{<last expression>, StateAcc}}")?;
+                if is_last {
+                    // Last expression is a field assignment - the accumulator value is
+                    // the RHS of the assignment (already stored in _Val), but we need
+                    // to extract it. For now, we'll just use the last _Val temp var.
+                    // However, this is a degenerate case - inject:into: should return
+                    // the accumulator value, not perform a field assignment as the last expr.
+                    // We'll close with a tuple containing the state.
+                    let final_state = self.current_state_var();
+                    write!(self.output, "{{_Val, {final_state}}}")?;
+                } else {
+                    // Not the last expression - the trailing " in " allows the next expression
+                }
+            } else {
+                // Non-assignment expression
+                if i > 0 && !has_mutations {
+                    // Previous expression was not a field assignment, so we need to sequence
+                    write!(self.output, "let _ = ")?;
+                }
+
+                if is_last {
+                    // Last expression: capture its value as the new accumulator
+                    let acc_var = self.fresh_temp_var("AccOut");
+                    write!(self.output, "let {acc_var} = ")?;
+                    self.generate_expression(expr)?;
+
+                    // Return {NewAcc, NewState}
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    write!(self.output, " in {{{acc_var}, {final_state}}}")?;
+                } else {
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
+                }
+            }
         }
 
         self.set_state_version(saved_state_version);

@@ -346,13 +346,21 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Checks if an expression is a control flow construct that handles its own state threading.
+    /// Checks if an expression is a control flow construct that *potentially*
+    /// threads state through a block (e.g. `do:`, `whileTrue:`, etc.).
     ///
-    /// These expressions (do:, whileTrue:, etc.) internally manage state
-    /// and should be bound to a state variable by the caller. They return the
-    /// final state value.
+    /// **IMPORTANT:** This helper is **selector-based only** - it does not analyze
+    /// whether the literal block argument actually mutates any captured state, nor which
+    /// variant of the underlying control-flow primitive (pure vs. with mutations) will
+    /// be used. As a result, it may return `true` for expressions whose final result
+    /// is a non-state value (such as `ok` or `nil`).
     ///
-    /// Note: inject:into: is NOT included because it returns an accumulated value,
+    /// **Callers that use this to decide whether to rebind a threaded `StateN` variable
+    /// MUST also perform mutation analysis** on the block argument (or use equivalent
+    /// information such as `control_flow_has_mutations()`) rather than assuming that
+    /// the return value is always the updated state.
+    ///
+    /// Note: `inject:into:` is NOT included because it returns an accumulated value,
     /// not the state. It has special handling for state extraction.
     pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
         match expr {

@@ -13,7 +13,7 @@
 //! - Message dispatch logic
 //! - Method table generation
 
-use super::{CoreErlangGenerator, Result};
+use super::{block_analysis, CoreErlangGenerator, Result};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
@@ -1270,8 +1270,8 @@ impl CoreErlangGenerator {
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
-            } else if Self::is_state_threading_control_flow(expr) {
-                // Control flow that threads state: bind result to the next state variable
+            } else if self.control_flow_has_mutations(expr) {
+                // Control flow that actually threads state: bind result to the next state variable
                 //
                 // We need to:
                 // 1. Write "let State1 = " (using NEXT state name)
@@ -1611,5 +1611,35 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         Ok(())
+    }
+
+    /// Checks if a control flow expression actually threads state through mutations.
+    ///
+    /// This goes beyond `is_state_threading_control_flow` by analyzing whether
+    /// the block argument contains field mutations that require state threading.
+    ///
+    /// Returns `true` only if:
+    /// 1. The expression is a state-threading control flow construct (do:, whileTrue:, etc.)
+    /// 2. The block argument contains field writes that need threading
+    ///
+    /// This prevents binding non-state return values (like `ok` or `nil`) to `StateN`.
+    fn control_flow_has_mutations(&self, expr: &Expression) -> bool {
+        // First check if it's a potential state-threading construct
+        if !Self::is_state_threading_control_flow(expr) {
+            return false;
+        }
+
+        // Extract the block argument and analyze for mutations
+        if let Expression::MessageSend { arguments, .. } = expr {
+            // The block is typically the last argument for these control flow constructs
+            if let Some(Expression::Block(block)) = arguments.last() {
+                let analysis = block_analysis::analyze_block(block);
+                return self.needs_mutation_threading(&analysis);
+            }
+        }
+
+        // If we can't analyze (e.g., block isn't a literal), conservatively return false
+        // to avoid binding non-state values to StateN
+        false
     }
 }

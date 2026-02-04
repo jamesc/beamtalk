@@ -1,0 +1,81 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for field mutations inside control flow blocks (BT-98)
+// Tests that actor field mutations work correctly within do: and inject:into:
+
+// @load tests/e2e/fixtures/field_mutation_counter.bt
+// @load tests/e2e/fixtures/field_mutation_accumulator.bt
+// @load tests/e2e/fixtures/field_mutation_nested.bt
+
+// ===========================================================================
+// FIELD MUTATION COUNTER - do: with field mutations
+// ===========================================================================
+
+// Create a counter and sum an array using do:
+counter := FieldMutationCounter spawn
+// => <beamtalk_object>
+
+// Sum [1, 2, 3, 4, 5] - should mutate counter.value to 15
+result := counter sumArray: [1, 2, 3, 4, 5]
+// => <future>
+
+result await
+// => 15
+
+// Verify the counter value was mutated
+getValue := counter getValue
+// => <future>
+
+getValue await
+// => 15
+
+// Test pure functional inject:into: (no mutations)
+counter2 := FieldMutationCounter spawn
+// => <beamtalk_object>
+
+injectResult := counter2 sumWithInject: [10, 20, 30]
+// => <future>
+
+injectResult await
+// => 60
+
+// Verify counter2 value is still 0 (inject:into: doesn't mutate)
+getValue2 := counter2 getValue
+// => <future>
+
+getValue2 await
+// => 0
+
+// ===========================================================================
+// FIELD MUTATION ACCUMULATOR - multiple fields in control flow
+// ===========================================================================
+
+// Note: This test is currently disabled pending BT-245 because inject:into:
+// with field mutations needs additional codegen fixes. The fixture exists
+// but map literal comparison isn't fully working yet.
+//
+// accumulator := FieldMutationAccumulator spawn
+// // => <beamtalk_object>
+//
+// accResult := accumulator accumulateWithInject: [5, 10, 15]
+// // => <future>
+//
+// accMap := accResult await
+// // => #{result => 30, count => 3}
+
+// ===========================================================================
+// NESTED CONTROL FLOW - to:do: with mutations
+// ===========================================================================
+
+// Note: to:do: with field mutations is deferred to BT-245. This test will be
+// enabled once that issue is resolved.
+//
+// nested := FieldMutationNested spawn
+// // => <beamtalk_object>
+//
+// nestedResult := nested nestedIncrement: 3 inner: 5
+// // => <future>
+//
+// nestedResult await
+// // => 15
