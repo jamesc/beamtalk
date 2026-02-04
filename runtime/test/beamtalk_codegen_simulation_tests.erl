@@ -210,7 +210,7 @@ async_message_uses_cast_tuple_test() ->
     ok = gen_server:cast(Actor, {increment, [], Future}),
     
     %% Verify future resolves
-    {ok, Result} = beamtalk_future:await(Future, 1000),
+    Result = beamtalk_future:await(Future, 1000),
     ?assertEqual(1, Result),
     
     gen_server:stop(Actor).
@@ -225,7 +225,7 @@ async_message_resolves_after_method_completes_test() ->
     gen_server:cast(Actor, {increment, [], Future}),
     
     %% Wait for resolution
-    {ok, Result} = beamtalk_future:await(Future, 1000),
+    Result = beamtalk_future:await(Future, 1000),
     ?assertEqual(11, Result),
     
     %% Verify actor state was updated
@@ -247,7 +247,7 @@ async_await_on_pending_future_blocks_test() ->
     %% Spawn a process that will await the future
     spawn(fun() ->
         Parent ! {ready, self()},  % Signal that we're about to await
-        {ok, Result} = beamtalk_future:await(Future, 2000),
+        Result = beamtalk_future:await(Future, 2000),
         Parent ! {awaited, Result}
     end),
     
@@ -283,13 +283,13 @@ async_await_on_resolved_future_returns_immediately_test() ->
     gen_server:cast(Actor, {increment, [], Future}),
     
     %% First await to ensure future is resolved
-    {ok, Result1} = beamtalk_future:await(Future, 1000),
+    Result1 = beamtalk_future:await(Future, 1000),
     ?assertEqual(21, Result1),
     
     %% Now await the already-resolved future again with a very small timeout.
     %% This verifies it is already resolved without relying on wall-clock timing.
     SmallTimeout = 10,
-    {ok, Result2} = beamtalk_future:await(Future, SmallTimeout),
+    Result2 = beamtalk_future:await(Future, SmallTimeout),
     
     ?assertEqual(21, Result2),
     
@@ -306,9 +306,8 @@ async_future_rejection_on_method_error_test() ->
     Future = beamtalk_future:new(),
     gen_server:cast(Actor, {'divide:', [0], Future}),
     
-    %% Await should return error
-    Result = beamtalk_future:await(Future, 1000),
-    ?assertEqual({error, division_by_zero}, Result),
+    %% Await should throw future_rejected
+    ?assertThrow({future_rejected, division_by_zero}, beamtalk_future:await(Future, 1000)),
     
     gen_server:stop(Actor).
 
@@ -327,10 +326,7 @@ async_multiple_concurrent_messages_test() ->
     end || _ <- lists:seq(1, 5)],
     
     %% Await all results
-    Results = [begin
-        {ok, R} = beamtalk_future:await(F, 1000),
-        R
-    end || F <- Futures],
+    Results = [beamtalk_future:await(F, 1000) || F <- Futures],
     
     %% All increments should have completed
     ?assertEqual([1, 2, 3, 4, 5], Results),
@@ -356,9 +352,9 @@ async_concurrent_messages_order_preserved_test() ->
     gen_server:cast(Actor, {increment, [], F3}),
     
     %% Results should be in order
-    {ok, R1} = beamtalk_future:await(F1, 1000),
-    {ok, R2} = beamtalk_future:await(F2, 1000),
-    {ok, R3} = beamtalk_future:await(F3, 1000),
+    R1 = beamtalk_future:await(F1, 1000),
+    R2 = beamtalk_future:await(F2, 1000),
+    R3 = beamtalk_future:await(F3, 1000),
     
     ?assertEqual(101, R1),
     ?assertEqual(102, R2),
@@ -377,13 +373,13 @@ async_chained_operations_test() ->
     %% First async increment
     Future1 = beamtalk_future:new(),
     gen_server:cast(Actor, {increment, [], Future1}),
-    {ok, Result1} = beamtalk_future:await(Future1, 1000),
+    Result1 = beamtalk_future:await(Future1, 1000),
     ?assertEqual(1, Result1),
     
     %% Second async increment (chained after first)
     Future2 = beamtalk_future:new(),
     gen_server:cast(Actor, {increment, [], Future2}),
-    {ok, Result2} = beamtalk_future:await(Future2, 1000),
+    Result2 = beamtalk_future:await(Future2, 1000),
     ?assertEqual(2, Result2),
     
     gen_server:stop(Actor).
@@ -403,8 +399,8 @@ async_nested_futures_different_actors_test() ->
     gen_server:cast(Actor2, {increment, [], F2}),
     
     %% Await both results
-    {ok, R1} = beamtalk_future:await(F1, 1000),
-    {ok, R2} = beamtalk_future:await(F2, 1000),
+    R1 = beamtalk_future:await(F1, 1000),
+    R2 = beamtalk_future:await(F2, 1000),
     
     ?assertEqual(11, R1),
     ?assertEqual(21, R2),
@@ -425,7 +421,7 @@ async_mixed_with_sync_messages_test() ->
     %% Async increment
     Future = beamtalk_future:new(),
     gen_server:cast(Actor, {increment, [], Future}),
-    {ok, Result} = beamtalk_future:await(Future, 1000),
+    Result = beamtalk_future:await(Future, 1000),
     ?assertEqual(2, Result),
     
     %% Sync getValue
@@ -443,9 +439,15 @@ async_future_timeout_behavior_test() ->
     %% Create a future but DON'T send the message
     Future = beamtalk_future:new(),
     
-    %% Await with short timeout should fail
-    Result = beamtalk_future:await(Future, 100),
-    ?assertEqual({error, timeout}, Result),
+    %% Await with short timeout should throw structured error
+    ?assertThrow(
+        #beamtalk_error{
+            kind = timeout,
+            class = 'Future',
+            message = <<"Await timed out">>
+        },
+        beamtalk_future:await(Future, 100)
+    ),
     
     %% Optional cleanup: resolve the future; the future process remains
     %% alive until its inactivity timeout elapses
@@ -465,7 +467,7 @@ async_multiple_awaits_same_future_test() ->
     lists:foreach(fun(N) ->
         spawn(fun() ->
             Parent ! {ready, N},  % Signal ready to await
-            {ok, Result} = beamtalk_future:await(Future, 2000),
+            Result = beamtalk_future:await(Future, 2000),
             Parent ! {waiter, N, Result}
         end)
     end, [1, 2, 3]),
