@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_set' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1]
+module 'stdlib_set' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, 'method_table'/0, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1]
   attributes ['behaviour' = ['gen_server']]
 
 'start_link'/1 = fun (InitArgs) ->
@@ -26,6 +26,12 @@ module 'stdlib_set' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3,
             call 'erlang':'error'({'spawn_failed', Reason})
     end
 
+
+'new'/0 = fun () ->
+    call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawn, not new'})
+
+'new'/1 = fun (_InitArgs) ->
+    call 'erlang':'error'({'actor_instantiation_error', 'Actors must use spawnWith:, not new:'})
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{

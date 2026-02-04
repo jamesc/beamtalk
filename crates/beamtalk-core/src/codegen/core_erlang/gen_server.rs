@@ -136,6 +136,56 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates the `new/0` error method for actors (BT-217).
+    ///
+    /// Actors cannot be instantiated with `new` - they must use `spawn`.
+    /// This function generates a method that throws a clear error when called.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'new'/0 = fun () ->
+    ///     call 'erlang':'error'({'actor_instantiation_error',
+    ///                            <<"Actors must use spawn, not new">>})
+    /// ```
+    pub(super) fn generate_actor_new_error_method(&mut self) -> Result<()> {
+        writeln!(self.output, "'new'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call 'erlang':'error'({{'actor_instantiation_error', 'Actors must use spawn, not new'}})"
+        )?;
+        self.indent -= 1;
+
+        Ok(())
+    }
+
+    /// Generates the `new/1` error method for actors (BT-217).
+    ///
+    /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
+    /// This function generates a method that throws a clear error when called.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'new'/1 = fun (_InitArgs) ->
+    ///     call 'erlang':'error'({'actor_instantiation_error',
+    ///                            <<"Actors must use spawnWith:, not new:">>})
+    /// ```
+    pub(super) fn generate_actor_new_with_args_error_method(&mut self) -> Result<()> {
+        writeln!(self.output, "'new'/1 = fun (_InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call 'erlang':'error'({{'actor_instantiation_error', 'Actors must use spawnWith:, not new:'}})"
+        )?;
+        self.indent -= 1;
+
+        Ok(())
+    }
+
     /// Generates the `init/1` callback for `gen_server`.
     ///
     /// For classes with non-Actor superclasses, the init function:
