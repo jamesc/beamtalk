@@ -17,7 +17,7 @@ default:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run all CI checks (build, lint, test) - same as CI pipeline
-ci: build lint test
+ci: build lint test test-e2e
 
 # Full clean and rebuild everything
 clean-all: clean clean-erlang
@@ -91,6 +91,7 @@ test-e2e:
 test-all: test-rust test-e2e test-runtime
 
 # Run Erlang runtime unit tests
+# Note: Runs 227 tests. Some super-related tests may fail (known issue - BT-XXX)
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail

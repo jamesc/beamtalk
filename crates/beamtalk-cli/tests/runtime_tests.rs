@@ -34,7 +34,7 @@ const UNIT_TEST_MODULES: &str = "beamtalk_actor_tests,beamtalk_future_tests,beam
 /// Note: This test is ignored by default. Use `just test-runtime` to run
 /// Erlang runtime tests, or `just test` to run both Rust and runtime tests.
 #[test]
-#[ignore]
+#[ignore = "slow test - run with `just test-runtime`"]
 #[serial(erlang_runtime)]
 fn erlang_runtime_unit_tests() {
     let runtime_dir = find_runtime_dir();

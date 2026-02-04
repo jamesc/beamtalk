@@ -615,7 +615,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 /// Note: Ignored by default due to slow execution (~50s for 316 test cases).
 /// Run explicitly with: `cargo test --test e2e -- --ignored` or `just test-e2e`
 #[test]
-#[ignore]
+#[ignore = "slow test - run with `just test-e2e`"]
 #[serial(e2e)]
 fn e2e_language_tests() {
     // Check if test cases directory exists
