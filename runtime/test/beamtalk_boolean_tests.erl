@@ -174,3 +174,22 @@ type_safety_test_() ->
                          beamtalk_boolean:dispatch('and:', [42], true))
         end}
     ]}.
+
+%%% ============================================================================
+%%% Instance Variable Reflection Tests (BT-164)
+%%% ============================================================================
+
+instVarNames_test() ->
+    %% Primitives have no instance variables
+    ?assertEqual([], beamtalk_boolean:dispatch('instVarNames', [], true)),
+    ?assertEqual([], beamtalk_boolean:dispatch('instVarNames', [], false)).
+
+instVarAt_test() ->
+    %% Primitives always return nil for instVarAt:
+    ?assertEqual(nil, beamtalk_boolean:dispatch('instVarAt', [anyField], true)),
+    ?assertEqual(nil, beamtalk_boolean:dispatch('instVarAt', [value], false)).
+
+instVarAt_put_immutable_error_test() ->
+    %% Trying to mutate a primitive should raise an immutable_primitive error
+    ?assertError({beamtalk_error, immutable_primitive, 'Boolean', 'instVarAt:put:', _, _, _},
+                 beamtalk_boolean:dispatch('instVarAt:put:', [value, false], true)).

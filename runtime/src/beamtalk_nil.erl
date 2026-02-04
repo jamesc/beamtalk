@@ -18,6 +18,9 @@
 %%% | `ifNotNil:` | [Block] | Return nil (no evaluation) |
 %%% | `ifNil:ifNotNil:` | [NilBlock, NotNilBlock] | Evaluate NilBlock |
 %%% | `asString` | [] | Returns `<<"nil">>` |
+%%% | `instVarNames` | [] | Returns `[]` (no instance variables) |
+%%% | `instVarAt` | [Name] | Returns `nil` (no fields) |
+%%% | `instVarAt:put:` | [Name, Value] | Error: immutable primitive |
 %%%
 %%% ## Usage Examples
 %%%
@@ -40,6 +43,8 @@
 
 -module(beamtalk_nil).
 -export([dispatch/3, has_method/1]).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -69,6 +74,9 @@ is_builtin('ifNil:') -> true;
 is_builtin('ifNotNil:') -> true;
 is_builtin('ifNil:ifNotNil:') -> true;
 is_builtin('asString') -> true;
+is_builtin('instVarNames') -> true;
+is_builtin('instVarAt') -> true;
+is_builtin('instVarAt:put:') -> true;
 is_builtin(_) -> false.
 
 %%% ============================================================================
@@ -113,8 +121,26 @@ builtin_dispatch('ifNil:ifNotNil:', [NilBlock, _NotNilBlock], nil) when is_funct
 %% Conversion
 builtin_dispatch('asString', [], nil) -> {ok, <<"nil">>};
 
+%% Instance variable reflection (BT-164)
+%% Primitives are immutable and have no instance variables
+builtin_dispatch('instVarNames', [], nil) -> 
+    {ok, []};
+builtin_dispatch('instVarAt', [_Name], nil) -> 
+    {ok, nil};
+builtin_dispatch('instVarAt:put:', [Name, _Value], nil) -> 
+    error(immutable_primitive_error('UndefinedObject', Name));
+
 %% Not a builtin method
 builtin_dispatch(_, _, _) -> not_found.
+
+%% @private
+%% @doc Construct immutable_primitive error for Nil (UndefinedObject).
+-spec immutable_primitive_error(atom(), term()) -> term().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Nil is immutable. Use assignment (x := newValue) instead.">>),
+    beamtalk_error:with_details(Error2, #{field => FieldName}).
 
 %% @doc Handle doesNotUnderstand by checking extension registry.
 -spec does_not_understand(atom(), list(), nil) -> term().
