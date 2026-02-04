@@ -136,10 +136,59 @@ init({Port, Options}) ->
             %% Start accepting connections asynchronously
             self() ! accept,
             State0 = beamtalk_repl_state:new(ListenSocket, ActualPort, Options),
-            State = beamtalk_repl_state:set_actor_registry(RegistryPid, State0),
+            State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0),
+            %% Auto-load standard library (Beamtalk class for reflection)
+            State = load_stdlib(State1),
             {ok, State};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
+    end.
+
+%% @private
+%% Load standard library modules at REPL startup.
+%% This enables `Beamtalk allClasses` to work without manual `:load`.
+load_stdlib(State) ->
+    StdlibPath = find_stdlib_path(),
+    case StdlibPath of
+        undefined ->
+            logger:debug("Stdlib not found, skipping auto-load"),
+            State;
+        Path ->
+            case beamtalk_repl_eval:handle_load(Path, State) of
+                {ok, _Result, NewState} ->
+                    logger:info("Auto-loaded stdlib: ~s", [Path]),
+                    NewState;
+                {error, Reason, _State} ->
+                    logger:warning("Failed to auto-load stdlib ~s: ~p", [Path, Reason]),
+                    State
+            end
+    end.
+
+%% @private
+%% Find the stdlib beamtalk.bt file in common locations
+find_stdlib_path() ->
+    %% Try various locations relative to the running code
+    BaseCandidates = [
+        "lib/beamtalk.bt",                    % Running from repo root
+        "../lib/beamtalk.bt"                  % Running from runtime/
+    ],
+    %% code:lib_dir can return {error, bad_name} if app not loaded
+    LibDir = code:lib_dir(beamtalk_runtime),
+    RuntimeCandidate =
+        case LibDir of
+            {error, _} ->
+                [];
+            _ ->
+                [filename:join([LibDir, "..", "..", "lib", "beamtalk.bt"])]
+        end,
+    Candidates = BaseCandidates ++ RuntimeCandidate,
+    find_first_existing(Candidates).
+
+find_first_existing([]) -> undefined;
+find_first_existing([Path | Rest]) ->
+    case filelib:is_file(Path) of
+        true -> Path;
+        false -> find_first_existing(Rest)
     end.
 
 %% @private
