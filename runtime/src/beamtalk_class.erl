@@ -55,6 +55,8 @@
 -module(beamtalk_class).
 -behaviour(gen_server).
 
+-include("beamtalk.hrl").
+
 %% API
 -export([
     start_link/1,
@@ -73,7 +75,8 @@
     add_after/3,
     super_dispatch/3,
     class_name/1,
-    module_name/1
+    module_name/1,
+    create_subclass/3
 ]).
 
 %% gen_server callbacks
@@ -103,7 +106,8 @@
     class_variables = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
     before_methods = #{} :: #{selector() => [fun()]},
-    after_methods = #{} :: #{selector() => [fun()]}
+    after_methods = #{} :: #{selector() => [fun()]},
+    dynamic_methods = #{} :: #{selector() => fun()}  % For dynamic classes: actual closures
 }).
 
 %%====================================================================
@@ -230,6 +234,68 @@ super_dispatch(State, Selector, Args) ->
             {error, missing_class_field_in_state}
     end.
 
+%% @doc Create a dynamic subclass at runtime.
+%%
+%% This is the Phase 1 implementation using interpreter-based dynamic classes.
+%% Methods are stored as closures and dispatch via apply/2.
+%%
+%% Arguments:
+%% - SuperclassName: Atom name of the superclass (e.g., 'Actor', 'Object')
+%% - ClassName: Atom name of the new class (e.g., 'MyClass')
+%% - ClassSpec: Map containing:
+%%   - instance_variables: List of field names [atom()]
+%%   - instance_methods: Map of {Selector => Fun} where Fun is arity 3:
+%%                       fun(Self, Args, State) -> {reply, Result, NewState}
+%%
+%% Returns: {ok, ClassPid} | {error, Reason}
+%%
+%% Example:
+%% ```erlang
+%% beamtalk_class:create_subclass('Actor', 'MyClass', #{
+%%     instance_variables => [count],
+%%     instance_methods => #{
+%%         increment => fun(Self, [], State) ->
+%%             Count = maps:get(count, State, 0),
+%%             {reply, Count + 1, maps:put(count, Count + 1, State)}
+%%         end
+%%     }
+%% })
+%% ```
+-spec create_subclass(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
+create_subclass(SuperclassName, ClassName, ClassSpec) ->
+    %% Verify superclass exists
+    case whereis_class(SuperclassName) of
+        undefined ->
+            {error, {superclass_not_found, SuperclassName}};
+        _SuperclassPid ->
+            %% Extract fields from ClassSpec
+            InstanceVars = maps:get(instance_variables, ClassSpec, []),
+            InstanceMethods = maps:get(instance_methods, ClassSpec, #{}),
+            
+            %% Build ClassInfo compatible with beamtalk_class
+            ClassInfo = #{
+                name => ClassName,
+                module => beamtalk_dynamic_object,  % All dynamic classes use this behavior
+                superclass => SuperclassName,
+                instance_methods => convert_methods_to_info(InstanceMethods),
+                instance_variables => InstanceVars,
+                class_methods => #{},
+                %% Store the actual closures in a custom field
+                dynamic_methods => InstanceMethods
+            },
+            
+            %% Register as a class process
+            case start_link(ClassName, ClassInfo) of
+                {ok, ClassPid} ->
+                    {ok, ClassPid};
+                {error, {already_started, Pid}} ->
+                    %% Class already exists
+                    {ok, Pid};
+                Error ->
+                    Error
+            end
+    end.
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -253,18 +319,60 @@ init({ClassName, ClassInfo}) ->
         class_variables = maps:get(class_variables, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         before_methods = maps:get(before_methods, ClassInfo, #{}),
-        after_methods = maps:get(after_methods, ClassInfo, #{})
+        after_methods = maps:get(after_methods, ClassInfo, #{}),
+        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{})
     },
     {ok, State}.
 
-handle_call({new, Args}, _From, #class_state{module = Module} = State) ->
-    %% Spawn new instance via the class's behavior module
-    %% TODO: This will integrate with beamtalk_actor once that's refactored
-    case erlang:apply(Module, spawn, [Args]) of
-        {ok, Pid} ->
-            {reply, {ok, Pid}, State};
-        Error ->
-            {reply, Error, State}
+handle_call({new, Args}, _From, #class_state{
+    name = ClassName,
+    module = Module,
+    dynamic_methods = DynamicMethods,
+    instance_variables = InstanceVars
+} = State) ->
+    %% Check if this is a dynamic class
+    case Module of
+        beamtalk_dynamic_object ->
+            %% Dynamic class - spawn beamtalk_dynamic_object instance
+            %% Build initial state with methods and fields
+            InitState = #{
+                '__class__' => ClassName,
+                '__class_pid__' => self(),
+                '__methods__' => DynamicMethods
+            },
+            %% Initialize instance variables from Args (expected to be a map or proplist)
+            InitStateWithFields = case Args of
+                [FieldMap] when is_map(FieldMap) ->
+                    maps:merge(InitState, FieldMap);
+                _ ->
+                    %% Initialize all instance variables to nil
+                    InitFields = lists:foldl(fun(Var, Acc) ->
+                        maps:put(Var, nil, Acc)
+                    end, InitState, InstanceVars),
+                    InitFields
+            end,
+            
+            %% Spawn the dynamic object
+            case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
+                {ok, Pid} ->
+                    %% Wrap in beamtalk_object record
+                    Obj = #beamtalk_object{
+                        class = ClassName,
+                        class_mod = beamtalk_dynamic_object,
+                        pid = Pid
+                    },
+                    {reply, {ok, Obj}, State};
+                Error ->
+                    {reply, Error, State}
+            end;
+        _ ->
+            %% Compiled class - use module's spawn function
+            case erlang:apply(Module, spawn, [Args]) of
+                {ok, Pid} ->
+                    {reply, {ok, Pid}, State};
+                Error ->
+                    {reply, Error, State}
+            end
     end;
 
 handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
@@ -366,6 +474,20 @@ notify_instances(_ClassName, _NewMethods) ->
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
+
+%% @private
+%% Convert dynamic method closures to method_info maps.
+%% This allows dynamic classes to register with the same structure as compiled classes.
+-spec convert_methods_to_info(#{selector() => fun()}) -> #{selector() => method_info()}.
+convert_methods_to_info(Methods) ->
+    maps:map(fun(_Selector, Fun) ->
+        %% Extract arity from function (dynamic methods are arity 3: Self, Args, State)
+        {arity, Arity} = erlang:fun_info(Fun, arity),
+        #{
+            arity => Arity,
+            block => Fun
+        }
+    end, Methods).
 
 %% @private
 %% Find and invoke a method in the superclass chain.
