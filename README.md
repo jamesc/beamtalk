@@ -162,7 +162,8 @@ cargo install just
 # See all available tasks
 just --list
 
-# Run CI checks (build, lint, test)
+# Run local CI checks (build, lint, unit & E2E tests)
+# Note: runtime integration tests run only in GitHub Actions CI
 just ci
 
 # Start the REPL
@@ -179,7 +180,7 @@ just clean
 cargo build
 
 # Start the REPL
-cargo run -- repl
+cargo run -p beamtalk-cli --bin beamtalk -- repl
 
 # Clean (note: fails in devcontainer due to volume mount)
 cargo clean  # Use `just clean` instead in devcontainer

@@ -21,12 +21,17 @@
 //!
 //! # Running Tests
 //!
+//! This test is `#[ignore]` by default due to slow startup (~50s).
+//!
 //! ```bash
-//! # Run just E2E tests
-//! cargo test --test e2e
+//! # Recommended: Use Just
+//! just test-e2e
+//!
+//! # Or run with cargo (must pass --ignored)
+//! cargo test --test e2e -- --ignored
 //!
 //! # Run with verbose output
-//! cargo test --test e2e -- --nocapture
+//! cargo test --test e2e -- --ignored --nocapture
 //! ```
 
 use serial_test::serial;

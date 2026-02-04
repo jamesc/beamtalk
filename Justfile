@@ -16,7 +16,8 @@ default:
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Run all CI checks (build, lint, test) - same as CI pipeline
+# Run local CI checks (build, lint, unit & E2E tests)
+# Note: Runtime integration tests run only in GitHub Actions CI
 ci: build lint test test-e2e
 
 # Full clean and rebuild everything
@@ -96,6 +97,10 @@ _clean-daemon-state:
 
 # Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
+#
+# Known failures: 6 tests for super dispatch (tracked in BT-235).
+# We allow these specific failures to avoid blocking development while the fix is in progress.
+# If more tests fail, it indicates a regression and the build will fail.
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -110,12 +115,13 @@ test-runtime:
             echo "❌ rebar3 failed without test results (compilation/config error?)"
             exit 1
         fi
-        # Allow up to 6 known failures (BT-235 super dispatch tests)
+        # Allow exactly 6 known failures (BT-235 super dispatch tests)
+        # Any additional failures indicate a regression
         if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
-            echo "❌ More than 6 tests failed! Check for regressions."
+            echo "❌ More than 6 tests failed! Check for regressions (expected: 6 from BT-235)."
             exit 1
         fi
-        echo "⚠️  Known test failures (BT-235 - super dispatch)"
+        echo "⚠️  6 known test failures (BT-235 - super dispatch)"
     else
         echo "$OUTPUT"
     fi
@@ -149,6 +155,9 @@ coverage-rust:
 
 # Generate Erlang runtime coverage
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
+#
+# Known failures: 6 tests for super dispatch (tracked in BT-235).
+# Coverage is still generated despite these failures since they're expected.
 coverage-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -157,12 +166,12 @@ coverage-runtime:
     # rebar3 auto-discovers all *_tests.erl modules
     if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
-        # Allow up to 6 known failures (BT-235 super dispatch tests)
+        # Allow exactly 6 known failures (BT-235 super dispatch tests)
         if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
-            echo "❌ More than 6 tests failed! Check for regressions."
+            echo "❌ More than 6 tests failed! Check for regressions (expected: 6 from BT-235)."
             exit 1
         fi
-        # Tests ran (with some expected failures), continue to coverage
+        # Tests ran (with known failures), continue to coverage
     else
         echo "$OUTPUT"
     fi
