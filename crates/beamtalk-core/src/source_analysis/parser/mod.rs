@@ -41,7 +41,7 @@
 //! # Usage
 //!
 //! ```
-//! use beamtalk_core::parse::{lex_with_eof, parse};
+//! use beamtalk_core::source_analysis::{lex_with_eof, parse};
 //!
 //! let tokens = lex_with_eof("x := 3 + 4");
 //! let (module, diagnostics) = parse(tokens);
@@ -151,7 +151,7 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let tokens = lex_with_eof("x := 42");
 /// let (module, diagnostics) = parse(tokens);

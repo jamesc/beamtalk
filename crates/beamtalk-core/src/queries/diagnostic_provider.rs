@@ -48,7 +48,7 @@ use crate::source_analysis::Diagnostic;
 ///
 /// ```
 /// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);

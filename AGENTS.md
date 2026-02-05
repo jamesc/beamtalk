@@ -298,7 +298,7 @@ Then it doesn't exist yet, and you're about to hallucinate it!
 
 3. **Adding features** - Consider which bounded context it belongs to
    - Language Service feature? → `crates/beamtalk-core/src/queries/`
-   - Compilation feature? → `crates/beamtalk-core/src/source_analysis/` or `src/analyse/`
+   - Compilation feature? → `crates/beamtalk-core/src/source_analysis/` or `src/semantic_analysis/`
    - Runtime feature? → `runtime/src/`
 
 4. **Writing documentation** - Include DDD context annotations

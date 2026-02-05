@@ -22,7 +22,7 @@ use crate::source_analysis::Span;
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::block_context::is_control_flow_selector;
+/// # use beamtalk_core::semantic_analysis::block_context::is_control_flow_selector;
 /// assert!(is_control_flow_selector("whileTrue:", 0));
 /// assert!(is_control_flow_selector("to:do:", 1));
 /// assert!(is_control_flow_selector("ifTrue:ifFalse:", 0));
@@ -105,10 +105,10 @@ pub fn selector_to_string(selector: &MessageSelector) -> String {
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::block_context::classify_block;
-/// # use beamtalk_core::analyse::BlockContext;
+/// # use beamtalk_core::semantic_analysis::block_context::classify_block;
+/// # use beamtalk_core::semantic_analysis::BlockContext;
 /// # use beamtalk_core::ast::{Expression, Block, MessageSelector, Identifier};
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 /// // Control flow: literal block in whileTrue:
 /// // [x < 10] whileTrue: [x := x + 1]
 /// // The argument block [x := x + 1] is ControlFlow

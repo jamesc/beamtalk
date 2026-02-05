@@ -191,7 +191,7 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// ```no_run
 /// use beamtalk_core::codegen::core_erlang::generate;
 /// use beamtalk_core::ast::Module;
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 ///
 /// # let module = Module::new(Vec::new(), Span::new(0, 0));
 /// let core_erlang = generate(&module)?;

@@ -124,9 +124,9 @@ pub enum MutationKind {
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::extract_pattern_bindings;
+/// # use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 /// # use beamtalk_core::ast::{Pattern, Identifier};
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 /// # use ecow::EcoString;
 /// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
 /// let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
@@ -226,9 +226,9 @@ fn extract_pattern_bindings_impl(
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::analyse;
+/// # use beamtalk_core::semantic_analysis::analyse;
 /// # use beamtalk_core::ast::Module;
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 /// let module = Module::new(vec![], Span::default());
 /// let result = analyse(&module);
 /// assert_eq!(result.diagnostics.len(), 0);

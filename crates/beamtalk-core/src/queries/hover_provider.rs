@@ -48,7 +48,7 @@ use crate::source_analysis::Span;
 /// ```
 /// use beamtalk_core::queries::hover_provider::compute_hover;
 /// use beamtalk_core::language_service::Position;
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
