@@ -52,7 +52,7 @@
 %%   after_methods => #{selector() => [fun()]}    % Flavors-style
 %% }
 %% ```
--module(beamtalk_class).
+-module(beamtalk_object_class).
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
@@ -483,7 +483,7 @@ registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
 
 notify_instances(_ClassName, _NewMethods) ->
-    %% TODO: Once beamtalk_instances is updated to work with per-class processes,
+    %% TODO: Once beamtalk_object_instances is updated to work with per-class processes,
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.

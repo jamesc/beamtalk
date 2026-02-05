@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
--module(beamtalk_class_tests).
+-module(beamtalk_object_class_tests).
 -include_lib("eunit/include/eunit.hrl").
 
 %%====================================================================
@@ -80,7 +80,7 @@ start_link_test_() ->
                          instance_methods => #{},
                          instance_variables => []
                      },
-                     {ok, Pid} = beamtalk_class:start_link('StartLinkTestClass', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('StartLinkTestClass', ClassInfo),
                      ?assert(is_pid(Pid)),
                      ?assert(is_process_alive(Pid))
                  end)
@@ -99,8 +99,8 @@ registry_name_test_() ->
                          module => test_class,
                          superclass => none
                      },
-                     {ok, _Pid} = beamtalk_class:start_link('RegistryTestClass', ClassInfo),
-                     RegPid = beamtalk_class:whereis_class('RegistryTestClass'),
+                     {ok, _Pid} = beamtalk_object_class:start_link('RegistryTestClass', ClassInfo),
+                     RegPid = beamtalk_object_class:whereis_class('RegistryTestClass'),
                      ?assert(is_pid(RegPid)),
                      ?assertEqual(RegPid, whereis(beamtalk_class_RegistryTestClass))
                  end)
@@ -119,7 +119,7 @@ pg_group_membership_test_() ->
                          module => test_class,
                          superclass => none
                      },
-                     {ok, Pid} = beamtalk_class:start_link('PgMembershipTestClass', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('PgMembershipTestClass', ClassInfo),
                      Members = pg:get_members(beamtalk_classes),
                      ?assert(lists:member(Pid, Members))
                  end)
@@ -147,8 +147,8 @@ methods_test_() ->
                          module => counter,
                          instance_methods => Methods
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     Result = beamtalk_class:methods(Pid),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     Result = beamtalk_object_class:methods(Pid),
                      ?assertEqual(lists:sort([increment, add, getValue]), lists:sort(Result))
                  end)
          ]
@@ -166,8 +166,8 @@ superclass_test_() ->
                          module => counter,
                          superclass => 'Object'
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     ?assertEqual('Object', beamtalk_class:superclass(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     ?assertEqual('Object', beamtalk_object_class:superclass(Pid))
                  end),
           ?_test(begin
                      ClassInfo = #{
@@ -175,8 +175,8 @@ superclass_test_() ->
                          module => proto_object,
                          superclass => none
                      },
-                     {ok, Pid} = beamtalk_class:start_link('ProtoObject', ClassInfo),
-                     ?assertEqual(none, beamtalk_class:superclass(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('ProtoObject', ClassInfo),
+                     ?assertEqual(none, beamtalk_object_class:superclass(Pid))
                  end)
          ]
      end}.
@@ -192,16 +192,16 @@ class_name_test_() ->
                          name => 'Counter',
                          module => counter
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     ?assertEqual('Counter', beamtalk_class:class_name(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     ?assertEqual('Counter', beamtalk_object_class:class_name(Pid))
                  end),
           ?_test(begin
                      ClassInfo = #{
                          name => 'Beamtalk',
                          module => 'Beamtalk'
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Beamtalk', ClassInfo),
-                     ?assertEqual('Beamtalk', beamtalk_class:class_name(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
+                     ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid))
                  end)
          ]
      end}.
@@ -217,16 +217,16 @@ module_name_test_() ->
                          name => 'Counter',
                          module => counter
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     ?assertEqual(counter, beamtalk_class:module_name(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     ?assertEqual(counter, beamtalk_object_class:module_name(Pid))
                  end),
           ?_test(begin
                      ClassInfo = #{
                          name => 'Beamtalk',
                          module => 'Beamtalk'
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Beamtalk', ClassInfo),
-                     ?assertEqual('Beamtalk', beamtalk_class:module_name(Pid))
+                     {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
+                     ?assertEqual('Beamtalk', beamtalk_object_class:module_name(Pid))
                  end)
          ]
      end}.
@@ -250,8 +250,8 @@ method_test_() ->
                          instance_methods => Methods,
                          method_source => MethodSource
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     MethodObj = beamtalk_class:method(Pid, increment),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     MethodObj = beamtalk_object_class:method(Pid, increment),
                      ?assertEqual('CompiledMethod', maps:get('__class__', MethodObj)),
                      ?assertEqual(increment, maps:get('__selector__', MethodObj)),
                      ?assertEqual(<<"increment => self.count := self.count + 1">>,
@@ -263,8 +263,8 @@ method_test_() ->
                          module => counter,
                          instance_methods => #{}
                      },
-                     {ok, Pid} = beamtalk_class:start_link('CounterNoMethods', ClassInfo),
-                     ?assertEqual(nil, beamtalk_class:method(Pid, nonexistent))
+                     {ok, Pid} = beamtalk_object_class:start_link('CounterNoMethods', ClassInfo),
+                     ?assertEqual(nil, beamtalk_object_class:method(Pid, nonexistent))
                  end)
          ]
      end}.
@@ -281,8 +281,8 @@ instance_variables_test_() ->
                          module => counter,
                          instance_variables => [count, name]
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
-                     IVars = beamtalk_class:instance_variables(Pid),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+                     IVars = beamtalk_object_class:instance_variables(Pid),
                      ?assertEqual([count, name], IVars)
                  end)
          ]
@@ -304,19 +304,19 @@ put_method_test_() ->
                          module => counter,
                          instance_methods => #{}
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                      
                      %% Add a new method
                      NewFun = fun() -> 42 end,
                      Source = <<"newMethod => 42">>,
-                     ok = beamtalk_class:put_method(Pid, newMethod, NewFun, Source),
+                     ok = beamtalk_object_class:put_method(Pid, newMethod, NewFun, Source),
                      
                      %% Verify it's in the method list
-                     Methods = beamtalk_class:methods(Pid),
+                     Methods = beamtalk_object_class:methods(Pid),
                      ?assert(lists:member(newMethod, Methods)),
                      
                      %% Verify we can retrieve it
-                     MethodObj = beamtalk_class:method(Pid, newMethod),
+                     MethodObj = beamtalk_object_class:method(Pid, newMethod),
                      ?assertEqual('CompiledMethod', maps:get('__class__', MethodObj)),
                      ?assertEqual(newMethod, maps:get('__selector__', MethodObj)),
                      ?assertEqual(Source, maps:get('__source__', MethodObj))
@@ -339,14 +339,14 @@ replace_method_test_() ->
                              someMethod => #{block => OldFun}
                          }
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                      
                      %% Replace with new implementation
                      NewFun = fun() -> new_behavior end,
-                     ok = beamtalk_class:put_method(Pid, someMethod, NewFun, <<"new">>),
+                     ok = beamtalk_object_class:put_method(Pid, someMethod, NewFun, <<"new">>),
                      
                      %% Verify replacement
-                     MethodObj = beamtalk_class:method(Pid, someMethod),
+                     MethodObj = beamtalk_object_class:method(Pid, someMethod),
                      MethodInfo = maps:get('__method_info__', MethodObj),
                      RetrievedFun = maps:get(block, MethodInfo),
                      ?assertEqual(NewFun, RetrievedFun)
@@ -370,10 +370,10 @@ add_before_method_test_() ->
                          module => counter,
                          instance_methods => #{}
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                      
                      BeforeFun = fun() -> io:format("Before!~n") end,
-                     ok = beamtalk_class:add_before(Pid, increment, BeforeFun),
+                     ok = beamtalk_object_class:add_before(Pid, increment, BeforeFun),
                      
                      %% Can't easily verify without accessing internal state,
                      %% but at least verify the call succeeds
@@ -394,10 +394,10 @@ add_after_method_test_() ->
                          module => counter,
                          instance_methods => #{}
                      },
-                     {ok, Pid} = beamtalk_class:start_link('Counter', ClassInfo),
+                     {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                      
                      AfterFun = fun() -> io:format("After!~n") end,
-                     ok = beamtalk_class:add_after(Pid, increment, AfterFun),
+                     ok = beamtalk_object_class:add_after(Pid, increment, AfterFun),
                      
                      ?assert(true)
                  end)
@@ -417,7 +417,7 @@ all_classes_test_() ->
           ?_test(begin
                      %% Test that all_classes returns a list
                      %% More thorough testing happens in other tests
-                     AllClasses = beamtalk_class:all_classes(),
+                     AllClasses = beamtalk_object_class:all_classes(),
                      ?assert(is_list(AllClasses))
                  end)
          ]
@@ -439,15 +439,15 @@ duplicate_registration_test_() ->
                          module => test_class,
                          superclass => none
                      },
-                     {ok, _Pid1} = beamtalk_class:start_link('DuplicateTestClass', ClassInfo),
+                     {ok, _Pid1} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
                      
                      %% Try to register the same name again
-                     Result = beamtalk_class:start_link('DuplicateTestClass', ClassInfo),
+                     Result = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
                      ?assertMatch({error, _}, Result)
                  end)
          ]
      end}.
 
 whereis_nonexistent_class_test() ->
-    Result = beamtalk_class:whereis_class('NonexistentClass'),
+    Result = beamtalk_object_class:whereis_class('NonexistentClass'),
     ?assertEqual(undefined, Result).

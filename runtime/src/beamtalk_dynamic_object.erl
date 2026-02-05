@@ -10,7 +10,7 @@
 %%%
 %%% ## Architecture
 %%%
-%%% Dynamic classes are created at runtime via `beamtalk_class:create_subclass/3`.
+%%% Dynamic classes are created at runtime via `beamtalk_object_class:create_subclass/3`.
 %%% Instances of dynamic classes run this behavior, which:
 %%% - Stores instance state in a map (like compiled actors)
 %%% - Stores method closures in `__methods__` field

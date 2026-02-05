@@ -32,17 +32,17 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
-    %% Should have exactly 3 children (beamtalk_bootstrap, beamtalk_stdlib, beamtalk_instances)
+    %% Should have exactly 3 children (beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances)
     ?assertEqual(3, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
-    %% Children should be beamtalk_bootstrap, beamtalk_stdlib, and beamtalk_instances
+    %% Children should be beamtalk_bootstrap, beamtalk_stdlib, and beamtalk_object_instances
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_stdlib, Ids)),
-    ?assert(lists:member(beamtalk_instances, Ids)),
+    ?assert(lists:member(beamtalk_object_instances, Ids)),
     ?assertNot(lists:member(beamtalk_classes, Ids)).
 
 children_are_workers_test() ->
@@ -68,7 +68,7 @@ children_ordered_correctly_test() ->
     
     %% Verify ordering: bootstrap -> stdlib -> instances
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
-    ?assertEqual([beamtalk_bootstrap, beamtalk_stdlib, beamtalk_instances], Ids).
+    ?assertEqual([beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances], Ids).
 
 %%% Child specifications tests
 
@@ -87,12 +87,12 @@ instances_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
     
     [_BootstrapSpec, _StdlibSpec, InstancesSpec] = ChildSpecs,
-    ?assertEqual(beamtalk_instances, maps:get(id, InstancesSpec)),
-    ?assertEqual({beamtalk_instances, start_link, []}, maps:get(start, InstancesSpec)),
+    ?assertEqual(beamtalk_object_instances, maps:get(id, InstancesSpec)),
+    ?assertEqual({beamtalk_object_instances, start_link, []}, maps:get(start, InstancesSpec)),
     ?assertEqual(permanent, maps:get(restart, InstancesSpec)),
     ?assertEqual(5000, maps:get(shutdown, InstancesSpec)),
     ?assertEqual(worker, maps:get(type, InstancesSpec)),
-    ?assertEqual([beamtalk_instances], maps:get(modules, InstancesSpec)).
+    ?assertEqual([beamtalk_object_instances], maps:get(modules, InstancesSpec)).
 
 stdlib_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),

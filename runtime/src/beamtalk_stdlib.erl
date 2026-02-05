@@ -292,10 +292,10 @@ register_beamtalk_class() ->
 %% Returns {ok, ClassName} on success, {error, ClassName, Reason} on failure.
 -spec register_class(atom(), map()) -> {ok, atom()} | {error, atom(), term()}.
 register_class(ClassName, ClassInfo) ->
-    case beamtalk_class:whereis_class(ClassName) of
+    case beamtalk_object_class:whereis_class(ClassName) of
         undefined ->
             %% Class doesn't exist, create it
-            case beamtalk_class:start_link(ClassName, ClassInfo) of
+            case beamtalk_object_class:start_link(ClassName, ClassInfo) of
                 {ok, _Pid} ->
                     {ok, ClassName};
                 {error, Reason} ->
@@ -320,12 +320,12 @@ register_class(ClassName, ClassInfo) ->
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Receiver) ->
     %% Return list of all registered class names
-    Pids = beamtalk_class:all_classes(),
-    [beamtalk_class:class_name(Pid) || Pid <- Pids];
+    Pids = beamtalk_object_class:all_classes(),
+    [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
 
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
     %% Look up a class by name, return pid or nil
-    case beamtalk_class:whereis_class(ClassName) of
+    case beamtalk_object_class:whereis_class(ClassName) of
         undefined -> nil;
         Pid -> Pid
     end;
