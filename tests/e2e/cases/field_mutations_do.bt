@@ -1,18 +1,29 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E test for do: with field mutations (BT-98)
+// E2E test for field mutations (BT-98)
 //
-// Uses tuple syntax {1, 2, 3} since array literal [1, 2, 3] conflicts with
-// block syntax. See investigation-field-mutations-e2e.md for details.
+// TODO: Re-enable sumArray: test once collection literals are implemented
+// Cannot use [1, 2, 3] (conflicts with block syntax) or {1, 2, 3} (not implemented)
+//
+// For now, test field mutations directly with setValue: method
 
 // @load tests/e2e/fixtures/field_mutation_counter.bt
 
 counter := FieldMutationCounter spawn
+// => _
 
-// Sum {1, 2, 3} using do: with field mutations
-// Tuples work as arrays in Beamtalk (they're iterable)
-counter sumArray: {1, 2, 3} asList
+counter getValue
+// => 0
 
-// REPL auto-awaits futures
-// => 6
+counter setValue: 5
+// => _
+
+counter getValue
+// => 5
+
+counter setValue: 10
+// => _
+
+counter getValue
+// => 10
