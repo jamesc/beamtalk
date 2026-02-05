@@ -612,32 +612,24 @@ When hot-loading:
 1. New code becomes "current"
 2. Old code becomes "old"
 3. Processes running old code continue until they make a fully-qualified call
-4. `code_change/3` callback allows state transformation
+4. `code_change/3` callback allows state transformation (delegated to `beamtalk_hot_reload`)
 
 ### Generated code_change Callback
 
 ```erlang
 %% Called when module is hot-reloaded
+%% Delegates to beamtalk_hot_reload domain service
 code_change(OldVsn, State, Extra) ->
-    %% Migrate state to new schema
-    NewState = migrate_state(OldVsn, State),
-    {ok, NewState}.
-
-migrate_state(_OldVsn, State) ->
-    %% Add new fields with defaults
-    State1 = maps:merge(#{
-        newField => default_value
-    }, State),
-
-    %% Remove obsolete fields
-    State2 = maps:without([obsoleteField], State1),
-
-    State2.
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 ```
 
-### Explicit State Migration in Beamtalk
+**Current behavior:** The `beamtalk_hot_reload` domain service preserves state unchanged. Future enhancements will support automatic field migration.
 
-The `patch` syntax can include explicit migration:
+### Explicit State Migration in Beamtalk (Future Feature)
+
+**Note:** This is a planned feature. Currently, `beamtalk_hot_reload` preserves state unchanged.
+
+The `patch` syntax will include explicit migration:
 
 ```
 // Patch with state migration
@@ -650,7 +642,7 @@ patch Agent >> state {
 }
 ```
 
-This compiles to a custom `code_change/3`:
+This will compile to a custom `code_change/3`:
 
 ```erlang
 code_change(_OldVsn, State, _Extra) ->

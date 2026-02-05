@@ -137,6 +137,8 @@ struct ParsedTestFile {
     load_files: Vec<String>,
     /// Test cases to run.
     cases: Vec<TestCase>,
+    /// Warnings about expressions without assertions.
+    warnings: Vec<String>,
 }
 
 /// Parse test cases from a `.bt` file.
@@ -158,6 +160,7 @@ struct ParsedTestFile {
 fn parse_test_file(content: &str) -> ParsedTestFile {
     let mut cases = Vec::new();
     let mut load_files = Vec::new();
+    let mut warnings = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
 
@@ -200,12 +203,27 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
                     expected: expected.trim().to_string(),
                     line: expr_line,
                 });
+                i += 1; // Consume the assertion line
+            } else {
+                // Warn about expression without assertion
+                // Don't increment i - the next line might be another expression
+                warnings.push(format!(
+                    "Line {expr_line}: Expression will not be executed (missing // => assertion): {expression}"
+                ));
             }
+        } else {
+            // End of file without assertion
+            warnings.push(format!(
+                "Line {expr_line}: Expression will not be executed (missing // => assertion): {expression}"
+            ));
         }
-        i += 1;
     }
 
-    ParsedTestFile { load_files, cases }
+    ParsedTestFile {
+        load_files,
+        cases,
+        warnings,
+    }
 }
 
 /// Manages the daemon and BEAM processes for tests.
@@ -542,6 +560,11 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     let mut failures = Vec::new();
     let mut pass_count = 0;
 
+    // Print warnings about expressions without assertions
+    for warning in &test_file.warnings {
+        eprintln!("⚠️  {file_name}: {warning}");
+    }
+
     // Clear bindings before running file
     if let Err(e) = client.clear_bindings() {
         failures.push(format!("{file_name}: Failed to clear bindings: {e}"));
@@ -717,6 +740,7 @@ mod tests {
         assert_eq!(parsed.cases[0].expected, "7");
         assert_eq!(parsed.cases[1].expression, "5 * 2");
         assert_eq!(parsed.cases[1].expected, "10");
+        assert!(parsed.warnings.is_empty());
     }
 
     #[test]
@@ -735,6 +759,7 @@ mod tests {
         assert_eq!(parsed.cases.len(), 2);
         assert_eq!(parsed.cases[0].expression, "3 + 4");
         assert_eq!(parsed.cases[1].expression, "[:x | x + 1] value: 5");
+        assert!(parsed.warnings.is_empty());
     }
 
     #[test]
@@ -747,6 +772,7 @@ undefined_var
         assert!(parsed.load_files.is_empty());
         assert_eq!(parsed.cases.len(), 1);
         assert_eq!(parsed.cases[0].expected, "ERROR: Undefined variable");
+        assert!(parsed.warnings.is_empty());
     }
 
     #[test]
@@ -765,5 +791,67 @@ Counter spawn
         assert_eq!(parsed.load_files[1], "lib/stdlib.bt");
         assert_eq!(parsed.cases.len(), 1);
         assert_eq!(parsed.cases[0].expression, "Counter spawn");
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_warns_on_missing_assertion() {
+        let content = r"
+// Test with proper assertion
+3 + 4
+// => 7
+
+// This expression has no assertion (should warn)
+count := 0
+
+// This expression also has no assertion (should warn)
+5 timesRepeat: [count := count + 1]
+
+// This would fail if previous lines actually ran
+count
+// => 5
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 2); // Only expressions with assertions
+        assert_eq!(parsed.cases[0].expression, "3 + 4");
+        assert_eq!(parsed.cases[1].expression, "count");
+
+        // Should have warnings for the two expressions without assertions
+        assert_eq!(parsed.warnings.len(), 2);
+        assert!(parsed.warnings[0].contains("Line 7"));
+        assert!(parsed.warnings[0].contains("count := 0"));
+        assert!(parsed.warnings[0].contains("missing // => assertion"));
+        assert!(parsed.warnings[1].contains("Line 10"));
+        assert!(parsed.warnings[1].contains("5 timesRepeat"));
+        assert!(parsed.warnings[1].contains("missing // => assertion"));
+    }
+
+    #[test]
+    fn test_parse_consecutive_expressions_without_assertions() {
+        // Test for bug where consecutive expressions without assertions
+        // cause the second expression to be skipped entirely (double increment bug)
+        let content = r"
+expr1
+expr2
+expr3
+// => result3
+";
+        let parsed = parse_test_file(content);
+
+        // Should have 1 test case (expr3 with assertion)
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "expr3");
+        assert_eq!(parsed.cases[0].expected, "result3");
+
+        // Should have 2 warnings (for expr1 and expr2)
+        assert_eq!(
+            parsed.warnings.len(),
+            2,
+            "Expected warnings for expr1 and expr2"
+        );
+        assert!(parsed.warnings[0].contains("Line 2"));
+        assert!(parsed.warnings[0].contains("expr1"));
+        assert!(parsed.warnings[1].contains("Line 3"));
+        assert!(parsed.warnings[1].contains("expr2"));
     }
 }
