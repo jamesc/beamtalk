@@ -13,7 +13,7 @@
 //! - Message dispatch logic
 //! - Method table generation
 
-use super::{block_analysis, CoreErlangGenerator, Result};
+use super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
