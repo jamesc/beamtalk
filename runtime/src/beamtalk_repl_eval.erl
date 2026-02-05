@@ -571,8 +571,6 @@ extract_class_names(Result) ->
 %% Register loaded classes by spawning per-class gen_server processes.
 %% ClassInfoList is a list of #{name => string(), superclass => string()} maps.
 -spec register_classes([map()], atom()) -> ok.
-register_classes([], _ModuleName) ->
-    ok;
 register_classes(ClassInfoList, ModuleName) ->
     lists:foreach(
         fun(ClassInfoMap) ->

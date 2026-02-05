@@ -1449,6 +1449,7 @@ just ci                      # Run all CI checks
 just fmt                     # Format all code
 just fmt-check               # Verify formatting
 just clippy                  # Lints (warnings = errors)
+just dialyzer                # Erlang type checking
 just test-rust               # Rust tests only
 just test-runtime            # Erlang runtime tests only
 
@@ -1464,7 +1465,27 @@ cargo fmt --all                           # Format all crates
 cargo fmt --all -- --check                # Verify formatting
 cargo clippy --all-targets -- -D warnings # Lints (warnings = errors)
 cargo test --all-targets                  # Run all tests
+cd runtime && rebar3 dialyzer             # Erlang type checking
 ```
+
+**Dialyzer (Erlang Type Checker):**
+
+Dialyzer performs static analysis on Erlang runtime code to catch type errors, incorrect specs, and unreachable code. It runs automatically in CI via `just lint`.
+
+```bash
+just dialyzer                # Run Dialyzer type checking
+cd runtime && rebar3 dialyzer # Direct rebar3 command
+```
+
+**Current configuration** (`runtime/rebar.config`):
+- Focuses on `error_handling` warnings (real bugs)
+- Disables `underspecs` and `unmatched_returns` (noisy, not bugs)
+- Future issues can address remaining spec precision improvements
+
+**When to run:**
+- Before committing Erlang runtime changes
+- After modifying function signatures or specs
+- CI runs automatically on every push/PR
 
 ### Workspace Commands (Planned - ADR 0004)
 
