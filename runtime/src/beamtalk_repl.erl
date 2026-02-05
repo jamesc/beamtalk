@@ -398,8 +398,8 @@ terminate(_Reason, State) ->
     ok.
 
 %% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+code_change(OldVsn, State, Extra) ->
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%% Internal exports for testing (delegate to server module)
 
