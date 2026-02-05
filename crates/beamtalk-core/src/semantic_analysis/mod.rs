@@ -267,20 +267,21 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     name_resolver.resolve_module(module);
     result.diagnostics.extend(name_resolver.take_diagnostics());
 
+    // Extract scope from NameResolver to pass to Analyser
+    // This eliminates duplicate scope building - the scope already contains:
+    // - Built-in identifiers (true, false, nil)
+    // - Known REPL variables
+    // - All variable bindings from name resolution
+    let scope = name_resolver.into_scope();
+
     // Phase 2: Type Checking (stub - currently does nothing)
     let mut type_checker = TypeChecker::new();
     type_checker.check_module(module);
     result.diagnostics.extend(type_checker.take_diagnostics());
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
-    let mut analyser = Analyser::new();
-
-    // Pre-define known REPL variables in the analyser's scope
-    for var_name in known_vars {
-        analyser
-            .scope
-            .define(var_name, module.span, BindingKind::Local);
-    }
+    // Receive scope from NameResolver - no need to re-build it
+    let mut analyser = Analyser::with_scope(scope);
 
     analyser.analyse_module(module);
     result.diagnostics.extend(analyser.result.diagnostics);
@@ -296,19 +297,26 @@ struct Analyser {
 }
 
 impl Analyser {
-    fn new() -> Self {
+    /// Creates a new analyser with an existing scope from `NameResolver`.
+    ///
+    /// This constructor receives the scope built by `NameResolver`, eliminating
+    /// duplicate scope construction. The scope already contains:
+    /// - Built-in identifiers (true, false, nil)
+    /// - Known REPL variables (if any)
+    /// - All variable bindings from name resolution
+    fn with_scope(scope: scope::Scope) -> Self {
         Self {
             result: AnalysisResult::new(),
-            scope: scope::Scope::new(),
+            scope,
         }
     }
 
     fn analyse_module(&mut self, module: &Module) {
-        // Define built-in identifiers that are always available
-        // These are special values in Beamtalk (true, false, nil)
-        self.scope.define("true", module.span, BindingKind::Local);
-        self.scope.define("false", module.span, BindingKind::Local);
-        self.scope.define("nil", module.span, BindingKind::Local);
+        // Scope is now received from NameResolver, already populated with:
+        // - Built-in identifiers (true, false, nil)
+        // - Known REPL variables
+        // - All variable bindings from name resolution
+        // No need to re-define them here.
 
         // Analyse top-level expressions
         for expr in &module.expressions {
