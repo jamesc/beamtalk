@@ -45,7 +45,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
@@ -269,7 +270,7 @@ pub fn start_detached_node(
     // Read cookie
     let cookie = read_workspace_cookie(workspace_id)?;
 
-    // Build the eval command to start workspace supervisor
+    // Build the eval command to start workspace supervisor and keep running
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
     let project_path_str = project_path.to_string_lossy();
     let eval_cmd = format!(
@@ -280,7 +281,8 @@ pub fn start_detached_node(
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
                                                           auto_cleanup => true}}), \
-         io:format(\"Workspace {workspace_id} started on port {port}~n\")."
+         io:format(\"Workspace {workspace_id} started on port {port}~n\"), \
+         receive stop -> ok end."
     );
 
     // Start detached BEAM node
@@ -299,7 +301,7 @@ pub fn start_detached_node(
         eval_cmd,
     ];
 
-    let child = Command::new("erl")
+    let _child = Command::new("erl")
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -309,8 +311,12 @@ pub fn start_detached_node(
             miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
         })?;
 
-    // Get the PID
-    let pid = child.id();
+    // With -detached, the spawn() returns immediately and the real BEAM node
+    // runs independently. We need to wait a bit for it to start up.
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Find the BEAM process by node name
+    let pid = find_beam_pid_by_node(&node_name)?;
 
     // Create node info
     let node_info = NodeInfo {
@@ -323,6 +329,29 @@ pub fn start_detached_node(
     save_node_info(workspace_id, &node_info)?;
 
     Ok(node_info)
+}
+
+/// Find the PID of a BEAM process by its node name.
+fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
+    let output = Command::new("ps")
+        .args(["-eo", "pid,command"])
+        .output()
+        .into_diagnostic()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("beam.smp") && line.contains(node_name) {
+            let pid_str = line
+                .trim()
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
+            let pid: u32 = pid_str.parse().into_diagnostic()?;
+            return Ok(pid);
+        }
+    }
+
+    Err(miette!("Could not find BEAM process for node {node_name}"))
 }
 
 /// Get or start a workspace node for the current directory.
