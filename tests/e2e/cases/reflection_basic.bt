@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test basic reflection API (BT-97)
+// @load tests/e2e/fixtures/counter.bt
+
+// Create counter instance
+c := Counter spawn
+// => _
+
+// Test class reflection
+c class
+// => Counter
+
+// Test respondsTo: with symbol literal
+c respondsTo: #increment
+// => true
+
+// Test respondsTo: with non-existent method
+c respondsTo: #nonExistent
+// => false
+
+// Test instVarNames - returns atoms (displayed as strings in E2E)
+c instVarNames
+// => ["value"]
+
+// Test instVarAt: - read field value
+c instVarAt: #value
+// => 0
+
+// Increment to change state
+c increment
+// => 1
+
+// Test instVarAt: after state change
+c instVarAt: #value
+// => 1
+
+// Test instVarAt:put: - set field value
+c instVarAt: #value put: 42
+// => 42
+
+// Verify field was set
+c getValue
+// => 42
+
+// Test perform: - dynamic dispatch (zero-arity method)
+c perform: #getValue
+// => 42
+
+// Test perform: with another method
+c perform: #increment
+// => 43
+
+// Verify increment worked via getValue
+c getValue
+// => 43
