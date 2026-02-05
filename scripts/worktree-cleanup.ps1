@@ -6,8 +6,8 @@
     Clean up orphaned devcontainers and volumes for this repository's worktrees.
 
 .DESCRIPTION
-    Finds and removes Docker containers that were created for worktrees
-    that no longer exist. Optionally can remove all containers for this project.
+    Finds and removes Docker containers and volumes that were created for worktrees
+    that no longer exist. Volumes in use are safely skipped.
 
 .PARAMETER All
     Remove all containers for this project, even for active worktrees
@@ -61,7 +61,7 @@ if (-not $All) {
             $currentPath = $matches[1]
             $activeWorktrees += $currentPath
             Write-Host "   ✓ $currentPath" -ForegroundColor Gray
-            # Derive the parent directory (e.g., C:/Users/james/source/worktrees)
+            # Derive the parent directory
             if (-not $worktreeParentDir) {
                 $worktreeParentDir = (Split-Path -Parent $currentPath) -replace "\\", "/"
             }
@@ -251,6 +251,9 @@ if ($projectVolumes.Count -gt 0) {
             }
         }
     }
+}
+else {
+    Write-Host "No orphaned volumes found" -ForegroundColor Gray
 }
 
 Write-Host ""
