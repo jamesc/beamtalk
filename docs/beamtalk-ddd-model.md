@@ -465,12 +465,14 @@ impl CoreErlangGenerator {
 - `DiagnosticSet`: Errors/warnings for a file
 - `CompletionList`: Suggestions at a position
 
-**Value Objects:**
-- `Position`: (line: u32, column: u32)
-- `Location`: (file: PathBuf, span: Span)
-- `Diagnostic`: (severity, message, span, code)
-- `Completion`: (label, kind, detail, insert_text)
-- `HoverInfo`: (range, contents)
+**Value Objects:** (defined in `language_service/value_objects.rs`)
+- `ByteOffset`: Type-safe byte offset in source text
+- `Position`: (line: u32, column: u32) with UTF-8 aware conversion
+- `Location`: (file: Utf8PathBuf, span: Span)
+- `Diagnostic`: Re-exported from parse diagnostics
+- `Completion`: (label, kind, detail, documentation)
+- `CompletionKind`: Enum for completion types (Function, Variable, Class, etc.)
+- `HoverInfo`: (contents, documentation, span)
 
 **Repositories:**
 - `FileCache`: Map of path → CachedFile
