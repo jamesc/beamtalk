@@ -69,14 +69,15 @@ init(Config) ->
             modules => [beamtalk_workspace_meta]
         },
         
-        %% REPL TCP server for client connections
+        %% REPL coordinator (includes TCP server and evaluation logic)
+        %% This provides backward compatibility with existing REPL client
         #{
-            id => beamtalk_repl_server,
-            start => {beamtalk_repl_server, start_link, [TcpPort]},
+            id => beamtalk_repl,
+            start => {beamtalk_repl, start_link, [TcpPort, #{}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
-            modules => [beamtalk_repl_server]
+            modules => [beamtalk_repl]
         },
         
         %% Idle monitor for auto-cleanup (only if enabled)
