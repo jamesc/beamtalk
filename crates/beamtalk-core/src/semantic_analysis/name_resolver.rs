@@ -17,7 +17,6 @@
 
 use crate::ast::{Block, ClassDefinition, Expression, MatchArm, MethodDefinition, Module};
 use crate::semantic_analysis::scope::{BindingKind, Scope};
-use crate::semantic_analysis::{CapturedVar, Mutation, MutationKind};
 use crate::source_analysis::{Diagnostic, Span};
 
 /// Name resolution domain service.
@@ -25,7 +24,8 @@ use crate::source_analysis::{Diagnostic, Span};
 /// **DDD Context:** Semantic Analysis - Domain Service
 ///
 /// Resolves identifiers to bindings and manages scope hierarchy. This is a
-/// stateless service that operates on the Scope domain object.
+/// stateful service that owns and manages the `Scope` domain object and
+/// accumulates diagnostics during name resolution.
 #[derive(Debug)]
 pub struct NameResolver {
     scope: Scope,
@@ -279,135 +279,6 @@ impl NameResolver {
 
         // Exit match arm scope
         self.scope.pop();
-    }
-
-    /// Collects captured variables and mutations from an expression.
-    ///
-    /// This is a helper method used during block analysis to track which variables
-    /// are captured from outer scopes and which variables are mutated.
-    pub fn collect_captures_and_mutations(
-        &self,
-        expr: &Expression,
-        captures: &mut Vec<CapturedVar>,
-        mutations: &mut Vec<Mutation>,
-    ) {
-        #[allow(clippy::enum_glob_use)] // cleaner match arms
-        use Expression::*;
-
-        match expr {
-            Identifier(id) => {
-                // Check if this is a captured variable
-                if let Some(var_info) = self.scope.lookup(&id.name) {
-                    if self.scope.is_captured(&id.name) {
-                        // Only add if not already in captures list
-                        if !captures.iter().any(|c| c.name == id.name) {
-                            captures.push(CapturedVar {
-                                name: id.name.clone(),
-                                defined_at: var_info.defined_at,
-                            });
-                        }
-                    }
-                }
-            }
-
-            Assignment {
-                target,
-                value,
-                span,
-            } => {
-                // Track mutation
-                if let Identifier(id) = target.as_ref() {
-                    let kind = if self.scope.is_captured(&id.name) {
-                        MutationKind::CapturedVariable {
-                            name: id.name.clone(),
-                        }
-                    } else {
-                        MutationKind::LocalVariable {
-                            name: id.name.clone(),
-                        }
-                    };
-                    mutations.push(Mutation { kind, span: *span });
-                } else if let FieldAccess { field, .. } = target.as_ref() {
-                    mutations.push(Mutation {
-                        kind: MutationKind::Field {
-                            name: field.name.clone(),
-                        },
-                        span: *span,
-                    });
-                }
-
-                // Recurse into value
-                self.collect_captures_and_mutations(value, captures, mutations);
-            }
-
-            Block(_block) => {
-                // Do not recurse into nested blocks here.
-                // Nested blocks are analyzed separately via the main analysis pass
-                // which handles proper scoping and parameter definitions.
-            }
-
-            MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                self.collect_captures_and_mutations(receiver, captures, mutations);
-                for arg in arguments {
-                    self.collect_captures_and_mutations(arg, captures, mutations);
-                }
-            }
-
-            FieldAccess { receiver, .. } => {
-                self.collect_captures_and_mutations(receiver, captures, mutations);
-            }
-
-            Cascade {
-                receiver, messages, ..
-            } => {
-                self.collect_captures_and_mutations(receiver, captures, mutations);
-                for msg in messages {
-                    for arg in &msg.arguments {
-                        self.collect_captures_and_mutations(arg, captures, mutations);
-                    }
-                }
-            }
-
-            Return { value, .. } => {
-                self.collect_captures_and_mutations(value, captures, mutations);
-            }
-
-            Parenthesized { expression, .. } => {
-                self.collect_captures_and_mutations(expression, captures, mutations);
-            }
-
-            Pipe { value, target, .. } => {
-                self.collect_captures_and_mutations(value, captures, mutations);
-                self.collect_captures_and_mutations(target, captures, mutations);
-            }
-
-            Match { value, arms, .. } => {
-                self.collect_captures_and_mutations(value, captures, mutations);
-                for arm in arms {
-                    // Collect from guard if present
-                    if let Some(guard) = &arm.guard {
-                        self.collect_captures_and_mutations(guard, captures, mutations);
-                    }
-                    self.collect_captures_and_mutations(&arm.body, captures, mutations);
-                }
-            }
-
-            MapLiteral { pairs, .. } => {
-                // Collect captures and mutations from map literal pairs
-                for pair in pairs {
-                    self.collect_captures_and_mutations(&pair.key, captures, mutations);
-                    self.collect_captures_and_mutations(&pair.value, captures, mutations);
-                }
-            }
-
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } => {
-                // No captures or mutations
-            }
-        }
     }
 }
 

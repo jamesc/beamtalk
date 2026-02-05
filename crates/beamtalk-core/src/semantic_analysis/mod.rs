@@ -376,8 +376,10 @@ impl Analyser {
 
         match expr {
             Identifier(_id) => {
-                // Name resolution is now handled by NameResolver
-                // No need to check for undefined variables here
+                // Binding identifiers to declarations and reporting undefined variables
+                // is handled by `NameResolver`. The semantic analyser still maintains
+                // its own scope (`self.scope`), but only for capture/mutation analysis
+                // and related metadata, not for additional name-resolution diagnostics.
             }
 
             Assignment { target, value, .. } => {
