@@ -560,9 +560,10 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     let mut failures = Vec::new();
     let mut pass_count = 0;
 
-    // Print warnings about expressions without assertions
+    // Treat warnings as test failures
     for warning in &test_file.warnings {
         eprintln!("⚠️  {file_name}: {warning}");
+        failures.push(format!("{file_name}: {warning}"));
     }
 
     // Clear bindings before running file

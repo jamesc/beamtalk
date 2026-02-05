@@ -16,6 +16,9 @@
 # Shell scripts
 *.sh text eol=lf
 
+# PowerShell scripts (require CRLF on Windows)
+*.ps1 text eol=crlf
+
 # Markdown and docs
 *.md text eol=lf
 
