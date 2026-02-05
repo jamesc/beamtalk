@@ -466,7 +466,7 @@ handle_call({method, MethodName}, _From, State) ->
 
 %% ✅ SAFE - validate against known methods first
 handle_call({method, MethodName}, _From, State) ->
-    case maps:get(MethodName, State#{'__methods__'}, undefined) of
+    case maps:get(MethodName, maps:get('__methods__', State, #{}), undefined) of
         undefined -> {reply, {error, method_not_found}, State};
         MethodFun -> {reply, MethodFun(State), State}
     end.
@@ -489,8 +489,8 @@ String = "hello " ++ "world",  % Slow
 Length = length(String),        % O(n)
 
 %% ✅ RIGHT - binaries are fast
-String = <<"hello ", "world">>,  % Fast
-Length = byte_size(String),      % O(1)
+String = <<"hello world">>,       % Fast
+Length = byte_size(String),       % O(1)
 
 %% Generated Beamtalk code should always use binaries
 'my_method'/1 = fun (Self) ->
