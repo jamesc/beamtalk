@@ -119,8 +119,8 @@ count                                  ← This will fail (count was never set)
 **Rules for E2E tests:**
 1. **Every expression must have `// =>` assertion** (even if `// => _` for wildcard)
 2. **No assertion = no execution** (expressions are skipped)
-3. **Parser warns about missing assertions** (file name, line number, and expression)
-4. **Check warnings during test runs** to catch accidentally skipped expressions
+3. **Missing assertions cause test failures** (BT-249: warnings now treated as errors)
+4. **CI will fail** if any test file has expressions without assertions
 
 **Safe pattern:**
 ```beamtalk
@@ -142,21 +142,22 @@ counter increment
 // ❌ DANGEROUS - This looks fine but DOESN'T RUN!
 x := 0
 3 timesRepeat: [x := x + 1]   ← No assertion, SKIPPED!
-                               ← ⚠️ Parser will warn about this!
+                               ← ❌ ERROR! Test will fail in CI!
 x
 // => 3                        ← Will fail! x was never set because previous line didn't run
 ```
 
 **Verification:**
 ```bash
-# Run E2E tests - warnings will be shown for missing assertions
+# Run E2E tests - missing assertions will FAIL the build
 just test-e2e
 
-# Example warning output:
+# Example error output:
 # ⚠️  mytest.bt: Line 15: Expression will not be executed (missing // => assertion): count := 0
+# E2E tests failed: 1 of 287 tests failed
 ```
 
-**Parser warnings (BT-248):** The test parser now emits warnings when it finds expressions without assertions, making it easier to catch accidentally skipped tests.
+**Error enforcement (BT-249):** Missing assertions are treated as test failures, not just warnings. CI will catch broken tests before they're merged.
 
 ### Verification Checklist
 
