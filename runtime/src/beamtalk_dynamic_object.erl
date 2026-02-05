@@ -167,9 +167,11 @@ dispatch(Selector, Args, Self, State) ->
             catch
                 Class:Reason:_Stacktrace ->
                     %% Method threw an exception - log without stack trace to avoid leaking sensitive data
-                    io:format(standard_error,
-                        "Error in method ~p: ~p:~p~n",
-                        [Selector, Class, Reason]),
+                    logger:error("Error in method", #{
+                        selector => Selector,
+                        class => Class,
+                        reason => Reason
+                    }),
                     ClassName = maps:get('__class__', State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, Selector),
@@ -185,9 +187,11 @@ dispatch(Selector, Args, Self, State) ->
                     catch
                         Class:Reason:_Stacktrace ->
                             %% DNU handler threw an exception - log without stack trace to avoid leaking sensitive data
-                            io:format(standard_error,
-                                "Error in doesNotUnderstand handler for selector ~p: ~p:~p~n",
-                                [Selector, Class, Reason]),
+                            logger:error("Error in doesNotUnderstand handler", #{
+                                selector => Selector,
+                                class => Class,
+                                reason => Reason
+                            }),
                             ClassName = maps:get('__class__', State, unknown),
                             Error0 = beamtalk_error:new(type_error, ClassName),
                             Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),

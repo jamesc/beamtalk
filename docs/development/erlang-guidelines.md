@@ -206,6 +206,104 @@ Or use a helper function in the codegen to generate this automatically.
 
 ---
 
+## Logging with OTP Logger
+
+**Use OTP's `logger` module for all logging.** Do NOT use `io:format` for diagnostics.
+
+### Log Levels
+
+| Level | Function | Use Case | Example |
+|-------|----------|----------|---------|
+| **debug** | `logger:debug/2` | Detailed diagnostics, JSON parse errors, dispatch traces | Protocol parsing failures |
+| **info** | `logger:info/2` | Important events | Workspace started, daemon ready |
+| **warning** | `logger:warning/2` | Recoverable issues | Accept error, failed cleanup |
+| **error** | `logger:error/2` | Errors affecting operations | Method not found, timeout |
+
+### Usage Pattern
+
+Always use structured metadata (maps), not format strings:
+
+```erlang
+%% ❌ WRONG - old style io:format
+io:format(standard_error, "JSON parse failed: ~p~n", [Reason])
+
+%% ✅ RIGHT - structured logger
+logger:debug("JSON parse failed", #{
+    class => Class,
+    reason => Reason,
+    stack => lists:sublist(Stack, 3),
+    data => Data
+})
+```
+
+### Benefits
+
+1. **Clean test output** - Configure logger level in test environment
+2. **Structured metadata** - Easy to parse and filter
+3. **Flexible output** - Console, file, or custom handlers
+4. **Standard OTP** - Follows Erlang best practices
+5. **Configurable** - Control via `sys.config` or runtime
+
+### Test Configuration
+
+Configure logger in `test/sys.config` to suppress non-error logs:
+
+```erlang
+[
+    {kernel, [
+        %% Only show errors in tests for clean output
+        {logger_level, error},
+        {logger, [
+            {handler, default, logger_std_h, #{
+                level => error,
+                formatter => {logger_formatter, #{
+                    single_line => true,
+                    template => [msg]
+                }}
+            }}
+        ]}
+    ]}
+].
+```
+
+### Production Configuration
+
+For production, use info level with structured output:
+
+```erlang
+[
+    {kernel, [
+        {logger_level, info},
+        {logger, [
+            {handler, default, logger_std_h, #{
+                level => info,
+                formatter => {logger_formatter, #{
+                    single_line => false,
+                    template => [time, " ", level, " ", msg, "\n"]
+                }}
+            }}
+        ]}
+    ]}
+].
+```
+
+### Runtime Control
+
+Enable debug logging at runtime:
+
+```erlang
+%% Enable debug level for all modules
+logger:set_primary_config(level, debug).
+
+%% Enable debug for specific module
+logger:set_module_level(beamtalk_repl_server, debug).
+
+%% Disable debug for specific module
+logger:unset_module_level(beamtalk_repl_server).
+```
+
+---
+
 ### Message Protocols
 
 ```erlang
