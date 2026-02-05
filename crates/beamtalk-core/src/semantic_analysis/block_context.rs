@@ -10,9 +10,9 @@
 //! - **`Other`**: Other known contexts
 //! - **`Unknown`**: Context could not be determined
 
-use crate::analyse::BlockContext;
 use crate::ast::{Expression, MessageSelector};
-use crate::parse::Span;
+use crate::semantic_analysis::BlockContext;
+use crate::source_analysis::Span;
 
 /// Determines if a selector takes blocks for control flow.
 ///
@@ -174,7 +174,7 @@ pub fn classify_block(
 mod tests {
     use super::*;
     use crate::ast::{Block, BlockParameter, Identifier, KeywordPart};
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     #[test]
     fn test_is_control_flow_selector_loops() {

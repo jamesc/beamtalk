@@ -29,7 +29,7 @@
 use crate::ast::{Expression, Literal, MessageSelector, Module};
 use crate::codegen::core_erlang::to_module_name;
 use crate::language_service::{HoverInfo, Position};
-use crate::parse::Span;
+use crate::source_analysis::Span;
 
 /// Computes hover information at a given position.
 ///
@@ -294,7 +294,7 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{lex_with_eof, parse};
+    use crate::source_analysis::{lex_with_eof, parse};
 
     #[test]
     fn compute_hover_on_identifier() {

@@ -176,7 +176,7 @@ Before using ANY Beamtalk syntax, verify it exists in **at least one** of these 
 ✅ **Test files:**
 - `tests/e2e/cases/*.bt` - End-to-end language tests
 - `test-package-compiler/cases/*/main.bt` - Compiler test cases
-- `crates/beamtalk-core/src/parse/parser/mod.rs` - Parser unit tests
+- `crates/beamtalk-core/src/source_analysis/parser/mod.rs` - Parser unit tests
 
 #### 4. **Syntax Rationale (Design Decisions)**
 ✅ **Deliberate choices:** [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md)
@@ -209,7 +209,7 @@ grep -r "subclass:" examples/*.bt
 **Option 2: Check parser tests**
 ```bash
 # See what the parser actually accepts
-grep -A10 "Actor subclass" crates/beamtalk-core/src/parse/parser/mod.rs
+grep -A10 "Actor subclass" crates/beamtalk-core/src/source_analysis/parser/mod.rs
 ```
 
 **Option 3: Ask explicitly**
@@ -298,7 +298,7 @@ Then it doesn't exist yet, and you're about to hallucinate it!
 
 3. **Adding features** - Consider which bounded context it belongs to
    - Language Service feature? → `crates/beamtalk-core/src/queries/`
-   - Compilation feature? → `crates/beamtalk-core/src/parse/` or `src/analyse/`
+   - Compilation feature? → `crates/beamtalk-core/src/source_analysis/` or `src/analyse/`
    - Runtime feature? → `runtime/src/`
 
 4. **Writing documentation** - Include DDD context annotations
@@ -991,13 +991,13 @@ Identifies which component of the codebase the issue affects:
 
 | Label | Description | Key Directories |
 |-------|-------------|----------------|
-| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/parse/` |
+| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
 | `stdlib` | Standard library: collections, primitives, strings | `lib/` |
 | `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
 | `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
 | `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/src/` |
-| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/parse/`, `crates/beamtalk-core/src/ast.rs` |
+| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/source_analysis/`, `crates/beamtalk-core/src/ast.rs` |
 
 #### Issue Type
 
@@ -1162,8 +1162,8 @@ Acceptance Criteria:
 - [ ] All tokens include source span
 
 Files to Modify:
-- crates/beamtalk-core/src/parse/token.rs
-- crates/beamtalk-core/src/parse/lexer.rs
+- crates/beamtalk-core/src/source_analysis/token.rs
+- crates/beamtalk-core/src/source_analysis/lexer.rs
 
 Dependencies: None
 

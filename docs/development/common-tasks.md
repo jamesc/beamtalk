@@ -5,7 +5,7 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 ## Adding a New AST Node
 
 1. Define type in `crates/beamtalk-core/src/ast.rs`
-2. Add parsing in `crates/beamtalk-core/src/parse/`
+2. Add parsing in `crates/beamtalk-core/src/source_analysis/`
 3. Add type checking in `analyse.rs` if needed
 4. Add Core Erlang generation in `erlang.rs`
 5. Add snapshot tests in `test-package-compiler/cases/`

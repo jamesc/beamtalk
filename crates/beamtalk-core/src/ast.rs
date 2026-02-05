@@ -27,7 +27,7 @@
 //!
 //! ```
 //! use beamtalk_core::ast::*;
-//! use beamtalk_core::parse::Span;
+//! use beamtalk_core::source_analysis::Span;
 //!
 //! // Source: x := 3 + 4
 //! let module = Module {
@@ -59,7 +59,7 @@
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::parse::Span;
+use crate::source_analysis::Span;
 use ecow::EcoString;
 
 /// Top-level container for a Beamtalk module (Aggregate Root).
@@ -841,7 +841,7 @@ impl MessageSelector {
     ///
     /// ```
     /// use beamtalk_core::ast::{MessageSelector, KeywordPart};
-    /// use beamtalk_core::parse::Span;
+    /// use beamtalk_core::source_analysis::Span;
     ///
     /// // Unary selector
     /// let selector = MessageSelector::Unary("increment".into());

@@ -235,7 +235,7 @@ mod tests {
     //! - Provide appropriate documentation and completion kinds
 
     use super::*;
-    use crate::parse::{lex_with_eof, parse};
+    use crate::source_analysis::{lex_with_eof, parse};
 
     #[test]
     fn compute_completions_includes_keywords() {

@@ -309,7 +309,7 @@ fn handle_compile(
         (None, vec![])
     } else {
         // Parse and generate
-        use beamtalk_core::parse::{lex_with_eof, parse};
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
         let tokens = lex_with_eof(&source);
         let (module, _) = parse(tokens);
 
@@ -446,8 +446,8 @@ fn handle_compile_expression(
     };
 
     // Parse the expression as a module (it will contain one expression)
-    let tokens = beamtalk_core::parse::lex_with_eof(&params.source);
-    let (module, parse_diagnostics) = beamtalk_core::parse::parse(tokens);
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&params.source);
+    let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     // Convert known_variables to &str references for the diagnostics function
     let known_vars: Vec<&str> = params.known_variables.iter().map(String::as_str).collect();
@@ -466,8 +466,8 @@ fn handle_compile_expression(
         .map(|d| DiagnosticInfo {
             message: d.message.to_string(),
             severity: match d.severity {
-                beamtalk_core::parse::Severity::Error => "error".to_string(),
-                beamtalk_core::parse::Severity::Warning => "warning".to_string(),
+                beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
+                beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
             },
             start: d.span.start(),
             end: d.span.end(),
@@ -926,7 +926,10 @@ mod tests {
 
     #[test]
     fn extract_class_names_returns_empty_for_module_without_classes() {
-        let module = beamtalk_core::ast::Module::new(vec![], beamtalk_core::parse::Span::new(0, 0));
+        let module = beamtalk_core::ast::Module::new(
+            vec![],
+            beamtalk_core::source_analysis::Span::new(0, 0),
+        );
         let classes = extract_class_names(&module);
         assert!(classes.is_empty());
     }
@@ -934,7 +937,7 @@ mod tests {
     #[test]
     fn extract_class_names_returns_class_info_with_superclass() {
         use beamtalk_core::ast::{ClassDefinition, Identifier};
-        use beamtalk_core::parse::Span;
+        use beamtalk_core::source_analysis::Span;
 
         let class = ClassDefinition::new(
             Identifier::new("Counter", Span::new(0, 7)),

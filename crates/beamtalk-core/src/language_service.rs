@@ -48,7 +48,7 @@
 //! ```
 
 use crate::ast::{Expression, Identifier, Module};
-use crate::parse::{Diagnostic as ParseDiagnostic, Span};
+use crate::source_analysis::{Diagnostic as ParseDiagnostic, Span};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -530,7 +530,7 @@ impl SimpleLanguageService {
 
 impl LanguageService for SimpleLanguageService {
     fn update_file(&mut self, file: Utf8PathBuf, content: String) {
-        use crate::parse::{lex_with_eof, parse};
+        use crate::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
         let (module, diagnostics) = parse(tokens);
