@@ -1102,7 +1102,8 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-208** | Parser and Language Syntax | 8 issues | ~70% | Medium |
 | **BT-209** | Code Quality and Infrastructure | 24 issues | ~75% | Medium |
 | **BT-197** | DDD Architecture Refactoring | 4 issues | ~50% | Medium |
-| **BT-162** | Self-as-Object and Reflection API | 10 issues | ~70% | High |
+| **BT-162** | BEAM Object Model (ADR 0005) | 19 issues | ~55% | High |
+| **BT-278** | Unified Method Dispatch (ADR 0006) | 4 issues | ~0% | Urgent |
 | **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
 | **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
 | **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |

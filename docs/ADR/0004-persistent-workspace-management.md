@@ -1,7 +1,6 @@
 # ADR 0004: Persistent Workspace Management
 
 ## Status
-
 Accepted
 
 ## Context

@@ -1,8 +1,7 @@
 # ADR 0002: Use Erlang Comparison Operators Directly
 
 ## Status
-
-Proposed (depends on ADR 0001)
+Accepted
 
 ## Context
 
