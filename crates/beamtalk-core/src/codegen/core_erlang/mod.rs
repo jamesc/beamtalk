@@ -1067,6 +1067,10 @@ impl CoreErlangGenerator {
                 // BT-215: Standalone class references resolve to class objects
                 // Wrap the class PID in a beamtalk_object record for uniform dispatch
                 // Generate: {'beamtalk_object', 'Point class', 'beamtalk_class', ClassPid}
+                //
+                // Note: If class doesn't exist, whereis_class returns 'undefined' and creates
+                // an invalid beamtalk_object. This causes a REPL formatting error but doesn't
+                // crash. Proper validation will be added in BT-246 (runtime dispatch).
                 let class_pid_var = self.fresh_var("ClassPid");
                 write!(
                     self.output,
