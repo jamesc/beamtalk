@@ -1,0 +1,72 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_hot_reload_tests).
+-include_lib("eunit/include/eunit.hrl").
+
+%%====================================================================
+%% Tests for beamtalk_hot_reload domain service
+%%====================================================================
+
+%% Basic behavior tests
+code_change_returns_ok_tuple_test() ->
+    State = #{foo => bar},
+    Result = beamtalk_hot_reload:code_change(old_version, State, extra),
+    ?assertMatch({ok, _}, Result).
+
+code_change_preserves_state_test() ->
+    State = #{field1 => value1, field2 => 42},
+    {ok, NewState} = beamtalk_hot_reload:code_change(old_version, State, extra),
+    ?assertEqual(State, NewState).
+
+%% Test with different OldVsn formats
+code_change_handles_atom_version_test() ->
+    State = #{data => <<"test">>},
+    {ok, NewState} = beamtalk_hot_reload:code_change('1.0', State, extra),
+    ?assertEqual(State, NewState).
+
+code_change_handles_down_tuple_version_test() ->
+    State = #{count => 0},
+    {ok, NewState} = beamtalk_hot_reload:code_change({down, '2.0'}, State, extra),
+    ?assertEqual(State, NewState).
+
+code_change_handles_undefined_version_test() ->
+    State = #{},
+    {ok, NewState} = beamtalk_hot_reload:code_change(undefined, State, extra),
+    ?assertEqual(State, NewState).
+
+%% Test with different state types
+code_change_handles_empty_map_test() ->
+    State = #{},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, []),
+    ?assertEqual(State, NewState).
+
+code_change_handles_complex_state_test() ->
+    State = #{
+        '__class__' => 'Counter',
+        '__methods__' => #{increment => fun() -> ok end},
+        value => 42,
+        nested => #{deep => #{value => <<"test">>}}
+    },
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual(State, NewState).
+
+code_change_handles_list_state_test() ->
+    %% Some gen_servers might use list states
+    State = [1, 2, 3],
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual(State, NewState).
+
+code_change_handles_tuple_state_test() ->
+    %% Some gen_servers might use tuple states
+    State = {state, 42, <<"data">>},
+    {ok, NewState} = beamtalk_hot_reload:code_change(v1, State, extra),
+    ?assertEqual(State, NewState).
+
+%% Test with different Extra values
+code_change_handles_various_extra_test() ->
+    State = #{test => true},
+    ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, undefined)),
+    ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, [])),
+    ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, #{config => value})),
+    ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, {migration, data})).

@@ -87,7 +87,7 @@
 // - **ProtoObject**: Minimal root class with reflection primitives
 // - **Object**: Standard root for value types
 // - **Actor**: Process-based objects with spawn
-// - **Runtime**: `runtime/src/beamtalk_class.erl` - underlying class registry
+// - **Runtime**: `runtime/src/beamtalk_object_class.erl` - underlying class registry
 
 Object subclass: Beamtalk
   // ## System Reflection Protocol

@@ -37,7 +37,7 @@ setup() ->
 teardown(DynamicClasses) ->
     %% Stop and unregister any dynamically created classes
     lists:foreach(fun(ClassName) ->
-        case beamtalk_class:whereis_class(ClassName) of
+        case beamtalk_object_class:whereis_class(ClassName) of
             undefined ->
                 ok;
             Pid when is_pid(Pid) ->
@@ -51,7 +51,7 @@ teardown(DynamicClasses) ->
 wait_for_actor_class(0) ->
     error(actor_class_not_registered_after_timeout);
 wait_for_actor_class(N) ->
-    case beamtalk_class:whereis_class('Actor') of
+    case beamtalk_object_class:whereis_class('Actor') of
         undefined ->
             timer:sleep(50),
             wait_for_actor_class(N - 1);
@@ -71,7 +71,7 @@ create_dynamic_class_test_() ->
      fun(_) ->
          [?_test(begin
              %% Create a simple dynamic class with one method
-             Result = beamtalk_class:create_subclass('Actor', 'TestDynamicClass', #{
+             Result = beamtalk_object_class:create_subclass('Actor', 'TestDynamicClass', #{
                  instance_variables => [count],
                  instance_methods => #{
                      increment => fun(_Self, [], State) ->
@@ -86,13 +86,13 @@ create_dynamic_class_test_() ->
              {ok, ClassPid} = Result,
              
              %% Verify class is registered
-             ?assertEqual(ClassPid, beamtalk_class:whereis_class('TestDynamicClass')),
+             ?assertEqual(ClassPid, beamtalk_object_class:whereis_class('TestDynamicClass')),
              
              %% Verify class metadata
-             ?assertEqual('TestDynamicClass', beamtalk_class:class_name(ClassPid)),
-             ?assertEqual('Actor', beamtalk_class:superclass(ClassPid)),
-             ?assertEqual([count], beamtalk_class:instance_variables(ClassPid)),
-             ?assertEqual([increment], beamtalk_class:methods(ClassPid))
+             ?assertEqual('TestDynamicClass', beamtalk_object_class:class_name(ClassPid)),
+             ?assertEqual('Actor', beamtalk_object_class:superclass(ClassPid)),
+             ?assertEqual([count], beamtalk_object_class:instance_variables(ClassPid)),
+             ?assertEqual([increment], beamtalk_object_class:methods(ClassPid))
          end)]
      end}.
 
@@ -101,7 +101,7 @@ spawn_dynamic_instance_test() ->
     setup(),
     
     %% Create dynamic class with unique name
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'SpawnTestCounter', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'SpawnTestCounter', #{
         instance_variables => [value],
         instance_methods => #{
             increment => fun(_Self, [], State) ->
@@ -117,7 +117,7 @@ spawn_dynamic_instance_test() ->
     }),
     
     %% Spawn instance with initial state
-    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_class:new(ClassPid, [#{value => 5}]),
+    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_object_class:new(ClassPid, [#{value => 5}]),
     
     ?assert(is_pid(InstancePid)),
     ?assert(erlang:is_process_alive(InstancePid)),
@@ -136,7 +136,7 @@ method_not_found_test() ->
     setup(),
     
     %% Create class with one method
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'Simple', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'Simple', #{
         instance_variables => [],
         instance_methods => #{
             foo => fun(_Self, [], State) ->
@@ -146,7 +146,7 @@ method_not_found_test() ->
     }),
     
     %% Spawn instance
-    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_class:new(ClassPid, [#{}]),
+    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_object_class:new(ClassPid, [#{}]),
     
     %% Call non-existent method
     Result = gen_server:call(InstancePid, {bar, []}),
@@ -157,7 +157,7 @@ field_initialization_test() ->
     setup(),
     
     %% Create class with multiple instance variables
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'Point', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'Point', #{
         instance_variables => [x, y],
         instance_methods => #{
             getX => fun(_Self, [], State) ->
@@ -170,7 +170,7 @@ field_initialization_test() ->
     }),
     
     %% Spawn with initial values
-    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_class:new(ClassPid, [#{x => 10, y => 20}]),
+    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_object_class:new(ClassPid, [#{x => 10, y => 20}]),
     
     %% Verify field values
     ?assertEqual(10, gen_server:call(InstancePid, {getX, []})),
@@ -183,7 +183,7 @@ dynamic_subclass_hierarchy_test() ->
     setup(),
     
     %% Create parent dynamic class
-    {ok, ParentPid} = beamtalk_class:create_subclass('Actor', 'Parent', #{
+    {ok, ParentPid} = beamtalk_object_class:create_subclass('Actor', 'Parent', #{
         instance_variables => [],
         instance_methods => #{
             parentMethod => fun(_Self, [], State) ->
@@ -193,7 +193,7 @@ dynamic_subclass_hierarchy_test() ->
     }),
     
     %% Create child dynamic class
-    {ok, ChildPid} = beamtalk_class:create_subclass('Parent', 'Child', #{
+    {ok, ChildPid} = beamtalk_object_class:create_subclass('Parent', 'Child', #{
         instance_variables => [],
         instance_methods => #{
             childMethod => fun(_Self, [], State) ->
@@ -203,18 +203,18 @@ dynamic_subclass_hierarchy_test() ->
     }),
     
     %% Verify hierarchy
-    ?assertEqual('Actor', beamtalk_class:superclass(ParentPid)),
-    ?assertEqual('Parent', beamtalk_class:superclass(ChildPid)),
+    ?assertEqual('Actor', beamtalk_object_class:superclass(ParentPid)),
+    ?assertEqual('Parent', beamtalk_object_class:superclass(ChildPid)),
     
     %% Verify class names
-    ?assertEqual('Parent', beamtalk_class:class_name(ParentPid)),
-    ?assertEqual('Child', beamtalk_class:class_name(ChildPid)).
+    ?assertEqual('Parent', beamtalk_object_class:class_name(ParentPid)),
+    ?assertEqual('Child', beamtalk_object_class:class_name(ChildPid)).
 
 %% Test error when superclass doesn't exist
 superclass_not_found_test() ->
     setup(),
     
-    Result = beamtalk_class:create_subclass('NonExistentClass', 'MyClass', #{
+    Result = beamtalk_object_class:create_subclass('NonExistentClass', 'MyClass', #{
         instance_variables => [],
         instance_methods => #{}
     }),
@@ -225,7 +225,7 @@ superclass_not_found_test() ->
 no_instance_variables_test() ->
     setup(),
     
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'Stateless', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'Stateless', #{
         instance_methods => #{
             hello => fun(_Self, [], State) ->
                 {reply, world, State}
@@ -233,10 +233,10 @@ no_instance_variables_test() ->
         }
     }),
     
-    ?assertEqual([], beamtalk_class:instance_variables(ClassPid)),
+    ?assertEqual([], beamtalk_object_class:instance_variables(ClassPid)),
     
     %% Spawn and call method
-    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_class:new(ClassPid, [#{}]),
+    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_object_class:new(ClassPid, [#{}]),
     ?assertEqual(world, gen_server:call(InstancePid, {hello, []})).
 
 %% Test async message send with futures
@@ -244,7 +244,7 @@ async_message_test() ->
     setup(),
     
     %% Create class
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'AsyncTest', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'AsyncTest', #{
         instance_variables => [value],
         instance_methods => #{
             compute => fun(_Self, [X], State) ->
@@ -256,7 +256,7 @@ async_message_test() ->
     }),
     
     %% Spawn instance
-    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_class:new(ClassPid, [#{value => 0}]),
+    {ok, #beamtalk_object{pid = InstancePid}} = beamtalk_object_class:new(ClassPid, [#{value => 0}]),
     
     %% Send async message
     FuturePid = beamtalk_future:new(),
@@ -274,7 +274,7 @@ repl_style_usage_test() ->
     %% Users would type these expressions interactively
     
     %% Step 1: Create a dynamic class (use unique name to avoid collisions)
-    ClassPid = element(2, beamtalk_class:create_subclass('Actor', 'REPLCounter', #{
+    ClassPid = element(2, beamtalk_object_class:create_subclass('Actor', 'REPLCounter', #{
         instance_variables => [count],
         instance_methods => #{
             increment => fun(_Self, [], State) ->
@@ -289,11 +289,11 @@ repl_style_usage_test() ->
     })),
     
     %% Step 2: Spawn an instance
-    CounterObj = element(2, beamtalk_class:new(ClassPid, [#{count => 0}])),
+    CounterObj = element(2, beamtalk_object_class:new(ClassPid, [#{count => 0}])),
     CounterPid = CounterObj#beamtalk_object.pid,
     
     %% Verify class was registered correctly
-    ?assertEqual([getValue, increment], lists:sort(beamtalk_class:methods(ClassPid))),
+    ?assertEqual([getValue, increment], lists:sort(beamtalk_object_class:methods(ClassPid))),
     
     %% Step 3: Send messages to the instance
     ?assertEqual(0, gen_server:call(CounterPid, {getValue, []})),
@@ -307,7 +307,7 @@ class_introspection_test() ->
     setup(),
     
     %% Create a dynamic class
-    {ok, ClassPid} = beamtalk_class:create_subclass('Actor', 'TestClass', #{
+    {ok, ClassPid} = beamtalk_object_class:create_subclass('Actor', 'TestClass', #{
         instance_variables => [x, y, z],
         instance_methods => #{
             foo => fun(_Self, [], State) -> {reply, bar, State} end,
@@ -316,15 +316,15 @@ class_introspection_test() ->
     }),
     
     %% Test class lookup
-    ?assertEqual(ClassPid, beamtalk_class:whereis_class('TestClass')),
+    ?assertEqual(ClassPid, beamtalk_object_class:whereis_class('TestClass')),
     
     %% Test class introspection
-    ?assertEqual('TestClass', beamtalk_class:class_name(ClassPid)),
-    ?assertEqual('Actor', beamtalk_class:superclass(ClassPid)),
-    ?assertEqual([x, y, z], beamtalk_class:instance_variables(ClassPid)),
+    ?assertEqual('TestClass', beamtalk_object_class:class_name(ClassPid)),
+    ?assertEqual('Actor', beamtalk_object_class:superclass(ClassPid)),
+    ?assertEqual([x, y, z], beamtalk_object_class:instance_variables(ClassPid)),
     
     %% Test method enumeration (order may vary)
-    Methods = beamtalk_class:methods(ClassPid),
+    Methods = beamtalk_object_class:methods(ClassPid),
     ?assert(lists:member(foo, Methods)),
     ?assert(lists:member(baz, Methods)),
     ?assertEqual(2, length(Methods)).
@@ -334,7 +334,7 @@ invalid_method_arity_test() ->
     setup(),
     
     %% Try to create class with wrong arity method (should fail)
-    Result = beamtalk_class:create_subclass('Actor', 'BadArity', #{
+    Result = beamtalk_object_class:create_subclass('Actor', 'BadArity', #{
         instance_variables => [],
         instance_methods => #{
             badMethod => fun(State) -> {reply, ok, State} end  % Arity 1, not 3

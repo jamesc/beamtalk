@@ -52,7 +52,7 @@
 %%   after_methods => #{selector() => [fun()]}    % Flavors-style
 %% }
 %% ```
--module(beamtalk_class).
+-module(beamtalk_object_class).
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
@@ -458,8 +458,8 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+code_change(OldVsn, State, Extra) ->
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
 %% Internal functions
@@ -483,7 +483,7 @@ registry_name(ClassName) ->
     list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)).
 
 notify_instances(_ClassName, _NewMethods) ->
-    %% TODO: Once beamtalk_instances is updated to work with per-class processes,
+    %% TODO: Once beamtalk_object_instances is updated to work with per-class processes,
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.

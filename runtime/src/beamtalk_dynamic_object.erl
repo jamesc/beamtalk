@@ -10,7 +10,7 @@
 %%%
 %%% ## Architecture
 %%%
-%%% Dynamic classes are created at runtime via `beamtalk_class:create_subclass/3`.
+%%% Dynamic classes are created at runtime via `beamtalk_object_class:create_subclass/3`.
 %%% Instances of dynamic classes run this behavior, which:
 %%% - Stores instance state in a map (like compiled actors)
 %%% - Stores method closures in `__methods__` field
@@ -144,8 +144,8 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
     ok.
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+code_change(OldVsn, State, Extra) ->
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
 %% Internal Dispatch

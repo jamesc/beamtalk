@@ -42,12 +42,12 @@ init([]) ->
         },
         %% Then start instance tracking
         #{
-            id => beamtalk_instances,
-            start => {beamtalk_instances, start_link, []},
+            id => beamtalk_object_instances,
+            start => {beamtalk_object_instances, start_link, []},
             restart => permanent,
             shutdown => 5000,
             type => worker,
-            modules => [beamtalk_instances]
+            modules => [beamtalk_object_instances]
         }
     ],
     

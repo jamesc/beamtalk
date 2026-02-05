@@ -26,7 +26,7 @@
 %%% 3. Create Object class process (with superclass = ProtoObject)
 %%% 4. Create Actor class process (with superclass = Object)
 %%%
-%%% Each class process is registered with `beamtalk_class:start_link/2` and
+%%% Each class process is registered with `beamtalk_object_class:start_link/2` and
 %%% joins the `beamtalk_classes` pg group for enumeration.
 -module(beamtalk_bootstrap).
 
@@ -73,7 +73,7 @@ init(Parent) ->
             },
             instance_variables => []
         },
-        {ok, _ProtoObjectClassPid} = case beamtalk_class:start_link('ProtoObject', ProtoObjectClassInfo) of
+        {ok, _ProtoObjectClassPid} = case beamtalk_object_class:start_link('ProtoObject', ProtoObjectClassInfo) of
             {ok, Pid1} -> {ok, Pid1};
             {error, {already_started, Pid1}} -> {ok, Pid1}
         end,
@@ -97,7 +97,7 @@ init(Parent) ->
             class_methods => #{},
             instance_variables => []
         },
-        {ok, _ObjectClassPid} = case beamtalk_class:start_link('Object', ObjectClassInfo) of
+        {ok, _ObjectClassPid} = case beamtalk_object_class:start_link('Object', ObjectClassInfo) of
             {ok, Pid2} -> {ok, Pid2};
             {error, {already_started, Pid2}} -> {ok, Pid2}
         end,
@@ -118,7 +118,7 @@ init(Parent) ->
             },
             instance_variables => []
         },
-        {ok, _ActorClassPid} = case beamtalk_class:start_link('Actor', ActorClassInfo) of
+        {ok, _ActorClassPid} = case beamtalk_object_class:start_link('Actor', ActorClassInfo) of
             {ok, Pid3} -> {ok, Pid3};
             {error, {already_started, Pid3}} -> {ok, Pid3}
         end,

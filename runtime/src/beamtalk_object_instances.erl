@@ -12,7 +12,7 @@
 %% A monitor process automatically cleans up entries when instances terminate.
 %%
 %% @see docs/beamtalk-object-model.md Part 5 "Instance Tracking"
--module(beamtalk_instances).
+-module(beamtalk_object_instances).
 -behaviour(gen_server).
 
 %% API
@@ -170,5 +170,5 @@ terminate(_Reason, _State) ->
     ok.
 
 %% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+code_change(OldVsn, State, Extra) ->
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
