@@ -45,6 +45,7 @@ start_link() ->
 %%
 %% Creates ProtoObject class, Object class, and Actor class processes.
 %% Returns after all three are successfully started and registered.
+-spec init(pid()) -> no_return().
 init(Parent) ->
     %% Ensure pg is started
     case whereis(pg) of
