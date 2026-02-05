@@ -70,6 +70,91 @@ Actor subclass: Counter
 | **Missing constraints** | `Counter new` on Actor | Error - actors use `spawn`, not `new` |
 | **Assumed features** | `Integer subclass: MyInt` | Primitives are sealed, cannot subclass |
 | **Smalltalk ported verbatim** | `Object subclass: #Counter` | Beamtalk uses identifiers, not symbols: `Object subclass: Counter` |
+| **Load syntax confusion** | `@load` in REPL | Use `:load` in REPL, `@load` only in E2E test files |
+
+### E2E Test Directives vs REPL Commands
+
+**CRITICAL:** E2E test files and REPL use different syntax for loading files.
+
+| Syntax | Where | Purpose | Example |
+|--------|-------|---------|---------|
+| `@load` | E2E test files (in comments) | Test framework directive | `// @load tests/fixtures/counter.bt` |
+| `:load` | REPL interactive session | REPL command | `> :load examples/counter.bt` |
+
+**When to use which:**
+- Writing E2E test case → `// @load path.bt` (test directive)
+- Interactive REPL → `> :load path.bt` (REPL command)
+- Documentation showing REPL session → `:load` (actual REPL command)
+- Code examples in docs → `:load` (REPL usage)
+
+**Why different?**
+- `@load` is parsed by test framework before execution (meta-level instruction)
+- `:load` is sent to REPL during execution (runtime command)
+- Different systems, different syntax - follows test framework conventions (like `@param` in JSDoc)
+
+### E2E Test Format: Missing Assertions Cause Silent Skips ⚠️
+
+**CRITICAL:** In E2E test files (`tests/e2e/cases/*.bt`), expressions **without** `// =>` assertions are **silently skipped** and never executed!
+
+**Test format:**
+```beamtalk
+// @load tests/fixtures/counter.bt   ← Test framework directive
+
+Counter spawn                          ← Expression to evaluate
+// => _                                 ← Required assertion (wildcard OK)
+
+c increment                            ← Another expression
+// => 1                                 ← Required assertion
+
+count := 0                             ← Expression without assertion
+                                       ← ⚠️ SILENTLY SKIPPED! Never runs!
+
+3 timesRepeat: [count := count + 1]   ← Expression without assertion
+                                       ← ⚠️ SILENTLY SKIPPED! Never runs!
+
+count                                  ← This will fail (count was never set)
+// => 3                                 ← Assertion fails because previous lines didn't run
+```
+
+**Rules for E2E tests:**
+1. **Every expression must have `// =>` assertion** (even if `// => _` for wildcard)
+2. **No assertion = no execution** (silent skip, no warning!)
+3. **Check test output** to verify test count matches expected expressions
+
+**Safe pattern:**
+```beamtalk
+// Expression with side effect (spawn, assignment)
+counter := Counter spawn
+// => _                    ← Wildcard assertion, but expression RUNS
+
+// Expression with expected value
+counter increment
+// => 1                    ← Specific assertion
+
+// Expression returning nil
+3 timesRepeat: [counter increment]
+// => nil                  ← Explicit nil assertion, expression RUNS
+```
+
+**Dangerous pattern:**
+```beamtalk
+// ❌ DANGEROUS - This looks fine but DOESN'T RUN!
+x := 0
+3 timesRepeat: [x := x + 1]   ← No assertion, SKIPPED!
+x
+// => 3                        ← Will fail! x was never set because previous line didn't run
+```
+
+**Verification:**
+```bash
+# Count test cases in file
+grep -c "// =>" tests/e2e/cases/mytest.bt
+
+# Compare to number of expressions
+# If counts don't match, you have silent skips!
+```
+
+**See also:** BT-XXX for adding warnings when expressions lack assertions.
 
 ### Verification Checklist
 
