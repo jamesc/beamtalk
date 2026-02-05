@@ -18,66 +18,46 @@ echo "Compiling test fixtures..."
 echo "  Checking beamtalk binary..."
 cargo build --bin beamtalk --quiet
 
+# Clean old artifacts to ensure fresh compilation
+# This prevents stale .beam files from masking build failures
+echo "  Cleaning old artifacts..."
+rm -f tests/e2e/fixtures/build/counter.beam tests/e2e/fixtures/build/counter.core
+rm -f runtime/test_fixtures/build/logging_counter.beam runtime/test_fixtures/build/logging_counter.core
+
 # Build counter fixture (using E2E fixture - BT-239)
 echo "  Building counter.bt (from tests/e2e/fixtures)..."
-./target/debug/beamtalk build tests/e2e/fixtures/counter.bt || true  # May report error even on success
+./target/debug/beamtalk build tests/e2e/fixtures/counter.bt
 
-# Copy to rebar3 build directories (for test execution)
-if [ -f tests/e2e/fixtures/build/counter.beam ]; then
-    for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-        if [ -d "$build_dir" ]; then
-            cp tests/e2e/fixtures/build/counter.beam "$build_dir/"
-            echo "  ✓ Copied counter.beam to $build_dir/"
-        fi
-    done
-elif [ -f tests/e2e/fixtures/build/counter.core ]; then
-    # Try manual erlc compile if beamtalk build reports error but creates .core
-    echo "  Compiling Core Erlang manually..."
-    cd tests/e2e/fixtures/build
-    erlc counter.core
-    cd ../../../..
-    
-    # Copy to rebar3 build directories
-    for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-        if [ -d "$build_dir" ]; then
-            cp tests/e2e/fixtures/build/counter.beam "$build_dir/"
-            echo "  ✓ Copied counter.beam to $build_dir/"
-        fi
-    done
-else
+# Verify build succeeded
+if [ ! -f tests/e2e/fixtures/build/counter.beam ]; then
     echo "  ✗ Failed to compile counter.bt"
     exit 1
 fi
 
+# Copy to rebar3 build directories (for test execution)
+for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
+    if [ -d "$build_dir" ]; then
+        cp tests/e2e/fixtures/build/counter.beam "$build_dir/"
+        echo "  ✓ Copied counter.beam to $build_dir/"
+    fi
+done
+
 # Build logging_counter fixture (BT-108 - super keyword tests)
 echo "  Building logging_counter.bt..."
-./target/debug/beamtalk build runtime/test_fixtures/logging_counter.bt || true
+./target/debug/beamtalk build runtime/test_fixtures/logging_counter.bt
 
-# Copy to rebar3 build directories
-if [ -f runtime/test_fixtures/build/logging_counter.beam ]; then
-    for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-        if [ -d "$build_dir" ]; then
-            cp runtime/test_fixtures/build/logging_counter.beam "$build_dir/"
-            echo "  ✓ Copied logging_counter.beam to $build_dir/"
-        fi
-    done
-elif [ -f runtime/test_fixtures/build/logging_counter.core ]; then
-    # Try manual erlc compile
-    echo "  Compiling Core Erlang manually..."
-    cd runtime/test_fixtures/build
-    erlc logging_counter.core
-    cd ../../..
-    
-    # Copy to rebar3 build directories
-    for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-        if [ -d "$build_dir" ]; then
-            cp runtime/test_fixtures/build/logging_counter.beam "$build_dir/"
-            echo "  ✓ Copied logging_counter.beam to $build_dir/"
-        fi
-    done
-else
+# Verify build succeeded
+if [ ! -f runtime/test_fixtures/build/logging_counter.beam ]; then
     echo "  ✗ Failed to compile logging_counter.bt"
     exit 1
 fi
+
+# Copy to rebar3 build directories
+for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
+    if [ -d "$build_dir" ]; then
+        cp runtime/test_fixtures/build/logging_counter.beam "$build_dir/"
+        echo "  ✓ Copied logging_counter.beam to $build_dir/"
+    fi
+done
 
 echo "Done!"
