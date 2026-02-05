@@ -36,6 +36,8 @@ The semantic analysis module structure exists with type definitions:
 
 - **Scope tracking**: `crates/beamtalk-core/src/analyse/scope.rs`
   - `Scope` - Hierarchical scope tracker with push/pop
+  - `Binding` - Value object with name, span, depth, kind, and optional type annotation
+  - `BindingKind` - Enum distinguishing Local, Parameter, InstanceField, ClassField
   - Variable lookup and capture detection
   - Depth tracking (module, class, method, block)
   - Full test coverage (17 tests)
