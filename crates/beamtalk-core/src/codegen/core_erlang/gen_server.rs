@@ -988,24 +988,10 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates built-in reflection message handlers (BT-97).
+    /// Generates the `class` reflection handler (BT-97).
     ///
-    /// All Beamtalk objects respond to reflection messages:
-    /// - `class` → returns class name atom
-    /// - `respondsTo:` → checks if selector exists
-    /// - `instVarNames` → returns list of field names
-    /// - `instVarAt:` → returns field value
-    /// - `instVarAt:put:` → sets field value
-    /// - `perform:` → dynamic dispatch to selector with args
-    ///
-    /// These are generated after user-defined methods but before the
-    /// `doesNotUnderstand:args:` fallback.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Reflection handlers are repetitive but distinct"
-    )]
-    pub(super) fn generate_reflection_handlers(&mut self) -> Result<()> {
-        // Handler: class => returns the class name atom
+    /// Returns the class name as an atom.
+    fn generate_class_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'class'> when 'true' ->")?;
         self.indent += 1;
@@ -1033,7 +1019,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
         self.indent -= 1;
 
-        // Handler: respondsTo: => checks if method exists
+        Ok(())
+    }
+
+    /// Generates the `respondsTo:` reflection handler (BT-97).
+    ///
+    /// Checks if the object responds to a given selector.
+    fn generate_responds_to_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
         self.indent += 1;
@@ -1066,7 +1058,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
         self.indent -= 1;
 
-        // Handler: instVarNames => returns list of field names
+        Ok(())
+    }
+
+    /// Generates the `instVarNames` reflection handler (BT-97).
+    ///
+    /// Returns a list of instance variable names, filtering out internal fields.
+    fn generate_inst_var_names_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
         self.indent += 1;
@@ -1123,7 +1121,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
         self.indent -= 1;
 
-        // Handler: instVarAt: => returns field value
+        Ok(())
+    }
+
+    /// Generates the `instVarAt:` reflection handler (BT-97).
+    ///
+    /// Returns the value of an instance variable.
+    fn generate_inst_var_at_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
         self.indent += 1;
@@ -1172,7 +1176,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
         self.indent -= 1;
 
-        // Handler: instVarAt:put: => sets field value
+        Ok(())
+    }
+
+    /// Generates the `instVarAt:put:` reflection handler (BT-97).
+    ///
+    /// Sets the value of an instance variable.
+    fn generate_inst_var_at_put_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
         self.indent += 1;
@@ -1221,7 +1231,13 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
         self.indent -= 1;
 
-        // Handler: perform: => dynamic dispatch
+        Ok(())
+    }
+
+    /// Generates the `perform:` reflection handler (BT-97).
+    ///
+    /// Dynamically dispatches to a method with the given selector.
+    fn generate_perform_handler(&mut self) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "<'perform:'> when 'true' ->")?;
         self.indent += 1;
@@ -1252,6 +1268,29 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "end")?;
         self.indent -= 1;
+
+        Ok(())
+    }
+
+    /// Generates built-in reflection message handlers (BT-97).
+    ///
+    /// All Beamtalk objects respond to reflection messages:
+    /// - `class` → returns class name atom
+    /// - `respondsTo:` → checks if selector exists
+    /// - `instVarNames` → returns list of field names
+    /// - `instVarAt:` → returns field value
+    /// - `instVarAt:put:` → sets field value
+    /// - `perform:` → dynamic dispatch to selector with args
+    ///
+    /// These are generated after user-defined methods but before the
+    /// `doesNotUnderstand:args:` fallback.
+    pub(super) fn generate_reflection_handlers(&mut self) -> Result<()> {
+        self.generate_class_handler()?;
+        self.generate_responds_to_handler()?;
+        self.generate_inst_var_names_handler()?;
+        self.generate_inst_var_at_handler()?;
+        self.generate_inst_var_at_put_handler()?;
+        self.generate_perform_handler()?;
 
         Ok(())
     }
