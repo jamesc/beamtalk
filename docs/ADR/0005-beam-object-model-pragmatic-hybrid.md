@@ -98,7 +98,7 @@ ProtoObject (minimal - identity, DNU)
 - Stack traces preserved through error propagation
 
 **Reflection and introspection:**
-- Classes registered in global ETS table at module load
+- Classes registered via Erlang process registry and OTP process groups at module load
 - Methods stored as metadata (selector, arity, source location)
 - `allInstances` tracks actors via ETS (value types not tracked)
 
