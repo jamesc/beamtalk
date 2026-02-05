@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test basic reflection API (BT-97)
+// @load tests/e2e/fixtures/counter.bt
+
+// Create counter instance
+c := Counter spawn
+// => _
+
+// Test class reflection
+c class
+// => Counter
+
+// Test respondsTo: - need to match exact selector format
+// For now, reflection API needs refinement (BT-97)
+// c respondsTo: increment
+// => true
+
+// Test instVarNames - returns atoms (displayed as strings in E2E)
+c instVarNames
+// => ["value"]

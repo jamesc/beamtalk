@@ -643,6 +643,14 @@ impl CoreErlangGenerator {
             }
         }
 
+        // Add built-in reflection methods (BT-97)
+        methods.push(("class".to_string(), 0));
+        methods.push(("respondsTo:".to_string(), 1));
+        methods.push(("instVarNames".to_string(), 0));
+        methods.push(("instVarAt:".to_string(), 1));
+        methods.push(("instVarAt:put:".to_string(), 2));
+        methods.push(("perform:".to_string(), 2));
+
         for (i, (name, arity)) in methods.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -699,6 +707,14 @@ impl CoreErlangGenerator {
                 }
             }
         }
+
+        // Add built-in reflection methods (BT-97)
+        methods.push("class".to_string());
+        methods.push("respondsTo:".to_string());
+        methods.push("instVarNames".to_string());
+        methods.push("instVarAt:".to_string());
+        methods.push("instVarAt:put:".to_string());
+        methods.push("perform:".to_string());
 
         // Generate lists:member call with method list
         write!(self.output, "call 'lists':'member'(Selector, [")?;
@@ -858,6 +874,9 @@ impl CoreErlangGenerator {
             self.generate_class_method_dispatches(class)?;
         }
 
+        // Generate built-in reflection message handlers (BT-97)
+        self.generate_reflection_handlers()?;
+
         // Default case for unknown messages - try doesNotUnderstand:args: first (per BT-29)
         self.write_indent()?;
         writeln!(self.output, "<OtherSelector> when 'true' ->")?;
@@ -966,6 +985,274 @@ impl CoreErlangGenerator {
                 self.generate_method_dispatch(method)?;
             }
         }
+        Ok(())
+    }
+
+    /// Generates built-in reflection message handlers (BT-97).
+    ///
+    /// All Beamtalk objects respond to reflection messages:
+    /// - `class` → returns class name atom
+    /// - `respondsTo:` → checks if selector exists
+    /// - `instVarNames` → returns list of field names
+    /// - `instVarAt:` → returns field value
+    /// - `instVarAt:put:` → sets field value
+    /// - `perform:` → dynamic dispatch to selector with args
+    ///
+    /// These are generated after user-defined methods but before the
+    /// `doesNotUnderstand:args:` fallback.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Reflection handlers are repetitive but distinct"
+    )]
+    pub(super) fn generate_reflection_handlers(&mut self) -> Result<()> {
+        // Handler: class => returns the class name atom
+        self.write_indent()?;
+        writeln!(self.output, "<'class'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let ClassName = call 'maps':'get'('__class__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', ClassName, State}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Handler: respondsTo: => checks if method exists
+        self.write_indent()?;
+        writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[Selector]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Methods = call 'maps':'get'('__methods__', State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Result = call 'maps':'is_key'(Selector, Methods) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', Result, State}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Handler: instVarNames => returns list of field names
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Filter out internal fields starting with '__'"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "let AllFields = call 'maps':'keys'(State) in")?;
+        self.write_indent()?;
+        writeln!(self.output, "let FilterFn = fun (Key) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Key of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'__class__'> when 'true' -> 'false'")?;
+        self.write_indent()?;
+        writeln!(self.output, "<'__class_mod__'> when 'true' -> 'false'")?;
+        self.write_indent()?;
+        writeln!(self.output, "<'__methods__'> when 'true' -> 'false'")?;
+        self.write_indent()?;
+        writeln!(self.output, "<'__registry_pid__'> when 'true' -> 'false'")?;
+        self.write_indent()?;
+        writeln!(self.output, "<_> when 'true' -> 'true'")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let UserFields = call 'lists':'filter'(FilterFn, AllFields) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', UserFields, State}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Handler: instVarAt: => returns field value
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[FieldName]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'maps':'is_key'(FieldName, State) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Value = call 'maps':'get'(FieldName, State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', Value, State}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', {{'error', 'field_not_found'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Handler: instVarAt:put: => sets field value
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[FieldName, Value]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'maps':'is_key'(FieldName, State) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let NewState = call 'maps':'put'(FieldName, Value, State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', Value, NewState}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', {{'error', 'field_not_found'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Handler: perform: => dynamic dispatch
+        self.write_indent()?;
+        writeln!(self.output, "<'perform:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[Selector, PerformArgs]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Recursively call dispatch with the provided selector and args"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{}':'dispatch'(Selector, PerformArgs, Self, State)",
+            self.module_name
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
         Ok(())
     }
 
