@@ -5,13 +5,17 @@
 
 use miette::{Context, IntoDiagnostic, Result};
 use std::process::Command;
+use tracing::{info, instrument};
 
 /// Compile and run a beamtalk program.
+#[instrument(skip_all, fields(path = %path))]
 pub fn run(path: &str) -> Result<()> {
+    info!("Starting run command");
     // First, build the project
     println!("Building...");
     super::build::build(path)?;
 
+    info!("Build complete, preparing to run");
     println!("\nRunning...");
     // TODO: Once codegen is implemented, we need to:
     // 1. Find the compiled BEAM file
@@ -20,6 +24,7 @@ pub fn run(path: &str) -> Result<()> {
     // For now, we'll just show that it would run
     println!("(Execution will be implemented once codegen is complete)");
 
+    info!("Run command completed");
     // Example of how to run once BEAM files are generated:
     // let status = Command::new("erl")
     //     .args(["-noshell", "-s", "main", "-s", "init", "stop"])

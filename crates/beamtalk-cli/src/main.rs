@@ -70,6 +70,17 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    // Initialize tracing subscriber only if RUST_LOG is explicitly set
+    // This avoids stderr interference with E2E tests and daemon communication
+    if std::env::var("RUST_LOG").is_ok() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+            )
+            .try_init();
+    }
+
     // Install miette's fancy error handler
     miette::set_hook(Box::new(|_| {
         Box::new(
