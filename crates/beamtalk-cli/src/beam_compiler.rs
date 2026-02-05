@@ -222,11 +222,17 @@ impl BeamCompiler {
             .iter()
             .map(|p| {
                 // Canonicalize each core file path to absolute
+                // Since we require output_dir to exist (it gets canonicalized above),
+                // core files should also exist and be canonicalizable
                 match std::fs::canonicalize(p.as_std_path()) {
                     Ok(abs_path) => {
                         format!("\"{}\"", escape_erlang_string(&abs_path.to_string_lossy()))
                     }
-                    Err(_) => format!("\"{}\"", escape_erlang_string(p.as_str())),
+                    Err(e) => {
+                        // Log warning but continue - file may still be found if cwd is correct
+                        warn!("Failed to canonicalize '{}': {}. Using path as-is.", p, e);
+                        format!("\"{}\"", escape_erlang_string(p.as_str()))
+                    }
                 }
             })
             .collect();
