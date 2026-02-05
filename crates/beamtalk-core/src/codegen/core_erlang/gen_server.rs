@@ -1129,7 +1129,7 @@ impl CoreErlangGenerator {
     /// Returns the value of an instance variable.
     fn generate_inst_var_at_handler(&mut self) -> Result<()> {
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Args of")?;
@@ -1184,7 +1184,7 @@ impl CoreErlangGenerator {
     /// Sets the value of an instance variable.
     fn generate_inst_var_at_put_handler(&mut self) -> Result<()> {
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAtPut'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Args of")?;
@@ -1234,44 +1234,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates the `perform:` reflection handler (BT-97).
-    ///
-    /// Dynamically dispatches to a method with the given selector.
-    fn generate_perform_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'perform:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[Selector, PerformArgs]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% Recursively call dispatch with the provided selector and args"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call '{}':'dispatch'(Selector, PerformArgs, Self, State)",
-            self.module_name
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
     /// Generates built-in reflection message handlers (BT-97).
     ///
     /// All Beamtalk objects respond to reflection messages:
@@ -1290,7 +1252,10 @@ impl CoreErlangGenerator {
         self.generate_inst_var_names_handler()?;
         self.generate_inst_var_at_handler()?;
         self.generate_inst_var_at_put_handler()?;
-        self.generate_perform_handler()?;
+        // Note: perform: and perform:withArguments: don't need handlers here
+        // They are implemented in the frontend (builtins.rs) by sending the
+        // target selector directly to handle_cast, bypassing the reflection
+        // dispatch layer entirely.
 
         Ok(())
     }

@@ -839,6 +839,47 @@ impl CoreErlangGenerator {
 
                         Ok(Some(()))
                     }
+                    "perform:" if arguments.len() == 1 => {
+                        // Dynamic message dispatch (zero-arity): receiver perform: selector
+                        // This is shorthand for perform:withArguments: with empty args list
+                        let receiver_var = self.fresh_var("Receiver");
+                        let selector_var = self.fresh_var("Selector");
+                        let pid_var = self.fresh_var("Pid");
+                        let future_var = self.fresh_var("Future");
+
+                        // Bind receiver
+                        write!(self.output, "let {receiver_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in ")?;
+
+                        // Bind selector (should be an atom)
+                        write!(self.output, "let {selector_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in ")?;
+
+                        // Extract pid from object record
+                        write!(
+                            self.output,
+                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                        )?;
+
+                        // Create future
+                        write!(
+                            self.output,
+                            "let {future_var} = call 'beamtalk_future':'new'() in "
+                        )?;
+
+                        // Send async message via gen_server:cast with empty args
+                        write!(
+                            self.output,
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{{selector_var}, [], {future_var}}}) in "
+                        )?;
+
+                        // Return the future
+                        write!(self.output, "{future_var}")?;
+
+                        Ok(Some(()))
+                    }
                     _ => Ok(None),
                 }
             }
@@ -1066,6 +1107,51 @@ impl CoreErlangGenerator {
                         write!(
                             self.output,
                             "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt', [{name_var}], {future_var}}}) in "
+                        )?;
+
+                        write!(self.output, "{future_var}")?;
+
+                        Ok(Some(()))
+                    }
+                    "instVarAt:put:" if arguments.len() == 2 => {
+                        // Set instance variable by name
+                        // For actors: Write to state map via gen_server
+                        // For primitives: Intended future behavior is error
+                        //                 (they have no mutable instance vars); current
+                        //                 implementation only supports actor instances
+                        //                 (see BT-164).
+
+                        let receiver_var = self.fresh_var("Receiver");
+                        let name_var = self.fresh_var("Name");
+                        let value_var = self.fresh_var("Value");
+                        let pid_var = self.fresh_var("Pid");
+                        let future_var = self.fresh_var("Future");
+
+                        write!(self.output, "let {receiver_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in ")?;
+
+                        write!(self.output, "let {name_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(self.output, " in ")?;
+
+                        write!(self.output, "let {value_var} = ")?;
+                        self.generate_expression(&arguments[1])?;
+                        write!(self.output, " in ")?;
+
+                        write!(
+                            self.output,
+                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let {future_var} = call 'beamtalk_future':'new'() in "
+                        )?;
+
+                        write!(
+                            self.output,
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAtPut', [{name_var}, {value_var}], {future_var}}}) in "
                         )?;
 
                         write!(self.output, "{future_var}")?;

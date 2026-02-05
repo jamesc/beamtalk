@@ -135,7 +135,7 @@ module 'actor_spawn_with_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
                     {'reply', UserFields, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
-        <'instVarAt:'> when 'true' ->
+        <'instVarAt'> when 'true' ->
             case Args of
                 <[FieldName]> when 'true' ->
                     case call 'maps':'is_key'(FieldName, State) of
@@ -147,7 +147,7 @@ module 'actor_spawn_with_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
                         end
                     <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
                 end
-            <'instVarAt:put:'> when 'true' ->
+            <'instVarAtPut'> when 'true' ->
                 case Args of
                     <[FieldName, Value]> when 'true' ->
                         case call 'maps':'is_key'(FieldName, State) of
@@ -157,13 +157,6 @@ module 'actor_spawn_with_args' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'hand
                             <'false'> when 'true' ->
                                 {'reply', {'error', 'field_not_found'}, State}
                             end
-                        <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-                    end
-                <'perform:'> when 'true' ->
-                    case Args of
-                        <[Selector, PerformArgs]> when 'true' ->
-                            %% Recursively call dispatch with the provided selector and args
-                            call 'actor_spawn_with_args':'dispatch'(Selector, PerformArgs, Self, State)
                         <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
                     end
                 <OtherSelector> when 'true' ->

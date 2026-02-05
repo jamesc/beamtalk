@@ -148,7 +148,7 @@ module 'future_string_interpolation' ['start_link'/1, 'init'/1, 'handle_cast'/2,
                     {'reply', UserFields, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
-        <'instVarAt:'> when 'true' ->
+        <'instVarAt'> when 'true' ->
             case Args of
                 <[FieldName]> when 'true' ->
                     case call 'maps':'is_key'(FieldName, State) of
@@ -160,7 +160,7 @@ module 'future_string_interpolation' ['start_link'/1, 'init'/1, 'handle_cast'/2,
                         end
                     <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
                 end
-            <'instVarAt:put:'> when 'true' ->
+            <'instVarAtPut'> when 'true' ->
                 case Args of
                     <[FieldName, Value]> when 'true' ->
                         case call 'maps':'is_key'(FieldName, State) of
@@ -170,13 +170,6 @@ module 'future_string_interpolation' ['start_link'/1, 'init'/1, 'handle_cast'/2,
                             <'false'> when 'true' ->
                                 {'reply', {'error', 'field_not_found'}, State}
                             end
-                        <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-                    end
-                <'perform:'> when 'true' ->
-                    case Args of
-                        <[Selector, PerformArgs]> when 'true' ->
-                            %% Recursively call dispatch with the provided selector and args
-                            call 'future_string_interpolation':'dispatch'(Selector, PerformArgs, Self, State)
                         <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
                     end
                 <OtherSelector> when 'true' ->

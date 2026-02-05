@@ -1185,33 +1185,39 @@ counter instVarNames    // => ["value"]
 
 #### `instVarAt: fieldName`
 
-Returns the value of an instance variable.
+Returns the value of an instance variable by name (symbol):
 
 ```beamtalk
-counter instVarAt: 'value'    // => 0
+counter instVarAt: #value    // => 0
 ```
 
-**Note:** Field name must be passed as a string atom.
+Returns `{error, field_not_found}` if the field doesn't exist.
 
-#### `instVarAt:put: fieldName value`
+#### `instVarAt:put:`
 
 Sets the value of an instance variable. Returns the new value.
 
 ```beamtalk
-counter instVarAt: 'value' put: 42    // => 42
+counter instVarAt: #value put: 42    // => 42
 ```
 
-**Note:** Field mutation via reflection bypasses normal access control. Use with caution.
+Returns `{error, field_not_found}` if the field doesn't exist.
 
-#### `perform: selector`
+**Note:** Only works for mutable instance variables in actors. Primitives (integers, strings) are immutable.
 
-Dynamically dispatches to a method with the given selector.
+#### `perform:` and `perform:withArguments:`
+
+Dynamically dispatches to a method with the given selector:
 
 ```beamtalk
-counter perform: 'getValue'    // => <current value>
+// Zero-arity method
+counter perform: #getValue    // => <current value>
+
+// Method with arguments
+counter perform: #instVarAt: withArguments: [#value]    // => <value>
 ```
 
-**Note:** Currently only supports zero-arity methods. Support for methods with arguments is planned.
+**Relationship to Smalltalk:** Beamtalk provides `perform:` for zero-arity methods and `perform:withArguments:` for methods with arguments, avoiding the proliferation of `perform:with:with:with:` variants.
 
 ### Implementation Notes
 
@@ -1221,18 +1227,18 @@ Reflection methods are implemented in the `dispatch/4` function, after user-defi
 
 ### Limitations (As of 2026-02-05)
 
-- `perform:` only supports zero-arity methods
-- `instVarAt:` and `instVarAt:put:` require atom field names (use symbols: `#fieldName`)
+- `instVarAt:` and `instVarAt:put:` require symbol field names (`#fieldName`)
 - No reflection on class methods (only instance methods)
 - No reflection on method metadata (arity, parameters, etc.)
+- Primitives don't support reflection yet (BT-163, BT-164)
 
 **Note:** Symbol literals (`#selector`) work correctly. Future semantic validation (BT-244) will provide better error messages when users accidentally pass identifiers instead of symbols.
 
 ### Future Enhancements
 
 Planned improvements tracked in Linear:
+- **BT-163, BT-164**: Reflection support for primitives
 - **BT-244**: Better error messages for symbol validation (semantic analysis)
-- `perform:withArguments:` for methods with arguments
 - Class-level reflection (`allInstances`, `allSubclasses`)
 - Method metadata (`methodDict`, `sourceCodeAt:`)
 - Block reflection (`sourceNode`, `numArgs`)
