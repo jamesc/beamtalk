@@ -154,7 +154,7 @@ grep -c "// =>" tests/e2e/cases/mytest.bt
 # If counts don't match, you have silent skips!
 ```
 
-**See also:** BT-XXX for adding warnings when expressions lack assertions.
+**See also:** BT-248 for adding warnings when expressions lack assertions.
 
 ### Verification Checklist
 
