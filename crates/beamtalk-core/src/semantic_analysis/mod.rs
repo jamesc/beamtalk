@@ -308,7 +308,19 @@ impl Analyser {
     fn analyse_method(&mut self, method: &crate::ast::MethodDefinition) {
         self.scope.push(); // Enter method scope (depth 2)
 
-        // Define 'self' - implicitly available in all method bodies
+        // Define 'self' - implicitly available in all method bodies.
+        //
+        // Although 'self' is conceptually the receiver *parameter*, we classify it
+        // as a `Local` binding rather than `Parameter` for two reasons:
+        //   - Consistency with other implicit bindings (true, false, nil), which
+        //     are also modeled as locals that are always in scope.
+        //   - It maintains a semantic distinction between explicit user-declared
+        //     parameters (marked as `Parameter`) and implicit bindings provided
+        //     by the language runtime.
+        //
+        // If future type checking or code generation needs to treat 'self' as a
+        // formal parameter, this BindingKind choice can be revisited, but the
+        // current behavior is intentional.
         self.scope.define("self", method.span, BindingKind::Local);
 
         // Define method parameters
