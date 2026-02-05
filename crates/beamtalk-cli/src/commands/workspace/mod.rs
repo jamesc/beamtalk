@@ -459,6 +459,16 @@ mod tests {
         let path = std::env::current_dir().unwrap();
         assert!(workspace_id_for(&path, Some("bad/name")).is_err());
         assert!(workspace_id_for(&path, Some("")).is_err());
+        assert!(workspace_id_for(&path, Some("has space")).is_err());
+        assert!(workspace_id_for(&path, Some("has.dot")).is_err());
+    }
+
+    #[test]
+    fn test_workspace_id_for_none_uses_hash() {
+        let path = std::env::current_dir().unwrap();
+        let from_none = workspace_id_for(&path, None).unwrap();
+        let from_hash = generate_workspace_id(&path).unwrap();
+        assert_eq!(from_none, from_hash, "None should fall through to hash");
     }
 
     #[test]

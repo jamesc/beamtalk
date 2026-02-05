@@ -102,17 +102,29 @@ get_metadata_includes_all_fields_test() ->
         OldPid -> gen_server:stop(OldPid), timer:sleep(10)
     end,
     
-    %% Start the server
-    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% Start the server with repl_port
+    Meta = (test_metadata())#{repl_port => 9001},
+    {ok, Pid} = beamtalk_workspace_meta:start_link(Meta),
     
     %% Get metadata
-    {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+    {ok, M} = beamtalk_workspace_meta:get_metadata(),
     
-    %% Should have all required fields
-    ?assert(maps:is_key(workspace_id, Meta)),
-    ?assert(maps:is_key(project_path, Meta)),
-    ?assert(maps:is_key(created_at, Meta)),
-    ?assert(maps:is_key(last_activity, Meta)),
+    %% Should have all required fields (including new ones)
+    ?assert(maps:is_key(workspace_id, M)),
+    ?assert(maps:is_key(project_path, M)),
+    ?assert(maps:is_key(created_at, M)),
+    ?assert(maps:is_key(last_activity, M)),
+    ?assert(maps:is_key(node_name, M)),
+    ?assert(maps:is_key(repl_port, M)),
+    ?assert(maps:is_key(supervised_actors, M)),
+    ?assert(maps:is_key(loaded_modules, M)),
+    
+    %% Verify values
+    ?assertEqual(<<"test123">>, maps:get(workspace_id, M)),
+    ?assertEqual(<<"/tmp/test">>, maps:get(project_path, M)),
+    ?assertEqual(9001, maps:get(repl_port, M)),
+    ?assertEqual([], maps:get(supervised_actors, M)),
+    ?assert(is_atom(maps:get(node_name, M))),
     
     %% Cleanup
     gen_server:stop(Pid).
@@ -286,3 +298,86 @@ register_module_when_not_started_test() ->
     end,
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:register_module(some_module)).
+
+%%% Persistence round-trip tests
+
+persist_and_restore_modules_test() ->
+    %% Use a unique workspace ID so we control the metadata file
+    WsId = <<"persist_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    Home = os:getenv("HOME", "/tmp"),
+    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
+    MetaFile = filename:join(MetaDir, "metadata.json"),
+    
+    %% Clean up any leftover file
+    _ = file:delete(MetaFile),
+    
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    
+    %% Start server, register a module, then stop (triggers terminate persist)
+    {ok, Pid1} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/persist_test">>,
+        created_at => 1000000
+    }),
+    ok = beamtalk_workspace_meta:register_module(lists),
+    %% Wait for debounce timer to fire
+    timer:sleep(2500),
+    gen_server:stop(Pid1),
+    timer:sleep(50),
+    
+    %% Verify file was written
+    ?assert(filelib:is_file(MetaFile)),
+    
+    %% Start a new server with same workspace - modules should be restored
+    {ok, Pid2} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/persist_test">>,
+        created_at => 1000000
+    }),
+    
+    {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
+    ?assert(lists:member(lists, Modules)),
+    
+    %% Actors should NOT be restored (always fresh)
+    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
+    
+    %% Cleanup
+    gen_server:stop(Pid2),
+    _ = file:delete(MetaFile),
+    _ = file:del_dir(MetaDir).
+
+load_corrupt_json_falls_back_test() ->
+    %% Use a unique workspace ID
+    WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    Home = os:getenv("HOME", "/tmp"),
+    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
+    MetaFile = filename:join(MetaDir, "metadata.json"),
+    
+    %% Write corrupt JSON
+    filelib:ensure_dir(MetaFile),
+    ok = file:write_file(MetaFile, <<"not valid json {{{{">>),
+    
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    
+    %% Should start successfully despite corrupt file
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/corrupt_test">>,
+        created_at => 2000000
+    }),
+    
+    %% Should have default state (not crash)
+    {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+    ?assertEqual(<<"/tmp/corrupt_test">>, maps:get(project_path, Meta)),
+    ?assertEqual([], maps:get(supervised_actors, Meta)),
+    ?assertEqual(2000000, maps:get(created_at, Meta)),
+    
+    gen_server:stop(Pid),
+    _ = file:delete(MetaFile),
+    _ = file:del_dir(MetaDir).
