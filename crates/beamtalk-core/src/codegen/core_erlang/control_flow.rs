@@ -973,9 +973,13 @@ impl CoreErlangGenerator {
                 write!(self.output, "let {val_var} = ")?;
                 self.generate_expression(value)?;
 
-                // Increment state version
-                // (removed - generate_field_assignment_open does this)
-                let new_state = format!("StateAcc{}", self.state_version());
+                // Increment state version for the new state
+                let _ = self.next_state_var();
+                let new_state = if self.in_loop_body {
+                    self.current_state_var()
+                } else {
+                    format!("State{}", self.state_version())
+                };
 
                 // let StateAccN = call 'maps':'put'('varname', _Val, StateAcc{N-1}) in
                 write!(
@@ -1173,23 +1177,36 @@ impl CoreErlangGenerator {
 
         // Generate body expressions
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                // Note: generate_field_assignment_open already writes trailing " in "
-                // No need to write more - the next expression or continuation will follow
+
+                if is_last {
+                    // Last expression: close with the final state variable
+                    write!(self.output, "{}", self.current_state_var())?;
+                }
+                // Otherwise, the trailing " in " from generate_field_assignment_open
+                // allows the next expression to become the body
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
+                if i > 0 {
+                    write!(self.output, " in ")?;
+                }
                 self.generate_local_var_assignment_in_loop(expr)?;
                 write!(self.output, " ")?;
             } else {
-                write!(self.output, "let _ = ")?;
+                // Non-assignment expression
+                if i > 0 {
+                    write!(self.output, "let _ = ")?;
+                }
                 self.generate_expression(expr)?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
 
                 // After last expression, rebuild StateAcc with updated values
                 if i == body.body.len() - 1 {
