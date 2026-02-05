@@ -50,6 +50,11 @@ impl StateThreading {
         Self { version: 0 }
     }
 
+    /// Returns the current version number.
+    pub(super) fn version(&self) -> usize {
+        self.version
+    }
+
     /// Returns the current state variable name.
     ///
     /// - Version 0 → `"State"`
@@ -88,11 +93,6 @@ impl StateThreading {
     /// nested context that needs independent state tracking.
     pub(super) fn reset(&mut self) {
         self.version = 0;
-    }
-
-    /// Returns the current version number.
-    pub(super) fn version(&self) -> usize {
-        self.version
     }
 
     /// Sets the version to a specific value.

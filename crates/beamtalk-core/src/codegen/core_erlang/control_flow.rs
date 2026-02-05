@@ -64,23 +64,18 @@ impl CoreErlangGenerator {
         //               State, List)
         //           in <continue with State1>
 
+        // Generate: let List = <receiver> in
+        //           let Lambda = fun (Item, StateAcc) -> body in
+        //           let State{n} = call 'lists':'foldl'(Lambda, initial, List) in <continuation>
         write!(self.output, "let ")?;
         let list_var = self.fresh_temp_var("temp");
         write!(self.output, "{list_var} = ")?;
         self.generate_expression(receiver)?;
 
+        // Bind lambda to a variable (Core Erlang requires this for foldl)
         write!(self.output, " in let ")?;
-        let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(&Expression::Block(body.clone()))?;
-
-        // Use foldl to thread state through list iteration
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = call 'lists':'foldl'(")?;
-
-        // Generate lambda: fun (Item, StateAcc) -> ... end
-        write!(self.output, "fun (")?;
+        let lambda_var = self.fresh_temp_var("temp");
+        write!(self.output, "{lambda_var} = fun (")?;
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
         write!(self.output, "{item_var}, StateAcc) -> ")?;
@@ -88,7 +83,18 @@ impl CoreErlangGenerator {
         // Generate body with state threading
         self.generate_list_do_body_with_threading(body, &item_var)?;
 
-        write!(self.output, ", {}, {list_var})", self.current_state_var())?;
+        // Capture current state before the foldl call
+        let initial_state = self.current_state_var();
+
+        // Call foldl with the lambda variable - returns the final state
+        // The caller will bind this result to the appropriate state variable
+        write!(
+            self.output,
+            " in call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var})"
+        )?;
+
+        // Note: Do NOT increment state version here - the caller does that
+        // when binding the result to the state variable
 
         Ok(())
     }
@@ -108,25 +114,42 @@ impl CoreErlangGenerator {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
+        // Mark that we're in a loop body so field reads use StateAcc
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
         // Generate the body expression(s), threading state through assignments
+        // Note: generate_field_assignment_open already writes trailing " in "
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                // Field assignment - will generate: let StateAcc1 = ... in
-                write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version() + 1);
-                self.set_state_version(self.state_version() + 1);
+                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
+                // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                write!(self.output, " in {next_state}")?;
+
+                if is_last {
+                    // Last expression: close with the final state variable
+                    write!(self.output, "{}", self.current_state_var())?;
+                }
+                // Otherwise, the trailing " in " from generate_field_assignment_open
+                // allows the next expression to become the body
             } else {
+                // Non-assignment expression
+                if i > 0 {
+                    // Sequence with previous expression using let _ = ... in
+                    write!(self.output, "let _ = ")?;
+                }
                 self.generate_expression(expr)?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
             }
         }
 
         self.set_state_version(saved_state_version);
+        self.in_loop_body = previous_in_loop_body;
         self.pop_scope();
 
         Ok(())
@@ -271,20 +294,25 @@ impl CoreErlangGenerator {
         write!(self.output, "{init_var} = ")?;
         self.generate_expression(initial)?;
 
+        // Bind lambda to a variable (Core Erlang requires this for foldl)
         write!(self.output, " in let ")?;
-        let result_var = self.fresh_temp_var("temp");
-        write!(self.output, "{result_var} = call 'lists':'foldl'(")?;
-
-        // Generate lambda: fun (Item, {Acc, StateAcc}) -> ... end
-        write!(self.output, "fun (Item, {{Acc, StateAcc}}) -> ")?;
+        let lambda_var = self.fresh_temp_var("temp");
+        write!(
+            self.output,
+            "{lambda_var} = fun (Item, {{Acc, StateAcc}}) -> "
+        )?;
 
         // Generate body with state threading
         self.generate_list_inject_body_with_threading(body)?;
 
+        // Call foldl with the lambda variable
+        write!(self.output, " in let ")?;
+        // Capture current state BEFORE incrementing for the foldl result
+        let initial_state = self.current_state_var();
+        let result_var = self.fresh_temp_var("temp");
         write!(
             self.output,
-            ", {{{init_var}, {}}}, {list_var})",
-            self.current_state_var()
+            "{result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {list_var})"
         )?;
 
         // Unpack result
@@ -314,35 +342,72 @@ impl CoreErlangGenerator {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
+        // Mark that we're in a loop body so field reads use StateAcc
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
         // Generate the body expression(s), threading state through assignments
+        // Note: generate_field_assignment_open already writes trailing " in "
         let mut has_mutations = false;
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
-                write!(self.output, "let ")?;
-                let next_state = format!("StateAcc{}", self.state_version() + 1);
-                self.set_state_version(self.state_version() + 1);
+                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
+                // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                write!(self.output, " in {next_state}")?;
+
+                if is_last {
+                    // LIMITATION: If the last expression in inject:into: is a field assignment,
+                    // we return the assigned value (_Val) as the accumulator, not a computed value.
+                    // This is a degenerate case - idiomatic inject:into: blocks should compute
+                    // and return an accumulator value, with field assignments being side effects.
+                    //
+                    // Example degenerate case:
+                    //   items inject: 0 into: [:acc :item | self.field := acc + item]
+                    //   => Returns the last assigned value, not the accumulator
+                    //
+                    // Correct usage:
+                    //   items inject: 0 into: [:acc :item |
+                    //     self.count := self.count + 1.
+                    //     acc + item
+                    //   ]
+                    //   => Returns the accumulator (acc + item), field mutation is side effect
+                    let final_state = self.current_state_var();
+                    write!(self.output, "{{_Val, {final_state}}}")?;
+                } else {
+                    // Not the last expression - the trailing " in " allows the next expression
+                }
             } else {
-                self.generate_expression(expr)?;
+                // Non-assignment expression
+                if i > 0 && !has_mutations {
+                    // Previous expression was not a field assignment, so we need to sequence
+                    write!(self.output, "let _ = ")?;
+                }
+
+                if is_last {
+                    // Last expression: capture its value as the new accumulator
+                    let acc_var = self.fresh_temp_var("AccOut");
+                    write!(self.output, "let {acc_var} = ")?;
+                    self.generate_expression(expr)?;
+
+                    // Return {NewAcc, NewState}
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    write!(self.output, " in {{{acc_var}, {final_state}}}")?;
+                } else {
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in ")?;
+                }
             }
         }
 
-        // Return {NewAcc, NewState}
-        if has_mutations {
-            let final_state = format!("StateAcc{}", self.state_version());
-            // The last expression is the new accumulator value
-            write!(self.output, " in {{<last expression>, {final_state}}}")?;
-        } else {
-            write!(self.output, " in {{<last expression>, StateAcc}}")?;
-        }
-
         self.set_state_version(saved_state_version);
+        self.in_loop_body = previous_in_loop_body;
         self.pop_scope();
 
         Ok(())
@@ -496,11 +561,9 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
+        write!(self.output, "in apply 'while'/{arity} (")?;
         for (i, var) in mutated_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -511,10 +574,6 @@ impl CoreErlangGenerator {
             write!(self.output, ", ")?;
         }
         write!(self.output, "{prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        // This makes the expression a valid value in REPL context
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -539,11 +598,11 @@ impl CoreErlangGenerator {
             }
 
             if Self::is_field_assignment(expr) {
-                write!(self.output, "let ")?;
-                let _next_state = format!("StateAcc{}", self.state_version() + 1);
-                self.set_state_version(self.state_version() + 1);
+                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
+                // Field assignment handles state version internally
+                // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
-                write!(self.output, " in")?;
+                // Note: generate_field_assignment_open already writes trailing " in "
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
@@ -687,11 +746,9 @@ impl CoreErlangGenerator {
         write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'while'/{arity} (")?;
+        write!(self.output, "in apply 'while'/{arity} (")?;
         for (i, var) in mutated_vars.iter().enumerate() {
             if i > 0 {
                 write!(self.output, ", ")?;
@@ -702,9 +759,6 @@ impl CoreErlangGenerator {
             write!(self.output, ", ")?;
         }
         write!(self.output, "{prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -844,18 +898,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, "in let ")?;
-        let new_state = self.next_state_var();
-        write!(self.output, "{new_state} = apply 'repeat'/{arity} (1")?;
+        write!(self.output, "in apply 'repeat'/{arity} (1")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -879,11 +928,11 @@ impl CoreErlangGenerator {
             }
 
             if Self::is_field_assignment(expr) {
-                write!(self.output, "let ")?;
-                let _next_state = format!("StateAcc{}", self.state_version() + 1);
-                self.set_state_version(self.state_version() + 1);
+                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
+                // Field assignment handles state version internally
+                // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
-                write!(self.output, " in")?;
+                // Note: generate_field_assignment_open already writes trailing " in "
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
@@ -924,9 +973,13 @@ impl CoreErlangGenerator {
                 write!(self.output, "let {val_var} = ")?;
                 self.generate_expression(value)?;
 
-                // Increment state version
-                self.set_state_version(self.state_version() + 1);
-                let new_state = format!("StateAcc{}", self.state_version());
+                // Increment state version for the new state
+                let _ = self.next_state_var();
+                let new_state = if self.in_loop_body {
+                    self.current_state_var()
+                } else {
+                    format!("State{}", self.state_version())
+                };
 
                 // let StateAccN = call 'maps':'put'('varname', _Val, StateAcc{N-1}) in
                 write!(
@@ -1064,21 +1117,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(
-            self.output,
-            "{new_state} = apply 'loop'/{arity} ({start_var}"
-        )?;
+        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state (BT-153)
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
@@ -1132,23 +1177,36 @@ impl CoreErlangGenerator {
 
         // Generate body expressions
         for (i, expr) in body.body.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, " in ")?;
-            }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                write!(self.output, "let ")?;
-                let _next_state = format!("StateAcc{}", self.state_version() + 1);
-                self.set_state_version(self.state_version() + 1);
+                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
+                // generate_field_assignment_open increments state_version internally
                 self.generate_field_assignment_open(expr)?;
-                write!(self.output, " in ")?;
+
+                if is_last {
+                    // Last expression: close with the final state variable
+                    write!(self.output, "{}", self.current_state_var())?;
+                }
+                // Otherwise, the trailing " in " from generate_field_assignment_open
+                // allows the next expression to become the body
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
+                if i > 0 {
+                    write!(self.output, " in ")?;
+                }
                 self.generate_local_var_assignment_in_loop(expr)?;
                 write!(self.output, " ")?;
             } else {
-                write!(self.output, "let _ = ")?;
+                // Non-assignment expression
+                if i > 0 {
+                    write!(self.output, "let _ = ")?;
+                }
                 self.generate_expression(expr)?;
+
+                if !is_last {
+                    write!(self.output, " in ")?;
+                }
 
                 // After last expression, rebuild StateAcc with updated values
                 if i == body.body.len() - 1 {
@@ -1379,21 +1437,13 @@ impl CoreErlangGenerator {
         write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
         write!(self.output, "end ")?;
 
-        // Initial call - capture current state BEFORE incrementing
+        // Initial call - the caller will bind the result to a state variable
         let prev_state = self.current_state_var();
-        write!(self.output, " in let ")?;
-        let new_state = self.next_state_var();
-        write!(
-            self.output,
-            "{new_state} = apply 'loop'/{arity} ({start_var}"
-        )?;
+        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
         for var in &mutated_vars {
             write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
         }
         write!(self.output, ", {prev_state})")?;
-
-        // Close the let by returning the new state
-        write!(self.output, " in {new_state}")?;
 
         Ok(())
     }
