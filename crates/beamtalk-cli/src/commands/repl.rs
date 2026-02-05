@@ -575,7 +575,12 @@ fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
 )]
-pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) -> Result<()> {
+pub fn run(
+    port_arg: Option<u16>,
+    node_arg: Option<String>,
+    foreground: bool,
+    _workspace_name: Option<String>, // Future: support explicit workspace names
+) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
 
@@ -621,6 +626,14 @@ pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) ->
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("Connected to existing workspace: {}", node_info.node_name);
+        }
+
+        // Display workspace info
+        let workspace_id = workspace::generate_workspace_id(&current_dir)?;
+        if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
+            println!("Workspace: {workspace_id}");
+            println!("Project:   {}", metadata.project_path.display());
+            println!();
         }
 
         None // No guard needed - node is detached

@@ -61,7 +61,8 @@ init(Config) ->
             start => {beamtalk_workspace_meta, start_link, [#{
                 workspace_id => WorkspaceId,
                 project_path => ProjectPath,
-                created_at => erlang:system_time(second)
+                created_at => erlang:system_time(second),
+                repl_port => TcpPort
             }]},
             restart => permanent,
             shutdown => 5000,

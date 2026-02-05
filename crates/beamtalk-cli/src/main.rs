@@ -57,6 +57,10 @@ enum Command {
         /// Start node in foreground instead of detached workspace (for debugging)
         #[arg(long)]
         foreground: bool,
+
+        /// Explicit workspace name (default: auto-detect from current directory)
+        #[arg(long)]
+        workspace: Option<String>,
     },
 
     /// Check source files for errors without compiling
@@ -106,7 +110,8 @@ fn main() -> Result<()> {
             port,
             node,
             foreground,
-        } => commands::repl::run(port, node.clone(), foreground),
+            workspace,
+        } => commands::repl::run(port, node.clone(), foreground, workspace.clone()),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");
