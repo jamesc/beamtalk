@@ -149,7 +149,9 @@ pub fn show_status() -> Result<()> {
 fn init_logging() {
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-    tracing_subscriber::registry()
+    // Use try_init() to handle cases where the subscriber is already initialized
+    // (e.g., when RUST_LOG is set and main.rs initialized it)
+    let _ = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
             EnvFilter::from_default_env().add_directive(
@@ -158,7 +160,7 @@ fn init_logging() {
                     .expect("Failed to parse tracing directive"),
             ),
         )
-        .init();
+        .try_init();
 }
 
 /// Run the main daemon server loop.
