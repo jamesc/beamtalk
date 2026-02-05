@@ -20,7 +20,7 @@
     Directory where worktrees are created (default: .worktrees/ inside main repo)
 
 .PARAMETER Command
-    Command to run in container (default: "copilot --yolo")
+    Command to run in container (default: "copilot")
 
 .EXAMPLE
     .\worktree-up.ps1 feature-branch
@@ -124,15 +124,32 @@ function Test-BranchExists {
 
 # Check if worktree exists for branch
 function Get-WorktreePath {
-    param([string]$BranchName)
+    param(
+        [string]$BranchName,
+        [string]$WorktreeRoot
+    )
     
+    # Sanitize branch name to match directory name
+    $dirName = $BranchName -replace '/', '-'
+    $expectedPath = Join-Path $WorktreeRoot $dirName
+    
+    # Check if this directory exists as a worktree
     $worktrees = git worktree list --porcelain 2>$null
+    $wtPath = $null
     foreach ($line in $worktrees) {
         if ($line -match "^worktree\s+(.+)") {
             $wtPath = $matches[1]
-        }
-        if ($line -match "^branch\s+refs/heads/(.+)" -and $matches[1] -eq $BranchName) {
-            return $wtPath
+            
+            # Convert container path to host path if needed
+            if ($wtPath -match "^/workspaces/(.+)$") {
+                $folderName = $matches[1]
+                $wtPath = Join-Path $WorktreeRoot $folderName
+            }
+            
+            # Match by directory name, not branch name
+            if ($wtPath -eq $expectedPath) {
+                return $wtPath
+            }
         }
     }
     return $null
@@ -210,83 +227,101 @@ if (-not $skipWorktreeSetup) {
     }
 
     # Check if we're already on this branch in current directory
-    $currentBranch = Get-CurrentBranch
-    $currentDir = Get-Location
+$currentBranch = Get-CurrentBranch
+$currentDir = Get-Location
 
-    # Always fetch latest from origin first
-    Write-Host "🔄 Fetching latest from origin..." -ForegroundColor Cyan
+# Always fetch latest from origin first
+Write-Host "🔄 Fetching latest from origin..." -ForegroundColor Cyan
+Push-Location $mainRepo
+try {
+    git fetch origin --prune 2>$null
+}
+finally {
+    Pop-Location
+}
+
+if ($currentBranch -eq $Branch) {
+    Write-Host "✅ Already on branch $Branch in current directory" -ForegroundColor Green
+    $worktreePath = $currentDir.Path
+}
+else {
+    # Check if worktree already exists
     Push-Location $mainRepo
     try {
-        git fetch origin --prune 2>$null
+        $existingWorktree = Get-WorktreePath -BranchName $Branch -WorktreeRoot $WorktreeRoot
+        
+        if ($existingWorktree -and (Test-Path $existingWorktree)) {
+            # Worktree exists and is accessible from Windows
+            Write-Host "✅ Worktree already exists at: $existingWorktree" -ForegroundColor Green
+            $worktreePath = $existingWorktree
+        }
+        elseif ($existingWorktree) {
+            # Worktree metadata exists but path is inaccessible (likely orphaned container path)
+            Write-Host "⚠️  Worktree metadata exists but path inaccessible: $existingWorktree" -ForegroundColor Yellow
+            Write-Host "🔄 Removing orphaned worktree and recreating..." -ForegroundColor Cyan
+            git worktree remove $Branch --force 2>$null
+            
+            # Create new worktree at proper Windows path
+            $dirName = $Branch -replace '/', '-'
+            $worktreePath = Join-Path $WorktreeRoot $dirName
+            
+            # Remove directory if it exists (may be leftover from previous container)
+            if (Test-Path $worktreePath) {
+                Write-Host "🗑️  Removing existing directory: $worktreePath" -ForegroundColor Gray
+                try {
+                    Remove-Item -Path $worktreePath -Recurse -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-Host "❌ Cannot remove directory (may be in use by container)" -ForegroundColor Red
+                    Write-Host "   Run: .\scripts\worktree-down.ps1 $Branch" -ForegroundColor Gray
+                    Write-Host "   Or:  docker stop <container-id>" -ForegroundColor Gray
+                    exit 1
+                }
+            }
+            
+            Write-Host "📌 Recreating worktree for branch: $Branch" -ForegroundColor Yellow
+            git worktree add $worktreePath $Branch
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "❌ Failed to recreate worktree" -ForegroundColor Red
+                exit 1
+            }
+            
+            Write-Host "✅ Worktree recreated at: $worktreePath" -ForegroundColor Green
+        }
+        else {
+            # Create new worktree
+            # Sanitize branch name for directory (replace / with -)
+            $dirName = $Branch -replace '/', '-'
+            $worktreePath = Join-Path $WorktreeRoot $dirName
+            
+            if (Test-BranchExists -BranchName $Branch) {
+                Write-Host "📌 Creating worktree for existing branch: $Branch" -ForegroundColor Yellow
+                git worktree add $worktreePath $Branch
+            }
+            else {
+                Write-Host "🌱 Creating worktree with new branch: $Branch (from $BaseBranch)" -ForegroundColor Yellow
+                git worktree add -b $Branch $worktreePath $BaseBranch
+            }
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "❌ Failed to create worktree" -ForegroundColor Red
+                exit 1
+            }
+            
+            Write-Host "✅ Worktree created at: $worktreePath" -ForegroundColor Green
+        }
     }
     finally {
         Pop-Location
     }
-
-    if ($currentBranch -eq $Branch) {
-        Write-Host "✅ Already on branch $Branch in current directory" -ForegroundColor Green
-        $worktreePath = $currentDir.Path
-    }
-    else {
-        # Idempotent worktree setup: ensure worktree exists
-        Push-Location $mainRepo
-        try {
-            # Check if this directory is already a worktree (by path, not branch)
-            if (Test-Path $worktreePath) {
-                # Directory exists - check if it's a valid worktree
-                Push-Location $worktreePath
-                try {
-                    $currentBranchInDir = git branch --show-current 2>$null
-                    if ($currentBranchInDir) {
-                        # It's a valid worktree - use it as-is
-                        # Don't try to switch branches - user may have changed it intentionally
-                        if ($currentBranchInDir -ne $Branch) {
-                            Write-Host "✅ Worktree exists at: $worktreePath" -ForegroundColor Green
-                            Write-Host "   Currently on branch: $currentBranchInDir (created as '$Branch')" -ForegroundColor Gray
-                        }
-                        else {
-                            Write-Host "✅ Worktree already on $Branch" -ForegroundColor Green
-                        }
-                    }
-                    else {
-                        # Directory exists but is not a valid worktree - error out
-                        Write-Host "❌ Directory exists but is not a valid worktree: $worktreePath" -ForegroundColor Red
-                        Write-Host "   Remove it manually or use a different name" -ForegroundColor Yellow
-                        exit 1
-                    }
-                }
-                finally {
-                    Pop-Location
-                }
-            }
-            else {
-                # Create new worktree from scratch
-                if (Test-BranchExists -BranchName $Branch) {
-                    Write-Host "📌 Creating worktree for existing branch: $Branch" -ForegroundColor Yellow
-                    git worktree add $worktreePath $Branch
-                }
-                else {
-                    Write-Host "🌱 Creating worktree with new branch: $Branch (from $BaseBranch)" -ForegroundColor Yellow
-                    git worktree add -b $Branch $worktreePath $BaseBranch
-                }
-                
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "❌ Failed to create worktree" -ForegroundColor Red
-                    exit 1
-                }
-                
-                Write-Host "✅ Worktree created at: $worktreePath" -ForegroundColor Green
-            }
-        }
-        finally {
-            Pop-Location
-        }
-    }
 }
+} # End of: if (-not $skipWorktreeSetup) for worktree creation
 
 # Update worktree with latest changes from remote (skip if container already running)
 if (-not $skipWorktreeSetup) {
-    Write-Host "🔄 Updating worktree with latest changes..." -ForegroundColor Cyan
+    if (Test-Path $worktreePath) {
+        Write-Host "🔄 Updating worktree with latest changes..." -ForegroundColor Cyan
     Push-Location $worktreePath
     try {
         $trackingBranch = git rev-parse --abbrev-ref "@{upstream}" 2>$null
@@ -307,6 +342,10 @@ if (-not $skipWorktreeSetup) {
         Pop-Location
     }
 }
+else {
+    Write-Host "ℹ️  Worktree path not accessible from host, will update in container" -ForegroundColor Gray
+}
+} # End of: if (-not $skipWorktreeSetup)
 
 # Check for devcontainer CLI
 $devcontainerCli = Get-Command devcontainer -ErrorAction SilentlyContinue
@@ -334,70 +373,22 @@ $worktreeMetaGitdir = Join-Path $env:MAIN_GIT_PATH "worktrees" $worktreeName "gi
 # Skip container setup if already running - just reconnect
 if ($skipWorktreeSetup) {
     Write-Host "`n🔌 Reconnecting to existing container..." -ForegroundColor Cyan
+    
+    # IMPORTANT: Pre-fix git paths for container before exec
+    # The finally block resets paths to host format after each run,
+    # so we must convert them back to container format before reconnecting
+    Write-Host "🔧 Pre-fixing .git paths for container..." -ForegroundColor Cyan
+    $containerGitPath = "/workspaces/.$projectName-git/worktrees/$worktreeName"
+    Set-Content -Path $worktreeGitFile -Value "gitdir: $containerGitPath" -NoNewline
+    Write-Host "   Set .git to: $containerGitPath" -ForegroundColor Gray
+    
+    if (Test-Path $worktreeMetaGitdir) {
+        Set-Content -Path $worktreeMetaGitdir -Value "/workspaces/$worktreeName" -NoNewline
+        Write-Host "   Set gitdir to: /workspaces/$worktreeName" -ForegroundColor Gray
+    }
+    Write-Host "✅ Git paths pre-configured for container" -ForegroundColor Green
 }
 else {
-    # Create .env file for devcontainer with port and node name derived from branch
-    Write-Host "Creating .env file for devcontainer..." -ForegroundColor Cyan
-    $envPath = Join-Path $worktreePath ".env"
-
-    # Derive port from branch name
-    # BT-190 -> 49342, BT-64 -> 49216, main -> 49152
-    # Uses ephemeral port range (49152-65535) to avoid conflicts with common services
-    # Port ranges: BT branches 49152-50151 (capped at issue 999), hash-based 50152-51051
-    $port = 49152
-    $nodeName = "beamtalk@localhost"
-    # Use container path (remoteUser: vscode), not Windows host path
-    $daemonSocket = "/home/vscode/.beamtalk/daemon.sock"
-
-    if ($Branch -match "^BT-(\d+)") {
-        $issueNum = [int]$matches[1]
-        # Cap issue number to keep port in valid range (max 65535, but we cap at 999 for simplicity)
-        if ($issueNum -gt 999) {
-            Write-Host "⚠️  Issue number $issueNum too large, capping to 999 for port derivation" -ForegroundColor Yellow
-            $issueNum = 999
-        }
-        $port = 49152 + $issueNum
-        $nodeName = "beamtalk_bt${issueNum}@localhost"
-        $daemonSocket = "/home/vscode/.beamtalk/daemon-bt${issueNum}.sock"
-        Write-Host "   Port: $port (derived from $Branch)" -ForegroundColor Gray
-        Write-Host "   Node: $nodeName" -ForegroundColor Gray
-        Write-Host "   Daemon: daemon-bt${issueNum}.sock" -ForegroundColor Gray
-    }
-    elseif ($Branch -eq "main") {
-        Write-Host "   Port: $port (main branch default)" -ForegroundColor Gray
-        Write-Host "   Node: $nodeName (main branch default)" -ForegroundColor Gray
-        Write-Host "   Daemon: daemon.sock (main branch default)" -ForegroundColor Gray
-    }
-    else {
-        # Hash branch name to port range 50152-51051 (non-overlapping with BT branches)
-        $hash = [System.Text.Encoding]::UTF8.GetBytes($Branch) | ForEach-Object { $_ } | Measure-Object -Sum
-        $port = 50152 + ($hash.Sum % 900)
-        $sanitizedBranch = $Branch -replace '[^a-zA-Z0-9]', '_'
-        # Truncate sanitized branch name to prevent Unix socket path length issues (~108 bytes)
-        # Keep first 20 chars + hash suffix to ensure uniqueness while staying under limit
-        if ($sanitizedBranch.Length -gt 20) {
-            $hashMod = [int]($hash.Sum % 10000)
-            $branchHash = "{0:D4}" -f $hashMod
-            $sanitizedBranch = $sanitizedBranch.Substring(0, 20) + "_" + $branchHash
-        }
-        $nodeName = "beamtalk_${sanitizedBranch}@localhost"
-        $daemonSocket = "/home/vscode/.beamtalk/daemon-${sanitizedBranch}.sock"
-        Write-Host "   Port: $port (derived from branch hash)" -ForegroundColor Gray
-        Write-Host "   Node: $nodeName" -ForegroundColor Gray
-        Write-Host "   Daemon: daemon-${sanitizedBranch}.sock" -ForegroundColor Gray
-    }
-
-    # Write .env file
-    @"
-# Auto-generated by worktree-up.ps1
-# Configuration for Beamtalk REPL and compiler daemon in this worktree
-BEAMTALK_REPL_PORT=$port
-BEAMTALK_NODE_NAME=$nodeName
-BEAMTALK_DAEMON_SOCKET=$daemonSocket
-"@ | Out-File -FilePath $envPath -Encoding utf8 -Force
-
-    Write-Host "✅ Created .env file" -ForegroundColor Green
-
     # Sync devcontainer config from main repo (worktrees may be created from old commits)
     Write-Host "📋 Syncing devcontainer config..." -ForegroundColor Cyan
     $mainDevcontainer = Join-Path $mainRepo ".devcontainer"
@@ -421,20 +412,20 @@ BEAMTALK_DAEMON_SOCKET=$daemonSocket
         Set-Content -Path $worktreeMetaGitdir -Value "/workspaces/$worktreeName" -NoNewline
         Write-Host "   Set gitdir to: /workspaces/$worktreeName" -ForegroundColor Gray
     }
-    Write-Host "✅ Git paths pre-configured for container" -ForegroundColor Green
+Write-Host "✅ Git paths pre-configured for container" -ForegroundColor Green
 
-    # Start devcontainer
-    Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
-    Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
+# Start devcontainer
+Write-Host "`n🐳 Starting devcontainer..." -ForegroundColor Cyan
+Write-Host "   Workspace: $worktreePath" -ForegroundColor Gray
 
-    # Suppress Docker CLI hints (e.g., "Try Docker Debug...")
-    $env:DOCKER_CLI_HINTS = "false"
+# Suppress Docker CLI hints (e.g., "Try Docker Debug...")
+$env:DOCKER_CLI_HINTS = "false"
 
-    # Build and start the container - capture output to get container ID
-    # Explicitly mount the main .git directory since ${localEnv:...} doesn't work reliably
-    $mountArg = "--mount=type=bind,source=$($env:MAIN_GIT_PATH),target=/workspaces/.$projectName-git"
-    Write-Host "Running: devcontainer up --workspace-folder $worktreePath $mountArg" -ForegroundColor Gray
-    $output = devcontainer up --workspace-folder $worktreePath $mountArg 2>&1 | ForEach-Object {
+# Build and start the container - capture output to get container ID
+# Explicitly mount the main .git directory since ${localEnv:...} doesn't work reliably
+$mountArg = "--mount=type=bind,source=$($env:MAIN_GIT_PATH),target=/workspaces/.$projectName-git"
+Write-Host "Running: devcontainer up --workspace-folder $worktreePath $mountArg" -ForegroundColor Gray
+$output = devcontainer up --workspace-folder $worktreePath $mountArg 2>&1 | ForEach-Object {
     # Filter out PowerShell's stderr wrapper noise and Docker hints
     if ($_ -is [System.Management.Automation.ErrorRecord]) {
         $line = $_.Exception.Message
@@ -543,6 +534,25 @@ if ($env:GIT_SIGNING_KEY) {
 }
 } # End of: if (-not $skipWorktreeSetup)
 
+# Run project-specific hook if it exists (for custom per-worktree setup like env files)
+# Load from worktree (not mainRepo) so reconnects use the synced version
+$hookScript = Join-Path $worktreePath ".devcontainer\worktree-up-hook.ps1"
+if (Test-Path $hookScript) {
+    Write-Host "🔧 Running project hook..." -ForegroundColor Cyan
+    try {
+        & $hookScript -WorktreePath $worktreePath -Branch $Branch -MainRepo $mainRepo
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ Project hook completed" -ForegroundColor Green
+        }
+        else {
+            Write-Host "⚠️  Project hook returned non-zero exit code" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "⚠️  Project hook failed: $_" -ForegroundColor Yellow
+    }
+}
+
 Write-Host "`nStarting: $Command" -ForegroundColor Cyan
 
 # Connect to the container and run the command
@@ -556,15 +566,46 @@ finally {
     Write-Host "`n🔧 Resetting .git paths for host..." -ForegroundColor Cyan
     
     # Reset worktree .git file to point to host path
+    # (retry a few times in case file is briefly locked by container shutdown)
     $hostGitPath = Join-Path $env:MAIN_GIT_PATH "worktrees" $worktreeName
-    Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline -Encoding utf8NoBOM
-    Write-Host "   Set .git to: $hostGitPath" -ForegroundColor Gray
+    $retries = 5
+    $retryDelay = 1
+    $success = $false
     
-    # Reset gitdir in main repo's worktree metadata to host path
-    if (Test-Path $worktreeMetaGitdir) {
-        Set-Content -Path $worktreeMetaGitdir -Value $worktreePath -NoNewline -Encoding utf8NoBOM
-        Write-Host "   Set gitdir to: $worktreePath" -ForegroundColor Gray
+    for ($i = 0; $i -lt $retries; $i++) {
+        try {
+            Set-Content -Path $worktreeGitFile -Value "gitdir: $hostGitPath" -NoNewline -Encoding utf8NoBOM -ErrorAction Stop
+            $success = $true
+            break
+        }
+        catch {
+            if ($i -lt ($retries - 1)) {
+                Write-Host "   Waiting for file lock to release... (attempt $($i+1)/$retries)" -ForegroundColor Gray
+                Start-Sleep -Seconds $retryDelay
+            }
+        }
     }
     
-    Write-Host "✅ Git paths restored for host" -ForegroundColor Green
+    if (-not $success) {
+        Write-Host "⚠️  Could not reset .git file (still locked). You may need to:" -ForegroundColor Yellow
+        Write-Host "   1. Wait a moment for container to fully stop" -ForegroundColor Gray
+        Write-Host "   2. Manually edit: $worktreeGitFile" -ForegroundColor Gray
+        Write-Host "   3. Set content to: gitdir: $hostGitPath" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "   Set .git to: $hostGitPath" -ForegroundColor Gray
+        
+        # Reset gitdir in main repo's worktree metadata to host path
+        if (Test-Path $worktreeMetaGitdir) {
+            try {
+                Set-Content -Path $worktreeMetaGitdir -Value $worktreePath -NoNewline -Encoding utf8NoBOM -ErrorAction Stop
+                Write-Host "   Set gitdir to: $worktreePath" -ForegroundColor Gray
+            }
+            catch {
+                Write-Host "⚠️  Could not reset gitdir file (still locked)" -ForegroundColor Yellow
+            }
+        }
+        
+        Write-Host "✅ Git paths restored for host" -ForegroundColor Green
+    }
 }
