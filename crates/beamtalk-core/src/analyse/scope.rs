@@ -9,7 +9,12 @@
 //! - Class (depth 1)
 //! - Method (depth 2)
 //! - Block (depth 3+)
+//!
+//! **DDD Context:** Semantic Analysis
+//!
+//! This module implements the `Binding` value object from the DDD model.
 
+use crate::ast::TypeAnnotation;
 use crate::parse::Span;
 use std::collections::HashMap;
 
@@ -22,14 +27,49 @@ pub struct Scope {
 
 #[derive(Debug, Clone)]
 struct ScopeLevel {
-    variables: HashMap<String, VarInfo>,
+    variables: HashMap<String, Binding>,
 }
 
-/// Information about a defined variable.
+/// The kind of binding in a scope.
+///
+/// **DDD Context:** Semantic Analysis - Value Object
+///
+/// Distinguishes between different kinds of variable bindings to support
+/// proper scoping and future type checking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    /// Local variable (let binding, loop variable)
+    Local,
+    /// Method or block parameter
+    Parameter,
+    /// Instance field (self.field)
+    InstanceField,
+    /// Class-level binding
+    ClassField,
+}
+
+/// A binding in a scope.
+///
+/// **DDD Context:** Semantic Analysis - Value Object
+///
+/// Represents a variable binding with its name, location, kind, and optional
+/// type annotation. This value object is the foundation for gradual typing
+/// and proper semantic analysis.
+///
+/// # Fields
+///
+/// - `name`: The variable name
+/// - `defined_at`: Source location where the binding was defined
+/// - `depth`: Scope depth (0 = module, 1 = class, 2 = method, 3+ = blocks)
+/// - `kind`: The kind of binding (local, parameter, field, etc.)
+/// - `type_annotation`: Optional type annotation for gradual typing
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VarInfo {
+pub struct Binding {
+    pub name: String,
     pub defined_at: Span,
     pub depth: usize,
+    pub kind: BindingKind,
+    pub type_annotation: Option<TypeAnnotation>,
 }
 
 impl Scope {
@@ -67,14 +107,23 @@ impl Scope {
     /// If a variable with the same name already exists in the current scope,
     /// its existing binding in this scope will be overwritten.
     ///
+    /// # Parameters
+    ///
+    /// - `name`: The variable name
+    /// - `span`: Source location of the definition
+    /// - `kind`: The kind of binding (local, parameter, field, etc.)
+    ///
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    pub fn define(&mut self, name: &str, span: Span) {
+    pub fn define(&mut self, name: &str, span: Span, kind: BindingKind) {
         let depth = self.current_depth();
-        let var_info = VarInfo {
+        let binding = Binding {
+            name: name.to_string(),
             defined_at: span,
             depth,
+            kind,
+            type_annotation: None,
         };
 
         // INVARIANT: levels always contains at least the module-level scope
@@ -82,13 +131,13 @@ impl Scope {
             .last_mut()
             .expect("levels should never be empty")
             .variables
-            .insert(name.to_string(), var_info);
+            .insert(name.to_string(), binding);
     }
 
     /// Looks up a variable by name, searching from innermost to outermost scope.
     ///
     /// Returns the variable information if found.
-    pub fn lookup(&self, name: &str) -> Option<&VarInfo> {
+    pub fn lookup(&self, name: &str) -> Option<&Binding> {
         for level in self.levels.iter().rev() {
             if let Some(var_info) = level.variables.get(name) {
                 return Some(var_info);
@@ -119,7 +168,7 @@ impl Scope {
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    pub fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &VarInfo)> {
+    pub fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &Binding)> {
         self.levels
             .last()
             .expect("levels should never be empty")
@@ -194,7 +243,7 @@ mod tests {
     #[test]
     fn define_adds_variable_to_current_scope() {
         let mut scope = Scope::new();
-        scope.define("x", test_span());
+        scope.define("x", test_span(), BindingKind::Local);
 
         let var = scope.lookup("x").unwrap();
         assert_eq!(var.depth, 0);
@@ -203,7 +252,7 @@ mod tests {
     #[test]
     fn lookup_finds_variable_in_current_scope() {
         let mut scope = Scope::new();
-        scope.define("x", test_span());
+        scope.define("x", test_span(), BindingKind::Local);
 
         assert!(scope.lookup("x").is_some());
         assert!(scope.lookup("y").is_none());
@@ -212,10 +261,10 @@ mod tests {
     #[test]
     fn lookup_searches_outer_scopes() {
         let mut scope = Scope::new();
-        scope.define("outer", test_span());
+        scope.define("outer", test_span(), BindingKind::Local);
 
         scope.push();
-        scope.define("inner", test_span());
+        scope.define("inner", test_span(), BindingKind::Local);
 
         // Inner scope can see both variables
         assert!(scope.lookup("outer").is_some());
@@ -225,10 +274,10 @@ mod tests {
     #[test]
     fn lookup_finds_innermost_shadowing_variable() {
         let mut scope = Scope::new();
-        scope.define("x", Span::new(0, 1));
+        scope.define("x", Span::new(0, 1), BindingKind::Local);
 
         scope.push();
-        scope.define("x", Span::new(10, 11));
+        scope.define("x", Span::new(10, 11), BindingKind::Local);
 
         let var = scope.lookup("x").unwrap();
         assert_eq!(var.depth, 1); // Inner definition
@@ -240,14 +289,14 @@ mod tests {
         let mut scope = Scope::new();
         scope.push(); // method level
 
-        scope.define("local", test_span());
+        scope.define("local", test_span(), BindingKind::Local);
         assert!(!scope.is_captured("local"));
     }
 
     #[test]
     fn is_captured_returns_true_for_outer_variable() {
         let mut scope = Scope::new();
-        scope.define("outer", test_span());
+        scope.define("outer", test_span(), BindingKind::Local);
 
         scope.push(); // class
         scope.push(); // method
@@ -264,10 +313,10 @@ mod tests {
     #[test]
     fn redefine_variable_in_same_scope() {
         let mut scope = Scope::new();
-        scope.define("x", Span::new(0, 1));
+        scope.define("x", Span::new(0, 1), BindingKind::Local);
 
         // Redefine in same scope with different span
-        scope.define("x", Span::new(10, 11));
+        scope.define("x", Span::new(10, 11), BindingKind::Local);
 
         let var = scope.lookup("x").unwrap();
         assert_eq!(var.depth, 0);
@@ -279,22 +328,22 @@ mod tests {
         let mut scope = Scope::new();
 
         // Module level (0)
-        scope.define("module_var", test_span());
+        scope.define("module_var", test_span(), BindingKind::Local);
         assert_eq!(scope.lookup("module_var").unwrap().depth, 0);
 
         // Class level (1)
         scope.push();
-        scope.define("class_var", test_span());
+        scope.define("class_var", test_span(), BindingKind::ClassField);
         assert_eq!(scope.lookup("class_var").unwrap().depth, 1);
 
         // Method level (2)
         scope.push();
-        scope.define("method_var", test_span());
+        scope.define("method_var", test_span(), BindingKind::Parameter);
         assert_eq!(scope.lookup("method_var").unwrap().depth, 2);
 
         // Block level (3)
         scope.push();
-        scope.define("block_var", test_span());
+        scope.define("block_var", test_span(), BindingKind::Local);
         assert_eq!(scope.lookup("block_var").unwrap().depth, 3);
 
         // All variables are visible from innermost scope
@@ -313,11 +362,11 @@ mod tests {
     #[test]
     fn current_scope_vars_returns_only_current_level() {
         let mut scope = Scope::new();
-        scope.define("outer", test_span());
+        scope.define("outer", test_span(), BindingKind::Local);
 
         scope.push();
-        scope.define("inner1", test_span());
-        scope.define("inner2", test_span());
+        scope.define("inner1", test_span(), BindingKind::Local);
+        scope.define("inner2", test_span(), BindingKind::Local);
 
         // Should only return variables from current (inner) scope
         let vars: Vec<&str> = scope.current_scope_vars().map(|(name, _)| name).collect();
@@ -330,8 +379,8 @@ mod tests {
     #[test]
     fn handles_empty_variable_name() {
         let mut scope = Scope::new();
-        scope.define("", test_span());
-        scope.define("valid", test_span());
+        scope.define("", test_span(), BindingKind::Local);
+        scope.define("valid", test_span(), BindingKind::Local);
 
         // Empty names are allowed (parser's responsibility to reject)
         assert!(scope.lookup("").is_some());
@@ -342,8 +391,8 @@ mod tests {
     #[test]
     fn iterator_lifetime_is_correct() {
         let mut scope = Scope::new();
-        scope.define("x", test_span());
-        scope.define("y", test_span());
+        scope.define("x", test_span(), BindingKind::Local);
+        scope.define("y", test_span(), BindingKind::Local);
 
         // Iterator should be independent of scope lifetime
         let iter = scope.current_scope_vars();
@@ -354,5 +403,20 @@ mod tests {
         assert_eq!(names.len(), 2);
         assert!(names.contains(&"x"));
         assert!(names.contains(&"y"));
+    }
+
+    #[test]
+    fn binding_kind_is_preserved() {
+        let mut scope = Scope::new();
+        scope.define("param", test_span(), BindingKind::Parameter);
+        scope.define("local", test_span(), BindingKind::Local);
+        scope.define("field", test_span(), BindingKind::InstanceField);
+
+        assert_eq!(scope.lookup("param").unwrap().kind, BindingKind::Parameter);
+        assert_eq!(scope.lookup("local").unwrap().kind, BindingKind::Local);
+        assert_eq!(
+            scope.lookup("field").unwrap().kind,
+            BindingKind::InstanceField
+        );
     }
 }
