@@ -173,13 +173,15 @@ beamtalk_class_named_found_test() ->
     ok = beamtalk_stdlib:init(),
     
     %% Look up an existing class
-    IntegerPid = beamtalk_stdlib:dispatch('classNamed:', ['Integer'], 'Beamtalk'),
+    Result = beamtalk_stdlib:dispatch('classNamed:', ['Integer'], 'Beamtalk'),
     
-    %% Should return a pid
-    ?assert(is_pid(IntegerPid)),
+    %% Should return a wrapped class object
+    ?assertMatch({beamtalk_object, 'Integer', beamtalk_object_class, _Pid}, Result),
     
-    %% The pid should be the Integer class
-    ?assertEqual('Integer', beamtalk_object_class:class_name(IntegerPid)).
+    %% Extract the pid and verify it's the Integer class
+    {beamtalk_object, 'Integer', beamtalk_object_class, Pid} = Result,
+    ?assert(is_pid(Pid)),
+    ?assertEqual('Integer', beamtalk_object_class:class_name(Pid)).
 
 beamtalk_class_named_not_found_test() ->
     ok = beamtalk_stdlib:init(),
