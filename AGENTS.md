@@ -29,6 +29,140 @@ Beamtalk is a Smalltalk/Newspeak-inspired programming language that compiles to 
 
 ---
 
+## Syntax Verification - Preventing Hallucinations 🚨
+
+**CRITICAL:** AI agents must **verify all Beamtalk syntax** before using it in code, tests, or examples. Do not invent or assume syntax patterns exist.
+
+### The Problem: Syntax Blending Hallucinations
+
+AI agents may hallucinate plausible-looking but invalid syntax by combining real language features incorrectly.
+
+**Example hallucination caught in BT-98:**
+```beamtalk
+// ❌ HALLUCINATED - This syntax does NOT exist!
+Counter := Actor [
+  state: value = 0.
+  increment => self.value := self.value + 1.
+].
+```
+
+**Why it looks plausible:**
+- ✅ `:=` is real (variable assignment)
+- ✅ `[...]` is real (block syntax)
+- ✅ `Actor` is real (class name)
+- ❌ **Combining them this way is INVALID**
+
+**Correct syntax:**
+```beamtalk
+// ✅ CORRECT - Keyword message for class definition
+Actor subclass: Counter
+  state: value = 0
+  
+  increment => self.value := self.value + 1
+```
+
+### Common Hallucination Patterns
+
+| Pattern | Example | Reality |
+|---------|---------|---------|
+| **Inline class syntax** | `Counter := Actor [...]` | Only `Actor subclass: Counter` works |
+| **Ruby/Python-style** | `Point.new(x: 3)` | Beamtalk uses `Point new: #{x => 3}` |
+| **Missing constraints** | `Counter new` on Actor | Error - actors use `spawn`, not `new` |
+| **Assumed features** | `Integer subclass: MyInt` | Primitives are sealed, cannot subclass |
+| **Smalltalk ported verbatim** | `Object subclass: #Counter` | Beamtalk uses identifiers, not symbols: `Object subclass: Counter` |
+
+### Verification Checklist
+
+Before using ANY Beamtalk syntax, verify it exists in **at least one** of these sources:
+
+#### 1. **Language Specification (Primary Authority)**
+✅ **Check first:** [docs/beamtalk-language-features.md](docs/beamtalk-language-features.md)
+- Contains full language specification
+- Explicitly marks implemented vs future features
+- Examples for every language construct
+
+#### 2. **Example Code (Real Usage)**
+✅ **Reference directory:** `examples/*.bt`
+- Real working code compiled and tested
+- Demonstrates idiomatic patterns
+- Shows actual syntax in use
+
+#### 3. **Test Cases (Validated Syntax)**
+✅ **Test files:**
+- `tests/e2e/cases/*.bt` - End-to-end language tests
+- `test-package-compiler/cases/*/main.bt` - Compiler test cases
+- `crates/beamtalk-core/src/parse/parser/mod.rs` - Parser unit tests
+
+#### 4. **Syntax Rationale (Design Decisions)**
+✅ **Deliberate choices:** [docs/beamtalk-syntax-rationale.md](docs/beamtalk-syntax-rationale.md)
+- Explains divergences from Smalltalk
+- Documents "why not X" decisions
+- Lists rejected alternatives
+
+### Red Flags: Probably Hallucinated
+
+🚩 **If you're about to use syntax that doesn't appear in the sources above, STOP!**
+
+**Ask yourself:**
+1. Have I seen this exact syntax in `examples/` or `tests/e2e/cases/`?
+2. Is it documented in `docs/beamtalk-language-features.md`?
+3. Does the parser have test cases for it in `parser/mod.rs`?
+
+**If no to all three → It's likely hallucinated. Ask for clarification.**
+
+### What To Do Instead
+
+**Option 1: Search the codebase**
+```bash
+# Find how Counter is actually defined
+grep -r "Counter" examples/*.bt tests/e2e/cases/*.bt
+
+# Find class definition syntax
+grep -r "subclass:" examples/*.bt
+```
+
+**Option 2: Check parser tests**
+```bash
+# See what the parser actually accepts
+grep -A10 "Actor subclass" crates/beamtalk-core/src/parse/parser/mod.rs
+```
+
+**Option 3: Ask explicitly**
+```markdown
+I want to define a class. I found these patterns:
+- `Actor subclass: Counter` in examples/counter.bt
+- Is `Counter := Actor [...]` also valid?
+
+Can you confirm which syntax is correct?
+```
+
+### Safe Code Generation Principles
+
+✅ **DO:**
+- Copy exact syntax from working examples
+- Reference parser tests for valid grammar
+- Use documented features from language spec
+- Ask when uncertain
+
+❌ **DON'T:**
+- Blend valid features into new combinations without verification
+- Assume Smalltalk syntax works as-is
+- Port syntax from other languages (Ruby, Python, Swift)
+- Invent "logical extensions" without checking
+
+### Integration with DevEx Checklist
+
+This extends the existing DevEx principle: **"Can you demonstrate the feature in 1-2 lines of REPL code?"**
+
+If you can't find your proposed syntax in:
+1. ✅ Examples that compile
+2. ✅ Tests that pass
+3. ✅ Documentation that describes it
+
+Then it doesn't exist yet, and you're about to hallucinate it!
+
+---
+
 ## Domain Driven Design (DDD)
 
 **CRITICAL:** The beamtalk architecture is **driven by Domain Driven Design principles**. Always consider DDD when creating new code or refactoring existing code.
