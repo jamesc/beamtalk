@@ -92,9 +92,9 @@ Actor subclass: Counter
 - `:load` is sent to REPL during execution (runtime command)
 - Different systems, different syntax - follows test framework conventions (like `@param` in JSDoc)
 
-### E2E Test Format: Missing Assertions Cause Silent Skips ⚠️
+### E2E Test Format: Parser Warns on Missing Assertions ⚠️
 
-**CRITICAL:** In E2E test files (`tests/e2e/cases/*.bt`), expressions **without** `// =>` assertions are **silently skipped** and never executed!
+**CRITICAL:** In E2E test files (`tests/e2e/cases/*.bt`), expressions **without** `// =>` assertions are **skipped** and never executed. The parser emits warnings to help catch these mistakes.
 
 **Test format:**
 ```beamtalk
@@ -118,8 +118,9 @@ count                                  ← This will fail (count was never set)
 
 **Rules for E2E tests:**
 1. **Every expression must have `// =>` assertion** (even if `// => _` for wildcard)
-2. **No assertion = no execution** (silent skip, no warning!)
-3. **Check test output** to verify test count matches expected expressions
+2. **No assertion = no execution** (expressions are skipped)
+3. **Parser warns about missing assertions** (file name, line number, and expression)
+4. **Check warnings during test runs** to catch accidentally skipped expressions
 
 **Safe pattern:**
 ```beamtalk
@@ -141,20 +142,21 @@ counter increment
 // ❌ DANGEROUS - This looks fine but DOESN'T RUN!
 x := 0
 3 timesRepeat: [x := x + 1]   ← No assertion, SKIPPED!
+                               ← ⚠️ Parser will warn about this!
 x
 // => 3                        ← Will fail! x was never set because previous line didn't run
 ```
 
 **Verification:**
 ```bash
-# Count test cases in file
-grep -c "// =>" tests/e2e/cases/mytest.bt
+# Run E2E tests - warnings will be shown for missing assertions
+just test-e2e
 
-# Compare to number of expressions
-# If counts don't match, you have silent skips!
+# Example warning output:
+# ⚠️  mytest.bt: Line 15: Expression will not be executed (missing // => assertion): count := 0
 ```
 
-**See also:** BT-248 for adding warnings when expressions lack assertions.
+**Parser warnings (BT-248):** The test parser now emits warnings when it finds expressions without assertions, making it easier to catch accidentally skipped tests.
 
 ### Verification Checklist
 
