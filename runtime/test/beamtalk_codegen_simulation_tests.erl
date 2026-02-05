@@ -1528,6 +1528,10 @@ chained_binary_operators_test() ->
 
 %% Setup helper for super tests
 setup_super_test_classes() ->
+    %% Ensure test fixtures directory is in code path
+    %% (counter.beam and logging_counter.beam are compiled there by compile.sh)
+    code:add_path("_build/test/lib/beamtalk_runtime/test"),
+    
     %% Ensure pg is started
     case whereis(pg) of
         undefined -> {ok, _} = pg:start_link();
