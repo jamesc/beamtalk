@@ -13,7 +13,7 @@
 //! - Await expressions
 //! - Cascades
 //!
-//! Note: Message sending is handled by [`super::message_dispatch`].
+//! Note: Message sending is handled by [`super::dispatch_codegen`].
 
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{

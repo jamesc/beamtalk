@@ -1466,6 +1466,25 @@ cargo clippy --all-targets -- -D warnings # Lints (warnings = errors)
 cargo test --all-targets                  # Run all tests
 ```
 
+### Workspace Commands (Planned - ADR 0004)
+
+```bash
+# Development
+beamtalk repl                    # Connect to project workspace (auto-create)
+beamtalk repl --session debug    # Named session, same workspace
+beamtalk repl --workspace exp    # Different workspace (different code)
+
+# Production
+beamtalk attach prod@host        # Attach REPL to running production node
+beamtalk run server.bt           # Run as daemon (no auto-cleanup)
+
+# Management
+beamtalk workspace list          # List active workspaces
+beamtalk workspace stop <name>   # Stop a workspace
+```
+
+See [ADR 0004: Persistent Workspace Management](docs/ADR/0004-persistent-workspace-management.md) for full architecture.
+
 ### License Headers
 
 All source files must include Apache 2.0 header:

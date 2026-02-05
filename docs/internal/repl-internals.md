@@ -6,6 +6,8 @@ This document describes the internal architecture of Beamtalk's interactive REPL
 
 For the overall system architecture, see [beamtalk-architecture.md](../beamtalk-architecture.md).
 
+For persistent workspaces (REPLs as sessions in long-running BEAM nodes), see [ADR 0004: Persistent Workspace Management](../ADR/0004-persistent-workspace-management.md).
+
 ---
 
 ## Overview

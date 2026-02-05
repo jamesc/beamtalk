@@ -4,6 +4,8 @@ The Beamtalk IDE provides a Smalltalk-style live programming experience where th
 
 This document describes the integrated development environment vision. The IDE is built with Phoenix LiveView and connects to running BEAM nodes.
 
+For the underlying workspace model (how IDEs connect to persistent BEAM nodes), see [ADR 0004: Persistent Workspace Management](ADR/0004-persistent-workspace-management.md).
+
 ---
 
 ## Table of Contents
