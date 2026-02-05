@@ -60,7 +60,7 @@ Each class is represented by two things:
 ```erlang
 %% Each class registers its process
 %% Name: beamtalk_class_<classname>
-register(beamtalk_class_counter, ClassPid).
+register(beamtalk_object_class_counter, ClassPid).
 
 %% Lookup
 beamtalk:class('Counter') -> #beamtalk_object{class='Counter class', ...}
@@ -84,7 +84,7 @@ call 'counter':'dispatch'('increment', Args, Self, State)
 dispatch(Selector, Args, Self, State) ->
     Class = Self#beamtalk_object.class,
     ClassPid = beamtalk:class_process(Class),
-    case beamtalk_class:lookup_method(ClassPid, Selector) of
+    case beamtalk_object_class:lookup_method(ClassPid, Selector) of
         {ok, Fun} -> Fun(Args, Self, State);
         not_found -> handle_dnu(Selector, Args, Self, State)
     end.

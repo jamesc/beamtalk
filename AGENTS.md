@@ -630,7 +630,7 @@ Beamtalk Source (.bt)
 | **Primitive operations** | Runtime | Codegen for dispatch | `runtime/src/beamtalk_integer.erl`<br>`runtime/src/beamtalk_string.erl` |
 | **REPL features** | REPL | Codegen for eval context | `runtime/src/beamtalk_repl*.erl` |
 | **Error messages** | All layers | Runtime for formatting | `runtime/src/beamtalk_error.erl` |
-| **Class system** | Codegen + Runtime | Parser for syntax | `codegen/core_erlang/gen_server.rs`<br>`runtime/src/beamtalk_class.erl` |
+| **Class system** | Codegen + Runtime | Parser for syntax | `codegen/core_erlang/gen_server.rs`<br>`runtime/src/beamtalk_object_class.erl` |
 
 ### Examples by Layer
 

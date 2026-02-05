@@ -61,7 +61,7 @@ init_registers_all_classes_test() ->
     ok = beamtalk_stdlib:init(),
     
     %% After init, should have bootstrap + stdlib classes
-    ClassesAfter = [beamtalk_class:class_name(Pid) || Pid <- beamtalk_class:all_classes()],
+    ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
     ?assertEqual(10, length(ClassesAfter)),  % 3 bootstrap + 7 stdlib
     
     %% Verify expected classes are present
@@ -82,61 +82,61 @@ init_idempotent_test() ->
     ok = beamtalk_stdlib:init(),
     
     %% Should still have same number of classes (no duplicates)
-    Classes = [beamtalk_class:class_name(Pid) || Pid <- beamtalk_class:all_classes()],
+    Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
     ?assertEqual(10, length(Classes)).
 
 integer_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Integer'),
+    Pid = beamtalk_object_class:whereis_class('Integer'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Integer', beamtalk_class:class_name(Pid)).
+    ?assertEqual('Integer', beamtalk_object_class:class_name(Pid)).
 
 string_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('String'),
+    Pid = beamtalk_object_class:whereis_class('String'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('String', beamtalk_class:class_name(Pid)).
+    ?assertEqual('String', beamtalk_object_class:class_name(Pid)).
 
 boolean_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Boolean'),
+    Pid = beamtalk_object_class:whereis_class('Boolean'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Boolean', beamtalk_class:class_name(Pid)).
+    ?assertEqual('Boolean', beamtalk_object_class:class_name(Pid)).
 
 nil_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('UndefinedObject'),
+    Pid = beamtalk_object_class:whereis_class('UndefinedObject'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('UndefinedObject', beamtalk_class:class_name(Pid)).
+    ?assertEqual('UndefinedObject', beamtalk_object_class:class_name(Pid)).
 
 block_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Block'),
+    Pid = beamtalk_object_class:whereis_class('Block'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Block', beamtalk_class:class_name(Pid)).
+    ?assertEqual('Block', beamtalk_object_class:class_name(Pid)).
 
 tuple_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Tuple'),
+    Pid = beamtalk_object_class:whereis_class('Tuple'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Tuple', beamtalk_class:class_name(Pid)).
+    ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
 beamtalk_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Beamtalk'),
+    Pid = beamtalk_object_class:whereis_class('Beamtalk'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Beamtalk', beamtalk_class:class_name(Pid)).
+    ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid)).
 
 integer_superclass_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Integer'),
-    Superclass = beamtalk_class:superclass(Pid),
+    Pid = beamtalk_object_class:whereis_class('Integer'),
+    Superclass = beamtalk_object_class:superclass(Pid),
     ?assertEqual('Object', Superclass).
 
 integer_methods_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_class:whereis_class('Integer'),
-    Methods = beamtalk_class:methods(Pid),
+    Pid = beamtalk_object_class:whereis_class('Integer'),
+    Methods = beamtalk_object_class:methods(Pid),
     
     %% Check some expected methods
     ?assert(lists:member('+', Methods)),
@@ -179,7 +179,7 @@ beamtalk_class_named_found_test() ->
     ?assert(is_pid(IntegerPid)),
     
     %% The pid should be the Integer class
-    ?assertEqual('Integer', beamtalk_class:class_name(IntegerPid)).
+    ?assertEqual('Integer', beamtalk_object_class:class_name(IntegerPid)).
 
 beamtalk_class_named_not_found_test() ->
     ok = beamtalk_stdlib:init(),

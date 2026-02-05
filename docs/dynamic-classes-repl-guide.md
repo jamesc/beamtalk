@@ -13,11 +13,11 @@ Dynamic classes are interpreter-based (Phase 1):
 
 ## Creating a Dynamic Class
 
-Use `beamtalk_class:create_subclass/3` to define a new class:
+Use `beamtalk_object_class:create_subclass/3` to define a new class:
 
 ```erlang
 %% Create a simple Counter class
-{ok, CounterClass} = beamtalk_class:create_subclass('Actor', 'Counter', #{
+{ok, CounterClass} = beamtalk_object_class:create_subclass('Actor', 'Counter', #{
     instance_variables => [value],
     instance_methods => #{
         increment => fun(_Self, [], State) ->
@@ -48,14 +48,14 @@ Use `beamtalk_class:create_subclass/3` to define a new class:
 
 ## Spawning Instances
 
-Once you have a class, spawn instances with `beamtalk_class:new/2`:
+Once you have a class, spawn instances with `beamtalk_object_class:new/2`:
 
 ```erlang
 %% Spawn with initial values
-{ok, Counter} = beamtalk_class:new(CounterClass, [#{value => 10}]).
+{ok, Counter} = beamtalk_object_class:new(CounterClass, [#{value => 10}]).
 
 %% Spawn with default values (fields initialize to nil)
-{ok, Counter2} = beamtalk_class:new(CounterClass, [#{}]).
+{ok, Counter2} = beamtalk_object_class:new(CounterClass, [#{}]).
 ```
 
 Returns a `#beamtalk_object{}` record containing:
@@ -86,13 +86,13 @@ Dynamic classes support full reflection:
 
 ```erlang
 %% Look up a class by name
-ClassPid = beamtalk_class:whereis_class('Counter').
+ClassPid = beamtalk_object_class:whereis_class('Counter').
 
 %% Get class metadata
-beamtalk_class:class_name(ClassPid).             %=> 'Counter'
-beamtalk_class:superclass(ClassPid).             %=> 'Actor'
-beamtalk_class:instance_variables(ClassPid).     %=> [value]
-beamtalk_class:methods(ClassPid).                %=> [increment, decrement, getValue]
+beamtalk_object_class:class_name(ClassPid).             %=> 'Counter'
+beamtalk_object_class:superclass(ClassPid).             %=> 'Actor'
+beamtalk_object_class:instance_variables(ClassPid).     %=> [value]
+beamtalk_object_class:methods(ClassPid).                %=> [increment, decrement, getValue]
 ```
 
 ## Inheritance
@@ -101,7 +101,7 @@ Dynamic classes can inherit from other dynamic classes:
 
 ```erlang
 %% Create parent class
-{ok, ParentClass} = beamtalk_class:create_subclass('Actor', 'Parent', #{
+{ok, ParentClass} = beamtalk_object_class:create_subclass('Actor', 'Parent', #{
     instance_variables => [],
     instance_methods => #{
         parentMethod => fun(_Self, [], State) ->
@@ -111,7 +111,7 @@ Dynamic classes can inherit from other dynamic classes:
 }).
 
 %% Create child class
-{ok, ChildClass} = beamtalk_class:create_subclass('Parent', 'Child', #{
+{ok, ChildClass} = beamtalk_object_class:create_subclass('Parent', 'Child', #{
     instance_variables => [],
     instance_methods => #{
         childMethod => fun(_Self, [], State) ->
@@ -121,7 +121,7 @@ Dynamic classes can inherit from other dynamic classes:
 }).
 
 %% Verify hierarchy
-beamtalk_class:superclass(ChildClass).  %=> 'Parent'
+beamtalk_object_class:superclass(ChildClass).  %=> 'Parent'
 ```
 
 **Note:** Method inheritance is handled by `beamtalk_class` lookup, not directly tested in Phase 1.
@@ -155,7 +155,7 @@ end
 
 ```erlang
 %% Create a 2D Point class
-{ok, PointClass} = beamtalk_class:create_subclass('Actor', 'Point', #{
+{ok, PointClass} = beamtalk_object_class:create_subclass('Actor', 'Point', #{
     instance_variables => [x, y],
     instance_methods => #{
         getX => fun(_Self, [], State) ->
@@ -180,7 +180,7 @@ end
 }).
 
 %% Spawn a point at (3, 4)
-{ok, P} = beamtalk_class:new(PointClass, [#{x => 3, y => 4}]).
+{ok, P} = beamtalk_object_class:new(PointClass, [#{x => 3, y => 4}]).
 Pid = P#beamtalk_object.pid.
 
 %% Use it
@@ -210,7 +210,7 @@ Result = beamtalk_future:await(FuturePid).
 Current limitations:
 - **Performance**: Slower than compiled classes (closure overhead)
 - **Super calls**: Not yet supported in dynamic methods
-- **No syntax sugar**: Must use `beamtalk_class:create_subclass/3` directly
+- **No syntax sugar**: Must use `beamtalk_object_class:create_subclass/3` directly
 
 These will be addressed in Phase 2 (compiler-embedded dynamic classes).
 
@@ -222,19 +222,19 @@ These will be addressed in Phase 2 (compiler-embedded dynamic classes).
        instance_variables => [value],
        instance_methods => #{...}
    }.
-   {ok, C1} = beamtalk_class:create_subclass('Actor', 'Counter', CounterSpec).
+   {ok, C1} = beamtalk_object_class:create_subclass('Actor', 'Counter', CounterSpec).
    ```
 
 2. **Extract PID early**: Get the PID once and reuse
    ```erlang
-   {ok, Obj} = beamtalk_class:new(ClassPid, [InitState]),
+   {ok, Obj} = beamtalk_object_class:new(ClassPid, [InitState]),
    Pid = Obj#beamtalk_object.pid,
    %% Now use Pid for all messages
    ```
 
 3. **Check for errors**: Class creation can fail
    ```erlang
-   case beamtalk_class:create_subclass('BadParent', 'MyClass', Spec) of
+   case beamtalk_object_class:create_subclass('BadParent', 'MyClass', Spec) of
        {ok, ClassPid} -> use_it(ClassPid);
        {error, {superclass_not_found, 'BadParent'}} -> handle_error()
    end
@@ -242,7 +242,7 @@ These will be addressed in Phase 2 (compiler-embedded dynamic classes).
 
 4. **Use introspection**: Explore classes interactively
    ```erlang
-   beamtalk_class:methods(ClassPid).  %% See what methods exist
+   beamtalk_object_class:methods(ClassPid).  %% See what methods exist
    ```
 
 ## Future: Phase 2

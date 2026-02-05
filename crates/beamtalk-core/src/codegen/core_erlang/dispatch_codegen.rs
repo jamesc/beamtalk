@@ -441,9 +441,9 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_class':'super_dispatch'(State, 'increment', [])
-    /// call 'beamtalk_class':'super_dispatch'(State, 'getValue', [])
-    /// call 'beamtalk_class':'super_dispatch'(State, 'at:put:', [1, Value])
+    /// call 'beamtalk_object_class':'super_dispatch'(State, 'increment', [])
+    /// call 'beamtalk_object_class':'super_dispatch'(State, 'getValue', [])
+    /// call 'beamtalk_object_class':'super_dispatch'(State, 'at:put:', [1, Value])
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
@@ -453,10 +453,10 @@ impl CoreErlangGenerator {
         // Use the domain service method for selector-to-atom conversion
         let selector_atom = selector.to_erlang_atom();
 
-        // Generate: call 'beamtalk_class':'super_dispatch'(State, 'selector', [Args])
+        // Generate: call 'beamtalk_object_class':'super_dispatch'(State, 'selector', [Args])
         write!(
             self.output,
-            "call 'beamtalk_class':'super_dispatch'({}, '{selector_atom}', [",
+            "call 'beamtalk_object_class':'super_dispatch'({}, '{selector_atom}', [",
             self.current_state_var()
         )?;
 

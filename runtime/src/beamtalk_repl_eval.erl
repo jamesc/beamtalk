@@ -139,7 +139,7 @@ handle_load(Path, State) ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
                                 {module, ModuleName} ->
-                                    %% Register classes with beamtalk_classes
+                                    %% Register classes with beamtalk_object_class
                                     register_classes(ClassNames, ModuleName),
                                     %% Track loaded module (avoid duplicates on reload)
                                     LoadedModules = beamtalk_repl_state:get_loaded_modules(State),
@@ -595,10 +595,10 @@ register_classes(ClassInfoList, ModuleName) ->
                 source_file => undefined
             },
             %% Check if class process already exists
-            case beamtalk_class:whereis_class(ClassAtom) of
+            case beamtalk_object_class:whereis_class(ClassAtom) of
                 undefined ->
                     %% Start new class process
-                    case beamtalk_class:start_link(ClassAtom, ClassInfo) of
+                    case beamtalk_object_class:start_link(ClassAtom, ClassInfo) of
                         {ok, _Pid} -> ok;
                         {error, Reason} ->
                             io:format(standard_error, "Warning: Failed to start class ~s: ~p~n", 
