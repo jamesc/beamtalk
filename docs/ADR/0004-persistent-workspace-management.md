@@ -187,17 +187,18 @@ Beamtalk can combine the best of both worlds:
 **Architecture:**
 
 ```erlang
-%% Per-node supervisor (inside each workspace node)
-beamtalk_node_sup
+%% Per-workspace supervisor (inside each workspace node)
+beamtalk_workspace_sup
   ├─ beamtalk_repl_server      % TCP server for REPL connections
   ├─ beamtalk_idle_monitor     % Tracks activity, self-terminates if idle
-  ├─ beamtalk_session_sup      % Supervises per-session actor trees
-  │    ├─ session_alice_sup    % Session "alice" actors
-  │    │    ├─ Counter#<0.123.0>
-  │    │    └─ Logger#<0.124.0>
-  │    └─ session_bob_sup      % Session "bob" actors
-  │         └─ Counter#<0.456.0>
-  └─ beamtalk_workspace_meta   % Metadata (project path, created_at)
+  ├─ beamtalk_workspace_meta   % Metadata (project path, created_at)
+  ├─ beamtalk_actor_sup        % Supervises ALL actors in workspace (shared)
+  │    ├─ Counter#<0.123.0>    %   ← Visible to all sessions
+  │    ├─ Logger#<0.124.0>     %   ← Visible to all sessions
+  │    └─ HttpServer#<0.125.0> %   ← Visible to all sessions
+  └─ beamtalk_session_sup      % Supervises session shell processes
+       ├─ session_alice        %   ← Just the shell, bindings
+       └─ session_bob          %   ← Just the shell, bindings
 ```
 
 **Features:**
@@ -217,40 +218,91 @@ beamtalk_node_sup
 
 ### Key Concepts: Nodes vs Sessions
 
-The design distinguishes between two levels of isolation:
+The design distinguishes between two levels:
 
-| Concept | What it is | Isolation level | Lifecycle |
-|---------|------------|-----------------|-----------|
-| **Node** | BEAM OS process | Code + full runtime | Long-lived (project or production) |
-| **Session** | Supervision tree within node | Actor state only | Ephemeral (per REPL connection) |
+| Term | What it is | Scope | Lifecycle |
+|------|------------|-------|-----------|
+| **Workspace** | BEAM node + project context | Actors, modules, ETS (shared) | Long-lived |
+| **Session** | REPL connection | Variable bindings (local) | Ephemeral |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Node: banking_dev@localhost                                  │
+│ Workspace: my-project (BEAM Node)                            │
 │                                                              │
-│   Code Server: Counter, Account, Logger (one version each)  │
+│   Shared State (all sessions see this):                      │
+│   ├── Actors: Counter <0.123>, Logger <0.124>               │
+│   ├── Modules: Counter, Logger, HttpServer                  │
+│   ├── ETS tables, registered names                          │
+│   └── Workspace global object                               │
 │                                                              │
+│   Sessions (REPL connections):                               │
 │   ┌─────────────────┐  ┌─────────────────┐                  │
-│   │ Session: alice  │  │ Session: bob    │  ← Same code,    │
-│   │ (sup tree)      │  │ (sup tree)      │    isolated actors│
-│   │ counter <0.123> │  │ counter <0.456> │                  │
+│   │ Session: alice  │  │ Session: bob    │                  │
+│   │ (Terminal 1)    │  │ (Terminal 2)    │                  │
+│   │                 │  │                 │                  │
+│   │ Local bindings: │  │ Local bindings: │                  │
+│   │ counter = <123> │  │ c = <123>       │  ← Same actor!  │
+│   │ x = 42          │  │ y = 100         │                  │
 │   └─────────────────┘  └─────────────────┘                  │
-│         ↑                      ↑                             │
-│    Terminal 1             Terminal 2                         │
+│                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**What's workspace-scoped (shared by all sessions):**
+- All actors (spawned by anyone in the workspace)
+- Loaded modules (hot reload affects everyone)
+- ETS tables and registered names
+- The `Workspace` global object
+
+**What's session-scoped (local to each REPL):**
+- Variable bindings (`counter := ...`)
+- Command history
+- Current namespace context
+
+### The Beamtalk Global Object
+
+`Beamtalk` is a global object (like `Smalltalk` in Smalltalk) available in every session:
+
+```beamtalk
+// Query runtime state
+Beamtalk actors                    // List all actors in workspace
+Beamtalk actorNamed: #myCounter    // Get actor by registered name
+Beamtalk sessions                  // List connected REPL sessions
+Beamtalk modules                   // List loaded modules
+
+// Runtime metadata
+Beamtalk projectPath               // "/home/user/my-project"
+Beamtalk nodeName                  // 'beamtalk_my_project@localhost'
+Beamtalk version                   // "0.1.0"
+
+// Session management
+Beamtalk currentSession            // This REPL's session
+Beamtalk broadcast: "Taking break" // Send message to all sessions
+
+// Hot reload
+Beamtalk reload: Counter           // Reload specific module
+Beamtalk reloadAll                 // Reload all modified modules
+```
+
+**Note on terminology:**
+- **Beamtalk** = The runtime global (actors, modules, node state)
+- **Workspace** = The IDE concept (your development session spanning multiple terminals)
+- **Session** = Each REPL connection (local bindings, command history)
+
+Think of it like VS Code: one workspace with multiple editor panes sharing the same project. Here: one workspace with multiple REPLs sharing the same runtime.
+
 **Why this distinction matters:**
 
-- **Nodes isolate code** — BEAM has one code server per node. Different module versions require different nodes.
-- **Sessions isolate actors** — Same code, separate actor hierarchies. Cheaper than spinning up new nodes.
+- **Actors belong to the workspace, not the session.** When you spawn an actor, any REPL in the workspace can interact with it.
+- **Bindings are session-local.** Your variable `counter` pointing to `<0.123>` is yours; Bob's variable `c` pointing to the same actor is his.
+- **Hot reload affects everyone.** When you `:reload Counter`, all sessions see the new code.
 
-| Scenario | Same node? | Why |
-|----------|------------|-----|
-| Two terminals, same project | ✓ Yes (two sessions) | Same code, just parallel work |
-| Feature branch experiment | ✗ No (separate node) | Different code versions |
-| Attach to production | ✓ Yes (new session) | Debug without affecting running services |
-| Two unrelated projects | ✗ No (separate nodes) | Completely different code |
+| Scenario | Same workspace? | Why |
+|----------|-----------------|-----|
+| Two terminals, same project | ✓ Yes | Share actors, different bindings |
+| Feature branch experiment | ✗ No (different workspace) | Different code versions |
+| Attach to production | ✓ Yes (new session) | Debug with shared actors |
+| Two unrelated projects | ✗ No (different workspaces) | Completely different code |
 
 ### Development vs Production
 
@@ -537,12 +589,12 @@ This is different from Smalltalk, where you can modify individual methods and th
    > counter increment                    % Works!
    ```
 
-2. **Workspace actor registry:**
+2. **Beamtalk actor registry:**
    ```erlang
-   > Workspace actors   % List all supervised actors
+   > Beamtalk actors   // List all supervised actors
    #(#myCounter -> <0.123.0>, #logger -> <0.124.0>)
    
-   > Workspace actorNamed: #myCounter   % Get actor by name
+   > Beamtalk actorNamed: #myCounter   // Get actor by name
    <0.123.0>
    ```
 
@@ -602,51 +654,52 @@ beamtalk repl --remote user@host:~/project-a
 
 ### Multi-REPL Same-Workspace Support
 
-Multiple REPL sessions can connect to the same workspace simultaneously:
+Multiple REPL sessions can connect to the same workspace simultaneously, sharing all actors:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Workspace: my-feature (BEAM node)                   │
+│ Workspace: my-project (BEAM node)                   │
 │                                                      │
+│   Actors (SHARED by all sessions):                  │
 │   ┌─────────┐  ┌─────────┐  ┌─────────┐            │
-│   │ Actor 1 │  │ Actor 2 │  │ Actor 3 │            │
+│   │ Counter │  │ Logger  │  │ Worker  │            │
+│   │ <0.123> │  │ <0.124> │  │ <0.125> │            │
 │   └─────────┘  └─────────┘  └─────────┘            │
-│                                                      │
-│   ┌─────────────────────────────────────┐          │
-│   │ beamtalk_repl_server (TCP listener) │          │
-│   └─────────────────────────────────────┘          │
 │        ↑              ↑              ↑              │
-└────────┼──────────────┼──────────────┼──────────────┘
-         │              │              │
-    ┌────┴────┐    ┌────┴────┐    ┌────┴────┐
-    │ REPL 1  │    │ REPL 2  │    │ REPL 3  │
-    │ (Term1) │    │ (Term2) │    │ (VSCode)│
-    └─────────┘    └─────────┘    └─────────┘
+│   ┌────┴────┐    ┌────┴────┐    ┌────┴────┐        │
+│   │ Session │    │ Session │    │ Session │        │
+│   │ alice   │    │ bob     │    │ vscode  │        │
+│   │ (REPL1) │    │ (REPL2) │    │ (ext)   │        │
+│   └─────────┘    └─────────┘    └─────────┘        │
+│                                                      │
+└─────────────────────────────────────────────────────┘
 ```
 
 **Behavior:**
 
 | Scenario | Behavior |
 |----------|----------|
-| Two REPLs, same workspace | Both see same actors, can send messages |
-| REPL 1 spawns actor | REPL 2 can interact with it (if named or pid known) |
-| REPL 1 defines class | REPL 2 sees new class after hot reload |
-| REPL 1 binds `x := 42` | REPL 2 does NOT see `x` (bindings are local) |
-| REPL 1 crashes | REPL 2 unaffected, actors survive |
+| Alice spawns actor | Bob and VSCode can see and message it |
+| Alice binds `counter := Counter spawn` | Bob does NOT see `counter` binding (local) |
+| Bob sends `<0.123> increment` | Same actor Alice spawned |
+| Alice reloads Counter module | Bob's actors get new code too |
+| Alice's REPL crashes | Actors survive, Bob unaffected |
 
 **Use cases:**
 
-1. **Pair programming:** Two developers, same workspace, different terminals
+1. **Pair programming:** Two developers, same workspace, same actors
 2. **Debugging:** One REPL for normal work, one for inspection
 3. **IDE integration:** VSCode extension connects alongside terminal REPL
 
-**Commands for multi-REPL awareness:**
-```erlang
-> Workspace sessions           % List connected REPLs
-#(#repl_1 -> <0.200.0>, #repl_2 -> <0.201.0>)
+**Workspace object for coordination:**
+```beamtalk
+Beamtalk sessions                  // List connected REPLs
+// #(#alice -> <0.200.0>, #bob -> <0.201.0>)
 
-> Workspace broadcast: "Taking a break"   % Notify other REPLs
-%% REPL 2 sees: [workspace] "Taking a break"
+Beamtalk broadcast: "Taking a break"   // Notify other REPLs
+// Bob and VSCode see: [workspace] "Taking a break"
+
+Beamtalk actorNamed: #myCounter    // Both Alice and Bob can access
 ```
 
 ### Workspace Metadata
@@ -1228,12 +1281,12 @@ Common issues and solutions:
 |---------|----------|----------|
 | **Workspace not responding** | `beamtalk repl` hangs or times out | Check if node is running: `ps aux \| grep beamtalk_workspace`. Kill stale process: `kill <PID>`. Then `beamtalk repl` creates fresh workspace. |
 | **Port conflict** | "Address already in use" on startup | Another workspace or process on same port. Use `beamtalk workspace list` to see ports. Stop conflicting workspace or use `--port <N>` to specify alternate. |
-| **Can't find my actor** | Variable unbound after reconnect | Actors survive, bindings don't. Use `Workspace actors` to list running actors, then rebind: `counter := Workspace actorNamed: #myCounter` |
-| **Wrong workspace** | Connected to different project's workspace | Check `Workspace projectPath`. Use `beamtalk workspace list` to see all, then `beamtalk repl --workspace <name>` to connect to specific one. |
+| **Can't find my actor** | Variable unbound after reconnect | Actors survive, bindings don't. Use `Beamtalk actors` to list running actors, then rebind: `counter := Beamtalk actorNamed: #myCounter` |
+| **Wrong workspace** | Connected to different project's workspace | Check `Beamtalk projectPath`. Use `beamtalk workspace list` to see all, then `beamtalk repl --workspace <name>` to connect to specific one. |
 | **Cookie mismatch** | "Connection refused" or "not allowed to connect" | Cookie file corrupted or mismatched. Delete `~/.beamtalk/workspaces/<id>/cookie` and restart workspace. |
 | **Orphaned workspace** | Workspace running but not in registry | Kill manually: find PID with `ps aux \| grep beamtalk_workspace_<name>`, then `kill <PID>`. Cleanup: `beamtalk workspace cleanup --force`. |
 | **Hot reload not working** | Changes to `.bt` file not reflected | Check compiler daemon is running. Try `:reload` in REPL. Verify module loaded: `code:which(counter)`. |
-| **Actor crashed** | `doesNotUnderstand:` or unexpected behavior | Check supervisor: `Workspace supervisor status`. Actor may have restarted with fresh state. Use `Workspace actorNamed:` to get new PID. |
+| **Actor crashed** | `doesNotUnderstand:` or unexpected behavior | Check supervisor: `Beamtalk supervisorStatus`. Actor may have restarted with fresh state. Use `Beamtalk actorNamed:` to get new PID. |
 
 ## Prior Art: Alternative Persistence Models
 
