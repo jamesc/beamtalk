@@ -106,26 +106,41 @@ handle_client(Socket, ReplPid) ->
 
 %% @private
 handle_client_loop(Socket, ReplPid) ->
-    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-        {ok, Data} ->
-            %% Send request to REPL server
-            ReplPid ! {client_request, Data, self()},
-            %% Wait for response
-            receive
-                {response, Response} ->
-                    gen_tcp:send(Socket, [Response, "\n"]),
-                    handle_client_loop(Socket, ReplPid)
-            after ?RECV_TIMEOUT ->
-                gen_tcp:send(Socket, [format_error(timeout), "\n"]),
+    try
+        case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+            {ok, Data} ->
+                %% Send request to REPL server
+                ReplPid ! {client_request, Data, self()},
+                %% Wait for response
+                receive
+                    {response, Response} ->
+                        case gen_tcp:send(Socket, [Response, "\n"]) of
+                            ok ->
+                                handle_client_loop(Socket, ReplPid);
+                            {error, SendError} ->
+                                %% Failed to send (e.g., broken pipe), close cleanly
+                                io:format(standard_error, "REPL client send error: ~p~n", [SendError]),
+                                gen_tcp:close(Socket)
+                        end
+                after ?RECV_TIMEOUT ->
+                    gen_tcp:send(Socket, [format_error(timeout), "\n"]),
+                    gen_tcp:close(Socket)
+                end;
+            {error, closed} ->
+                ok;
+            {error, timeout} ->
+                gen_tcp:close(Socket);
+            {error, RecvError} ->
+                io:format(standard_error, "REPL client recv error: ~p~n", [RecvError]),
                 gen_tcp:close(Socket)
-            end;
-        {error, closed} ->
-            ok;
-        {error, timeout} ->
-            gen_tcp:close(Socket);
-        {error, Reason} ->
-            logger:warning("REPL client error", #{reason => Reason}),
-            gen_tcp:close(Socket)
+        end
+    catch
+        Class:Reason:Stack ->
+            %% Unexpected crash in client handler - log and close cleanly
+            io:format(standard_error,
+                      "REPL client handler crash:~nClass: ~p~nReason: ~p~nStack: ~p~n",
+                      [Class, Reason, lists:sublist(Stack, 10)]),
+            catch gen_tcp:close(Socket)
     end.
 
 %%% Protocol Parsing and Formatting
