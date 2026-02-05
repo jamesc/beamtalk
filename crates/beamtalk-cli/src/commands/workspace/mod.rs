@@ -251,3 +251,103 @@ pub fn create_workspace(project_path: &Path) -> Result<WorkspaceMetadata> {
 
     Ok(metadata)
 }
+
+/// Start a detached BEAM node for a workspace.
+/// Returns the NodeInfo for the started node.
+#[allow(dead_code)] // Used in Phase 3
+pub fn start_detached_node(
+    workspace_id: &str,
+    port: u16,
+    runtime_beam_dir: &Path,
+    jsx_beam_dir: &Path,
+) -> Result<NodeInfo> {
+    use std::process::{Command, Stdio};
+
+    // Generate node name
+    let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
+
+    // Read cookie
+    let cookie = read_workspace_cookie(workspace_id)?;
+
+    // Build the eval command to start workspace supervisor
+    let project_path = get_workspace_metadata(workspace_id)?.project_path;
+    let project_path_str = project_path.to_string_lossy();
+    let eval_cmd = format!(
+        "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
+         application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
+         application:set_env(beamtalk_runtime, tcp_port, {port}), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
+                                                          project_path => <<\"{project_path_str}\">>, \
+                                                          tcp_port => {port}, \
+                                                          auto_cleanup => true}}), \
+         io:format(\"Workspace {workspace_id} started on port {port}~n\")."
+    );
+
+    // Start detached BEAM node
+    let args = vec![
+        "-detached".to_string(),
+        "-noshell".to_string(),
+        "-sname".to_string(),
+        node_name.clone(),
+        "-setcookie".to_string(),
+        cookie,
+        "-pa".to_string(),
+        runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        "-eval".to_string(),
+        eval_cmd,
+    ];
+
+    let child = Command::new("erl")
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| {
+            miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
+        })?;
+
+    // Get the PID
+    let pid = child.id();
+
+    // Create node info
+    let node_info = NodeInfo {
+        node_name: node_name.clone(),
+        port,
+        pid,
+    };
+
+    // Save node info
+    save_node_info(workspace_id, &node_info)?;
+
+    Ok(node_info)
+}
+
+/// Get or start a workspace node for the current directory.
+/// Returns (NodeInfo, bool) where bool indicates if a new node was started.
+#[allow(dead_code)] // Used in Phase 3
+pub fn get_or_start_workspace(
+    project_path: &Path,
+    port: u16,
+    runtime_beam_dir: &Path,
+    jsx_beam_dir: &Path,
+) -> Result<(NodeInfo, bool)> {
+    // Create workspace if it doesn't exist
+    let metadata = create_workspace(project_path)?;
+    let workspace_id = &metadata.workspace_id;
+
+    // Check if node is already running
+    if let Some(node_info) = get_node_info(workspace_id)? {
+        if is_node_running(&node_info) {
+            return Ok((node_info, false)); // Existing node
+        }
+        // Stale node.info file
+        cleanup_stale_node_info(workspace_id)?;
+    }
+
+    // Start new detached node
+    let node_info = start_detached_node(workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
+    Ok((node_info, true)) // New node started
+}
