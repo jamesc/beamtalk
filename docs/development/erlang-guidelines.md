@@ -472,7 +472,7 @@ build_error(Kind, Class) ->
 | Record | Type Alias | Use Case |
 |--------|------------|----------|
 | `#beamtalk_error{}` | `beamtalk_error:error()` | All error construction functions |
-| `#beamtalk_object{}` | `beamtalk_object:object()` | Object creation/spawn functions |
+| `#beamtalk_object{}` | `#beamtalk_object{}` | Object creation/spawn functions |
 | `#class_state{}` | Internal only | Class state in gen_server |
 
 **Example from codebase:**

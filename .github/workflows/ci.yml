@@ -56,6 +56,9 @@ jobs:
       - name: Format check
         run: just fmt-check
 
+      - name: Dialyzer type checking (Erlang runtime)
+        run: just dialyzer
+
       - name: Test Rust (unit + integration)
         run: just test-rust
 
@@ -64,9 +67,6 @@ jobs:
 
       - name: Test Erlang runtime (unit tests)
         run: just test-runtime
-
-      - name: Dialyzer type checking (Erlang runtime)
-        run: just dialyzer
 
       - name: Test Erlang runtime (integration tests)
         run: |
