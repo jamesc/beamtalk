@@ -104,7 +104,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3, spawn_with_registry/3, spawn_with_registry/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4]).
 
 %% gen_server callbacks (for generated actors to delegate to)
 -export([init/1, handle_cast/2, handle_call/3, handle_info/2,
@@ -127,6 +127,13 @@ start_link(Module, Args) ->
 -spec start_link(term(), module(), term()) -> {ok, pid()} | {error, term()}.
 start_link(Name, Module, Args) ->
     gen_server:start_link(Name, Module, Args, []).
+
+%% @doc Start an actor under the workspace actor supervisor.
+%% This is used by beamtalk_actor_sup with simple_one_for_one strategy.
+%% Module:Function should spawn the actor and return {ok, Pid}.
+-spec start_link_supervised(module(), atom(), list()) -> {ok, pid()} | {error, term()}.
+start_link_supervised(Module, Function, Args) ->
+    erlang:apply(Module, Function, Args).
 
 %% @doc Spawn an actor and register it with the REPL actor registry.
 %% Returns {ok, Pid} or {error, Reason}.
