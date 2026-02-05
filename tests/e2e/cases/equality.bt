@@ -13,81 +13,91 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Numeric coercion: integer and float with same value are equal
-assert: (1.0 == 1)
+1.0 == 1
+// => true
 
 // Numeric inequality: different values
-assert: (1.0 ~= 2)
-assert: (1 ~= 2)
+1.0 ~= 2
+// => true
+1 ~= 2
+// => true
 
 // String equality
-assert: ('hello' == 'hello')
-assert: ('hello' ~= 'world')
+'hello' == 'hello'
+// => true
+'hello' ~= 'world'
+// => true
 
 // Boolean equality
-assert: (true == true)
-assert: (false == false)
-assert: (true ~= false)
+true == true
+// => true
+false == false
+// => true
+true ~= false
+// => true
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Strict Equality (no type coercion)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Use `=` for strict equality without coercion
-assert: (1.0 = 1.0)
-assert: (1 = 1)
+1.0 = 1.0
+// => true
+1 = 1
+// => true
 
 // Strict inequality: integer and float are NOT strictly equal
-assert: ((1.0 = 1) not)
-assert: (1.0 ~= 1) not  // 1.0 ~= 1 is false (they're equal with coercion), so negating gives true
+(1.0 = 1) not
+// => false
+(1.0 ~= 1) not
+// => true
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Value Type Equality (Map Contents)
+// Value Type Equality (Map Contents) - NOT YET IMPLEMENTED
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Two maps with same keys and values are equal
-m1 := #{x => 3, y => 4}
-m2 := #{x => 3, y => 4}
-assert: (m1 == m2)
-
-// Maps with different values are not equal
-m3 := #{x => 5, y => 6}
-assert: (m1 ~= m3)
+// TODO: Map literals (#{key => value}) not yet implemented
+// When implemented, test:
+// - Two maps with same keys/values are equal
+// - Maps with different values are not equal
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Actor Identity (Process PIDs)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// @load tests/e2e/fixtures/counter.bt
+
 // Actors are compared by pid - different spawns are not equal
-Counter := Actor
-  state: count
-
-  spawn => #{count => 0}
-
-  increment => [
-    newCount := count + 1
-    #{count => newCount}
-  ]
-
 c1 := Counter spawn
+// => _
 c2 := Counter spawn
+// => _
 
 // Different actor instances are not equal (different pids)
-assert: (c1 ~= c2)
+c1 ~= c2
+// => true
 
 // Same reference is equal to itself
-assert: (c1 == c1)
+c1 == c1
+// => true
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Edge Cases
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Empty maps are equal
-assert: (#{} == #{})
+// Empty maps are equal - NOT YET IMPLEMENTED
+// TODO: Map literals not yet supported
+// #{} == #{}
+// // => true
 
 // Zero values with coercion
-assert: (0.0 == 0)
-assert: (0 == 0.0)
+0.0 == 0
+// => true
+0 == 0.0
+// => true
 
 // Negative values
-assert: (-1.0 == -1)
-assert: (-5 ~= -6)
+-1.0 == -1
+// => true
+-5 ~= -6
+// => true

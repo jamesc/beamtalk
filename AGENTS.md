@@ -119,8 +119,8 @@ count                                  ← This will fail (count was never set)
 **Rules for E2E tests:**
 1. **Every expression must have `// =>` assertion** (even if `// => _` for wildcard)
 2. **No assertion = no execution** (expressions are skipped)
-3. **Parser warns about missing assertions** (file name, line number, and expression)
-4. **Check warnings during test runs** to catch accidentally skipped expressions
+3. **Missing assertions cause test failures** (BT-249: warnings now treated as errors)
+4. **CI will fail** if any test file has expressions without assertions
 
 **Safe pattern:**
 ```beamtalk
@@ -142,21 +142,22 @@ counter increment
 // ❌ DANGEROUS - This looks fine but DOESN'T RUN!
 x := 0
 3 timesRepeat: [x := x + 1]   ← No assertion, SKIPPED!
-                               ← ⚠️ Parser will warn about this!
+                               ← ❌ ERROR! Test will fail in CI!
 x
 // => 3                        ← Will fail! x was never set because previous line didn't run
 ```
 
 **Verification:**
 ```bash
-# Run E2E tests - warnings will be shown for missing assertions
+# Run E2E tests - missing assertions will FAIL the build
 just test-e2e
 
-# Example warning output:
+# Example error output:
 # ⚠️  mytest.bt: Line 15: Expression will not be executed (missing // => assertion): count := 0
+# E2E tests failed: 1 of 287 tests failed
 ```
 
-**Parser warnings (BT-248):** The test parser now emits warnings when it finds expressions without assertions, making it easier to catch accidentally skipped tests.
+**Error enforcement (BT-249):** Missing assertions are treated as test failures, not just warnings. CI will catch broken tests before they're merged.
 
 ### Verification Checklist
 
@@ -1451,6 +1452,7 @@ just ci                      # Run all CI checks
 just fmt                     # Format all code
 just fmt-check               # Verify formatting
 just clippy                  # Lints (warnings = errors)
+just dialyzer                # Erlang type checking
 just test-rust               # Rust tests only
 just test-runtime            # Erlang runtime tests only
 
@@ -1466,7 +1468,27 @@ cargo fmt --all                           # Format all crates
 cargo fmt --all -- --check                # Verify formatting
 cargo clippy --all-targets -- -D warnings # Lints (warnings = errors)
 cargo test --all-targets                  # Run all tests
+cd runtime && rebar3 dialyzer             # Erlang type checking
 ```
+
+**Dialyzer (Erlang Type Checker):**
+
+Dialyzer performs static analysis on Erlang runtime code to catch type errors, incorrect specs, and unreachable code. It runs automatically in CI via `just lint`.
+
+```bash
+just dialyzer                # Run Dialyzer type checking
+cd runtime && rebar3 dialyzer # Direct rebar3 command
+```
+
+**Current configuration** (`runtime/rebar.config`):
+- Focuses on `error_handling` warnings (real bugs)
+- Disables `underspecs` and `unmatched_returns` (noisy, not bugs)
+- Future issues can address remaining spec precision improvements
+
+**When to run:**
+- Before committing Erlang runtime changes
+- After modifying function signatures or specs
+- CI runs automatically on every push/PR
 
 ### Workspace Commands (Planned - ADR 0004)
 
