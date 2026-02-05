@@ -207,14 +207,38 @@ impl BeamCompiler {
             .ok_or_else(|| miette::miette!("Failed to capture escript stderr"))?;
 
         // Prepare input: {OutputDir, [CoreFile1, CoreFile2, ...]}
-        // Escape paths to prevent injection attacks
+        // Use absolute paths since escript runs from temp_dir
+        let abs_output_dir = std::fs::canonicalize(&self.output_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to canonicalize output directory '{}'",
+                    self.output_dir
+                )
+            })?;
+        let abs_output_dir_str = abs_output_dir.to_string_lossy();
+
         let core_files_str: Vec<String> = core_files
             .iter()
-            .map(|p| format!("\"{}\"", escape_erlang_string(p.as_str())))
+            .map(|p| {
+                // Canonicalize each core file path to absolute
+                // Since we require output_dir to exist (it gets canonicalized above),
+                // core files should also exist and be canonicalizable
+                match std::fs::canonicalize(p.as_std_path()) {
+                    Ok(abs_path) => {
+                        format!("\"{}\"", escape_erlang_string(&abs_path.to_string_lossy()))
+                    }
+                    Err(e) => {
+                        // Log warning but continue - file may still be found if cwd is correct
+                        warn!("Failed to canonicalize '{}': {}. Using path as-is.", p, e);
+                        format!("\"{}\"", escape_erlang_string(p.as_str()))
+                    }
+                }
+            })
             .collect();
         let input = format!(
             "{{\"{}\",[{}]}}.\n",
-            escape_erlang_string(self.output_dir.as_str()),
+            escape_erlang_string(&abs_output_dir_str),
             core_files_str.join(",")
         );
 
