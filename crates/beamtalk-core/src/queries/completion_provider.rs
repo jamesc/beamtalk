@@ -49,7 +49,7 @@ use std::collections::HashSet;
 /// ```
 /// use beamtalk_core::queries::completion_provider::compute_completions;
 /// use beamtalk_core::language_service::Position;
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
@@ -235,7 +235,7 @@ mod tests {
     //! - Provide appropriate documentation and completion kinds
 
     use super::*;
-    use crate::parse::{lex_with_eof, parse};
+    use crate::source_analysis::{lex_with_eof, parse};
 
     #[test]
     fn compute_completions_includes_keywords() {

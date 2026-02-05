@@ -66,7 +66,7 @@ use beamtalk_core::parse::{lex, parse};
 use beamtalk_core::codegen::generate_core_erlang;
 
 // ❌ BAD - Core depends on CLI (NEVER DO THIS)
-// crates/beamtalk-core/src/parse/lexer.rs
+// crates/beamtalk-core/src/source_analysis/lexer.rs
 use beamtalk_cli::repl::ReplContext; // ❌ WRONG!
 ```
 
@@ -210,7 +210,7 @@ The beamtalk test suite follows the **testing pyramid** pattern: many fast unit 
 
 **Example:**
 ```rust
-// crates/beamtalk-core/src/parse/lexer.rs
+// crates/beamtalk-core/src/source_analysis/lexer.rs
 #[cfg(test)]
 mod tests {
     use super::*;

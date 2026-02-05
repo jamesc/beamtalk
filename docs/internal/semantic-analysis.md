@@ -27,14 +27,14 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
 
 The semantic analysis module structure exists with type definitions:
 
-- **Module**: `crates/beamtalk-core/src/analyse/mod.rs`
+- **Module**: `crates/beamtalk-core/src/semantic_analysis/mod.rs`
   - `AnalysisResult` - Container for diagnostics and block metadata
   - `BlockInfo` - Block context, captures, and mutations
   - `BlockContext` - Enum for control flow, stored, passed contexts
   - `CapturedVar`, `Mutation`, `MutationKind` - Analysis metadata types
   - `analyse()` - Public API (currently returns empty result)
 
-- **Scope tracking**: `crates/beamtalk-core/src/analyse/scope.rs`
+- **Scope tracking**: `crates/beamtalk-core/src/semantic_analysis/scope.rs`
   - `Scope` - Hierarchical scope tracker with push/pop
   - `Binding` - Value object with name, span, depth, kind, and optional type annotation
   - `BindingKind` - Enum distinguishing Local, Parameter, InstanceField, ClassField
@@ -42,7 +42,7 @@ The semantic analysis module structure exists with type definitions:
   - Depth tracking (module, class, method, block)
   - Full test coverage (17 tests)
 
-- **Error types**: `crates/beamtalk-core/src/analyse/error.rs`
+- **Error types**: `crates/beamtalk-core/src/semantic_analysis/error.rs`
   - `SemanticError` and `SemanticErrorKind`
   - Error types: undefined variables, unused variables, mutated captures, escaping blocks
 
@@ -111,7 +111,7 @@ crates/beamtalk-core/src/
 
 ## Key Types
 
-Current implementation in `crates/beamtalk-core/src/analyse/mod.rs`:
+Current implementation in `crates/beamtalk-core/src/semantic_analysis/mod.rs`:
 
 ```rust
 /// Result of semantic analysis

@@ -12,7 +12,7 @@
 // Suppress unused_assignments for struct fields used by derive macros
 #![allow(unused_assignments)]
 
-use beamtalk_core::parse::{Diagnostic as CoreDiagnostic, Severity};
+use beamtalk_core::source_analysis::{Diagnostic as CoreDiagnostic, Severity};
 use miette::{Diagnostic, SourceSpan};
 
 /// A compilation diagnostic with rich formatting.
@@ -63,7 +63,7 @@ impl CompileDiagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beamtalk_core::parse::Span;
+    use beamtalk_core::source_analysis::Span;
 
     #[test]
     fn test_from_core_diagnostic_error() {

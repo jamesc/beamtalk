@@ -15,7 +15,7 @@
 //! This module implements the `Binding` value object from the DDD model.
 
 use crate::ast::TypeAnnotation;
-use crate::parse::Span;
+use crate::source_analysis::Span;
 use std::collections::HashMap;
 
 /// Tracks variable definitions across nested scopes.

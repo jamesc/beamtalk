@@ -336,7 +336,7 @@ pub fn check_escript_available() -> Result<()> {
 /// ```no_run
 /// use beamtalk_cli::beam_compiler::write_core_erlang;
 /// use beamtalk_core::ast::Module;
-/// use beamtalk_core::parse::Span;
+/// use beamtalk_core::source_analysis::Span;
 /// use camino::Utf8PathBuf;
 ///
 /// let module = Module::new(Vec::new(), Span::new(0, 0));
@@ -373,7 +373,7 @@ pub fn write_core_erlang(
 mod tests {
     use super::*;
     use beamtalk_core::ast::Module;
-    use beamtalk_core::parse::Span;
+    use beamtalk_core::source_analysis::Span;
     use std::fs;
     use tempfile::TempDir;
 

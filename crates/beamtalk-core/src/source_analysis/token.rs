@@ -303,7 +303,7 @@ impl Trivia {
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::parse::{Token, TokenKind, Span};
+/// use beamtalk_core::source_analysis::{Token, TokenKind, Span};
 ///
 /// let token = Token::new(TokenKind::Identifier("foo".into()), Span::new(0, 3));
 /// assert!(matches!(token.kind(), TokenKind::Identifier(_)));

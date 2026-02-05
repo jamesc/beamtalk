@@ -14,13 +14,13 @@
 
 #![doc = include_str!("../../../README.md")]
 
-pub mod analyse;
 pub mod ast;
 pub mod codegen;
 pub mod erlang;
 pub mod language_service;
-pub mod parse;
 pub mod queries;
+pub mod semantic_analysis;
+pub mod source_analysis;
 
 /// Re-export commonly used types.
 pub mod prelude {
@@ -32,5 +32,5 @@ pub mod prelude {
         Completion, CompletionKind, HoverInfo, LanguageService, Location, Position,
         SimpleLanguageService,
     };
-    pub use crate::parse::Span;
+    pub use crate::source_analysis::Span;
 }

@@ -12,7 +12,7 @@ The current parser is already well-structured for IDE-first development. The mai
 
 ### Current Parser
 
-The parser (`crates/beamtalk-core/src/parse/parser.rs`, ~1,642 LOC) uses recursive descent with:
+The parser (`crates/beamtalk-core/src/source_analysis/parser.rs`, ~1,642 LOC) uses recursive descent with:
 - Comprehensive error recovery at statement boundaries
 - Trivia preservation for IDE formatting
 - Precise source spans on all AST nodes
@@ -36,7 +36,7 @@ Currently, binary precedence is split across three nearly identical methods:
 
 Pratt parsing (top-down operator precedence parsing) uses a binding power table to handle operator precedence declaratively.
 
-**Prototype:** `crates/beamtalk-core/src/parse/parser_pratt.rs` (~120 LOC core, ~280 LOC with tests)
+**Prototype:** `crates/beamtalk-core/src/source_analysis/parser_pratt.rs` (~120 LOC core, ~280 LOC with tests)
 
 **How it works:**
 ```rust
@@ -132,7 +132,7 @@ Tools like `lalrpop` or `pest` were not evaluated because:
 4. ✅ Added edge case tests for unknown operators and single operand expressions
 5. ✅ Removed `parser_pratt.rs` prototype (functionality integrated into main parser)
 
-**Location:** `crates/beamtalk-core/src/parse/parser.rs`
+**Location:** `crates/beamtalk-core/src/source_analysis/parser.rs`
 - `BindingPower` struct (lines ~70-95)
 - `binary_binding_power()` function (lines ~97-130)
 - `parse_binary_with_pratt()` method in Parser
@@ -169,4 +169,4 @@ Chumsky was not adopted because it provides the same underlying algorithm with m
 - [Pratt Parsing Made Easy](https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html) - matklad's tutorial
 - [rust-analyzer parser](https://github.com/rust-lang/rust-analyzer/tree/master/crates/parser) - Production Pratt parser example
 - [Simple but Powerful Pratt Parsing](https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/) - Bob Nystrom's explanation
-- Implementation: `crates/beamtalk-core/src/parse/parser.rs` (search for `binary_binding_power`)
+- Implementation: `crates/beamtalk-core/src/source_analysis/parser.rs` (search for `binary_binding_power`)
