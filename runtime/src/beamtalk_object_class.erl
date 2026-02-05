@@ -449,8 +449,43 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State}.
 
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
+    %% Handle async message dispatch (Future protocol)
+    case Msg of
+        {Selector, Args, FuturePid} ->
+            %% Async message with Future - dispatch and resolve/reject the future
+            %% Match the same selectors as handle_call
+            case {Selector, Args} of
+                {methods, []} ->
+                    Result = maps:keys(Methods),
+                    FuturePid ! {resolve, Result},
+                    {noreply, State};
+                {superclass, []} ->
+                    Result = State#class_state.superclass,
+                    FuturePid ! {resolve, Result},
+                    {noreply, State};
+                {class_name, []} ->
+                    Result = State#class_state.name,
+                    FuturePid ! {resolve, Result},
+                    {noreply, State};
+                {module_name, []} ->
+                    Result = State#class_state.module,
+                    FuturePid ! {resolve, Result},
+                    {noreply, State};
+                {{method, _MethodSelector}, _} ->
+                    %% For method lookup, just reject - this is complex
+                    Error = {error, not_supported_in_async},
+                    FuturePid ! {reject, Error},
+                    {noreply, State};
+                _ ->
+                    %% Unknown message
+                    Error = {error, {unknown_class_message, Selector}},
+                    FuturePid ! {reject, Error},
+                    {noreply, State}
+            end;
+        _ ->
+            {noreply, State}
+    end.
 
 handle_info(_Info, State) ->
     {noreply, State}.

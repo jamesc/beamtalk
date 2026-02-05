@@ -324,10 +324,10 @@ dispatch(allClasses, [], _Receiver) ->
     [beamtalk_object_class:class_name(Pid) || Pid <- Pids];
 
 dispatch('classNamed:', [ClassName], _Receiver) when is_atom(ClassName) ->
-    %% Look up a class by name, return pid or nil
+    %% Look up a class by name, return wrapped class object or nil
     case beamtalk_object_class:whereis_class(ClassName) of
         undefined -> nil;
-        Pid -> Pid
+        Pid -> {beamtalk_object, ClassName, beamtalk_object_class, Pid}
     end;
 
 dispatch(globals, [], _Receiver) ->
