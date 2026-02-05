@@ -1318,6 +1318,12 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `whats-next` | `/whats-next` | Get recommendations for what to work on next |
 | `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
 | `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
+| `code-review` | `/code-review` | Review current branch changes vs main |
+| `final-reviewer` | `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
+
+**Note:** `@final-reviewer` can accept a Linear issue ID or PR number:
+- `@final-reviewer BT-123` - Find PR for issue, checkout branch, review
+- `@final-reviewer #225` - Checkout PR #225, review
 | `add-ast-node` | "add AST node" | Add a new AST node to the compiler |
 | `add-cli-command` | "add CLI command" | Add a new command to the CLI |
 | `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
