@@ -1501,6 +1501,67 @@ All source files must include Apache 2.0 header:
 - **No periods**: Newlines separate statements, not `.`
 - **Comments**: Use `//` and `/* */`, not Smalltalk's `"..."`
 
+### Logging Strategy
+
+The beamtalk CLI uses the `tracing` crate for structured logging and instrumentation.
+
+**When to use each log level:**
+
+| Level | Use For | Example |
+|-------|---------|---------|
+| `trace!` | Very detailed execution flow, function entry/exit | Function parameters, loop iterations |
+| `debug!` | Internal state, diagnostics useful during development | File paths, intermediate values, compilation steps |
+| `info!` | Important milestones and successful operations | "Starting build", "Compilation completed" |
+| `warn!` | Recoverable issues, deprecation warnings | "Failed to clean up temp file", "Using fallback" |
+| `error!` | Errors that affect user operations | Compilation errors, file not found |
+
+**Instrumentation best practices:**
+
+1. **Use `#[instrument]` for spans** - Add to key functions to create automatic spans:
+   ```rust
+   #[instrument(skip_all, fields(path = %path))]
+   pub fn build(path: &str) -> Result<()> { ... }
+   ```
+
+2. **Skip sensitive data** - Use `skip` or `skip_all` to avoid logging secrets:
+   ```rust
+   #[instrument(skip(password))]
+   fn authenticate(user: &str, password: &str) { ... }
+   ```
+
+3. **Add structured fields** - Include key-value pairs for better filtering:
+   ```rust
+   info!(count = files.len(), "Found source files");
+   ```
+
+4. **Keep user output separate** - Use `println!` for user-facing output, tracing for diagnostics:
+   ```rust
+   println!("Building {} files...", count);  // User sees this
+   info!(count, "Starting build");           // Logged when RUST_LOG is set
+   ```
+
+**Enabling logging:**
+
+```bash
+# Development - see debug output
+RUST_LOG=beamtalk_cli=debug beamtalk build examples/
+
+# Production - errors and warnings only
+RUST_LOG=warn beamtalk build myproject/
+
+# Full trace for debugging
+RUST_LOG=beamtalk_cli=trace beamtalk build test.bt
+
+# Multiple modules
+RUST_LOG=beamtalk_cli=debug,beamtalk_core=info beamtalk build
+```
+
+**What NOT to log:**
+- User-facing output (use `println!` instead)
+- Sensitive data (passwords, tokens, credentials)
+- High-frequency operations in hot paths (use `trace!` sparingly)
+- Duplicate information already in `println!` output
+
 ---
 
 ## File Conventions

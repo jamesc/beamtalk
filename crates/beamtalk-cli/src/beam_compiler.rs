@@ -34,6 +34,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use tracing::{debug, instrument, warn};
 
 /// Embedded compile.escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
@@ -136,7 +137,12 @@ impl BeamCompiler {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[allow(clippy::too_many_lines)]
+    #[instrument(skip_all, fields(file_count = core_files.len(), output_dir = %self.output_dir))]
     pub fn compile_batch(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
+        debug!(
+            "Starting batch compilation of {} Core Erlang files",
+            core_files.len()
+        );
         // Check if escript is available
         check_escript_available()?;
 
@@ -154,6 +160,10 @@ impl BeamCompiler {
             std::process::id(),
             counter
         ));
+        debug!(
+            "Writing escript to temporary file: {}",
+            escript_path.display()
+        );
         std::fs::write(&escript_path, COMPILE_ESCRIPT)
             .into_diagnostic()
             .wrap_err("Failed to write compile escript")?;
@@ -172,6 +182,7 @@ impl BeamCompiler {
         // Start the escript process with explicit working directory
         // Use temp_dir as working directory to avoid getcwd() errors
         // when test temp directories are deleted before subprocess completes
+        debug!("Spawning escript process");
         let mut child = Command::new("escript")
             .arg(&escript_path)
             .current_dir(&temp_dir)
@@ -269,9 +280,10 @@ impl BeamCompiler {
 
         // Clean up temporary escript file
         if let Err(err) = std::fs::remove_file(&escript_path) {
-            eprintln!(
-                "Warning: failed to remove temporary escript file '{}': {err}",
-                escript_path.display()
+            warn!(
+                "Failed to remove temporary escript file '{}': {}",
+                escript_path.display(),
+                err
             );
         }
 
@@ -282,9 +294,14 @@ impl BeamCompiler {
             } else {
                 format!("Compilation failed:\n{}", error_messages.join("\n"))
             };
+            debug!("Compilation failed with status: {:?}", status);
             miette::bail!(error_msg);
         }
 
+        debug!(
+            beam_count = compiled_modules.len(),
+            "Compilation completed successfully"
+        );
         Ok(compiled_modules)
     }
 }

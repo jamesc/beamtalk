@@ -70,6 +70,14 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    // Initialize tracing subscriber with RUST_LOG environment variable support
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .init();
+
     // Install miette's fancy error handler
     miette::set_hook(Box::new(|_| {
         Box::new(
