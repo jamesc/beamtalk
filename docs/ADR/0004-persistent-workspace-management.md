@@ -187,17 +187,17 @@ Beamtalk can combine the best of both worlds:
 **Architecture:**
 
 ```erlang
-%% Workspace supervisor (top-level)
-beamtalk_workspace_sup
-  ├─ beamtalk_workspace_registry  % Track active workspaces
-  ├─ beamtalk_workspace_cleaner   % Auto-cleanup abandoned workspaces
-  └─ per-workspace supervision tree
-       ├─ beamtalk_repl_server    % TCP server for REPL connections
-       ├─ beamtalk_workspace_meta % Workspace metadata (last_active)
-       └─ user_actor_sup          % Supervise spawned actors
-            ├─ Counter#<0.123.0>
-            ├─ Logger#<0.124.0>
-            └─ ...
+%% Per-node supervisor (inside each workspace node)
+beamtalk_node_sup
+  ├─ beamtalk_repl_server      % TCP server for REPL connections
+  ├─ beamtalk_idle_monitor     % Tracks activity, self-terminates if idle
+  ├─ beamtalk_session_sup      % Supervises per-session actor trees
+  │    ├─ session_alice_sup    % Session "alice" actors
+  │    │    ├─ Counter#<0.123.0>
+  │    │    └─ Logger#<0.124.0>
+  │    └─ session_bob_sup      % Session "bob" actors
+  │         └─ Counter#<0.456.0>
+  └─ beamtalk_workspace_meta   % Metadata (project path, created_at)
 ```
 
 **Features:**
@@ -214,6 +214,94 @@ beamtalk_workspace_sup
 ## Decision
 
 **Implement persistent workspaces using detached BEAM nodes with supervision trees, not Pharo-style image snapshots.**
+
+### Key Concepts: Nodes vs Sessions
+
+The design distinguishes between two levels of isolation:
+
+| Concept | What it is | Isolation level | Lifecycle |
+|---------|------------|-----------------|-----------|
+| **Node** | BEAM OS process | Code + full runtime | Long-lived (project or production) |
+| **Session** | Supervision tree within node | Actor state only | Ephemeral (per REPL connection) |
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Node: banking_dev@localhost                                  │
+│                                                              │
+│   Code Server: Counter, Account, Logger (one version each)  │
+│                                                              │
+│   ┌─────────────────┐  ┌─────────────────┐                  │
+│   │ Session: alice  │  │ Session: bob    │  ← Same code,    │
+│   │ (sup tree)      │  │ (sup tree)      │    isolated actors│
+│   │ counter <0.123> │  │ counter <0.456> │                  │
+│   └─────────────────┘  └─────────────────┘                  │
+│         ↑                      ↑                             │
+│    Terminal 1             Terminal 2                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Why this distinction matters:**
+
+- **Nodes isolate code** — BEAM has one code server per node. Different module versions require different nodes.
+- **Sessions isolate actors** — Same code, separate actor hierarchies. Cheaper than spinning up new nodes.
+
+| Scenario | Same node? | Why |
+|----------|------------|-----|
+| Two terminals, same project | ✓ Yes (two sessions) | Same code, just parallel work |
+| Feature branch experiment | ✗ No (separate node) | Different code versions |
+| Attach to production | ✓ Yes (new session) | Debug without affecting running services |
+| Two unrelated projects | ✗ No (separate nodes) | Completely different code |
+
+### Development vs Production
+
+Workspaces serve different purposes in development and production:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ DEVELOPMENT                                                  │
+│                                                              │
+│   beamtalk repl                                              │
+│   - Auto-creates node for project directory                  │
+│   - Auto-creates session for this terminal                   │
+│   - Auto-cleanup after 4 hours idle                          │
+│   - Hot reload from source files                             │
+│                                                              │
+│   beamtalk repl --session experiment                         │
+│   - Same node (same code)                                    │
+│   - New session (isolated actors)                            │
+│                                                              │
+│   beamtalk repl --workspace feature-x                        │
+│   - Different node (can have different code)                 │
+│   - Useful for testing breaking changes                      │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ PRODUCTION                                                   │
+│                                                              │
+│   # Started by systemd/Docker/k8s                            │
+│   beamtalk run server.bt --name prod@host                    │
+│   - Runs as daemon, no auto-cleanup                          │
+│   - Application supervisor manages services                  │
+│                                                              │
+│   # Live debugging (attach session to running node)          │
+│   beamtalk attach prod@host                                  │
+│   - Creates debug session in production node                 │
+│   - Can inspect actors, send messages, hot reload            │
+│   - Detach when done, node keeps running                     │
+│                                                              │
+│   # Or use standard OTP releases                             │
+│   beamtalk build --release                                   │
+│   ./rel/myapp/bin/myapp start                                │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key insight:** The same attach mechanism works for both:
+- **Dev:** `beamtalk repl` → auto-create node + session
+- **Prod:** `beamtalk attach` → session on existing node
+
+This is `erl -remsh` / `iex --remsh` productized with automatic node discovery and cookie management.
 
 ### Rationale
 
@@ -265,15 +353,44 @@ Current directory: /home/user/project-a
 
 #### 3. Automatic Cleanup
 
+Cleanup targets **nodes** (not sessions). Sessions are ephemeral and just die when REPL disconnects.
+
 ```erlang
-%% Workspace cleaner runs every 10 minutes
+%% Node cleaner runs every 10 minutes (inside each node, self-terminating)
 -define(MAX_IDLE_TIME, 3600 * 4).  % 4 hours
 
-cleanup_stale_workspaces() ->
-    Workspaces = beamtalk_workspace_registry:list(),
-    Now = erlang:system_time(second),
-    [shutdown_workspace(Id) || {Id, #{last_active := LastActive}} <- Workspaces,
-                                Now - LastActive > ?MAX_IDLE_TIME].
+check_idle() ->
+    case has_active_sessions() orelse has_recent_activity() of
+        true -> ok;  % Keep running
+        false ->
+            case idle_time() > ?MAX_IDLE_TIME of
+                true -> init:stop();  % Self-terminate
+                false -> ok
+            end
+    end.
+```
+
+**What counts as "activity":**
+- Session connected (even if idle in REPL)
+- Actor message sent/received
+- Code hot-reloaded
+- Any user interaction
+
+**Cleanup mechanism (no external daemon):**
+
+| Component | Responsibility |
+|-----------|----------------|
+| **Node self-monitor** | Each node tracks `last_active`, self-terminates if idle too long |
+| **CLI on startup** | `beamtalk repl` checks for orphan files (node died but files remain), cleans up |
+| **Production nodes** | Started with `--persistent` or via systemd — never auto-cleanup |
+
+```bash
+# Development node: auto-cleanup enabled
+beamtalk repl                        # Creates node, will auto-terminate if idle
+
+# Production node: auto-cleanup disabled
+beamtalk run server.bt --persistent  # Never self-terminates
+systemctl start myapp                # Managed externally, no beamtalk cleanup
 ```
 
 #### 4. Actor Supervision
@@ -300,6 +417,236 @@ Compiler Daemon:
 code_change(OldVsn, State, _Extra) ->
     %% Migrate state to new format if needed
     {ok, migrate_state(State)}.
+
+### Class Definition Hot Reload
+
+**The hardest problem in live coding:** What happens to existing actor instances when you modify a class definition?
+
+**Important limitation:** Hot reloaded code is **memory-only**. If the node restarts, it loads code from disk (release files), not the hot-reloaded version. This is a fundamental BEAM characteristic — hot reload is for immediate fixes, not persistent changes. To persist changes across restarts, you must update source files and redeploy.
+
+```beamtalk
+// Original Counter.bt
+class Counter
+  @value := 0
+  
+  increment
+    @value := @value + 1
+end
+```
+
+```erlang
+> counter := Counter spawn
+> counter increment   % @value = 1
+> counter increment   % @value = 2
+```
+
+Now you modify Counter.bt:
+
+```beamtalk
+// Modified Counter.bt  
+class Counter
+  @value := 0
+  @step := 1          // NEW: added instance variable
+  
+  increment
+    @value := @value + @step   // CHANGED: uses @step
+  
+  step: newStep       // NEW: setter
+    @step := newStep
+end
+```
+
+**Hot reload behavior:**
+
+| Change Type | Behavior | Notes |
+|-------------|----------|-------|
+| **New method** | Available immediately | Existing actors gain new method |
+| **Modified method** | Takes effect on next call | No state change needed |
+| **Removed method** | `doesNotUnderstand:` on next call | Calling removed method fails |
+| **New instance variable** | **Defaults to nil** | `@step` is `nil` until set |
+| **Removed instance variable** | **Orphaned** | Old data in state, inaccessible |
+| **Renamed instance variable** | **Both orphaned and nil** | Old name orphaned, new name nil |
+
+**Example after hot reload:**
+
+```erlang
+> counter increment   
+%% ERROR: @step is nil, can't add nil to integer!
+
+> counter step: 1     % Set the new variable
+> counter increment   % Now works: @value = 3
+```
+
+**Strategies for safe upgrades:**
+
+1. **code_change/3 callback** (recommended for critical actors):
+   ```beamtalk
+   class Counter
+     codeChange: oldVersion state: oldState extra: extra
+       // Migrate state: add default for @step
+       self step: (oldState at: #step ifAbsent: [1])
+   end
+   ```
+
+2. **Lazy initialization** (recommended for simple cases):
+   ```beamtalk
+   step
+     @step ifNil: [@step := 1].
+     ^ @step
+   ```
+
+3. **Versioned spawning** (for incompatible changes):
+   ```erlang
+   > oldCounter := Counter spawn       % Old version
+   > newCounter := CounterV2 spawn     % New version
+   > newCounter migrateFrom: oldCounter
+   ```
+
+**Key insight:** BEAM's hot reload is *module-level*, not *instance-level*. All instances of a class share the same code. When code changes:
+- **Code pointer updates** — next method call uses new code
+- **State unchanged** — instance variables retain their values
+- **Shape mismatch** — new variables are nil, removed variables are orphaned
+
+This is different from Smalltalk, where you can modify individual methods and the change applies immediately to all instances. Beamtalk's approach is BEAM-native: reload the module, let actors handle migration.
+```
+
+### REPL Binding Persistence
+
+**Important distinction:** Workspaces preserve *running actors*, not *REPL variable bindings*.
+
+```erlang
+%% Session 1
+> counter := Counter spawn    % Creates actor, binds to 'counter'
+> counter increment           % Works
+> counter increment           % Works
+%% Disconnect
+
+%% Session 2 (reconnect)
+> counter increment           % ERROR: 'counter' is unbound!
+```
+
+**Why?** REPL bindings are local to the Erlang shell process. When you disconnect, that process dies. The *actor* (a separate process) survives, but the *variable* pointing to it does not.
+
+**Solutions:**
+
+1. **Named actors (recommended for important actors):**
+   ```erlang
+   > counter := Counter spawnAs: #myCounter
+   %% Reconnect later
+   > counter := Actor named: #myCounter   % Rebind to existing actor
+   > counter increment                    % Works!
+   ```
+
+2. **Workspace actor registry:**
+   ```erlang
+   > Workspace actors   % List all supervised actors
+   #(#myCounter -> <0.123.0>, #logger -> <0.124.0>)
+   
+   > Workspace actorNamed: #myCounter   % Get actor by name
+   <0.123.0>
+   ```
+
+3. **Session restore (future enhancement):**
+   ```erlang
+   %% On reconnect, REPL could auto-restore bindings from registry
+   > :bindings              % Show available bindings
+   counter = <0.123.0> (Counter)
+   logger = <0.124.0> (Logger)
+   
+   > :restore counter       % Rebind 'counter' to the actor
+   ```
+
+**Mental model:** Think of workspaces like a server room. Actors are servers that keep running. REPL bindings are sticky notes on your desk pointing to servers. When you leave, the sticky notes get thrown away, but the servers keep running. You can write new sticky notes when you return.
+
+### Security and Node Authentication
+
+Workspaces use Erlang's distributed node authentication via **cookies**:
+
+```
+~/.beamtalk/
+├── workspaces/
+│   ├── my-feature/
+│   │   ├── cookie          # Random 32-char secret
+│   │   ├── node.info       # Node name, port, PID
+│   │   └── metadata.json   # Project path, created_at, etc.
+│   └── b7a3f9.../
+│       └── ...
+└── config.toml             # Global settings
+```
+
+**Cookie generation:**
+```erlang
+%% On workspace creation
+Cookie = base64:encode(crypto:strong_rand_bytes(24)),
+file:write_file(CookiePath, Cookie),
+file:change_mode(CookiePath, 8#600).  % Owner read/write only
+```
+
+**Security properties:**
+
+| Property | Implementation |
+|----------|----------------|
+| **Isolation** | Each workspace has unique cookie—can't connect to wrong workspace |
+| **Local-only** | Nodes bind to `127.0.0.1` by default (no network exposure) |
+| **File permissions** | Cookie files are `chmod 600` (owner only) |
+| **No shared secrets** | Workspaces don't share cookies with each other |
+
+**Advanced: Remote workspaces (future)**
+```bash
+# Enable network access (explicit opt-in)
+beamtalk workspace create my-feature --network
+
+# Connect from another machine
+beamtalk repl --remote user@host:~/project-a
+```
+
+### Multi-REPL Same-Workspace Support
+
+Multiple REPL sessions can connect to the same workspace simultaneously:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Workspace: my-feature (BEAM node)                   │
+│                                                      │
+│   ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│   │ Actor 1 │  │ Actor 2 │  │ Actor 3 │            │
+│   └─────────┘  └─────────┘  └─────────┘            │
+│                                                      │
+│   ┌─────────────────────────────────────┐          │
+│   │ beamtalk_repl_server (TCP listener) │          │
+│   └─────────────────────────────────────┘          │
+│        ↑              ↑              ↑              │
+└────────┼──────────────┼──────────────┼──────────────┘
+         │              │              │
+    ┌────┴────┐    ┌────┴────┐    ┌────┴────┐
+    │ REPL 1  │    │ REPL 2  │    │ REPL 3  │
+    │ (Term1) │    │ (Term2) │    │ (VSCode)│
+    └─────────┘    └─────────┘    └─────────┘
+```
+
+**Behavior:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Two REPLs, same workspace | Both see same actors, can send messages |
+| REPL 1 spawns actor | REPL 2 can interact with it (if named or pid known) |
+| REPL 1 defines class | REPL 2 sees new class after hot reload |
+| REPL 1 binds `x := 42` | REPL 2 does NOT see `x` (bindings are local) |
+| REPL 1 crashes | REPL 2 unaffected, actors survive |
+
+**Use cases:**
+
+1. **Pair programming:** Two developers, same workspace, different terminals
+2. **Debugging:** One REPL for normal work, one for inspection
+3. **IDE integration:** VSCode extension connects alongside terminal REPL
+
+**Commands for multi-REPL awareness:**
+```erlang
+> Workspace sessions           % List connected REPLs
+#(#repl_1 -> <0.200.0>, #repl_2 -> <0.201.0>)
+
+> Workspace broadcast: "Taking a break"   % Notify other REPLs
+%% REPL 2 sees: [workspace] "Taking a break"
 ```
 
 ### Workspace Metadata
@@ -366,6 +713,39 @@ beamtalk repl
 5. **Workspace discovery**: Heuristics (directory-based) may not always match user intent
 6. **Node management complexity**: Need to track node names, ports, cookies
 7. **No UI persistence**: Can't save debugger state, open windows (terminal-only anyway)
+8. **Hot reload not persisted**: Code changes are memory-only; node restart loads from disk (see "Class Definition Hot Reload")
+
+### Open Questions
+
+**Source code in production releases:**
+
+Following BEAM conventions (Erlang, Elixir, Gleam), production releases ship `.beam` files only, not source. This keeps deploys small and source private. However, this creates tension with Smalltalk-style workflows:
+
+- **`:save Counter`** — A future feature to persist hot-reloaded code back to source files would require source to be present (or reconstructible) on the production server.
+- **Decompilation** — Reconstructing `.bt` from BEAM loses comments, formatting, and possibly semantic information.
+- **Embedded source** — Storing source in BEAM metadata (like Elixir's `@doc`) is possible but increases artifact size.
+
+This is a philosophical choice: How Smalltalk-like should production be? Pharo's image model doesn't have this problem because source and bytecode live together. BEAM's separation forces a decision.
+
+**Options (not decided):**
+1. Ship `.beam` only (BEAM convention) — `:save` is dev-only
+2. Opt-in `--include-source` for releases that need it
+3. Embed source in BEAM metadata, extract on `:save`
+4. `:save` pushes to remote git repo, not local disk
+
+This decision is deferred to a future ADR on build/release tooling.
+
+**Package management in workspaces:**
+
+Workspaces need to load project dependencies (packages). When a workspace node starts, it must add all dependency `ebin/` directories to the code path. Key considerations:
+
+- File format (Tonel-style, flat `.bt`, Mix project structure)
+- Build tool integration (Mix handles Erlang + Elixir deps natively, access to Hex.pm)
+- Compiled dependency caching (per-project vs shared cache)
+- Version conflicts across workspaces (different nodes can have different versions)
+- Hot reloading dependencies in running workspaces
+
+This is deferred to a separate ADR on package management and build tooling.
 
 ### Neutral
 
@@ -507,6 +887,353 @@ counter := Counter spawnPersistent: #{db => mnesia, table => counters}
    - Add workspace naming/renaming
    - Integrate with Observer and debugging tools
    - Add workspace resource monitoring
+
+## Future Considerations: Namespaces
+
+A future ADR will address namespaces (à la GNU Smalltalk). This section captures how namespaces would interact with workspaces.
+
+### The Two Axes of Isolation
+
+| Dimension | What it isolates | Mechanism |
+|-----------|------------------|-----------|
+| **Namespace** | Class definitions, name bindings | Compile-time name resolution |
+| **Workspace** | Running processes, actor state | Runtime BEAM nodes |
+
+These are **orthogonal**—you need both, and they compose:
+
+```
+                    Namespace A         Namespace B
+                   ┌───────────────┬───────────────┐
+    Workspace 1    │ Counter (v1)  │ Counter (v2)  │  ← Same node, different namespaces
+    (BEAM node)    │ Actor <0.123> │ Actor <0.456> │
+                   ├───────────────┼───────────────┤
+    Workspace 2    │ Counter (v1)  │ Counter (v2)  │  ← Different node, same namespaces
+    (BEAM node)    │ Actor <0.789> │ Actor <0.012> │
+                   └───────────────┴───────────────┘
+```
+
+### Design Questions for Future ADR
+
+**1. Where do namespaces live?**
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| **Per-workspace** | Each workspace has its own namespace tree | Full isolation, can experiment freely | Code not shared, duplication |
+| **Global (code-level)** | Namespaces defined in source files, loaded into workspaces | Source-of-truth in files, hot reload works | All workspaces see same namespace structure |
+| **Hybrid** | Source defines namespaces, workspaces can overlay/shadow | Flexible, experimental-friendly | Complexity, debugging confusion |
+
+**Leaning toward:** Global namespaces from source, loaded into workspaces. Matches BEAM's module system.
+
+**2. How do actors know their namespace?**
+
+When you spawn an actor, which namespace context does it use?
+
+```beamtalk
+// In namespace Banking
+counter := Counter spawn   // Which Counter? Banking::Counter or root Counter?
+```
+
+Options:
+- **Lexical:** Actor uses namespace where `spawn` was written
+- **Dynamic:** Actor uses REPL's current namespace
+- **Explicit:** `counter := Banking::Counter spawn`
+
+**Leaning toward:** Lexical default, explicit override. Like Erlang module calls.
+
+**3. Can actors in different namespaces communicate?**
+
+On BEAM, all pids are equal. Namespace is compile-time, not runtime. Actors are just processes—they don't carry namespace metadata at runtime (unless we add it).
+
+**Leaning toward:** Yes, actors communicate freely. Namespaces are for code organization, not runtime isolation. Use supervision trees for runtime isolation.
+
+**4. Hot reload scope?**
+
+When you modify `Banking::Counter`, what happens?
+
+| Scope | Behavior | Implication |
+|-------|----------|-------------|
+| **Namespace-scoped** | Only `Banking::Counter` reloads | Other namespaces' `Counter` unchanged |
+| **All workspaces** | All workspaces with `Banking` namespace see change | Consistent, but can break running workspaces |
+| **Per-workspace opt-in** | Workspace must `:reload Banking::Counter` | Safe, but manual |
+
+**Leaning toward:** Namespace-scoped, pushed to all workspaces by default, with opt-out. Like Erlang's code server.
+
+**5. Workspace-local namespace overlays?**
+
+Can a workspace have its own experimental version of a namespace?
+
+```bash
+# Workspace: experiment
+beamtalk repl --overlay Banking=./experimental/banking.bt
+```
+
+This would shadow `Banking::Counter` with the experimental version, only in this workspace.
+
+**Leaning toward:** Yes, but explicit. Great for testing, dangerous if implicit.
+
+### Proposed Interaction Model
+
+```beamtalk
+namespace Banking
+  class Counter ... end
+  class Account ... end
+  
+  namespace Internal    // Nested (GNU Smalltalk-style hierarchy)
+    class AuditLog ... end
+  end
+end
+
+// Usage
+counter := Banking::Counter spawn
+log := Banking::Internal::AuditLog spawn
+```
+
+**Interaction Rules (tentative):**
+
+1. **Namespaces are loaded into workspaces** — workspace decides which namespaces to load
+2. **Actors are namespace-unaware at runtime** — pids don't carry namespace metadata
+3. **Hot reload is namespace-scoped** — `Banking::Counter` reloads without affecting `Parser::Counter`
+4. **Workspace overlays shadow namespaces** — experimental workspace can override `Banking` without affecting others
+5. **Name resolution is lexical** — code compiled in `Banking` resolves `Counter` to `Banking::Counter`
+
+### Example Workflow
+
+```bash
+# Terminal 1: Normal development
+cd ~/project
+beamtalk repl
+> import Banking
+> counter := Counter spawn    // Banking::Counter
+> counter increment
+
+# Terminal 2: Experimental workspace with overlay
+cd ~/project
+beamtalk workspace create experiment --overlay Banking=./my-experimental-banking.bt
+beamtalk repl --workspace experiment
+> import Banking
+> counter := Counter spawn    // Experimental Banking::Counter
+> counter increment           // Uses experimental implementation
+
+# Both workspaces coexist, different Counter implementations running
+```
+
+### Why This Matters for Workspaces
+
+The key insight: **namespaces and workspaces serve different purposes**.
+
+- **Namespaces** prevent name collisions and organize code (compile-time)
+- **Workspaces** isolate running systems and preserve state (runtime)
+
+A developer might:
+- Use **one workspace** with **many namespaces** (normal development)
+- Use **many workspaces** with **same namespaces** (parallel experiments)
+- Use **workspace overlays** to test namespace changes safely
+
+This ADR's workspace design supports all three patterns. The namespace ADR will formalize the compile-time side.
+
+## Tooling Integration
+
+Workspaces must integrate with modern development tooling (VS Code, LSP, DAP). This section defines how.
+
+### Architecture Overview
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Developer Machine                                             │
+│                                                               │
+│  ┌─────────────┐      ┌─────────────┐      ┌──────────────┐  │
+│  │ VS Code     │      │ beamtalk-lsp│      │ Workspace    │  │
+│  │             │←LSP─→│ (Rust)      │←TCP─→│ Node         │  │
+│  │ Editor      │      │             │      │ (BEAM)       │  │
+│  │ Terminal    │──────┼─────────────┼──────│              │  │
+│  │ Debug       │←DAP─→│ DAP adapter │─────→│ Actors       │  │
+│  └─────────────┘      └─────────────┘      └──────────────┘  │
+│                                                               │
+│  beamtalk-lsp:                                                │
+│    - Owns file watching (*.bt files)                          │
+│    - Parse + type-check on change (fast diagnostics)          │
+│    - Compile + hot reload on save                             │
+│    - Push .beam to workspace node                             │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### LSP-Workspace Interaction
+
+**Model: Hybrid** — LSP works standalone for static analysis, enhanced features when workspace node is available.
+
+| LSP Feature | Static (no node) | Live (with node) |
+|-------------|------------------|------------------|
+| Completions | Class/method names from source | + Running actor names, live values |
+| Hover | Type info, documentation | + Current actor state on hover |
+| Diagnostics | Parse errors, type errors | + Runtime warnings from node |
+| Go to definition | Source locations | Same |
+| Rename/refactor | Source-only refactor | + Hot reload after rename |
+| Code actions | Static fixes | + "Send message to actor" actions |
+
+**Fallback behavior:** If no workspace node is running, LSP provides full static functionality. When node becomes available, enhanced features activate automatically.
+
+```typescript
+// VS Code status bar shows workspace state
+[Beamtalk: my-project ● connected]   // Node running, live features
+[Beamtalk: my-project ○ static]      // No node, static analysis only
+```
+
+### File Watching and Hot Reload
+
+**Owner: LSP** (like rust-analyzer)
+
+**Trigger: Auto-reload on save**
+
+```
+User edits counter.bt
+        ↓
+LSP detects change (file watcher)
+        ↓
+Parse + type-check (<50ms)
+        ↓
+Diagnostics appear in editor
+        ↓
+User saves (Ctrl+S)
+        ↓
+LSP compiles to counter.beam
+        ↓
+LSP pushes to workspace node (if connected)
+        ↓
+Node: code:load_binary(counter, Beam)
+        ↓
+Running actors get new code on next message
+```
+
+**File events:**
+
+| Event | Action |
+|-------|--------|
+| File changed | Re-parse, update diagnostics |
+| File saved | Compile, hot reload to node |
+| File created | Add to project, compile |
+| File deleted | Remove from code path, warn if in use |
+| File renamed | Update references, reload |
+
+### Debugging (DAP)
+
+**Model: Erlang debugger via DAP adapter**
+
+Leverage Erlang's built-in debugger infrastructure (`:int`, `:dbg` modules) with a DAP protocol wrapper. This is the same approach ElixirLS uses.
+
+**Capabilities:**
+
+| Feature | Support | Notes |
+|---------|---------|-------|
+| Breakpoints | ✓ | Line breakpoints via `:int` |
+| Step over/into/out | ✓ | Standard Erlang debugger |
+| Variable inspection | ✓ | View actor state, locals |
+| Call stack | ✓ | Full stack trace |
+| Conditional breakpoints | ✓ | Erlang debugger supports |
+| Actor-specific | Future | Break on message receive, etc. |
+
+**VS Code launch.json:**
+
+```json
+{
+  "type": "beamtalk",
+  "request": "attach",
+  "name": "Attach to workspace",
+  "workspace": "my-project"
+}
+```
+
+**Debugging workflow:**
+
+1. Set breakpoint in VS Code (click gutter)
+2. LSP sends breakpoint to workspace node via `:int.break/2`
+3. Actor hits breakpoint, pauses
+4. DAP adapter notifies VS Code
+5. VS Code shows call stack, variables
+6. User steps/continues
+7. Actor resumes
+
+### VS Code Extension Features
+
+The Beamtalk VS Code extension should provide:
+
+| Feature | Description |
+|---------|-------------|
+| **Workspace status** | Status bar shows connected/disconnected |
+| **Actor explorer** | Tree view of running actors in workspace |
+| **REPL terminal** | Integrated terminal with `beamtalk repl` |
+| **Hot reload indicator** | Flash notification on successful reload |
+| **Commands** | `Beamtalk: Restart Workspace`, `Beamtalk: Attach`, etc. |
+| **Diagnostics** | Problems panel with parse/type/runtime errors |
+| **Debug** | Full DAP integration (breakpoints, stepping) |
+
+**Actor Explorer tree view:**
+
+```
+WORKSPACE: my-project
+├── Sessions
+│   └── main (you)
+├── Actors
+│   ├── Counter #myCounter <0.123.0>
+│   │   └── @value: 42
+│   ├── Logger #logger <0.124.0>
+│   └── HttpServer <0.125.0>
+└── Modules
+    ├── Counter (modified)
+    ├── Logger
+    └── HttpServer
+```
+
+### Diagnostics Pipeline
+
+Diagnostics flow from multiple sources:
+
+```
+┌─────────────────┐
+│ Source file     │
+└────────┬────────┘
+         ↓
+┌─────────────────┐     ┌─────────────────┐
+│ Parser          │────→│ Syntax errors   │──→ Problems panel
+└────────┬────────┘     └─────────────────┘
+         ↓
+┌─────────────────┐     ┌─────────────────┐
+│ Type checker    │────→│ Type errors     │──→ Problems panel
+└────────┬────────┘     └─────────────────┘
+         ↓
+┌─────────────────┐     ┌─────────────────┐
+│ Compiler        │────→│ Compile errors  │──→ Problems panel
+└────────┬────────┘     └─────────────────┘
+         ↓
+┌─────────────────┐     ┌─────────────────┐
+│ Workspace node  │────→│ Runtime warnings│──→ Problems panel
+└─────────────────┘     └─────────────────┘
+```
+
+**Latency targets:**
+
+| Stage | Target | Notes |
+|-------|--------|-------|
+| Parse | <20ms | Per-file, on keystroke |
+| Type check | <50ms | Incremental |
+| Compile | <200ms | Full file to .beam |
+| Hot reload | <100ms | Push to node |
+| Total save-to-running | <500ms | User-perceptible limit |
+
+## Troubleshooting
+
+Common issues and solutions:
+
+| Problem | Symptoms | Solution |
+|---------|----------|----------|
+| **Workspace not responding** | `beamtalk repl` hangs or times out | Check if node is running: `ps aux \| grep beamtalk_workspace`. Kill stale process: `kill <PID>`. Then `beamtalk repl` creates fresh workspace. |
+| **Port conflict** | "Address already in use" on startup | Another workspace or process on same port. Use `beamtalk workspace list` to see ports. Stop conflicting workspace or use `--port <N>` to specify alternate. |
+| **Can't find my actor** | Variable unbound after reconnect | Actors survive, bindings don't. Use `Workspace actors` to list running actors, then rebind: `counter := Workspace actorNamed: #myCounter` |
+| **Wrong workspace** | Connected to different project's workspace | Check `Workspace projectPath`. Use `beamtalk workspace list` to see all, then `beamtalk repl --workspace <name>` to connect to specific one. |
+| **Cookie mismatch** | "Connection refused" or "not allowed to connect" | Cookie file corrupted or mismatched. Delete `~/.beamtalk/workspaces/<id>/cookie` and restart workspace. |
+| **Orphaned workspace** | Workspace running but not in registry | Kill manually: find PID with `ps aux \| grep beamtalk_workspace_<name>`, then `kill <PID>`. Cleanup: `beamtalk workspace cleanup --force`. |
+| **Hot reload not working** | Changes to `.bt` file not reflected | Check compiler daemon is running. Try `:reload` in REPL. Verify module loaded: `code:which(counter)`. |
+| **Actor crashed** | `doesNotUnderstand:` or unexpected behavior | Check supervisor: `Workspace supervisor status`. Actor may have restarted with fresh state. Use `Workspace actorNamed:` to get new PID. |
 
 ## References
 
