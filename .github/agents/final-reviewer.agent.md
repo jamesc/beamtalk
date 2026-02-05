@@ -12,6 +12,7 @@ tools:
   - file_search
   - list_dir
   - get_errors
+   - mcp_linear_linear
 ---
 
 # Final Code Reviewer Agent
@@ -63,24 +64,21 @@ Reviews the current branch against main.
 
 When a Linear issue ID is provided:
 
-1. **Fetch issue from Linear**:
-   ```bash
-   # Get issue details including branch name
-   gh api graphql -f query='
-     query {
-       issue(id: "BT-123") {
-         title
-         description
-         state { name }
-         attachments { nodes { url } }
-       }
-     }
-   ' --hostname linear.app 2>/dev/null || \
-   curl -s -H "Authorization: $LINEAR_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"query": "{ issue(id: \"BT-123\") { title branchName } }"}' \
-     https://api.linear.app/graphql
-   ```
+1. **Fetch issue from Linear (MCP first, API fallback)**:
+      Use the Linear MCP tool first:
+      ```json
+      {"action": "get", "id": "BT-123"}
+      ```
+      If MCP is unavailable or fails, fall back to the Linear API using `LINEAR_API_TOKEN`:
+      ```bash
+      curl -s -H "Authorization: $LINEAR_API_TOKEN" \
+         -H "Content-Type: application/json" \
+         -d '{"query": "{ issue(id: \"BT-123\") { title description state { name } } }"}' \
+         https://api.linear.app/graphql
+      ```
+      Capture:
+      - Issue title and state
+      - Any PR links in the description or comments
 
 2. **Find associated PR on GitHub**:
    ```bash
