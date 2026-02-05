@@ -140,7 +140,7 @@ all_classes() ->
     pg:get_members(beamtalk_classes).
 
 %% @doc Create a new instance of this class.
--spec new(pid()) -> {ok, pid()} | {error, term()}.
+-spec new(pid()) -> {ok, #beamtalk_object{}} | {error, term()}.
 new(ClassPid) ->
     new(ClassPid, []).
 

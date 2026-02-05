@@ -428,9 +428,15 @@ dialyzer --build_plt --apps erts kernel stdlib
 
 # Check project
 rebar3 dialyzer
+
+# Or use Just command
+just dialyzer
 ```
 
-**Type specs for generated code:**
+### Type Specs for Generated Code
+
+Always add `-spec` annotations for public functions:
+
 ```erlang
 -spec increment(pid()) -> ok.
 increment(Pid) ->
@@ -440,6 +446,54 @@ increment(Pid) ->
 get_value(Pid) ->
     gen_server:call(Pid, get_value).
 ```
+
+### Precise Specs for Custom Types ⚠️
+
+**CRITICAL:** When returning Beamtalk's structured types (`#beamtalk_error{}`, `#beamtalk_object{}`, etc.), always use the **precise type** in specs, not `term()`.
+
+**Why this matters:** Vague specs like `-> term()` won't catch bugs where you accidentally return bare tuples instead of structured records.
+
+```erlang
+%% ❌ WRONG - Vague spec, won't catch tuple bugs
+-spec build_error(atom(), atom()) -> term().
+build_error(Kind, Class) ->
+    beamtalk_error:new(Kind, Class).
+    %% If someone changes to {error, Kind, Class}, Dialyzer won't catch it!
+
+%% ✅ RIGHT - Precise spec catches mistakes
+-spec build_error(atom(), atom()) -> beamtalk_error:error().
+build_error(Kind, Class) ->
+    beamtalk_error:new(Kind, Class).
+    %% Now if someone returns {error, Kind, Class}, Dialyzer fails!
+```
+
+**Custom types to use precisely:**
+
+| Record | Type Alias | Use Case |
+|--------|------------|----------|
+| `#beamtalk_error{}` | `beamtalk_error:error()` | All error construction functions |
+| `#beamtalk_object{}` | `beamtalk_object:object()` | Object creation/spawn functions |
+| `#class_state{}` | Internal only | Class state in gen_server |
+
+**Example from codebase:**
+```erlang
+%% All immutable_primitive_error functions
+-spec immutable_primitive_error(atom(), term()) -> beamtalk_error:error().
+immutable_primitive_error(Class, FieldName) ->
+    Error0 = beamtalk_error:new(immutable_primitive, Class),
+    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+    beamtalk_error:with_hint(Error1, <<"Use assignment instead">>).
+```
+
+**When to be vague:**
+- Functions that can return multiple types: `-> term()` is OK
+- Internal helper functions with obvious types
+- Callbacks that accept any term: `handle_info(term(), State) -> ...`
+
+**When to be precise:**
+- ✅ Functions returning custom records (`#beamtalk_error{}`, `#beamtalk_object{}`)
+- ✅ Functions with specific error tuples: `-> {ok, Result} | {error, atom()}`
+- ✅ Public API functions (always document return type)
 
 ---
 
