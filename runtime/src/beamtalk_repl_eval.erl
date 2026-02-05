@@ -280,8 +280,12 @@ parse_daemon_response(ResponseLine, ModuleName) ->
         end
     catch
         Class:Error:Stack ->
-            io:format(standard_error, "Failed to parse daemon response:~nClass: ~p~nError: ~p~nStack: ~p~nResponse: ~p~n", 
-                      [Class, Error, Stack, ResponseLine]),
+            logger:debug("Failed to parse daemon response", #{
+                class => Class,
+                error => Error,
+                stack => Stack,
+                response => ResponseLine
+            }),
             {error, {daemon_error, <<"Invalid JSON in response">>}}
     end.
 
@@ -523,8 +527,12 @@ parse_file_compile_response(ResponseLine, ModuleName) ->
         end
     catch
         Class:Error:Stack ->
-            io:format(standard_error, "Failed to parse file compile response:~nClass: ~p~nError: ~p~nStack: ~p~nResponse (first 200 bytes): ~p~n",  
-                      [Class, Error, Stack, binary:part(ResponseLine, 0, min(200, byte_size(ResponseLine)))]),
+            logger:debug("Failed to parse file compile response", #{
+                class => Class,
+                error => Error,
+                stack => Stack,
+                response_preview => binary:part(ResponseLine, 0, min(200, byte_size(ResponseLine)))
+            }),
             {error, {daemon_error, <<"Invalid JSON in response">>}}
     end.
 
@@ -599,8 +607,10 @@ register_classes(ClassInfoList, ModuleName) ->
                     case beamtalk_object_class:start_link(ClassAtom, ClassInfo) of
                         {ok, _Pid} -> ok;
                         {error, Reason} ->
-                            io:format(standard_error, "Warning: Failed to start class ~s: ~p~n", 
-                                      [ClassName, Reason])
+                            logger:warning("Failed to start class", #{
+                                class_name => ClassName,
+                                reason => Reason
+                            })
                     end;
                 _Pid ->
                     %% Class already exists - could update it here if needed

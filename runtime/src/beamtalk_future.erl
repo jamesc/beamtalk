@@ -279,9 +279,7 @@ execute_callback(Callback, Value) ->
         catch
             Class:Reason:_Stacktrace ->
                 %% Log error without stack trace to avoid leaking sensitive data
-                io:format(standard_error,
-                    "Error in future callback: ~p:~p~n",
-                    [Class, Reason])
+                logger:error("Error in future callback", #{class => Class, reason => Reason})
         end
     end).
 
