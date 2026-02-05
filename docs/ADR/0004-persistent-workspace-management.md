@@ -233,7 +233,7 @@ The design distinguishes between two levels:
 │   ├── Actors: Counter <0.123>, Logger <0.124>               │
 │   ├── Modules: Counter, Logger, HttpServer                  │
 │   ├── ETS tables, registered names                          │
-│   └── Workspace global object                               │
+│   └── Beamtalk global object                                │
 │                                                              │
 │   Sessions (REPL connections):                               │
 │   ┌─────────────────┐  ┌─────────────────┐                  │
@@ -319,8 +319,8 @@ Workspaces serve different purposes in development and production:
 │   - Hot reload from source files                             │
 │                                                              │
 │   beamtalk repl --session experiment                         │
-│   - Same node (same code)                                    │
-│   - New session (isolated actors)                            │
+│   - Same node (same code, shared actors)                     │
+│   - New session (isolated bindings only)                     │
 │                                                              │
 │   beamtalk repl --workspace feature-x                        │
 │   - Different node (can have different code)                 │
@@ -691,7 +691,7 @@ Multiple REPL sessions can connect to the same workspace simultaneously, sharing
 2. **Debugging:** One REPL for normal work, one for inspection
 3. **IDE integration:** VSCode extension connects alongside terminal REPL
 
-**Workspace object for coordination:**
+**Beamtalk global for coordination:**
 ```beamtalk
 Beamtalk sessions                  // List connected REPLs
 // #(#alice -> <0.200.0>, #bob -> <0.201.0>)
