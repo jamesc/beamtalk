@@ -138,7 +138,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
                     {'reply', UserFields, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
-        <'instVarAt'> when 'true' ->
+        <'instVarAt:'> when 'true' ->
             case Args of
                 <[FieldName]> when 'true' ->
                     case call 'maps':'is_key'(FieldName, State) of
@@ -150,7 +150,7 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
                         end
                     <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
                 end
-            <'instVarAtPut'> when 'true' ->
+            <'instVarAt:put:'> when 'true' ->
                 case Args of
                     <[FieldName, Value]> when 'true' ->
                         case call 'maps':'is_key'(FieldName, State) of
@@ -183,10 +183,10 @@ module 'empty_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/
 
 
 'method_table'/0 = fun () ->
-            ~{'empty' => 0, 'emptyWithSpace' => 0, 'emptyWithNewlines' => 0, 'class' => 0, 'respondsTo:' => 1, 'instVarNames' => 0, 'instVarAt:' => 1, 'instVarAt:put:' => 2, 'perform:' => 2}~
+            ~{'empty' => 0, 'emptyWithSpace' => 0, 'emptyWithNewlines' => 0, 'class' => 0, 'respondsTo:' => 1, 'instVarNames' => 0, 'instVarAt:' => 1, 'instVarAt:put:' => 2, 'perform:' => 1, 'perform:withArguments:' => 2}~
 
 
 'has_method'/1 = fun (Selector) ->
-            call 'lists':'member'(Selector, ['empty', 'emptyWithSpace', 'emptyWithNewlines', 'class', 'respondsTo:', 'instVarNames', 'instVarAt:', 'instVarAt:put:', 'perform:'])
+            call 'lists':'member'(Selector, ['empty', 'emptyWithSpace', 'emptyWithNewlines', 'class', 'respondsTo:', 'instVarNames', 'instVarAt:', 'instVarAt:put:', 'perform:', 'perform:withArguments:'])
 
 end

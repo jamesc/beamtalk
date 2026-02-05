@@ -134,7 +134,7 @@ ProtoObject
   // Subclasses can override for custom dispatch or proxying
   //
   // Arguments:
-  // - selector: Symbol representing the message name (e.g., #at:put:)
+  // - selector: Symbol representing the message name (e.g., #'at:put:')
   // - args: Array of arguments passed with the message
   doesNotUnderstand: selector args: arguments => // implemented by compiler
 

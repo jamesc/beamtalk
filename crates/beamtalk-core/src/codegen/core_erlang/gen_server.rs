@@ -649,7 +649,8 @@ impl CoreErlangGenerator {
         methods.push(("instVarNames".to_string(), 0));
         methods.push(("instVarAt:".to_string(), 1));
         methods.push(("instVarAt:put:".to_string(), 2));
-        methods.push(("perform:".to_string(), 2));
+        methods.push(("perform:".to_string(), 1));
+        methods.push(("perform:withArguments:".to_string(), 2));
 
         for (i, (name, arity)) in methods.iter().enumerate() {
             if i > 0 {
@@ -715,6 +716,7 @@ impl CoreErlangGenerator {
         methods.push("instVarAt:".to_string());
         methods.push("instVarAt:put:".to_string());
         methods.push("perform:".to_string());
+        methods.push("perform:withArguments:".to_string());
 
         // Generate lists:member call with method list
         write!(self.output, "call 'lists':'member'(Selector, [")?;
@@ -1129,7 +1131,7 @@ impl CoreErlangGenerator {
     /// Returns the value of an instance variable.
     fn generate_inst_var_at_handler(&mut self) -> Result<()> {
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Args of")?;
@@ -1184,7 +1186,7 @@ impl CoreErlangGenerator {
     /// Sets the value of an instance variable.
     fn generate_inst_var_at_put_handler(&mut self) -> Result<()> {
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAtPut'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Args of")?;

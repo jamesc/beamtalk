@@ -1106,7 +1106,7 @@ impl CoreErlangGenerator {
 
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt', [{name_var}], {future_var}}}) in "
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt:', [{name_var}], {future_var}}}) in "
                         )?;
 
                         write!(self.output, "{future_var}")?;
@@ -1151,7 +1151,7 @@ impl CoreErlangGenerator {
 
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAtPut', [{name_var}, {value_var}], {future_var}}}) in "
+                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt:put:', [{name_var}, {value_var}], {future_var}}}) in "
                         )?;
 
                         write!(self.output, "{future_var}")?;
