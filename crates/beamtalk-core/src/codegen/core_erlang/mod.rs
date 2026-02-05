@@ -1066,12 +1066,18 @@ impl CoreErlangGenerator {
             Expression::ClassReference { name, .. } => {
                 // BT-215: Standalone class references resolve to class objects
                 // Wrap the class PID in a beamtalk_object record for uniform dispatch
-                // Generate: {'beamtalk_object', 'Point class', 'beamtalk_class', ClassPid}
+                // Pattern matches generate_beamtalk_class_named (lines 915-922)
+                //
+                // Generate:
+                //   let ClassPid = call 'beamtalk_class':'whereis_class'('Point') in
+                //   let ClassModName = call 'beamtalk_class':'module_name'(ClassPid) in
+                //   {'beamtalk_object', 'Point class', ClassModName, ClassPid}
                 //
                 // Note: If class doesn't exist, whereis_class returns 'undefined' and creates
                 // an invalid beamtalk_object. This causes a REPL formatting error but doesn't
                 // crash. Proper validation will be added in BT-246 (runtime dispatch).
                 let class_pid_var = self.fresh_var("ClassPid");
+                let class_mod_var = self.fresh_var("ClassModName");
                 write!(
                     self.output,
                     "let {class_pid_var} = call 'beamtalk_class':'whereis_class'('{}') in ",
@@ -1079,7 +1085,11 @@ impl CoreErlangGenerator {
                 )?;
                 write!(
                     self.output,
-                    "{{'beamtalk_object', '{} class', 'beamtalk_class', {class_pid_var}}}",
+                    "let {class_mod_var} = call 'beamtalk_class':'module_name'({class_pid_var}) in "
+                )?;
+                write!(
+                    self.output,
+                    "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}}",
                     name.name
                 )?;
                 Ok(())
@@ -3778,6 +3788,54 @@ end
         assert!(
             !code.contains("gen_server':'cast"),
             "Should not use gen_server:cast for class methods. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_standalone_class_reference_uses_dynamic_module_name() {
+        // BT-215: Test that standalone ClassReference uses module_name/1 dynamically
+        // Review comment: Should match generate_beamtalk_class_named pattern (lines 915-922)
+        use crate::ast::{Expression, Identifier, Module};
+        use crate::parse::Span;
+
+        // Create expression: Point (standalone class reference)
+        let expr = Expression::ClassReference {
+            name: Identifier::new("Point", Span::new(0, 5)),
+            span: Span::new(0, 5),
+        };
+
+        let module = Module {
+            expressions: vec![expr],
+            classes: vec![],
+            span: Span::new(0, 5),
+            leading_comments: vec![],
+        };
+
+        let code = generate_repl_expression(&module.expressions[0], "repl_eval")
+            .expect("codegen should succeed");
+
+        // Should call whereis_class to get the class PID
+        assert!(
+            code.contains("call 'beamtalk_class':'whereis_class'('Point')"),
+            "Should call whereis_class to get class PID. Got:\n{code}"
+        );
+
+        // Should call module_name to get the module name dynamically
+        assert!(
+            code.contains("call 'beamtalk_class':'module_name'("),
+            "Should call module_name to get module name dynamically. Got:\n{code}"
+        );
+
+        // Should NOT hardcode 'beamtalk_class' as the module name
+        assert!(
+            !code.contains("'beamtalk_object', 'Point class', 'beamtalk_class'"),
+            "Should not hardcode 'beamtalk_class' as module name. Got:\n{code}"
+        );
+
+        // Should create beamtalk_object with dynamic ClassModName variable
+        assert!(
+            code.contains("'beamtalk_object'") && code.contains("'Point class'"),
+            "Should create beamtalk_object with metaclass name. Got:\n{code}"
         );
     }
 }
