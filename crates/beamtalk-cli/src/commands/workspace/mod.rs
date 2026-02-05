@@ -15,7 +15,7 @@
 //! │ Port: 49152  Cookie: ~/.beamtalk/workspaces/abc123/cookie│
 //! │                                                           │
 //! │   beamtalk_workspace_sup                                 │
-//! │     ├─ beamtalk_repl_server    (TCP server)              │
+//! │     ├─ beamtalk_repl           (TCP server + eval)       │
 //! │     ├─ beamtalk_workspace_meta                           │
 //! │     ├─ beamtalk_idle_monitor                             │
 //! │     ├─ beamtalk_actor_sup                                │
@@ -254,7 +254,7 @@ pub fn create_workspace(project_path: &Path) -> Result<WorkspaceMetadata> {
 }
 
 /// Start a detached BEAM node for a workspace.
-/// Returns the NodeInfo for the started node.
+/// Returns the `NodeInfo` for the started node.
 #[allow(dead_code)] // Used in Phase 3
 pub fn start_detached_node(
     workspace_id: &str,
@@ -262,8 +262,6 @@ pub fn start_detached_node(
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
 ) -> Result<NodeInfo> {
-    use std::process::{Command, Stdio};
-
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
 
@@ -286,11 +284,17 @@ pub fn start_detached_node(
     );
 
     // Start detached BEAM node
+    let (node_flag, node_arg) = if node_name.contains('@') {
+        ("-name", node_name.clone())
+    } else {
+        ("-sname", node_name.clone())
+    };
+
     let args = vec![
         "-detached".to_string(),
         "-noshell".to_string(),
-        "-sname".to_string(),
-        node_name.clone(),
+        node_flag.to_string(),
+        node_arg,
         "-setcookie".to_string(),
         cookie,
         "-pa".to_string(),
@@ -342,7 +346,6 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
     for line in stdout.lines() {
         if line.contains("beam.smp") && line.contains(node_name) {
             let pid_str = line
-                .trim()
                 .split_whitespace()
                 .next()
                 .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
@@ -355,7 +358,7 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 }
 
 /// Get or start a workspace node for the current directory.
-/// Returns (NodeInfo, bool) where bool indicates if a new node was started.
+/// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
 #[allow(dead_code)] // Used in Phase 3
 pub fn get_or_start_workspace(
     project_path: &Path,

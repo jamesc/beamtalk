@@ -13,7 +13,7 @@
 %%% Architecture (from ADR 0004):
 %%% ```
 %%% beamtalk_workspace_sup
-%%%   ├─ beamtalk_repl_server      % TCP server for REPL connections
+%%%   ├─ beamtalk_repl             % TCP server + eval coordinator
 %%%   ├─ beamtalk_idle_monitor     % Tracks activity, self-terminates if idle
 %%%   ├─ beamtalk_workspace_meta   % Metadata (project path, created_at)
 %%%   ├─ beamtalk_actor_sup        % Supervises user actors
@@ -73,7 +73,7 @@ init(Config) ->
         %% This provides backward compatibility with existing REPL client
         #{
             id => beamtalk_repl,
-            start => {beamtalk_repl, start_link, [TcpPort, #{}]},
+            start => {beamtalk_repl, start_link, [TcpPort, #{bind_ip => {127, 0, 0, 1}}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
