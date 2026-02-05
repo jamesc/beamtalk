@@ -282,7 +282,7 @@ parse_daemon_response(ResponseLine, ModuleName) ->
         Class:Error:Stack ->
             logger:debug("Failed to parse daemon response", #{
                 class => Class,
-                error => Error,
+                reason => Error,
                 stack => Stack,
                 response => ResponseLine
             }),
@@ -529,7 +529,7 @@ parse_file_compile_response(ResponseLine, ModuleName) ->
         Class:Error:Stack ->
             logger:debug("Failed to parse file compile response", #{
                 class => Class,
-                error => Error,
+                reason => Error,
                 stack => Stack,
                 response_preview => binary:part(ResponseLine, 0, min(200, byte_size(ResponseLine)))
             }),

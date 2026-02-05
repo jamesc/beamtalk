@@ -122,9 +122,9 @@ format_error(Reason) ->
             %% Log formatting failure for debugging
             logger:debug("Failed to format error", #{
                 class => Class,
-                error => FormatError,
+                reason => FormatError,
                 stack => lists:sublist(Stack, 5),
-                reason => Reason
+                original_reason => Reason
             }),
             %% Return fallback error response
             jsx:encode(#{<<"type">> => <<"error">>, 
