@@ -11,6 +11,8 @@ This repository has custom skills in `.github/skills/` that provide detailed wor
 | `/whats-next` | Get recommendations for what to work on next |
 | `/pr-resolve` | Address all PR review comments systematically |
 | `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
+| `/code-review` | Review current branch changes vs main |
+| `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
 
 See `.github/skills/` for full workflow details, or ask Copilot about any command.
 
