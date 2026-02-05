@@ -20,7 +20,7 @@ use crate::ast::{
     Block, BlockParameter, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair,
     MessageSelector,
 };
-use crate::parse::{Token, TokenKind};
+use crate::source_analysis::{Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser, binary_binding_power};

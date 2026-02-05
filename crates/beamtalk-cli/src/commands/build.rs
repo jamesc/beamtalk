@@ -122,13 +122,13 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
         .wrap_err_with(|| format!("Failed to read file '{path}'"))?;
 
     // Lex and parse the source using beamtalk-core
-    let tokens = beamtalk_core::parse::lex_with_eof(&source);
-    let (module, diagnostics) = beamtalk_core::parse::parse(tokens);
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     // Check for errors
     let has_errors = diagnostics
         .iter()
-        .any(|d| d.severity == beamtalk_core::parse::Severity::Error);
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
 
     // Display all diagnostics (errors and warnings) using miette formatting
     if !diagnostics.is_empty() {

@@ -13,7 +13,7 @@
 //! The analysis produces diagnostics and metadata used by the code generator.
 
 use crate::ast::{Expression, Identifier, MatchArm, Module, Pattern};
-use crate::parse::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -124,9 +124,9 @@ pub enum MutationKind {
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::extract_pattern_bindings;
+/// # use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 /// # use beamtalk_core::ast::{Pattern, Identifier};
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 /// # use ecow::EcoString;
 /// let pattern = Pattern::Variable(Identifier::new("x", Span::default()));
 /// let (bindings, diagnostics) = extract_pattern_bindings(&pattern);
@@ -136,7 +136,7 @@ pub enum MutationKind {
 /// ```
 pub fn extract_pattern_bindings(
     pattern: &Pattern,
-) -> (Vec<Identifier>, Vec<crate::parse::Diagnostic>) {
+) -> (Vec<Identifier>, Vec<crate::source_analysis::Diagnostic>) {
     let mut bindings = Vec::new();
     let mut diagnostics = Vec::new();
     let mut seen = std::collections::HashMap::new();
@@ -158,7 +158,7 @@ fn extract_pattern_bindings_impl(
     pattern: &Pattern,
     bindings: &mut Vec<Identifier>,
     seen: &mut std::collections::HashMap<EcoString, Span>,
-    diagnostics: &mut Vec<crate::parse::Diagnostic>,
+    diagnostics: &mut Vec<crate::source_analysis::Diagnostic>,
 ) {
     match pattern {
         // Variable patterns bind the identifier
@@ -170,7 +170,7 @@ fn extract_pattern_bindings_impl(
                 Entry::Occupied(entry) => {
                     // Duplicate variable - emit diagnostic
                     let first_span = *entry.get();
-                    diagnostics.push(crate::parse::Diagnostic::error(
+                    diagnostics.push(crate::source_analysis::Diagnostic::error(
                         format!(
                             "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
                             id.name,
@@ -226,9 +226,9 @@ fn extract_pattern_bindings_impl(
 /// # Examples
 ///
 /// ```
-/// # use beamtalk_core::analyse::analyse;
+/// # use beamtalk_core::semantic_analysis::analyse;
 /// # use beamtalk_core::ast::Module;
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 /// let module = Module::new(vec![], Span::default());
 /// let result = analyse(&module);
 /// assert_eq!(result.diagnostics.len(), 0);
@@ -683,7 +683,7 @@ mod tests {
     use crate::ast::{
         BinarySegment, Block, BlockParameter, Expression, Identifier, Literal, MessageSelector,
     };
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     fn test_span() -> Span {
         Span::new(0, 0)
@@ -1824,7 +1824,7 @@ mod tests {
         // Verify it's a warning, not an error
         assert_eq!(
             result.diagnostics[0].severity,
-            crate::parse::Severity::Warning
+            crate::source_analysis::Severity::Warning
         );
     }
 

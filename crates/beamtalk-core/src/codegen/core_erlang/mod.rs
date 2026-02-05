@@ -191,7 +191,7 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// ```no_run
 /// use beamtalk_core::codegen::core_erlang::generate;
 /// use beamtalk_core::ast::Module;
-/// # use beamtalk_core::parse::Span;
+/// # use beamtalk_core::source_analysis::Span;
 ///
 /// # let module = Module::new(Vec::new(), Span::new(0, 0));
 /// let core_erlang = generate(&module)?;
@@ -1442,7 +1442,7 @@ impl CoreErlangGenerator {
 mod tests {
     use super::*;
     use crate::ast::*;
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     #[test]
     fn test_generate_empty_module() {
@@ -3462,7 +3462,7 @@ end
         use crate::ast::{
             ClassDefinition, Identifier, MethodDefinition, MethodKind, StateDeclaration,
         };
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         // Create a Counter class with instance variables and methods
         let class = ClassDefinition {
@@ -3607,7 +3607,7 @@ end
     fn test_multiple_classes_registration() {
         // BT-218: Test that modules with multiple classes register all of them
         use crate::ast::{ClassDefinition, Identifier, StateDeclaration};
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         let class1 = ClassDefinition {
             name: Identifier::new("Counter", Span::new(0, 7)),
@@ -3703,7 +3703,7 @@ end
     fn test_beamtalk_module_generation() {
         // BT-220: Test that Beamtalk class generates special module with class methods
         use crate::ast::{ClassDefinition, Identifier};
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         let class = ClassDefinition {
             name: Identifier::new("Beamtalk", Span::new(0, 8)),
@@ -3787,7 +3787,7 @@ end
     fn test_class_method_call_generation() {
         // BT-215: Test that ClassReference message sends generate direct function calls
         use crate::ast::{Expression, Identifier, MessageSelector, Module};
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         // Create expression: Beamtalk allClasses
         let expr = Expression::MessageSend {
@@ -3880,7 +3880,7 @@ end
         // BT-215: Test that standalone ClassReference uses module_name/1 dynamically
         // Review comment: Should match generate_beamtalk_class_named pattern (lines 915-922)
         use crate::ast::{Expression, Identifier, Module};
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         // Create expression: Point (standalone class reference)
         let expr = Expression::ClassReference {
@@ -3928,7 +3928,7 @@ end
         // BT-215: Test that standalone ClassReference handles undefined classes gracefully
         // Review comment: Should check for 'undefined' and return 'nil', like generate_beamtalk_class_named
         use crate::ast::{Expression, Identifier, Module};
-        use crate::parse::Span;
+        use crate::source_analysis::Span;
 
         // Create expression: NonExistentClass (standalone class reference)
         let expr = Expression::ClassReference {

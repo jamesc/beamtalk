@@ -3,7 +3,7 @@
 
 //! Semantic analysis error types.
 
-use crate::parse::Span;
+use crate::source_analysis::Span;
 use ecow::EcoString;
 
 /// A semantic error discovered during analysis.

@@ -56,7 +56,7 @@ Binary operators have precedence levels:
 
 ## Implementation Details
 
-### Lexer (crates/beamtalk-core/src/parse/lexer.rs)
+### Lexer (crates/beamtalk-core/src/source_analysis/lexer.rs)
 
 **Implemented:**
 - Lines 804-811: Single-char operators: `+`, `-`, `*`, `/`, `<`, `>`, `=`, `~`
@@ -68,7 +68,7 @@ Binary operators have precedence levels:
 - `&&`, `||` - Not operators, use `and:` and `or:` keyword messages
 - `and`, `or` - Keyword messages, not binary operators
 
-### Parser (crates/beamtalk-core/src/parse/parser/mod.rs)
+### Parser (crates/beamtalk-core/src/source_analysis/parser/mod.rs)
 
 **Implemented** (lines 126-143, `binary_binding_power` function):
 - Precedence 10: `=`, `==`, `~=` (equality)

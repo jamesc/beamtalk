@@ -15,7 +15,7 @@
 //! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
 
 use beamtalk_core::erlang::generate_with_name;
-use beamtalk_core::parse::{lex_with_eof, parse};
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use std::fs;
 use std::process::Command;

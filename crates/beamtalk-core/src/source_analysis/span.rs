@@ -16,7 +16,7 @@ use std::ops::Range;
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::parse::Span;
+/// use beamtalk_core::source_analysis::Span;
 ///
 /// let span = Span::new(0, 10);
 /// assert_eq!(span.start(), 0);

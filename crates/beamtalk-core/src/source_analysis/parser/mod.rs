@@ -41,7 +41,7 @@
 //! # Usage
 //!
 //! ```
-//! use beamtalk_core::parse::{lex_with_eof, parse};
+//! use beamtalk_core::source_analysis::{lex_with_eof, parse};
 //!
 //! let tokens = lex_with_eof("x := 3 + 4");
 //! let (module, diagnostics) = parse(tokens);
@@ -53,7 +53,7 @@
 use crate::ast::{Comment, CommentKind, Module};
 #[cfg(test)]
 use crate::ast::{Expression, Literal, MessageSelector};
-use crate::parse::{Span, Token, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
 // Submodules with additional impl blocks for Parser
@@ -151,7 +151,7 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
 /// # Examples
 ///
 /// ```
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let tokens = lex_with_eof("x := 42");
 /// let (module, diagnostics) = parse(tokens);
@@ -448,7 +448,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::lex_with_eof;
+    use crate::source_analysis::lex_with_eof;
 
     /// Helper to parse a string and check for errors.
     fn parse_ok(source: &str) -> Module {
@@ -1318,8 +1318,8 @@ Actor subclass: Rectangle
         // Actually, `++` is a single BinarySelector token, so this tests that
         // unknown operators don't cause errors
         let (module, diagnostics) = {
-            let tokens = crate::parse::lex_with_eof("1 ++ 2");
-            crate::parse::parse(tokens)
+            let tokens = crate::source_analysis::lex_with_eof("1 ++ 2");
+            crate::source_analysis::parse(tokens)
         };
         // The parser should handle this gracefully
         // It may produce diagnostics but shouldn't panic

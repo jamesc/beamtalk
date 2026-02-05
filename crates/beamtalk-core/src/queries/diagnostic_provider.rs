@@ -27,9 +27,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol publishDiagnostics notification
 
-use crate::analyse;
 use crate::ast::Module;
-use crate::parse::Diagnostic;
+use crate::semantic_analysis;
+use crate::source_analysis::Diagnostic;
 
 /// Computes diagnostics for a module.
 ///
@@ -48,7 +48,7 @@ use crate::parse::Diagnostic;
 ///
 /// ```
 /// use beamtalk_core::queries::diagnostic_provider::compute_diagnostics;
-/// use beamtalk_core::parse::{lex_with_eof, parse};
+/// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
@@ -75,7 +75,7 @@ pub fn compute_diagnostics_with_known_vars(
     let mut all_diagnostics = parse_diagnostics;
 
     // Run semantic analysis with known variables
-    let analysis_result = analyse::analyse_with_known_vars(module, known_vars);
+    let analysis_result = semantic_analysis::analyse_with_known_vars(module, known_vars);
     all_diagnostics.extend(analysis_result.diagnostics);
 
     all_diagnostics
@@ -84,7 +84,7 @@ pub fn compute_diagnostics_with_known_vars(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{lex_with_eof, parse};
+    use crate::source_analysis::{lex_with_eof, parse};
 
     #[test]
     fn compute_diagnostics_returns_parse_errors() {
@@ -140,7 +140,7 @@ mod tests {
         let has_warning = diagnostics.iter().any(|d| {
             d.message.contains("assignment to 'count'")
                 && d.message.contains("has no effect on outer scope")
-                && d.severity == crate::parse::Severity::Warning
+                && d.severity == crate::source_analysis::Severity::Warning
         });
         assert!(
             has_warning,
