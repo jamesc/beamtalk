@@ -203,8 +203,10 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
                     expected: expected.trim().to_string(),
                     line: expr_line,
                 });
+                i += 1; // Consume the assertion line
             } else {
                 // Warn about expression without assertion
+                // Don't increment i - the next line might be another expression
                 warnings.push(format!(
                     "Line {expr_line}: Expression will not be executed (missing // => assertion): {expression}"
                 ));
@@ -215,7 +217,6 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
                 "Line {expr_line}: Expression will not be executed (missing // => assertion): {expression}"
             ));
         }
-        i += 1;
     }
 
     ParsedTestFile {
@@ -823,5 +824,34 @@ count
         assert!(parsed.warnings[1].contains("Line 10"));
         assert!(parsed.warnings[1].contains("5 timesRepeat"));
         assert!(parsed.warnings[1].contains("missing // => assertion"));
+    }
+
+    #[test]
+    fn test_parse_consecutive_expressions_without_assertions() {
+        // Test for bug where consecutive expressions without assertions
+        // cause the second expression to be skipped entirely (double increment bug)
+        let content = r"
+expr1
+expr2
+expr3
+// => result3
+";
+        let parsed = parse_test_file(content);
+
+        // Should have 1 test case (expr3 with assertion)
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "expr3");
+        assert_eq!(parsed.cases[0].expected, "result3");
+
+        // Should have 2 warnings (for expr1 and expr2)
+        assert_eq!(
+            parsed.warnings.len(),
+            2,
+            "Expected warnings for expr1 and expr2"
+        );
+        assert!(parsed.warnings[0].contains("Line 2"));
+        assert!(parsed.warnings[0].contains("expr1"));
+        assert!(parsed.warnings[1].contains("Line 3"));
+        assert!(parsed.warnings[1].contains("expr2"));
     }
 }
