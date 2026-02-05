@@ -1168,14 +1168,12 @@ counter class    // => Counter
 
 #### `respondsTo: selector`
 
-Checks if an object responds to a given method selector.
+Checks if an object responds to a given method selector. Pass a symbol literal.
 
 ```beamtalk
-counter respondsTo: 'increment'   // => true
-counter respondsTo: 'nonExistent' // => false
+counter respondsTo: #increment   // => true
+counter respondsTo: #nonExistent // => false
 ```
-
-**Note:** Currently requires passing the selector as a string. Symbol literal syntax (`#increment`) is planned for future release.
 
 #### `instVarNames`
 
@@ -1223,16 +1221,17 @@ Reflection methods are implemented in the `dispatch/4` function, after user-defi
 
 ### Limitations (As of 2026-02-05)
 
-- Symbol literals (`#increment`) not yet implemented - use strings instead (`'increment'`)
 - `perform:` only supports zero-arity methods
-- `instVarAt:` and `instVarAt:put:` require string field names
+- `instVarAt:` and `instVarAt:put:` require atom field names (use symbols: `#fieldName`)
 - No reflection on class methods (only instance methods)
 - No reflection on method metadata (arity, parameters, etc.)
+
+**Note:** Symbol literals (`#selector`) work correctly. Future semantic validation (BT-244) will provide better error messages when users accidentally pass identifiers instead of symbols.
 
 ### Future Enhancements
 
 Planned improvements tracked in Linear:
-- Symbol literal syntax (`#selector`)
+- **BT-244**: Better error messages for symbol validation (semantic analysis)
 - `perform:withArguments:` for methods with arguments
 - Class-level reflection (`allInstances`, `allSubclasses`)
 - Method metadata (`methodDict`, `sourceCodeAt:`)

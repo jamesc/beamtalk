@@ -12,10 +12,13 @@ c := Counter spawn
 c class
 // => Counter
 
-// Test respondsTo: - need to match exact selector format
-// For now, reflection API needs refinement (BT-97)
-// c respondsTo: increment
+// Test respondsTo: with symbol literal
+c respondsTo: #increment
 // => true
+
+// Test respondsTo: with non-existent method
+c respondsTo: #nonExistent
+// => false
 
 // Test instVarNames - returns atoms (displayed as strings in E2E)
 c instVarNames
