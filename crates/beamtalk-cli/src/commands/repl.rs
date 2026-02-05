@@ -52,7 +52,9 @@ use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
 use serde::Deserialize;
+use tracing::info;
 
+use crate::commands::workspace;
 use crate::paths::{beamtalk_dir, is_daemon_running};
 
 /// Connection timeout in milliseconds.
@@ -342,7 +344,7 @@ fn find_runtime_dir() -> Result<PathBuf> {
 
 /// Start the compiler daemon in the background.
 fn start_daemon() -> Result<()> {
-    eprintln!("Starting compiler daemon...");
+    info!("Starting compiler daemon...");
 
     // Get path to beamtalk binary (ourselves)
     let exe = std::env::current_exe().into_diagnostic()?;
@@ -366,7 +368,7 @@ fn start_daemon() -> Result<()> {
         ));
     }
 
-    eprintln!("Compiler daemon started.");
+    info!("Compiler daemon started.");
     Ok(())
 }
 
@@ -374,7 +376,7 @@ fn start_daemon() -> Result<()> {
 fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let runtime_dir = find_runtime_dir()?;
-    eprintln!("Using runtime at: {}", runtime_dir.display());
+    info!("Using runtime at: {}", runtime_dir.display());
 
     // Build runtime first
     let build_lib_dir = runtime_dir.join("_build/default/lib");
@@ -383,7 +385,7 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
 
     // Check if runtime is built
     if !runtime_beam_dir.exists() {
-        eprintln!("Building Beamtalk runtime...");
+        info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
             .arg("compile")
             .current_dir(&runtime_dir)
@@ -395,7 +397,7 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
         }
     }
 
-    eprintln!("Starting BEAM node with REPL backend on port {port}...");
+    info!("Starting BEAM node with REPL backend on port {port}...");
 
     // Build the eval command that configures the runtime via application:set_env
     // This allows runtime to read port from application environment
@@ -573,7 +575,7 @@ fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
 )]
-pub fn run(port_arg: Option<u16>, node_arg: Option<String>) -> Result<()> {
+pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
 
@@ -589,10 +591,39 @@ pub fn run(port_arg: Option<u16>, node_arg: Option<String>) -> Result<()> {
         start_daemon()?;
     }
 
-    // Start BEAM node with REPL backend
-    // Use a guard to ensure cleanup on any exit path
-    let beam_guard = BeamChildGuard {
-        child: start_beam_node(port, node_name.as_ref())?,
+    // Choose startup mode: workspace (default) or foreground (debug)
+    let beam_guard_opt = if foreground {
+        // Foreground mode: start node directly (original behavior)
+        println!("Starting BEAM node in foreground mode (--foreground)...");
+        Some(BeamChildGuard {
+            child: start_beam_node(port, node_name.as_ref())?,
+        })
+    } else {
+        // Workspace mode: start or connect to detached node
+        let current_dir = std::env::current_dir().into_diagnostic()?;
+
+        // Use the same runtime paths as foreground mode
+        let runtime_dir = find_runtime_dir()?;
+        let build_lib_dir = runtime_dir.join("_build/default/lib");
+        let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
+        let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
+
+        let (node_info, is_new) = workspace::get_or_start_workspace(
+            &current_dir,
+            port,
+            &runtime_beam_dir,
+            &jsx_beam_dir,
+        )?;
+
+        if is_new {
+            println!("Started new workspace node: {}", node_info.node_name);
+            // Give the node time to initialize
+            std::thread::sleep(Duration::from_millis(2000));
+        } else {
+            println!("Connected to existing workspace: {}", node_info.node_name);
+        }
+
+        None // No guard needed - node is detached
     };
 
     // Connect to REPL backend
@@ -860,7 +891,10 @@ pub fn run(port_arg: Option<u16>, node_arg: Option<String>) -> Result<()> {
     let _ = rl.save_history(&history_file);
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
-    drop(beam_guard);
+    // Clean up BEAM node if in foreground mode
+    if let Some(guard) = beam_guard_opt {
+        drop(guard);
+    }
 
     Ok(())
 }

@@ -7,13 +7,95 @@
 %%% the JSON protocol for REPL requests/responses.
 
 -module(beamtalk_repl_server).
+-behaviour(gen_server).
 
 -include("beamtalk.hrl").
 
--export([handle_client/2, parse_request/1, format_response/1, format_error/1,
+-export([start_link/1, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1]).
 
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
 -define(RECV_TIMEOUT, 30000).
+
+-record(state, {
+    listen_socket :: gen_tcp:socket(),
+    port :: inet:port_number(),
+    acceptor_pid :: pid() | undefined
+}).
+
+%%% Public API
+
+%% @doc Start the REPL TCP server.
+%% Listens on the specified port for incoming REPL connections.
+-spec start_link(inet:port_number()) -> {ok, pid()} | {error, term()}.
+start_link(Port) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Port, []).
+
+%%% gen_server callbacks
+
+%% @private
+init(Port) ->
+    %% Start listening on TCP port
+    case gen_tcp:listen(Port, [binary, {packet, line}, {active, false}, {reuseaddr, true}]) of
+        {ok, ListenSocket} ->
+            %% Start acceptor process
+            {ok, AcceptorPid} = start_acceptor(ListenSocket),
+            {ok, #state{listen_socket = ListenSocket, port = Port, acceptor_pid = AcceptorPid}};
+        {error, Reason} ->
+            {stop, {listen_failed, Reason}}
+    end.
+
+%% @private
+handle_call(_Request, _From, State) ->
+    {reply, {error, unknown_request}, State}.
+
+%% @private
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%% @private
+handle_info({'DOWN', _Ref, process, AcceptorPid, Reason}, State = #state{acceptor_pid = AcceptorPid, listen_socket = ListenSocket}) ->
+    %% Acceptor died, restart it
+    io:format(standard_error, "REPL acceptor died: ~p, restarting~n", [Reason]),
+    {ok, NewAcceptorPid} = start_acceptor(ListenSocket),
+    {noreply, State#state{acceptor_pid = NewAcceptorPid}};
+
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%% @private
+terminate(_Reason, #state{listen_socket = ListenSocket}) ->
+    gen_tcp:close(ListenSocket),
+    ok.
+
+%% @private
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%% Acceptor Process
+
+%% @private
+start_acceptor(ListenSocket) ->
+    Pid = spawn_link(fun() -> acceptor_loop(ListenSocket) end),
+    {ok, Pid}.
+
+%% @private
+acceptor_loop(ListenSocket) ->
+    case gen_tcp:accept(ListenSocket) of
+        {ok, ClientSocket} ->
+            %% TODO: Get actual REPL pid from session supervisor
+            %% For now, this is a placeholder
+            ReplPid = whereis(beamtalk_repl),
+            spawn(fun() -> handle_client(ClientSocket, ReplPid) end),
+            acceptor_loop(ListenSocket);
+        {error, Reason} ->
+            io:format(standard_error, "Accept error: ~p~n", [Reason]),
+            timer:sleep(1000),
+            acceptor_loop(ListenSocket)
+    end.
 
 %%% Client Handling
 
@@ -24,26 +106,41 @@ handle_client(Socket, ReplPid) ->
 
 %% @private
 handle_client_loop(Socket, ReplPid) ->
-    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-        {ok, Data} ->
-            %% Send request to REPL server
-            ReplPid ! {client_request, Data, self()},
-            %% Wait for response
-            receive
-                {response, Response} ->
-                    gen_tcp:send(Socket, [Response, "\n"]),
-                    handle_client_loop(Socket, ReplPid)
-            after ?RECV_TIMEOUT ->
-                gen_tcp:send(Socket, [format_error(timeout), "\n"]),
+    try
+        case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+            {ok, Data} ->
+                %% Send request to REPL server
+                ReplPid ! {client_request, Data, self()},
+                %% Wait for response
+                receive
+                    {response, Response} ->
+                        case gen_tcp:send(Socket, [Response, "\n"]) of
+                            ok ->
+                                handle_client_loop(Socket, ReplPid);
+                            {error, SendError} ->
+                                %% Failed to send (e.g., broken pipe), close cleanly
+                                io:format(standard_error, "REPL client send error: ~p~n", [SendError]),
+                                gen_tcp:close(Socket)
+                        end
+                after ?RECV_TIMEOUT ->
+                    gen_tcp:send(Socket, [format_error(timeout), "\n"]),
+                    gen_tcp:close(Socket)
+                end;
+            {error, closed} ->
+                ok;
+            {error, timeout} ->
+                gen_tcp:close(Socket);
+            {error, RecvError} ->
+                io:format(standard_error, "REPL client recv error: ~p~n", [RecvError]),
                 gen_tcp:close(Socket)
-            end;
-        {error, closed} ->
-            ok;
-        {error, timeout} ->
-            gen_tcp:close(Socket);
-        {error, Reason} ->
-            logger:warning("REPL client error", #{reason => Reason}),
-            gen_tcp:close(Socket)
+        end
+    catch
+        Class:Reason:Stack ->
+            %% Unexpected crash in client handler - log and close cleanly
+            io:format(standard_error,
+                      "REPL client handler crash:~nClass: ~p~nReason: ~p~nStack: ~p~n",
+                      [Class, Reason, lists:sublist(Stack, 10)]),
+            catch gen_tcp:close(Socket)
     end.
 
 %%% Protocol Parsing and Formatting

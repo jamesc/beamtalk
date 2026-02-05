@@ -126,8 +126,14 @@ init({Port, Options}) ->
     %% Ensure beamtalk runtime is started (for class registry, bootstrap, etc.)
     application:ensure_all_started(beamtalk_runtime),
     
-    %% Open TCP listen socket
-    case gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {packet, line}]) of
+    %% Open TCP listen socket (bind to localhost if specified)
+    BindIp = maps:get(bind_ip, Options, undefined),
+    ListenOptions0 = [binary, {active, false}, {reuseaddr, true}, {packet, line}],
+    ListenOptions = case BindIp of
+        undefined -> ListenOptions0;
+        _ -> [{ip, BindIp} | ListenOptions0]
+    end,
+    case gen_tcp:listen(Port, ListenOptions) of
         {ok, ListenSocket} ->
             %% Get actual port (important when Port=0)
             {ok, ActualPort} = inet:port(ListenSocket),

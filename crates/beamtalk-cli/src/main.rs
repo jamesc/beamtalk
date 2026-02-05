@@ -53,6 +53,10 @@ enum Command {
         /// Node name for Erlang distribution (default: `BEAMTALK_NODE_NAME` env var)
         #[arg(long)]
         node: Option<String>,
+
+        /// Start node in foreground instead of detached workspace (for debugging)
+        #[arg(long)]
+        foreground: bool,
     },
 
     /// Check source files for errors without compiling
@@ -98,7 +102,11 @@ fn main() -> Result<()> {
         Command::Build { path } => commands::build::build(&path),
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
-        Command::Repl { port, node } => commands::repl::run(port, node.clone()),
+        Command::Repl {
+            port,
+            node,
+            foreground,
+        } => commands::repl::run(port, node.clone(), foreground),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");
@@ -111,6 +119,7 @@ fn main() -> Result<()> {
     match result {
         Ok(()) => std::process::exit(0),
         Err(e) => {
+            // miette already provides nice error formatting, just display it
             eprintln!("{e:?}");
             std::process::exit(1);
         }
