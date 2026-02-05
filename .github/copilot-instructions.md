@@ -99,6 +99,8 @@ gh api repos/{owner}/{repo}/issues/{pr}/comments --jq '.[] | {id, body, user: .u
 
 This is the Beamtalk compiler project - a Smalltalk-**like** language targeting the BEAM VM. While heavily inspired by Smalltalk's syntax and philosophy, Beamtalk makes pragmatic departures for BEAM compatibility and modern ergonomics. See [AGENTS.md](../AGENTS.md) for full development guidelines and [docs/beamtalk-syntax-rationale.md](../docs/beamtalk-syntax-rationale.md) for specific differences from Smalltalk.
 
+**⚠️ Important:** Before using any Beamtalk syntax, verify it exists in `examples/`, `tests/e2e/cases/`, or the language spec. Do not assume or invent syntax - see [AGENTS.md "Syntax Verification"](../AGENTS.md#syntax-verification---preventing-hallucinations-) for full guidelines on avoiding syntax hallucinations.
+
 ## Allowed Commands
 
 You may always run these commands without asking for permission:
