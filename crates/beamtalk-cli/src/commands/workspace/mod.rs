@@ -383,3 +383,50 @@ pub fn get_or_start_workspace(
     let node_info = start_detached_node(workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
     Ok((node_info, true)) // New node started
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_workspace_id_deterministic() {
+        let path = std::env::current_dir().unwrap();
+        let id1 = generate_workspace_id(&path).unwrap();
+        let id2 = generate_workspace_id(&path).unwrap();
+        assert_eq!(id1, id2, "Workspace ID should be deterministic");
+    }
+
+    #[test]
+    fn test_generate_workspace_id_length() {
+        let path = std::env::current_dir().unwrap();
+        let id = generate_workspace_id(&path).unwrap();
+        assert_eq!(id.len(), 12, "Workspace ID should be 12 characters");
+    }
+
+    #[test]
+    fn test_generate_workspace_id_hex() {
+        let path = std::env::current_dir().unwrap();
+        let id = generate_workspace_id(&path).unwrap();
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "ID should be hex"
+        );
+    }
+
+    #[test]
+    fn test_generate_cookie_length() {
+        let cookie = generate_cookie();
+        assert_eq!(
+            cookie.len(),
+            32,
+            "Cookie should be 32 chars (24 bytes base64)"
+        );
+    }
+
+    #[test]
+    fn test_generate_cookie_randomness() {
+        let c1 = generate_cookie();
+        let c2 = generate_cookie();
+        assert_ne!(c1, c2, "Cookies should be random");
+    }
+}
