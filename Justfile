@@ -115,18 +115,18 @@ test-runtime:
     # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
     if ! OUTPUT=$(rebar3 eunit 2>&1); then
         echo "$OUTPUT"
-        # Only accept exit if it's a test failure (not compilation/config error)
-        if ! echo "$OUTPUT" | grep -qE "(Failed|Passed):"; then
-            echo "❌ rebar3 failed without test results (compilation/config error?)"
+        # Check if any tests actually failed (as opposed to being cancelled/skipped)
+        if echo "$OUTPUT" | grep -qE "Failed: [1-9]"; then
+            echo "❌ Runtime tests failed"
             exit 1
         fi
-        # Allow exactly 6 known failures (BT-235 super dispatch tests)
-        # Any additional failures indicate a regression
-        if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
-            echo "❌ More than 6 tests failed! Check for regressions (expected: 6 from BT-235)."
+        # Allow "cancelled" status for integration tests that need daemon
+        if echo "$OUTPUT" | grep -q "One or more tests were cancelled"; then
+            echo "✓ Unit tests passed (integration tests skipped - need daemon)"
+        else
+            echo "❌ rebar3 failed without test results"
             exit 1
         fi
-        echo "⚠️  6 known test failures (BT-235 - super dispatch)"
     else
         echo "$OUTPUT"
     fi
