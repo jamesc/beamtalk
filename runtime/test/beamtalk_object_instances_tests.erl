@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Unit tests for the beamtalk_instances registry.
+%%% @doc Unit tests for the beamtalk_object_instances registry.
 %%% Tests cover registration, lookup, auto-cleanup on process death,
 %%% and iteration over instances.
 -module(beamtalk_object_instances_tests).
