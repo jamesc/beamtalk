@@ -1064,15 +1064,21 @@ impl CoreErlangGenerator {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
             Expression::ClassReference { name, .. } => {
-                // BT-215: For now, class references without message sends are not supported
-                // Future: Resolve to class object for full metaclass system
-                Err(CodeGenError::UnsupportedFeature {
-                    feature: format!(
-                        "standalone class reference '{}' - use with a message send",
-                        name.name
-                    ),
-                    location: format!("{:?}", expr.span()),
-                })
+                // BT-215: Standalone class references resolve to class objects
+                // Wrap the class PID in a beamtalk_object record for uniform dispatch
+                // Generate: {'beamtalk_object', 'Point class', 'beamtalk_class', ClassPid}
+                let class_pid_var = self.fresh_var("ClassPid");
+                write!(
+                    self.output,
+                    "let {class_pid_var} = call 'beamtalk_class':'whereis_class'('{}') in ",
+                    name.name
+                )?;
+                write!(
+                    self.output,
+                    "{{'beamtalk_object', '{} class', 'beamtalk_class', {class_pid_var}}}",
+                    name.name
+                )?;
+                Ok(())
             }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
