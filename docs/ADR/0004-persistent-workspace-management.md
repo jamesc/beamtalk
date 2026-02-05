@@ -702,6 +702,101 @@ Beamtalk broadcast: "Taking a break"   // Notify other REPLs
 Beamtalk actorNamed: #myCounter    // Both Alice and Bob can access
 ```
 
+### REPL Message Protocol (Preliminary)
+
+REPLs communicate with workspace nodes using a message-based protocol inspired by Clojure's nREPL.
+
+**Transport:** TCP with JSON messages (simpler than nREPL's bencode, easier tooling)
+
+**Message structure:**
+```json
+{
+  "op": "eval",
+  "id": "msg-001",
+  "session": "alice",
+  "code": "counter := Counter spawn"
+}
+```
+
+**Response structure:**
+```json
+{
+  "id": "msg-001",
+  "session": "alice",
+  "value": "<0.123.0>",
+  "status": ["done"]
+}
+```
+
+**Core operations:**
+
+| Op | Description | Request fields | Response fields |
+|----|-------------|----------------|-----------------|
+| `eval` | Evaluate expression | `code`, `session` | `value`, `out`, `err`, `status` |
+| `complete` | Autocompletion | `prefix`, `context` | `completions` |
+| `info` | Documentation/type | `symbol` | `doc`, `arglists`, `class` |
+| `inspect` | Object inspection | `expr` or `pid` | `state`, `class`, `methods` |
+| `load-file` | Load `.bt` file | `path` or `content` | `status` |
+| `reload` | Hot reload module | `module` | `status` |
+| `interrupt` | Cancel evaluation | `session` | `status` |
+| `actors` | List actors | — | `actors` |
+| `sessions` | List sessions | — | `sessions` |
+| `clone` | Create new session | `session` (to clone from) | `new-session` |
+| `close` | Close session | `session` | `status` |
+
+**Streaming output:**
+
+Long-running evaluations stream output as multiple messages:
+
+```json
+{"id": "msg-001", "out": "Processing...\n"}
+{"id": "msg-001", "out": "Step 1 complete\n"}
+{"id": "msg-001", "value": "ok", "status": ["done"]}
+```
+
+**Status values:**
+- `done` — Operation complete
+- `error` — Operation failed (see `err` field)
+- `interrupted` — Cancelled by user
+- `need-input` — Waiting for user input (future)
+
+**Actor-specific operations:**
+
+| Op | Description | Request fields | Response fields |
+|----|-------------|----------------|-----------------|
+| `spawn` | Spawn actor | `class`, `args`, `name` | `pid` |
+| `send` | Send message | `pid`, `message` | `result` (if sync) |
+| `state` | Get actor state | `pid` | `state` |
+| `kill` | Terminate actor | `pid` | `status` |
+
+**Example session:**
+
+```
+→ {"op": "clone", "id": "1"}
+← {"id": "1", "new-session": "alice", "status": ["done"]}
+
+→ {"op": "eval", "id": "2", "session": "alice", "code": "counter := Counter spawn"}
+← {"id": "2", "session": "alice", "value": "<0.123.0>", "status": ["done"]}
+
+→ {"op": "eval", "id": "3", "session": "alice", "code": "counter increment"}
+← {"id": "3", "session": "alice", "value": "1", "status": ["done"]}
+
+→ {"op": "actors", "id": "4", "session": "alice"}
+← {"id": "4", "actors": [{"pid": "<0.123.0>", "class": "Counter", "name": null}], "status": ["done"]}
+
+→ {"op": "complete", "id": "5", "session": "alice", "prefix": "coun"}
+← {"id": "5", "completions": ["counter"], "status": ["done"]}
+```
+
+**Why this matters:**
+
+1. **Tooling interop** — Any client speaking this protocol can connect (CLI, VS Code, web IDE)
+2. **Language agnostic** — JSON over TCP works from any language
+3. **Streaming** — Long operations don't block; output streams incrementally
+4. **Session isolation** — Each client has own bindings, shares actors
+
+This is a preliminary design. See **BT-253** for full protocol specification research.
+
 ### Workspace Metadata
 
 Each workspace stores metadata in ETS table:
