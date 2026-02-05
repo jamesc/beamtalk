@@ -54,7 +54,7 @@ build-erlang:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run all linting and formatting checks
-lint: clippy fmt-check
+lint: clippy fmt-check dialyzer
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:
@@ -70,6 +70,11 @@ fmt-check:
 fmt:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
+
+# Run Dialyzer on Erlang runtime
+dialyzer:
+    @echo "🔬 Running Dialyzer type checking..."
+    cd runtime && rebar3 dialyzer
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Testing
