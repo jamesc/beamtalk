@@ -199,10 +199,15 @@ parse_json(Data) ->
         {ok, Decoded}
     catch
         Class:Reason:Stack ->
-            %% Log parse failures for debugging REPL protocol issues
-            io:format(standard_error, 
-                      "JSON parse failed:~nClass: ~p~nReason: ~p~nStack: ~p~nData: ~p~n",
-                      [Class, Reason, lists:sublist(Stack, 3), Data]),
+            %% Log parse failures for debugging REPL protocol issues (suppressed during tests)
+            case application:get_env(beamtalk_runtime, suppress_json_errors, false) of
+                false ->
+                    io:format(standard_error, 
+                              "JSON parse failed:~nClass: ~p~nReason: ~p~nStack: ~p~nData: ~p~n",
+                              [Class, Reason, lists:sublist(Stack, 3), Data]);
+                true ->
+                    ok
+            end,
             {error, not_json}
     end.
 
