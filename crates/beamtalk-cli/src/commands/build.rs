@@ -8,20 +8,25 @@ use crate::diagnostic::CompileDiagnostic;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
+use tracing::{debug, error, info, instrument, warn};
 
 /// Build beamtalk source files.
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
+#[instrument(skip_all, fields(path = %path))]
 pub fn build(path: &str) -> Result<()> {
+    info!("Starting build");
     let source_path = Utf8PathBuf::from(path);
 
     // Find source files
     let source_files = find_source_files(&source_path)?;
 
     if source_files.is_empty() {
+        error!("No .bt source files found in '{}'", path);
         miette::bail!("No .bt source files found in '{path}'");
     }
 
+    info!(count = source_files.len(), "Found source files");
     println!("Building {} file(s)...", source_files.len());
 
     // Determine project root (for directory input, use the path; for file input, use parent)
@@ -35,6 +40,7 @@ pub fn build(path: &str) -> Result<()> {
 
     // Create build directory relative to project root
     let build_dir = project_root.join("build");
+    debug!("Creating build directory: {}", build_dir);
     std::fs::create_dir_all(&build_dir)
         .into_diagnostic()
         .wrap_err("Failed to create build directory")?;
@@ -64,12 +70,17 @@ pub fn build(path: &str) -> Result<()> {
     }
 
     // Batch compile Core Erlang to BEAM
+    info!("Compiling Core Erlang to BEAM");
     println!("  Compiling to BEAM bytecode...");
     let compiler = BeamCompiler::new(build_dir);
     let beam_files = compiler
         .compile_batch(&core_files)
         .wrap_err("Failed to compile Core Erlang to BEAM")?;
 
+    info!(
+        beam_count = beam_files.len(),
+        "Build completed successfully"
+    );
     println!("Build complete");
     println!("  Generated {} BEAM file(s) in build/", beam_files.len());
 
@@ -113,7 +124,9 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
+#[instrument(skip_all, fields(path = %path, module = module_name))]
 fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Result<()> {
+    debug!("Compiling module '{}'", module_name);
     println!("  Compiling {path}...");
 
     // Read source file
@@ -132,24 +145,40 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
 
     // Display all diagnostics (errors and warnings) using miette formatting
     if !diagnostics.is_empty() {
+        debug!(
+            diagnostic_count = diagnostics.len(),
+            "Found diagnostics during compilation"
+        );
         for diagnostic in &diagnostics {
             let compile_diag =
                 CompileDiagnostic::from_core_diagnostic(diagnostic, path.as_str(), &source);
-            eprintln!("{:?}", miette::Report::new(compile_diag));
+
+            // Use appropriate log level based on diagnostic severity
+            match diagnostic.severity {
+                beamtalk_core::source_analysis::Severity::Error => {
+                    error!("{:?}", miette::Report::new(compile_diag));
+                }
+                beamtalk_core::source_analysis::Severity::Warning => {
+                    warn!("{:?}", miette::Report::new(compile_diag));
+                }
+            }
         }
     }
 
     // Fail compilation only if there are errors
     if has_errors {
+        error!("Compilation failed for '{}'", path);
         miette::bail!("Failed to compile '{path}'");
     }
 
+    debug!("Parsed successfully: {}", path);
     println!("    ✓ Parsed successfully");
 
     // Generate Core Erlang
     write_core_erlang(&module, module_name, core_file)
         .wrap_err_with(|| format!("Failed to generate Core Erlang for '{path}'"))?;
 
+    debug!("Generated Core Erlang: {}", core_file);
     println!("    ✓ Generated Core Erlang: {core_file}");
 
     Ok(())
