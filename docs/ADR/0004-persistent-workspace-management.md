@@ -261,25 +261,32 @@ The design distinguishes between two levels:
 
 ### The Beamtalk Global Object
 
-`Beamtalk` is a global object (like `Smalltalk` in Smalltalk) available in every session:
+`Beamtalk` is a global object (like `Smalltalk` in Smalltalk) available in every session.
+
+**Current implementation** (see `lib/beamtalk.bt`):
+- `Beamtalk allClasses` — List all registered classes
+- `Beamtalk classNamed:` — Get class by name
+- `Beamtalk globals` — Access global namespace
+
+**Proposed additions for workspace support:**
 
 ```beamtalk
-// Query runtime state
+// Query runtime state (PROPOSED)
 Beamtalk actors                    // List all actors in workspace
 Beamtalk actorNamed: #myCounter    // Get actor by registered name
 Beamtalk sessions                  // List connected REPL sessions
 Beamtalk modules                   // List loaded modules
 
-// Runtime metadata
+// Runtime metadata (PROPOSED)
 Beamtalk projectPath               // "/home/user/my-project"
 Beamtalk nodeName                  // 'beamtalk_my_project@localhost'
 Beamtalk version                   // "0.1.0"
 
-// Session management
+// Session management (PROPOSED)
 Beamtalk currentSession            // This REPL's session
 Beamtalk broadcast: "Taking break" // Send message to all sessions
 
-// Hot reload
+// Hot reload (PROPOSED)
 Beamtalk reload: Counter           // Reload specific module
 Beamtalk reloadAll                 // Reload all modified modules
 ```
@@ -478,33 +485,33 @@ code_change(OldVsn, State, _Extra) ->
 
 ```beamtalk
 // Original Counter.bt
-class Counter
-  @value := 0
+Actor subclass: Counter
+  value := 0
   
   increment
-    @value := @value + 1
+    self.value := self.value + 1
 end
 ```
 
 ```erlang
 > counter := Counter spawn
-> counter increment   % @value = 1
-> counter increment   % @value = 2
+> counter increment   // self.value = 1
+> counter increment   // self.value = 2
 ```
 
 Now you modify Counter.bt:
 
 ```beamtalk
 // Modified Counter.bt  
-class Counter
-  @value := 0
-  @step := 1          // NEW: added instance variable
+Actor subclass: Counter
+  value := 0
+  step := 1          // NEW: added instance variable
   
   increment
-    @value := @value + @step   // CHANGED: uses @step
+    self.value := self.value + self.step   // CHANGED: uses step
   
   step: newStep       // NEW: setter
-    @step := newStep
+    self.step := newStep
 end
 ```
 
@@ -515,7 +522,7 @@ end
 | **New method** | Available immediately | Existing actors gain new method |
 | **Modified method** | Takes effect on next call | No state change needed |
 | **Removed method** | `doesNotUnderstand:` on next call | Calling removed method fails |
-| **New instance variable** | **Defaults to nil** | `@step` is `nil` until set |
+| **New instance variable** | **Defaults to nil** | `step` is `nil` until set |
 | **Removed instance variable** | **Orphaned** | Old data in state, inaccessible |
 | **Renamed instance variable** | **Both orphaned and nil** | Old name orphaned, new name nil |
 
@@ -523,19 +530,19 @@ end
 
 ```erlang
 > counter increment   
-%% ERROR: @step is nil, can't add nil to integer!
+// ERROR: step is nil, can't add nil to integer!
 
-> counter step: 1     % Set the new variable
-> counter increment   % Now works: @value = 3
+> counter step: 1     // Set the new variable
+> counter increment   // Now works: self.value = 3
 ```
 
 **Strategies for safe upgrades:**
 
 1. **code_change/3 callback** (recommended for critical actors):
    ```beamtalk
-   class Counter
+   Actor subclass: Counter
      codeChange: oldVersion state: oldState extra: extra
-       // Migrate state: add default for @step
+       // Migrate state: add default for step
        self step: (oldState at: #step ifAbsent: [1])
    end
    ```
@@ -543,14 +550,14 @@ end
 2. **Lazy initialization** (recommended for simple cases):
    ```beamtalk
    step
-     @step ifNil: [@step := 1].
-     ^ @step
+     self.step ifNil: [self.step := 1].
+     ^ self.step
    ```
 
 3. **Versioned spawning** (for incompatible changes):
    ```erlang
-   > oldCounter := Counter spawn       % Old version
-   > newCounter := CounterV2 spawn     % New version
+   > oldCounter := Counter spawn       // Old version
+   > newCounter := CounterV2 spawn     // New version
    > newCounter migrateFrom: oldCounter
    ```
 
@@ -560,7 +567,6 @@ end
 - **Shape mismatch** — new variables are nil, removed variables are orphaned
 
 This is different from Smalltalk, where you can modify individual methods and the change applies immediately to all instances. Beamtalk's approach is BEAM-native: reload the module, let actors handle migration.
-```
 
 ### REPL Binding Persistence
 
@@ -581,31 +587,37 @@ This is different from Smalltalk, where you can modify individual methods and th
 
 **Solutions:**
 
-1. **Named actors (recommended for important actors):**
+1. **Named actors (proposed syntax for important actors):**
    ```erlang
-   > counter := Counter spawnAs: #myCounter
-   %% Reconnect later
-   > counter := Actor named: #myCounter   % Rebind to existing actor
-   > counter increment                    % Works!
+   // PROPOSED: spawnAs: does not exist yet
+   // > counter := Counter spawnAs: #myCounter
+   
+   // Current workaround: spawn and register manually
+   > counter := Counter spawn
+   > Beamtalk register: counter as: #myCounter   // Proposed API
+   
+   // Reconnect later
+   > counter := Beamtalk actorNamed: #myCounter   // Rebind to existing actor
+   > counter increment                            // Works!
    ```
 
-2. **Beamtalk actor registry:**
+2. **Beamtalk actor registry (proposed additions):**
    ```erlang
-   > Beamtalk actors   // List all supervised actors
+   > Beamtalk actors   // Proposed: List all supervised actors
    #(#myCounter -> <0.123.0>, #logger -> <0.124.0>)
    
-   > Beamtalk actorNamed: #myCounter   // Get actor by name
+   > Beamtalk actorNamed: #myCounter   // Proposed: Get actor by name
    <0.123.0>
    ```
 
 3. **Session restore (future enhancement):**
    ```erlang
-   %% On reconnect, REPL could auto-restore bindings from registry
-   > :bindings              % Show available bindings
+   // On reconnect, REPL could auto-restore bindings from registry
+   > :bindings              // Show available bindings
    counter = <0.123.0> (Counter)
    logger = <0.124.0> (Logger)
    
-   > :restore counter       % Rebind 'counter' to the actor
+   > :restore counter       // Rebind 'counter' to the actor
    ```
 
 **Mental model:** Think of workspaces like a server room. Actors are servers that keep running. REPL bindings are sticky notes on your desk pointing to servers. When you leave, the sticky notes get thrown away, but the servers keep running. You can write new sticky notes when you return.
@@ -1121,17 +1133,21 @@ This would shadow `Banking::Counter` with the experimental version, only in this
 
 ### Proposed Interaction Model
 
+> **Note:** The following shows **proposed future syntax** for namespaces.
+> This is NOT valid Beamtalk syntax today—provided for illustration only.
+
 ```beamtalk
+// PROPOSED FUTURE SYNTAX - NOT IMPLEMENTED
 namespace Banking
-  class Counter ... end
-  class Account ... end
+  Actor subclass: Counter ... end
+  Actor subclass: Account ... end
   
   namespace Internal    // Nested (GNU Smalltalk-style hierarchy)
-    class AuditLog ... end
+    Actor subclass: AuditLog ... end
   end
 end
 
-// Usage
+// Usage (also proposed)
 counter := Banking::Counter spawn
 log := Banking::Internal::AuditLog spawn
 ```
@@ -1146,20 +1162,22 @@ log := Banking::Internal::AuditLog spawn
 
 ### Example Workflow
 
+> **Note:** The `import` keyword shown below is **proposed future syntax**.
+
 ```bash
 # Terminal 1: Normal development
 cd ~/project
 beamtalk repl
-> import Banking
-> counter := Counter spawn    // Banking::Counter
+> // PROPOSED: import Banking
+> counter := Counter spawn    // Would resolve to Banking::Counter
 > counter increment
 
 # Terminal 2: Experimental workspace with overlay
 cd ~/project
 beamtalk workspace create experiment --overlay Banking=./my-experimental-banking.bt
 beamtalk repl --workspace experiment
-> import Banking
-> counter := Counter spawn    // Experimental Banking::Counter
+> // PROPOSED: import Banking
+> counter := Counter spawn    // Would use experimental Banking::Counter
 > counter increment           // Uses experimental implementation
 
 # Both workspaces coexist, different Counter implementations running
