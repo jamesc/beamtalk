@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Nested counter with field mutations in nested control flow
+// Tests BT-98: Field assignments in nested blocks
+
+Actor subclass: FieldMutationNested
+  state: value = 0
+
+  getValue => ^self.value
+
+  // Nested to:do: with field mutation
+  nestedIncrement: outer inner: inner =>
+    1 to: outer do: [:i |
+      1 to: inner do: [:j |
+        self.value := self.value + 1
+      ]
+    ].
+    ^self.value
