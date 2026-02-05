@@ -440,3 +440,264 @@ increment(Pid) ->
 get_value(Pid) ->
     gen_server:call(Pid, get_value).
 ```
+
+---
+
+## Common BEAM Pitfalls ⚠️
+
+**Gotchas that commonly bite developers coming from other languages:**
+
+### 1. Atom Table Exhaustion
+
+**Problem:** Atoms are never garbage collected. Creating atoms from user input can exhaust the atom table (1,048,576 limit).
+
+| ❌ Wrong | ✅ Right | Why |
+|---------|---------|-----|
+| `list_to_atom(UserInput)` | Use `binary()` for dynamic strings | Atoms never GC'd |
+| `binary_to_atom(UserInput, utf8)` | Validate against whitelist first | Can exhaust atom table |
+| Creating atoms in loops | Use binaries or existing atoms | Memory leak |
+
+**Safe patterns:**
+```erlang
+%% ❌ DANGEROUS - creates atoms from user input
+handle_call({method, MethodName}, _From, State) ->
+    Method = binary_to_atom(MethodName, utf8),  % DANGEROUS!
+    dispatch(Method, State).
+
+%% ✅ SAFE - validate against known methods first
+handle_call({method, MethodName}, _From, State) ->
+    case maps:get(MethodName, State#{'__methods__'}, undefined) of
+        undefined -> {reply, {error, method_not_found}, State};
+        MethodFun -> {reply, MethodFun(State), State}
+    end.
+```
+
+### 2. String Type Confusion
+
+**Problem:** Erlang has multiple string types. Using the wrong one causes performance issues.
+
+| Type | Syntax | Use Case | Performance |
+|------|--------|----------|-------------|
+| **List** | `"hello"` | Legacy code, char ops | Slow (linked list) |
+| **Binary** | `<<"hello">>` | Modern strings, I/O | Fast (compact) |
+| **Atom** | `'hello'` | Constants, tags | Fast (integers) |
+
+**Best practices:**
+```erlang
+%% ❌ WRONG - lists are slow for strings
+String = "hello " ++ "world",  % Slow
+Length = length(String),        % O(n)
+
+%% ✅ RIGHT - binaries are fast
+String = <<"hello ", "world">>,  % Fast
+Length = byte_size(String),      % O(1)
+
+%% Generated Beamtalk code should always use binaries
+'my_method'/1 = fun (Self) ->
+    <<"Generated string literal">>
+end
+```
+
+### 3. Process Limits
+
+**Problem:** BEAM has process limits. Default max is 262,144 processes.
+
+**Guidelines:**
+- Design for 10K-100K actors in production
+- Use pooling for high-volume short-lived operations
+- Monitor process count: `erlang:system_info(process_count)`
+- Increase limit only after profiling: `erl +P 1000000`
+
+**Anti-patterns to avoid:**
+```erlang
+%% ❌ BAD - spawn per HTTP request
+handle_request(Req) ->
+    spawn(fun() -> process_request(Req) end).  % Will exhaust limit
+
+%% ✅ GOOD - use poolboy or similar
+handle_request(Req) ->
+    poolboy:transaction(worker_pool, fun(Worker) ->
+        gen_server:call(Worker, {process, Req})
+    end).
+```
+
+### 4. Hot Code Loading Complexity
+
+**Problem:** Hot code loading keeps two versions alive simultaneously during reload.
+
+**Key facts:**
+- Old version runs until all processes finish with it
+- Recursive functions need fully qualified calls to upgrade
+- `-on_load` attribute for initialization
+
+**Safe code loading pattern:**
+```erlang
+%% ❌ RISKY - local call prevents upgrade
+loop(State) ->
+    receive
+        Msg -> loop(handle(Msg, State))  % Stuck on old version!
+    end.
+
+%% ✅ SAFE - fully qualified call allows upgrade
+loop(State) ->
+    receive
+        Msg -> ?MODULE:loop(handle(Msg, State))  % Upgrades on next iteration
+    end.
+```
+
+### 5. Pattern Matching vs Evaluation
+
+**Problem:** Erlang pattern matches, it doesn't evaluate expressions in patterns.
+
+```erlang
+%% ❌ WRONG - tries to match variable Value against 42
+Value = get_value(),
+case Value of
+    Value == 42 -> true;  % SYNTAX ERROR!
+    _ -> false
+end.
+
+%% ✅ RIGHT - pattern match against literal
+case get_value() of
+    42 -> true;
+    _ -> false
+end.
+
+%% ✅ RIGHT - use guard for evaluation
+case get_value() of
+    Value when Value == 42 -> true;
+    _ -> false
+end.
+```
+
+### 6. Variable Single Assignment
+
+**Problem:** Erlang variables are single-assignment (immutable).
+
+```erlang
+%% ❌ WRONG - cannot rebind X
+X = 5,
+X = X + 1.  % ERROR: badmatch
+
+%% ✅ RIGHT - use new variable
+X = 5,
+X1 = X + 1,
+X2 = X1 * 2.
+
+%% Pattern matching allows "rebinding" if value matches
+X = 5,
+X = 5.  % OK - matches
+X = 6.  % ERROR - doesn't match
+```
+
+**Codegen strategy:**
+```erlang
+%% Generate sequential variable names
+let <X> = 5 in
+let <X1> = call 'erlang':'+'(X, 1) in
+let <X2> = call 'erlang':'*'(X1, 2) in
+X2
+```
+
+### 7. Security: binary_to_term
+
+**Problem:** `binary_to_term/1` can execute arbitrary code and exhaust resources.
+
+```erlang
+%% ❌ DANGEROUS - untrusted data
+Data = receive_from_network(),
+Term = binary_to_term(Data).  % CAN EXECUTE CODE!
+
+%% ✅ SAFER - use safe option (but still risky)
+Term = binary_to_term(Data, [safe]).
+
+%% ✅ SAFEST - use explicit parsing
+case parse_json(Data) of
+    {ok, Parsed} -> Parsed;
+    {error, Reason} -> handle_error(Reason)
+end.
+```
+
+**Never use `binary_to_term/1` on:**
+- Network input
+- User uploads
+- External storage
+- Anything not generated by your own code
+
+### 8. Message Queue Unbounded Growth
+
+**Problem:** Process mailboxes can grow unbounded, exhausting memory.
+
+**Protection strategies:**
+```erlang
+%% ✅ Monitor mailbox size
+handle_info(check_mailbox, State) ->
+    {message_queue_len, Len} = process_info(self(), message_queue_len),
+    case Len > 10000 of
+        true -> 
+            error_logger:warning_msg("Mailbox overflow: ~p messages", [Len]),
+            {noreply, State};
+        false -> 
+            {noreply, State}
+    end.
+
+%% ✅ Use process_flag for hibernation
+init([]) ->
+    process_flag(message_queue_data, off_heap),  % Reduce GC pressure
+    {ok, #state{}}.
+
+%% ✅ Add backpressure
+handle_cast({work, Item}, #state{queue = Queue} = State) when length(Queue) > 1000 ->
+    {noreply, State};  % Drop work when overloaded
+handle_cast({work, Item}, #state{queue = Queue} = State) ->
+    {noreply, State#state{queue = [Item | Queue]}}.
+```
+
+### 9. Large Binary Memory Leaks
+
+**Problem:** Large binaries (>64 bytes) are reference counted. Holding references prevents GC.
+
+```erlang
+%% ❌ LEAKS - keeps entire binary in memory
+extract_header(LargeBinary) ->
+    <<Header:32/binary, _Rest/binary>> = LargeBinary,
+    Header.  % Rest is still in memory via LargeBinary!
+
+%% ✅ BETTER - copy small part
+extract_header(LargeBinary) ->
+    <<Header:32/binary, _Rest/binary>> = LargeBinary,
+    binary:copy(Header).  % Now Rest can be GC'd
+```
+
+### 10. ETS Table Leaks
+
+**Problem:** ETS tables aren't garbage collected. Owned by creating process.
+
+```erlang
+%% ❌ WRONG - table dies with temporary process
+spawn(fun() ->
+    Table = ets:new(temp, [public]),
+    ets:insert(Table, {key, value})
+    %% Process dies, table deleted!
+end).
+
+%% ✅ RIGHT - owned by long-lived process
+init([]) ->
+    Table = ets:new(persistent, [named_table, public, {read_concurrency, true}]),
+    {ok, #state{table = Table}}.
+```
+
+### Summary Checklist
+
+Before generating Erlang code, verify:
+
+- [ ] No `list_to_atom/1` or `binary_to_atom/2` on untrusted input
+- [ ] Use `binary()` for strings, not lists
+- [ ] Process spawning is bounded (pooling, limits)
+- [ ] Recursive functions use `?MODULE:function` for hot code loading
+- [ ] Pattern matching doesn't try to evaluate expressions
+- [ ] Variables follow single-assignment (use X, X1, X2...)
+- [ ] No `binary_to_term/1` on untrusted data
+- [ ] Message queue growth is monitored/bounded
+- [ ] Large binaries are copied when extracting small parts
+- [ ] ETS tables owned by long-lived processes

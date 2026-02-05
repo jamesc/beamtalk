@@ -431,6 +431,440 @@ format_error_message(#beamtalk_error{} = Error) ->
 
 ---
 
+## When to Stop and Ask for Help 🚨
+
+**If you encounter any of these situations, STOP working and ask the user:**
+
+### 1. **Circular Dependencies**
+- Issue A blocks B, B blocks A
+- Design decision requires another design decision
+- "Need to implement X to test Y, but need Y to implement X"
+
+**What to do:** Explain the circular dependency and ask which to break or how to approach incrementally.
+
+### 2. **Specification Ambiguity**
+- Acceptance criteria are unclear or contradictory
+- Multiple valid interpretations of requirements
+- Missing information about edge cases
+- Conflicting examples in documentation
+
+**What to do:** List the ambiguities, propose 2-3 interpretations, ask which is correct.
+
+### 3. **Missing Design Decision**
+- Feature requires architectural choice (e.g., "Should this be sync or async?")
+- Multiple implementation strategies, no clear winner
+- Trade-offs between performance, complexity, and maintainability
+- ADR-worthy decision needed
+
+**What to do:** Present options with pros/cons, recommend one, ask for decision.
+
+### 4. **Repeated Test Failures**
+- Same tests fail after multiple fix attempts (>3 tries)
+- Test passes locally but fails in CI
+- Flaky test that passes/fails randomly
+- Root cause unclear after investigation
+
+**What to do:** Share test output, explain attempts made, ask for debugging guidance.
+
+### 5. **Breaking Change Concern**
+- Change might break existing user code
+- Alters public API or language semantics
+- Requires migration path or deprecation cycle
+- Affects BEAM interoperability
+
+**What to do:** Describe the potential break, propose alternatives, ask if acceptable.
+
+### 6. **Performance Cliff**
+- Solution works but is O(n²) or worse
+- Generates excessive memory allocations
+- Requires unbounded resources (atoms, processes, memory)
+- Creates hot spots in critical path
+
+**What to do:** Present working solution, explain performance concern, ask if acceptable or needs optimization.
+
+### 7. **Security Boundary**
+- Handling untrusted user input
+- Parsing external data formats
+- Executing dynamic code
+- Network or filesystem operations
+
+**What to do:** Describe the security concern, propose validation strategy, request review.
+
+### 8. **Spinning for >30 Minutes**
+- Multiple solutions attempted, none work
+- Stuck on same error/issue without progress
+- Uncertainty about correct approach
+- Debugging reveals deeper issues
+
+**What to do:** Summarize what was tried, share current error, ask for direction.
+
+### Better to Ask Early
+
+**It's better to ask after 30 minutes than spin for 3 hours on wrong assumptions.**
+
+Example good question:
+```
+I'm implementing BT-123 (field mutation in blocks). I've tried:
+1. Threading state through block closure - fails with X
+2. Using mutable reference - breaks Erlang semantics
+3. Copying state back after block - loses updates
+
+Should I:
+A) Refactor codegen to use different state model?
+B) Add runtime state synchronization?
+C) Document as limitation and create follow-up issue?
+
+Current error: [paste error]
+```
+
+---
+
+## Understanding the Compilation Pipeline 🔧
+
+**Where does your feature live?**
+
+```
+Beamtalk Source (.bt)
+    ↓ Lexer (src/parse/lexer.rs)        - Converts text → tokens
+    ↓ Parser (src/parse/parser/mod.rs)  - Converts tokens → AST
+    ↓ Semantic Analysis (future)         - Type checking, validation
+    ↓ Code Generation (src/codegen/)     - Converts AST → Core Erlang
+    ↓ erlc                               - Converts Core Erlang → BEAM bytecode
+    ↓ Runtime (runtime/src/)             - Executes BEAM bytecode
+    ↓ REPL (runtime/src/beamtalk_repl*/) - Interactive evaluation
+```
+
+### Quick Reference: Where to Implement Features
+
+| You're implementing... | Primary location | Secondary location | Key files |
+|------------------------|------------------|--------------------|-----------|
+| **New syntax** | Parser | Lexer (if new tokens needed) | `parse/parser/mod.rs`<br>`parse/lexer.rs` |
+| **Type checking** | Semantic analysis (future) | N/A | Not yet implemented |
+| **Code generation** | Codegen | Runtime support functions | `codegen/core_erlang/*.rs` |
+| **Runtime behavior** | Runtime | Codegen for dispatch | `runtime/src/beamtalk_*.erl` |
+| **Primitive operations** | Runtime | Codegen for dispatch | `runtime/src/beamtalk_integer.erl`<br>`runtime/src/beamtalk_string.erl` |
+| **REPL features** | REPL | Codegen for eval context | `runtime/src/beamtalk_repl*.erl` |
+| **Error messages** | All layers | Runtime for formatting | `runtime/src/beamtalk_error.erl` |
+| **Class system** | Codegen + Runtime | Parser for syntax | `codegen/core_erlang/gen_server.rs`<br>`runtime/src/beamtalk_class.erl` |
+
+### Examples by Layer
+
+**Lexer changes:**
+- Adding new operators (`++`, `//`)
+- New literal syntax (symbols `#foo`)
+- Keywords (`sealed`, `async`)
+
+**Parser changes:**
+- Message send syntax (unary, binary, keyword)
+- Block syntax (`[...]`, `[:x | ...]`)
+- Class definitions (`Actor subclass: Counter`)
+
+**Codegen changes:**
+- How field access compiles (`self.value`)
+- Control flow structures (`ifTrue:`, `whileTrue:`)
+- Message dispatch (sync vs async)
+
+**Runtime changes:**
+- Primitive method implementations (`Integer +`)
+- Error handling and formatting
+- Class registration and dispatch
+- REPL evaluation and state management
+
+### Debugging Tip: Inspect Intermediate Stages
+
+```bash
+# See generated Core Erlang
+beamtalk build examples/counter.bt
+cat examples/build/counter.core
+
+# See BEAM assembly
+cd examples/build
+erlc +to_asm counter.core
+cat counter.S
+
+# Test in Erlang shell
+cd examples/build
+erl
+1> c(counter).
+2> counter:spawn().
+```
+
+### When Multiple Layers Need Changes
+
+**Example: Adding `whileTrue:` support**
+
+1. ✅ **Parser** - Already parses as keyword message
+2. ✅ **Codegen** - Generate loop with condition check
+3. ✅ **Runtime** - Block evaluation (`beamtalk_block:value/1`)
+4. ✅ **Tests** - E2E test in `tests/e2e/cases/control_flow.bt`
+
+**Start from the bottom up:**
+1. Runtime support (blocks can be evaluated)
+2. Codegen (generate the loop)
+3. Tests (validate it works)
+
+---
+
+## Scope Control 📋
+
+**When to create a follow-up issue vs fix inline:**
+
+### ✅ Fix Inline (No New Issue)
+
+These are part of your current work:
+
+- **Formatting/typos** in files you're modifying
+- **Test failures** caused by your changes
+- **Clippy warnings** in code you wrote
+- **Documentation** for features you just added
+- **Compile errors** introduced by your changes
+
+### ❌ Create Follow-up Issue
+
+These should be separate issues:
+
+- **Bug discovered** in unrelated code
+- **Performance optimization** opportunity noticed
+- **Missing tests** in other modules
+- **Additional feature ideas** ("while I'm here...")
+- **Refactoring** that's not required for current issue
+- **Technical debt** in existing code
+
+### Red Flags of Scope Creep
+
+🚩 PR grows beyond 10 files changed  
+🚩 "Just one more thing" appears in commits  
+🚩 Acceptance criteria complete but still coding  
+🚩 Testing uncovers orthogonal issues  
+🚩 Refactoring unrelated code "for consistency"  
+🚩 Adding features not in acceptance criteria  
+
+### What to Do When You Find Extra Work
+
+**Step 1:** Complete the original issue first
+
+**Step 2:** Create new issue with context
+```markdown
+Title: Fix X discovered in Y
+
+Context:
+Discovered while working on BT-123. File Z has issue X.
+
+[Details of the issue]
+
+Acceptance Criteria:
+- [ ] Fix X
+- [ ] Add test for X
+
+Dependencies:
+None - independent of BT-123
+
+References:
+- Discovered in: BT-123
+```
+
+**Step 3:** Get original issue reviewed/merged
+
+**Step 4:** Pick up follow-up if high priority
+
+### Example: Good Scope Control
+
+**BT-98: Field assignments in nested blocks**
+
+✅ **In scope:**
+- Implement field mutation in control flow
+- Update codegen for `whileTrue:`, `timesRepeat:`
+- Add E2E tests for mutations
+- Fix clippy warnings in new code
+
+❌ **Out of scope (create follow-up):**
+- Optimize state threading (works but slow)
+- Add `to:by:do:` iteration (different feature)
+- Refactor existing control flow tests (not broken)
+- Add mutation detection analysis (separate concern)
+
+**Result:** BT-98 merged quickly. Follow-ups: BT-245 (optimization), BT-35 (to:by:do:).
+
+### Benefits
+
+- ✅ **Faster reviews** - Smaller, focused PRs
+- ✅ **Easier debugging** - Clear what changed
+- ✅ **Better history** - One issue, one fix
+- ✅ **Parallelizable** - Follow-ups can be picked up independently
+
+---
+
+## Debugging Workflow 🔍
+
+**Step-by-step debugging for common failures:**
+
+### Compiler Crashes
+
+```bash
+# 1. Enable panic backtraces
+RUST_BACKTRACE=1 beamtalk build failing.bt
+
+# 2. Identify which phase failed
+# Lexer error:     "unexpected character at line X, column Y"
+# Parser error:    "expected X, found Y"
+# Codegen error:   "failed to generate code for ..."
+
+# 3. Create minimal repro case
+echo "minimal failing code" > test.bt
+beamtalk build test.bt
+
+# 4. Add debug output in relevant layer
+# For parser: add dbg!(&ast) in parse/parser/mod.rs
+# For codegen: add dbg!(&expr) in codegen/core_erlang/
+```
+
+### Runtime Errors
+
+```bash
+# 1. Inspect generated Core Erlang
+cat build/module_name.core | less
+
+# Look for:
+# - Function definitions ('functionName'/Arity)
+# - Pattern matches (case ... of)
+# - Error calls (call 'erlang':'error')
+
+# 2. Test in Erlang shell directly
+cd build
+erl
+1> c(module_name).
+2> module_name:function_name(Args).
+
+# 3. Enable Erlang debug traces
+3> dbg:tracer().
+4> dbg:p(all, c).
+5> dbg:tpl(module_name, '_', []).
+6> module_name:function_name(Args).
+```
+
+### Test Failures
+
+```bash
+# 1. Run single test with output
+cargo test test_name -- --nocapture
+
+# 2. Check what the test expects
+# - Snapshot test: see tests/snapshots/*.snap
+# - E2E test: see tests/e2e/cases/*.bt
+# - Unit test: read test source
+
+# 3. Update snapshots if intentional
+cargo test test_name
+# Review changes in git diff
+cargo insta accept
+
+# 4. Run all tests in module
+cargo test --test module_name
+```
+
+### E2E Test Failures
+
+```bash
+# 1. Check REPL daemon logs
+just test-e2e 2>&1 | tee e2e.log
+grep "ERROR\|Warning\|failed" e2e.log
+
+# 2. Test fixture manually
+cd tests/e2e/fixtures
+../../target/debug/beamtalk build counter.bt
+cat build/counter.core
+
+# 3. Run REPL interactively
+beamtalk repl
+> @load tests/e2e/fixtures/counter.bt
+> Counter spawn
+> c increment
+
+# 4. Check expected output in test file
+cat tests/e2e/cases/actors.bt
+# Look for // => expected output comments
+```
+
+### Codegen Debugging
+
+```bash
+# 1. Generate and inspect Core Erlang
+beamtalk build failing.bt
+cat build/failing.core
+
+# 2. Look for suspicious patterns:
+# - Missing State/Self parameters
+# - Unbound variables (StateX, State1, etc.)
+# - Wrong function arities
+# - Call to undefined functions
+
+# 3. Compare with working example
+beamtalk build examples/counter.bt
+diff build/counter.core build/failing.core
+
+# 4. Add codegen debug output
+# Edit src/codegen/core_erlang/expressions.rs
+dbg!(&expr);
+// Rebuild and check output
+```
+
+### Runtime/REPL Debugging
+
+```bash
+# 1. Check if modules loaded
+beamtalk repl
+> Beamtalk loadedModules
+> Beamtalk classNamed: #Counter
+
+# 2. Enable verbose mode
+beamtalk repl --verbose
+
+# 3. Check actor state
+> c := Counter spawn
+> c class
+> c respondsTo: #increment
+
+# 4. Inspect Erlang process state
+# In separate terminal:
+erl -name debug@127.0.0.1 -setcookie beamtalk
+(debug@127.0.0.1)1> nodes().
+(debug@127.0.0.1)2> observer:start().
+# Find beamtalk_repl process, inspect state
+```
+
+### Performance Debugging
+
+```bash
+# 1. Profile compilation
+time beamtalk build large_file.bt
+
+# 2. Profile runtime
+beamtalk repl
+> :timer.tc(fun() -> Counter spawn end).
+{TimeInMicroseconds, Result}
+
+# 3. Check memory usage
+> observer:start().
+# Memory tab, see allocation by process
+
+# 4. Flame graphs (advanced)
+# Enable Erlang profiling
+erl -pa build
+1> fprof:apply(Module, Function, Args).
+2> fprof:profile().
+3> fprof:analyse().
+```
+
+### When All Else Fails
+
+1. **Simplify** - Remove code until it works, then add back
+2. **Compare** - Find similar working code, diff against it
+3. **Ask** - Share error + what you tried, get fresh eyes
+4. **Rubber duck** - Explain the problem out loud to yourself
+5. **Sleep** - Come back tomorrow with fresh perspective
+
+---
+
 ## Work Tracking
 
 We use **Linear** for task management. Project prefix: `BT`
