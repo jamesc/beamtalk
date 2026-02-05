@@ -1068,30 +1068,35 @@ impl CoreErlangGenerator {
                 // Wrap the class PID in a beamtalk_object record for uniform dispatch
                 // Pattern matches generate_beamtalk_class_named (lines 915-922)
                 //
-                // Generate:
-                //   let ClassPid = call 'beamtalk_class':'whereis_class'('Point') in
-                //   let ClassModName = call 'beamtalk_class':'module_name'(ClassPid) in
-                //   {'beamtalk_object', 'Point class', ClassModName, ClassPid}
+                // Generate a case expression to handle undefined classes gracefully:
+                //   case call 'beamtalk_class':'whereis_class'('Point') of
+                //     <'undefined'> when 'true' -> 'nil'
+                //     <ClassPid> when 'true' ->
+                //       let ClassModName = call 'beamtalk_class':'module_name'(ClassPid) in
+                //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
+                //   end
                 //
-                // Note: If class doesn't exist, whereis_class returns 'undefined' and creates
-                // an invalid beamtalk_object. This causes a REPL formatting error but doesn't
-                // crash. Proper validation will be added in BT-246 (runtime dispatch).
+                // This matches the pattern in generate_beamtalk_class_named (lines 906-923).
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
+
                 write!(
                     self.output,
-                    "let {class_pid_var} = call 'beamtalk_class':'whereis_class'('{}') in ",
+                    "case call 'beamtalk_class':'whereis_class'('{}') of ",
                     name.name
                 )?;
+                write!(self.output, "<'undefined'> when 'true' -> 'nil'; ")?;
+                write!(self.output, "<{class_pid_var}> when 'true' -> ")?;
                 write!(
                     self.output,
                     "let {class_mod_var} = call 'beamtalk_class':'module_name'({class_pid_var}) in "
                 )?;
                 write!(
                     self.output,
-                    "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}}",
+                    "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
                     name.name
                 )?;
+                write!(self.output, "end")?;
                 Ok(())
             }
             Expression::Super(_) => {
@@ -3836,6 +3841,50 @@ end
         assert!(
             code.contains("'beamtalk_object'") && code.contains("'Point class'"),
             "Should create beamtalk_object with metaclass name. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_standalone_class_reference_validates_undefined_classes() {
+        // BT-215: Test that standalone ClassReference handles undefined classes gracefully
+        // Review comment: Should check for 'undefined' and return 'nil', like generate_beamtalk_class_named
+        use crate::ast::{Expression, Identifier, Module};
+        use crate::parse::Span;
+
+        // Create expression: NonExistentClass (standalone class reference)
+        let expr = Expression::ClassReference {
+            name: Identifier::new("NonExistentClass", Span::new(0, 16)),
+            span: Span::new(0, 16),
+        };
+
+        let module = Module {
+            expressions: vec![expr],
+            classes: vec![],
+            span: Span::new(0, 16),
+            leading_comments: vec![],
+        };
+
+        let code = generate_repl_expression(&module.expressions[0], "repl_eval")
+            .expect("codegen should succeed");
+
+        // Should use a case expression to check for undefined
+        assert!(
+            code.contains("case call 'beamtalk_class':'whereis_class'('NonExistentClass')"),
+            "Should use case expression to handle whereis_class result. Got:\n{code}"
+        );
+
+        // Should return 'nil' when class is undefined
+        assert!(
+            code.contains("<'undefined'> when 'true' ->") && code.contains("'nil'"),
+            "Should return 'nil' when whereis_class returns 'undefined'. Got:\n{code}"
+        );
+
+        // Should create beamtalk_object in the success branch
+        assert!(
+            code.contains('<')
+                && code.contains("> when 'true' ->")
+                && code.contains("'beamtalk_object'"),
+            "Should create beamtalk_object in success branch of case. Got:\n{code}"
         );
     }
 }
