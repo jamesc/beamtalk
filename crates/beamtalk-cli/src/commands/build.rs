@@ -8,7 +8,7 @@ use crate::diagnostic::CompileDiagnostic;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Build beamtalk source files.
 ///
@@ -152,7 +152,16 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
         for diagnostic in &diagnostics {
             let compile_diag =
                 CompileDiagnostic::from_core_diagnostic(diagnostic, path.as_str(), &source);
-            error!("{:?}", miette::Report::new(compile_diag));
+
+            // Use appropriate log level based on diagnostic severity
+            match diagnostic.severity {
+                beamtalk_core::source_analysis::Severity::Error => {
+                    error!("{:?}", miette::Report::new(compile_diag));
+                }
+                beamtalk_core::source_analysis::Severity::Warning => {
+                    warn!("{:?}", miette::Report::new(compile_diag));
+                }
+            }
         }
     }
 
