@@ -124,7 +124,7 @@ handle_client_loop(Socket, ReplPid) ->
         {error, timeout} ->
             gen_tcp:close(Socket);
         {error, Reason} ->
-            io:format(standard_error, "REPL client error: ~p~n", [Reason]),
+            logger:warning("REPL client error", #{reason => Reason}),
             gen_tcp:close(Socket)
     end.
 
@@ -202,9 +202,12 @@ format_error(Reason) ->
     catch
         Class:FormatError:Stack ->
             %% Log formatting failure for debugging
-            io:format(standard_error,
-                      "Failed to format error:~nClass: ~p~nError: ~p~nStack: ~p~nReason: ~p~n",
-                      [Class, FormatError, lists:sublist(Stack, 5), Reason]),
+            logger:debug("Failed to format error", #{
+                class => Class,
+                reason => FormatError,
+                stack => lists:sublist(Stack, 5),
+                original_reason => Reason
+            }),
             %% Return fallback error response
             jsx:encode(#{<<"type">> => <<"error">>, 
                         <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
@@ -281,15 +284,13 @@ parse_json(Data) ->
         {ok, Decoded}
     catch
         Class:Reason:Stack ->
-            %% Log parse failures for debugging REPL protocol issues (suppressed during tests)
-            case application:get_env(beamtalk_runtime, suppress_json_errors, false) of
-                false ->
-                    io:format(standard_error, 
-                              "JSON parse failed:~nClass: ~p~nReason: ~p~nStack: ~p~nData: ~p~n",
-                              [Class, Reason, lists:sublist(Stack, 3), Data]);
-                true ->
-                    ok
-            end,
+            %% Log parse failures for debugging REPL protocol issues
+            logger:debug("JSON parse failed", #{
+                class => Class,
+                reason => Reason,
+                stack => lists:sublist(Stack, 3),
+                data => Data
+            }),
             {error, not_json}
     end.
 

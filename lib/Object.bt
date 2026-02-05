@@ -57,6 +57,8 @@
 // - `instVarNames` - List of instance variable names
 // - `instVarAt:` - Read instance variable by name
 // - `instVarAt:put:` - Write instance variable by name
+// - `perform:` - Dynamically dispatch zero-arity method
+// - `perform:withArguments:` - Dynamically dispatch method with arguments
 //
 // ### Nil Testing  
 // - `isNil` - Returns false for all objects except Nil
@@ -169,8 +171,50 @@ ProtoObject subclass: Object
   // Arguments:
   // - name: Symbol representing the instance variable name
   //
-  // Returns: Current value of the instance variable, or nil if not found
+  // Returns: Current value of the instance variable, or {error, field_not_found} if not found
+  //
+  // Example:
+  // ```beamtalk
+  // counter instVarAt: #value
+  // // => 0
+  // ```
   instVarAt: name => // implemented by compiler
+  
+  // Set an instance variable by name
+  //
+  // For actors: Writes value to the state map
+  // For primitives: Should raise immutability error (not yet implemented - see BT-164)
+  //
+  // Arguments:
+  // - name: Symbol representing the instance variable name
+  // - value: New value to set
+  //
+  // Returns: The new value, or {error, field_not_found} if field doesn't exist
+  //
+  // Example:
+  // ```beamtalk
+  // counter instVarAt: #value put: 42
+  // // => 42
+  // ```
+  instVarAt: name put: value => // implemented by compiler
+  
+  // Dynamically dispatch a zero-arity method by selector
+  //
+  // Shorthand for `perform:withArguments:` with empty argument list.
+  //
+  // Arguments:
+  // - selector: Symbol representing the method name
+  //
+  // Returns: Result of invoking the method
+  //
+  // Example:
+  // ```beamtalk
+  // counter perform: #getValue
+  // // => 42
+  // ```
+  //
+  // See also: `perform:withArguments:` for methods with arguments
+  perform: selector => // implemented by compiler
 
   // ## Instantiation Protocol (Class Methods)
   //

@@ -101,31 +101,88 @@ module 'whitespace_handling' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
-        <OtherSelector> when 'true' ->
-            %% Try doesNotUnderstand:args: fallback (BT-29)
-            let DnuSelector = 'doesNotUnderstand:args:' in
-            let Methods = call 'maps':'get'('__methods__', State) in
-            case call 'maps':'is_key'(DnuSelector, Methods) of
-                <'true'> when 'true' ->
-                    %% Call doesNotUnderstand:args: with [Selector, Args]
-                    call 'whitespace_handling':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
-                <'false'> when 'true' ->
-                    %% No DNU handler - return #beamtalk_error{} record
+        <'class'> when 'true' ->
+            case Args of
+                <[]> when 'true' ->
                     let ClassName = call 'maps':'get'('__class__', State) in
-                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
-                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
-                    let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
-                    let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
-                    {'error', Error, State}
+                    {'reply', ClassName, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
-    end
+        <'respondsTo:'> when 'true' ->
+            case Args of
+                <[Selector]> when 'true' ->
+                    let Methods = call 'maps':'get'('__methods__', State) in
+                    let Result = call 'maps':'is_key'(Selector, Methods) in
+                    {'reply', Result, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+            end
+        <'instVarNames'> when 'true' ->
+            case Args of
+                <[]> when 'true' ->
+                    %% Filter out internal fields starting with '__'
+                    let AllFields = call 'maps':'keys'(State) in
+                    let FilterFn = fun (Key) ->
+                        case Key of
+                            <'__class__'> when 'true' -> 'false'
+                            <'__class_mod__'> when 'true' -> 'false'
+                            <'__methods__'> when 'true' -> 'false'
+                            <'__registry_pid__'> when 'true' -> 'false'
+                            <_> when 'true' -> 'true'
+                        end
+                    in
+                    let UserFields = call 'lists':'filter'(FilterFn, AllFields) in
+                    {'reply', UserFields, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+            end
+        <'instVarAt:'> when 'true' ->
+            case Args of
+                <[FieldName]> when 'true' ->
+                    case call 'maps':'is_key'(FieldName, State) of
+                        <'true'> when 'true' ->
+                            let Value = call 'maps':'get'(FieldName, State) in
+                            {'reply', Value, State}
+                        <'false'> when 'true' ->
+                            {'reply', {'error', 'field_not_found'}, State}
+                        end
+                    <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+                end
+            <'instVarAt:put:'> when 'true' ->
+                case Args of
+                    <[FieldName, Value]> when 'true' ->
+                        case call 'maps':'is_key'(FieldName, State) of
+                            <'true'> when 'true' ->
+                                let NewState = call 'maps':'put'(FieldName, Value, State) in
+                                {'reply', Value, NewState}
+                            <'false'> when 'true' ->
+                                {'reply', {'error', 'field_not_found'}, State}
+                            end
+                        <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+                    end
+                <OtherSelector> when 'true' ->
+                    %% Try doesNotUnderstand:args: fallback (BT-29)
+                    let DnuSelector = 'doesNotUnderstand:args:' in
+                    let Methods = call 'maps':'get'('__methods__', State) in
+                    case call 'maps':'is_key'(DnuSelector, Methods) of
+                        <'true'> when 'true' ->
+                            %% Call doesNotUnderstand:args: with [Selector, Args]
+                            call 'whitespace_handling':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
+                        <'false'> when 'true' ->
+                            %% No DNU handler - return #beamtalk_error{} record
+                            let ClassName = call 'maps':'get'('__class__', State) in
+                            let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
+                            let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
+                            let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
+                            let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
+                            {'error', Error, State}
+                    end
+            end
 
 
 'method_table'/0 = fun () ->
-    ~{}~
+            ~{'class' => 0, 'respondsTo:' => 1, 'instVarNames' => 0, 'instVarAt:' => 1, 'instVarAt:put:' => 2, 'perform:' => 1, 'perform:withArguments:' => 2}~
 
 
 'has_method'/1 = fun (Selector) ->
-    call 'lists':'member'(Selector, [])
+            call 'lists':'member'(Selector, ['class', 'respondsTo:', 'instVarNames', 'instVarAt:', 'instVarAt:put:', 'perform:', 'perform:withArguments:'])
 
 end

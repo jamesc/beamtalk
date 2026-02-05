@@ -272,7 +272,7 @@ handle_call({instVarAt, Name, put, Value}, _From, State) ->
 
 ```
 obj perform: #increment                    // => sends increment message
-obj perform: #at:put: withArgs: [1, 'x']   // => sends at:put: with args
+obj perform: #'at:put:' withArgs: [1, 'x']   // => sends at:put: with args
 ```
 
 **Implementation:**
