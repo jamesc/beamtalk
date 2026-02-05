@@ -59,6 +59,15 @@ impl NameResolver {
         &self.scope
     }
 
+    /// Consumes the name resolver and returns ownership of the scope.
+    ///
+    /// This allows the scope to be passed to other analysis phases (e.g., Analyser)
+    /// without duplicating scope construction.
+    #[must_use]
+    pub fn into_scope(self) -> Scope {
+        self.scope
+    }
+
     /// Resolves a module, defining bindings and detecting undefined variables.
     pub fn resolve_module(&mut self, module: &Module) {
         // Define built-in identifiers that are always available
