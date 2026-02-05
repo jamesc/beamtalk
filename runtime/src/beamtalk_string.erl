@@ -294,7 +294,7 @@ builtin_dispatch(_, _, _) -> not_found.
 
 %% @private
 %% @doc Construct immutable_primitive error for String.
--spec immutable_primitive_error(atom(), term()) -> term().
+-spec immutable_primitive_error(atom(), term()) -> beamtalk_error:error().
 immutable_primitive_error(Class, FieldName) ->
     Error0 = beamtalk_error:new(immutable_primitive, Class),
     Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),

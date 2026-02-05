@@ -20,6 +20,10 @@
     format/1
 ]).
 
+%% Type definition for error record
+-type error() :: #beamtalk_error{}.
+-export_type([error/0]).
+
 %% @doc Create a new error with the specified kind and class.
 %%
 %% The message is generated automatically based on kind and class.
