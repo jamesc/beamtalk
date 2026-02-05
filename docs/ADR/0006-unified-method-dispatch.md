@@ -189,7 +189,7 @@ counter:safe_dispatch(increment, [], State)
 counter:dispatch(increment, [], Self, State)   ← LOCAL LOOKUP (fast path)
     ↓ (not found locally)
     ↓
-beamtalk_dispatch:super('Counter', increment, [], Self, State)  ← HIERARCHY WALK
+beamtalk_dispatch:super(increment, [], Self, State, 'Counter')  ← HIERARCHY WALK
     ↓
 Look up Actor class in registry
     ↓
