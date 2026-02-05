@@ -1434,7 +1434,7 @@ impl CoreErlangGenerator {
                     let selector_atom = selector.to_erlang_atom();
                     write!(
                         self.output,
-                        "let {super_result_var} = call 'beamtalk_class':'super_dispatch'({current_state}, '{selector_atom}', ["
+                        "let {super_result_var} = call 'beamtalk_object_class':'super_dispatch'({current_state}, '{selector_atom}', ["
                     )?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
@@ -1476,7 +1476,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         case call 'beamtalk_class':'start_link'('Counter', ~{...}~) of
+    ///         case call 'beamtalk_object_class':'start_link'('Counter', ~{...}~) of
     ///             <{'ok', _Pid}> when 'true' -> 'ok'
     ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
     ///             <{'error', _Reason}> when 'true' -> 'ok'
@@ -1506,7 +1506,7 @@ impl CoreErlangGenerator {
             }
             write!(
                 self.output,
-                "let _Reg{} = case call 'beamtalk_class':'start_link'('{}', ~{{",
+                "let _Reg{} = case call 'beamtalk_object_class':'start_link'('{}', ~{{",
                 i, class.name.name
             )?;
             writeln!(self.output)?;

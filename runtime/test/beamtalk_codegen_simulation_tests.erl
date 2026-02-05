@@ -1535,9 +1535,9 @@ setup_super_test_classes() ->
     end,
     
     %% Start Counter class process if not already running
-    case beamtalk_class:whereis_class('Counter') of
+    case beamtalk_object_class:whereis_class('Counter') of
         undefined ->
-            {ok, _CounterPid} = beamtalk_class:start_link('Counter', #{
+            {ok, _CounterPid} = beamtalk_object_class:start_link('Counter', #{
                 name => 'Counter',
                 module => counter,
                 superclass => 'Actor',
@@ -1557,9 +1557,9 @@ setup_super_test_classes() ->
     end,
     
     %% Start LoggingCounter class process if not already running
-    case beamtalk_class:whereis_class('LoggingCounter') of
+    case beamtalk_object_class:whereis_class('LoggingCounter') of
         undefined ->
-            {ok, _LoggingPid} = beamtalk_class:start_link('LoggingCounter', #{
+            {ok, _LoggingPid} = beamtalk_object_class:start_link('LoggingCounter', #{
                 name => 'LoggingCounter',
                 module => logging_counter,
                 superclass => 'Counter',

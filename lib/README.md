@@ -280,7 +280,7 @@ MissingClass
 - All methods are class-level - no instance creation needed
 - Acts like a namespace providing system-wide access
 - Class methods implemented as compiler primitives
-- Calls into runtime class registry (`beamtalk_class:all_classes/0`, `beamtalk_class:whereis_class/1`)
+- Calls into runtime class registry (`beamtalk_object_class:all_classes/0`, `beamtalk_object_class:whereis_class/1`)
 
 **Note:** Full testing requires BT-224 (auto-loading standard library).
 

@@ -827,7 +827,7 @@ impl CoreErlangGenerator {
 
         writeln!(
             self.output,
-            "case call 'beamtalk_class':'start_link'('{class_name}', ~{{"
+            "case call 'beamtalk_object_class':'start_link'('{class_name}', ~{{"
         )?;
         self.indent += 1;
         self.write_indent()?;
@@ -894,12 +894,12 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let ClassName = call 'beamtalk_class':'class_name'(Pid) in"
+            "let ClassName = call 'beamtalk_object_class':'class_name'(Pid) in"
         )?;
         self.write_indent()?;
         writeln!(
             self.output,
-            "let ClassModName = call 'beamtalk_class':'module_name'(Pid) in"
+            "let ClassModName = call 'beamtalk_object_class':'module_name'(Pid) in"
         )?;
         self.write_indent()?;
         writeln!(
@@ -910,7 +910,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "in call 'lists':'map'(MapFun, call 'beamtalk_class':'all_classes'())"
+            "in call 'lists':'map'(MapFun, call 'beamtalk_object_class':'all_classes'())"
         )?;
         self.indent -= 1;
         writeln!(self.output)?;
@@ -928,7 +928,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call 'beamtalk_class':'whereis_class'(ClassName) of"
+            "case call 'beamtalk_object_class':'whereis_class'(ClassName) of"
         )?;
         self.indent += 1;
         self.write_indent()?;
@@ -943,7 +943,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let ClassModName = call 'beamtalk_class':'module_name'(Pid) in"
+            "let ClassModName = call 'beamtalk_object_class':'module_name'(Pid) in"
         )?;
         self.write_indent()?;
         writeln!(
@@ -1098,10 +1098,10 @@ impl CoreErlangGenerator {
                 // Pattern matches generate_beamtalk_class_named (lines 915-922)
                 //
                 // Generate a case expression to handle undefined classes gracefully:
-                //   case call 'beamtalk_class':'whereis_class'('Point') of
+                //   case call 'beamtalk_object_class':'whereis_class'('Point') of
                 //     <'undefined'> when 'true' -> 'nil'
                 //     <ClassPid> when 'true' ->
-                //       let ClassModName = call 'beamtalk_class':'module_name'(ClassPid) in
+                //       let ClassModName = call 'beamtalk_object_class':'module_name'(ClassPid) in
                 //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
                 //   end
                 //
@@ -1111,14 +1111,14 @@ impl CoreErlangGenerator {
 
                 write!(
                     self.output,
-                    "case call 'beamtalk_class':'whereis_class'('{}') of ",
+                    "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
                     name.name
                 )?;
                 write!(self.output, "<'undefined'> when 'true' -> 'nil'; ")?;
                 write!(self.output, "<{class_pid_var}> when 'true' -> ")?;
                 write!(
                     self.output,
-                    "let {class_mod_var} = call 'beamtalk_class':'module_name'({class_pid_var}) in "
+                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
                 )?;
                 write!(
                     self.output,
@@ -3528,7 +3528,7 @@ end
 
         // Check that it calls beamtalk_class:start_link
         assert!(
-            code.contains("call 'beamtalk_class':'start_link'('Counter',"),
+            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
             "Should call beamtalk_class:start_link with class name. Got:\n{code}"
         );
 
@@ -3656,7 +3656,7 @@ end
 
         // Should register first class (Counter)
         assert!(
-            code.contains("call 'beamtalk_class':'start_link'('Counter',"),
+            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
             "Should register Counter class. Got:\n{code}"
         );
         assert!(
@@ -3670,7 +3670,7 @@ end
 
         // Should register second class (Logger)
         assert!(
-            code.contains("call 'beamtalk_class':'start_link'('Logger',"),
+            code.contains("call 'beamtalk_object_class':'start_link'('Logger',"),
             "Should register Logger class. Got:\n{code}"
         );
         assert!(
@@ -3760,7 +3760,7 @@ end
 
         // Should implement allClasses to call beamtalk_class:all_classes
         assert!(
-            code.contains("call 'beamtalk_class':'all_classes'()"),
+            code.contains("call 'beamtalk_object_class':'all_classes'()"),
             "Should call beamtalk_class:all_classes. Got:\n{code}"
         );
 
@@ -3772,7 +3772,7 @@ end
 
         // Should implement classNamed: to call whereis_class
         assert!(
-            code.contains("call 'beamtalk_class':'whereis_class'(ClassName)"),
+            code.contains("call 'beamtalk_object_class':'whereis_class'(ClassName)"),
             "Should call whereis_class. Got:\n{code}"
         );
 
@@ -3900,20 +3900,20 @@ end
 
         // Should call whereis_class to get the class PID
         assert!(
-            code.contains("call 'beamtalk_class':'whereis_class'('Point')"),
+            code.contains("call 'beamtalk_object_class':'whereis_class'('Point')"),
             "Should call whereis_class to get class PID. Got:\n{code}"
         );
 
         // Should call module_name to get the module name dynamically
         assert!(
-            code.contains("call 'beamtalk_class':'module_name'("),
+            code.contains("call 'beamtalk_object_class':'module_name'("),
             "Should call module_name to get module name dynamically. Got:\n{code}"
         );
 
-        // Should NOT hardcode 'beamtalk_class' as the module name
+        // Should NOT hardcode 'beamtalk_object_class' as the module name
         assert!(
-            !code.contains("'beamtalk_object', 'Point class', 'beamtalk_class'"),
-            "Should not hardcode 'beamtalk_class' as module name. Got:\n{code}"
+            !code.contains("'beamtalk_object', 'Point class', 'beamtalk_object_class'"),
+            "Should not hardcode 'beamtalk_object_class' as module name. Got:\n{code}"
         );
 
         // Should create beamtalk_object with dynamic ClassModName variable
@@ -3948,7 +3948,7 @@ end
 
         // Should use a case expression to check for undefined
         assert!(
-            code.contains("case call 'beamtalk_class':'whereis_class'('NonExistentClass')"),
+            code.contains("case call 'beamtalk_object_class':'whereis_class'('NonExistentClass')"),
             "Should use case expression to handle whereis_class result. Got:\n{code}"
         );
 

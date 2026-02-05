@@ -64,12 +64,12 @@ protoobject_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
                      %% Verify ProtoObject class exists
-                     ProtoObjectClassPid = beamtalk_class:whereis_class('ProtoObject'),
+                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
                      ?assert(is_pid(ProtoObjectClassPid)),
                      ?assert(is_process_alive(ProtoObjectClassPid)),
                      
                      %% Verify it has no superclass (true root)
-                     Superclass = beamtalk_class:superclass(ProtoObjectClassPid),
+                     Superclass = beamtalk_object_class:superclass(ProtoObjectClassPid),
                      ?assertEqual(none, Superclass)
                  end)
           ]
@@ -86,12 +86,12 @@ object_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
                      %% Verify Object class exists
-                     ObjectClassPid = beamtalk_class:whereis_class('Object'),
+                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
                      ?assert(is_pid(ObjectClassPid)),
                      ?assert(is_process_alive(ObjectClassPid)),
                      
                      %% Verify it inherits from ProtoObject class
-                     Superclass = beamtalk_class:superclass(ObjectClassPid),
+                     Superclass = beamtalk_object_class:superclass(ObjectClassPid),
                      ?assertEqual('ProtoObject', Superclass)
                  end)
           ]
@@ -108,12 +108,12 @@ actor_class_exists_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
                      %% Verify Actor class exists
-                     ActorClassPid = beamtalk_class:whereis_class('Actor'),
+                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
                      ?assert(is_pid(ActorClassPid)),
                      ?assert(is_process_alive(ActorClassPid)),
                      
                      %% Verify it inherits from Object class
-                     Superclass = beamtalk_class:superclass(ActorClassPid),
+                     Superclass = beamtalk_object_class:superclass(ActorClassPid),
                      ?assertEqual('Object', Superclass)
                  end)
           ]
@@ -130,14 +130,14 @@ three_level_hierarchy_test_() ->
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
                      %% Walk the hierarchy from Actor -> Object -> ProtoObject -> none
-                     ActorClassPid = beamtalk_class:whereis_class('Actor'),
-                     ?assertEqual('Object', beamtalk_class:superclass(ActorClassPid)),
+                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
+                     ?assertEqual('Object', beamtalk_object_class:superclass(ActorClassPid)),
                      
-                     ObjectClassPid = beamtalk_class:whereis_class('Object'),
-                     ?assertEqual('ProtoObject', beamtalk_class:superclass(ObjectClassPid)),
+                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     ?assertEqual('ProtoObject', beamtalk_object_class:superclass(ObjectClassPid)),
                      
-                     ProtoObjectClassPid = beamtalk_class:whereis_class('ProtoObject'),
-                     ?assertEqual(none, beamtalk_class:superclass(ProtoObjectClassPid))
+                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     ?assertEqual(none, beamtalk_object_class:superclass(ProtoObjectClassPid))
                  end)
           ]
      end}.
@@ -155,9 +155,9 @@ all_three_classes_in_pg_group_test_() ->
                      %% All three classes should be in the beamtalk_classes pg group
                      Members = pg:get_members(beamtalk_classes),
                      
-                     ProtoObjectClassPid = beamtalk_class:whereis_class('ProtoObject'),
-                     ObjectClassPid = beamtalk_class:whereis_class('Object'),
-                     ActorClassPid = beamtalk_class:whereis_class('Actor'),
+                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
                      
                      ?assert(lists:member(ProtoObjectClassPid, Members)),
                      ?assert(lists:member(ObjectClassPid, Members)),
@@ -179,8 +179,8 @@ protoobject_methods_test_() ->
           ?_test(begin
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
-                     ProtoObjectClassPid = beamtalk_class:whereis_class('ProtoObject'),
-                     Methods = beamtalk_class:methods(ProtoObjectClassPid),
+                     ProtoObjectClassPid = beamtalk_object_class:whereis_class('ProtoObject'),
+                     Methods = beamtalk_object_class:methods(ProtoObjectClassPid),
                      
                      %% ProtoObject should have its core methods
                      ?assert(lists:member(class, Methods)),
@@ -200,8 +200,8 @@ object_methods_test_() ->
           ?_test(begin
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
-                     ObjectClassPid = beamtalk_class:whereis_class('Object'),
-                     Methods = beamtalk_class:methods(ObjectClassPid),
+                     ObjectClassPid = beamtalk_object_class:whereis_class('Object'),
+                     Methods = beamtalk_object_class:methods(ObjectClassPid),
                      
                      %% Object should have nil testing methods
                      ?assert(lists:member(isNil, Methods)),
@@ -223,10 +223,10 @@ actor_methods_test_() ->
           ?_test(begin
                      {ok, _Pid} = beamtalk_bootstrap:start_link(),
                      
-                     ActorClassPid = beamtalk_class:whereis_class('Actor'),
+                     ActorClassPid = beamtalk_object_class:whereis_class('Actor'),
                      
                      %% Actor should have class methods for spawning
-                     Methods = beamtalk_class:methods(ActorClassPid),
+                     Methods = beamtalk_object_class:methods(ActorClassPid),
                      
                      %% Check that instance methods exist
                      %% (spawn methods are class methods, stored separately)
