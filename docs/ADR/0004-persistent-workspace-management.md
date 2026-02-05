@@ -1235,17 +1235,197 @@ Common issues and solutions:
 | **Hot reload not working** | Changes to `.bt` file not reflected | Check compiler daemon is running. Try `:reload` in REPL. Verify module loaded: `code:which(counter)`. |
 | **Actor crashed** | `doesNotUnderstand:` or unexpected behavior | Check supervisor: `Workspace supervisor status`. Actor may have restarted with fresh state. Use `Workspace actorNamed:` to get new PID. |
 
+## Prior Art: Alternative Persistence Models
+
+Beyond Pharo and BEAM, several other systems offer instructive approaches to persistent development environments.
+
+### Clojure nREPL
+
+**Architecture:** Persistent JVM process with nREPL server. Editors (CIDER, Calva) connect via TCP using EDN message protocol.
+
+```
+┌─────────────────┐     ┌──────────────────────┐
+│  CIDER/Calva    │     │   JVM Process        │
+│  (Editor)       │────▶│   nREPL Server       │
+│                 │ EDN │   Session A, B, ...  │
+└─────────────────┘     └──────────────────────┘
+```
+
+**Key concepts:**
+- **Sessions:** Each client gets isolated namespace state and bindings
+- **Message protocol:** Structured ops (`eval`, `complete`, `load-file`) not raw text
+- **Middleware:** Extensible handlers for completion, debugging, pretty-printing
+
+**Relevance to Beamtalk:**
+- ✅ Our node/session model is nearly identical
+- 💡 Consider formal protocol spec like nREPL's message ops
+- **Difference:** nREPL is single-JVM; we can run multiple nodes with actor supervision
+
+### Unison (Content-Addressed Code)
+
+**Architecture:** Code stored in SQLite database, identified by SHA3-512 hash of AST. Names are mutable pointers to immutable definitions.
+
+```
+┌─────────────────────────────────────────────────┐
+│ Unison Codebase (SQLite)                         │
+│                                                  │
+│   Hash: abc123 → (+ 1 2)        ← Immutable     │
+│   Hash: def456 → (fn [x] ...)   ← Immutable     │
+│   Name: "increment" → def456    ← Mutable ptr   │
+└─────────────────────────────────────────────────┘
+```
+
+**Key concepts:**
+- **Content-addressed:** Code identified by hash, not file path
+- **Immutable definitions:** Code never changes—new code = new hash
+- **Mutable names:** Rename = change pointer, code unchanged
+- **No files:** Source rendered to files for editing, but DB is truth
+- **Perfect versioning:** All versions exist forever
+
+**Relevance to Beamtalk:**
+- 💡 Solves the `:save` problem—hot-reloaded code IS the persisted code
+- 💡 Rename is free—change name pointer, all references update
+- ⚠️ Radical departure from file-based workflow
+- **Possible future:** Content-addressing internally, files as external interface
+
+### Akka Persistence (Event Sourcing)
+
+**Architecture:** Actors persist events (facts), not state. Recovery replays events to reconstruct state. Snapshots checkpoint periodically.
+
+```
+┌─────────────────────────────────────────────────┐
+│ Persistent Actor                                 │
+│                                                  │
+│   Event Journal:                                 │
+│   ├── Event 1: Incremented                      │
+│   ├── Event 2: Incremented                      │
+│   └── Snapshot @ Event 100: { count: 42 }       │
+│                                                  │
+│   Recovery: Load snapshot → replay events        │
+└─────────────────────────────────────────────────┘
+```
+
+**Key concepts:**
+- **Event sourcing:** Persist events, replay to recover state
+- **Snapshots:** Checkpoint state to speed up recovery
+- **Command/Event split:** Commands = requests, Events = facts (only events replayed)
+- **Durable state:** Alternative CRUD-style persistence (latest state only)
+
+**Relevance to Beamtalk:**
+- 💡 Solves "node restart = state lost" with event replay
+- 💡 Could be optional: `Counter spawnPersistent` vs `Counter spawn`
+- ⚠️ Adds complexity: schema evolution, storage management
+- **Possible future:** Event sourcing as opt-in for critical actors
+
+### Jupyter (Persistent Kernels)
+
+**Architecture:** Kernel process (Python/R/etc.) runs persistently. Jupyter Server manages sessions. Frontends connect via WebSocket.
+
+```
+┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│  Browser/Lab    │     │   Jupyter Server     │     │   Kernel        │
+│  (Frontend)     │────▶│   Session Manager    │────▶│   State in RAM  │
+│                 │ WS  │   Kernel Manager     │ ZMQ │                 │
+└─────────────────┘     └──────────────────────┘     └─────────────────┘
+```
+
+**Key concepts:**
+- **Kernel = persistent process:** State survives cell runs and client disconnects
+- **Session manager:** Maps notebooks to kernels, tracks metadata
+- **Multiple clients:** Multiple frontends can connect to same kernel
+- **No disk persistence:** Kernel restart = state lost (by design)
+
+**Relevance to Beamtalk:**
+- ✅ Our model is very similar (node = kernel, session = notebook)
+- 💡 Session manager pattern for central registry
+- 💡 WebSocket reconnection survives browser refresh
+- **Difference:** Jupyter is cell-based (sequential); Beamtalk is actor-based (concurrent)
+
+### Common Lisp (SLIME/Swank)
+
+**Architecture:** Lisp image runs with Swank server. Emacs connects via SLIME. Image can be saved to disk.
+
+```
+┌─────────────────┐     ┌──────────────────────┐
+│  Emacs + SLIME  │     │   Lisp Image         │
+│  (Editor)       │────▶│   Swank Server       │
+│                 │ TCP │   (full state)       │
+└─────────────────┘     └──────────────────────┘
+```
+
+**Key concepts:**
+- **Image-based:** Entire Lisp state serializable to disk
+- **Swank protocol:** Editor talks to running Lisp
+- **Hybrid workflow:** Code in files (for VCS) + live in image
+- **Save-image command:** User explicitly persists state when wanted
+
+**Relevance to Beamtalk:**
+- 💡 Hybrid source-of-truth: files for VCS, image for live state
+- 💡 Explicit save-state command for user control
+- ⚠️ Same image problems as Pharo (large, platform-specific)
+- **Difference:** BEAM can't serialize VM state like Lisp can
+
+### Comparison Matrix
+
+| System | Runtime Persistence | Code Persistence | State Recovery | Files? |
+|--------|---------------------|------------------|----------------|--------|
+| **Pharo** | Image snapshot | In image | Load image | No |
+| **BEAM/Erlang** | Node running | Files → hot reload | None | Yes |
+| **Clojure nREPL** | JVM running | Files → reload | None | Yes |
+| **Unison** | Process running | Content-addressed DB | None | Derived |
+| **Akka** | Process running | Files | Event replay | Yes |
+| **Jupyter** | Kernel running | Notebook cells | None | Yes |
+| **Common Lisp** | Image running | Image + files | Load image | Hybrid |
+| **Beamtalk** | Node running | Files → hot reload | None* | Yes |
+
+*Future enhancement: optional event sourcing for actor state persistence
+
+### Potential Future Enhancements
+
+Based on prior art analysis:
+
+| Enhancement | Inspired By | Complexity | Value |
+|-------------|-------------|------------|-------|
+| **Formal message protocol** | nREPL | Medium | High (tooling) |
+| **Content-addressed modules** | Unison | High | Medium (versioning) |
+| **Optional event sourcing** | Akka | High | High (state survives) |
+| **Session registry service** | Jupyter | Low | High (multi-client) |
+| **Explicit save-state command** | SLIME | Medium | Medium (user control) |
+
+These enhancements are not part of this ADR but inform future design decisions. See:
+- **BT-253**: Research: Formal REPL message protocol (nREPL-style)
+- **BT-254**: Research: Actor state persistence (Akka-style event sourcing)
+
 ## References
 
-- **Pharo by Example**: <https://books.pharo.org/> (image model documentation)
+### Beamtalk Design
+- **BT-182**: Persistent BEAM runtime across REPL restarts (child issue)
+- **BT-184**: Workspace architecture design (child issue)
+- **BT-185**: Epic: Persistent Workspace Management (parent issue)
+- **BT-252**: ADR: Package Management and Build Tooling (related)
+- Linear: <https://linear.app/beamtalk/issue/BT-185>
+
+### BEAM/Erlang
 - **Erlang Distributed Systems**: <https://www.erlang.org/doc/reference_manual/distributed.html>
 - **OTP Supervisor Behavior**: <https://www.erlang.org/doc/design_principles/sup_princ.html>
 - **Hot Code Reloading**: <https://www.erlang.org/doc/reference_manual/code_loading.html>
 - **BEAM Wisdoms**: <http://beam-wisdoms.clau.se/en/latest/> (VM internals)
-- **BT-182**: Persistent BEAM runtime across REPL restarts (child issue)
-- **BT-184**: Workspace architecture design (child issue)
-- **BT-185**: Epic: Persistent Workspace Management (parent issue)
-- Linear: <https://linear.app/beamtalk/issue/BT-185>
+
+### Smalltalk/Pharo
+- **Pharo by Example**: <https://books.pharo.org/> (image model documentation)
+- **Tonel file format**: <https://github.com/pharo-vcs/tonel>
+
+### Prior Art Systems
+- **nREPL (Clojure)**: <https://nrepl.org/nrepl/design/overview.html>
+- **Unison Language**: <https://www.unison-lang.org/docs/the-big-idea/>
+- **Akka Persistence**: <https://doc.akka.io/libraries/akka-core/current/typed/persistence.html>
+- **Jupyter Architecture**: <https://docs.jupyter.org/en/stable/projects/architecture/content-architecture.html>
+- **SLIME/Swank**: <https://slime.common-lisp.dev/>
+
+### Tooling
+- **Language Server Protocol**: <https://microsoft.github.io/language-server-protocol/>
+- **Debug Adapter Protocol**: <https://microsoft.github.io/debug-adapter-protocol/>
+- **ElixirLS** (reference implementation): <https://github.com/elixir-lsp/elixir-ls>
 
 ## Notes
 
