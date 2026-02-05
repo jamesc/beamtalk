@@ -431,6 +431,66 @@ See full error taxonomy: [docs/internal/design-self-as-object.md](docs/internal/
 
 ---
 
+## Logging - CRITICAL RULES
+
+**NO io:format for diagnostics EVER!** All logging in the runtime MUST use OTP's `logger` module.
+
+### Why Logger, Not io:format
+
+The runtime uses OTP's `logger` module for all diagnostic output:
+
+```erlang
+%% ❌ WRONG - io:format for diagnostics
+io:format(standard_error, "Error: ~p~n", [Reason])
+
+%% ✅ RIGHT - structured logger
+logger:error("Error in method", #{selector => Selector, reason => Reason})
+```
+
+### Log Levels
+
+| Level | When | Example |
+|-------|------|---------|
+| `logger:debug/2` | Detailed diagnostics | JSON parse errors, protocol details |
+| `logger:info/2` | Important events | Workspace started, daemon ready |
+| `logger:warning/2` | Recoverable issues | Accept error, failed cleanup |
+| `logger:error/2` | Errors affecting operations | Method exceptions, timeouts |
+
+### Structured Metadata
+
+Always use metadata maps, not format strings:
+
+```erlang
+%% ✅ Good - structured metadata
+logger:error("Error in method", #{
+    selector => Selector,
+    class => Class,
+    reason => Reason
+})
+
+%% ❌ Bad - format strings
+logger:error("Error in method ~p: ~p:~p", [Selector, Class, Reason])
+```
+
+### Benefits
+
+1. **Clean test output** - Configure logger to suppress non-error logs during tests
+2. **Structured data** - Metadata maps are easy to parse and filter
+3. **Standard OTP** - Follows Erlang best practices
+4. **Configurable** - Control via `sys.config` or runtime API
+
+### Test Configuration
+
+Tests suppress debug/info/warning logs via `runtime/test/sys.config`:
+
+```erlang
+[{kernel, [{logger_level, error}]}]
+```
+
+See full logging guidelines: [docs/development/erlang-guidelines.md](docs/development/erlang-guidelines.md#logging-with-otp-logger)
+
+---
+
 ## User Experience & Developer Experience (DevEx) First
 
 **CRITICAL:** Beamtalk is an **interactive-first** language. Every feature must be validated from the user's perspective before it's considered complete.
