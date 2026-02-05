@@ -119,6 +119,7 @@ fn main() -> Result<()> {
     match result {
         Ok(()) => std::process::exit(0),
         Err(e) => {
+            // miette already provides nice error formatting, just display it
             eprintln!("{e:?}");
             std::process::exit(1);
         }

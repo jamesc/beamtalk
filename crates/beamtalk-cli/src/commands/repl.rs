@@ -52,6 +52,7 @@ use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
 use serde::Deserialize;
+use tracing::info;
 
 use crate::commands::workspace;
 use crate::paths::{beamtalk_dir, is_daemon_running};
@@ -343,7 +344,7 @@ fn find_runtime_dir() -> Result<PathBuf> {
 
 /// Start the compiler daemon in the background.
 fn start_daemon() -> Result<()> {
-    eprintln!("Starting compiler daemon...");
+    info!("Starting compiler daemon...");
 
     // Get path to beamtalk binary (ourselves)
     let exe = std::env::current_exe().into_diagnostic()?;
@@ -367,7 +368,7 @@ fn start_daemon() -> Result<()> {
         ));
     }
 
-    eprintln!("Compiler daemon started.");
+    info!("Compiler daemon started.");
     Ok(())
 }
 
@@ -375,7 +376,7 @@ fn start_daemon() -> Result<()> {
 fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
     let runtime_dir = find_runtime_dir()?;
-    eprintln!("Using runtime at: {}", runtime_dir.display());
+    info!("Using runtime at: {}", runtime_dir.display());
 
     // Build runtime first
     let build_lib_dir = runtime_dir.join("_build/default/lib");
@@ -384,7 +385,7 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
 
     // Check if runtime is built
     if !runtime_beam_dir.exists() {
-        eprintln!("Building Beamtalk runtime...");
+        info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
             .arg("compile")
             .current_dir(&runtime_dir)
@@ -396,7 +397,7 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
         }
     }
 
-    eprintln!("Starting BEAM node with REPL backend on port {port}...");
+    info!("Starting BEAM node with REPL backend on port {port}...");
 
     // Build the eval command that configures the runtime via application:set_env
     // This allows runtime to read port from application environment
