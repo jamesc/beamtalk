@@ -26,6 +26,7 @@
          terminate/2, code_change/3]).
 
 -define(ETS_TABLE, beamtalk_workspace_registry).
+-define(PERSIST_DELAY_MS, 2000).  % Debounce disk writes to every 2 seconds
 
 -record(state, {
     workspace_id :: binary(),
@@ -36,7 +37,8 @@
     repl_port :: inet:port_number() | undefined,
     supervised_actors :: [pid()],
     loaded_modules :: [atom()],
-    metadata_path :: string()
+    metadata_path :: string(),
+    persist_timer :: reference() | undefined
 }).
 
 -type metadata() :: #{
@@ -178,7 +180,8 @@ init(InitialMetadata) ->
         repl_port = ReplPort,
         supervised_actors = [],
         loaded_modules = [],
-        metadata_path = MetadataPath
+        metadata_path = MetadataPath,
+        persist_timer = undefined
     },
     
     %% Store initial state in ETS
@@ -220,8 +223,7 @@ handle_cast(update_activity, State) ->
     Now = erlang:system_time(second),
     State2 = State#state{last_activity = Now},
     store_state_in_ets(State2),
-    persist_metadata_to_disk(State2),
-    {noreply, State2};
+    {noreply, schedule_persist(State2)};
 
 handle_cast({register_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
@@ -232,15 +234,13 @@ handle_cast({register_actor, Pid}, State) ->
             State#state{supervised_actors = [Pid | Actors]}
     end,
     store_state_in_ets(State2),
-    persist_metadata_to_disk(State2),
-    {noreply, State2};
+    {noreply, schedule_persist(State2)};
 
 handle_cast({unregister_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
     State2 = State#state{supervised_actors = lists:delete(Pid, Actors)},
     store_state_in_ets(State2),
-    persist_metadata_to_disk(State2),
-    {noreply, State2};
+    {noreply, schedule_persist(State2)};
 
 handle_cast({register_module, Module}, State) ->
     Modules = State#state.loaded_modules,
@@ -249,20 +249,22 @@ handle_cast({register_module, Module}, State) ->
         false -> State#state{loaded_modules = [Module | Modules]}
     end,
     store_state_in_ets(State2),
-    persist_metadata_to_disk(State2),
-    {noreply, State2};
+    {noreply, schedule_persist(State2)};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+handle_info(persist_to_disk, State) ->
+    persist_metadata_to_disk(State),
+    {noreply, State#state{persist_timer = undefined}};
+
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Actor exited, remove from tracked list
     Actors = State#state.supervised_actors,
     State2 = State#state{supervised_actors = lists:delete(Pid, Actors)},
     store_state_in_ets(State2),
-    persist_metadata_to_disk(State2),
-    {noreply, State2};
+    {noreply, schedule_persist(State2)};
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -280,6 +282,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 
 %% @private
+%% Schedule a debounced persist to disk.
+%% Cancels any pending timer and sets a new one.
+schedule_persist(#state{persist_timer = undefined} = State) ->
+    Ref = erlang:send_after(?PERSIST_DELAY_MS, self(), persist_to_disk),
+    State#state{persist_timer = Ref};
+schedule_persist(State) ->
+    %% Timer already pending; no-op (the existing timer will flush)
+    State.
+
+%% @private
 %% Store state in ETS for fast read access
 store_state_in_ets(State) ->
     case ets:whereis(?ETS_TABLE) of
@@ -295,19 +307,36 @@ load_metadata_from_disk(State) ->
         {ok, Binary} ->
             try jsx:decode(Binary, [return_maps]) of
                 Map ->
-                    %% Restore supervised_actors (list of PIDs stored as strings)
-                    Actors = maps:get(<<"supervised_actors">>, Map, []),
-                    ActorPids = [list_to_pid(binary_to_list(P)) || P <- Actors,
-                                 is_binary(P)],
-                    %% Note: PIDs from disk won't be valid, but we keep the structure
+                    %% Do NOT restore supervised_actors from disk - PIDs are
+                    %% not valid across node restarts. The monitor-based cleanup
+                    %% handles tracking for the current session only.
                     
-                    %% Restore loaded_modules
+                    %% Restore loaded_modules (atoms persist across restarts)
                     Modules = maps:get(<<"loaded_modules">>, Map, []),
-                    ModuleAtoms = [binary_to_existing_atom(M, utf8) || M <- Modules,
-                                   is_binary(M)],
+                    ModuleAtoms = [Atom || Bin <- Modules,
+                                   is_binary(Bin),
+                                   Atom <- [safe_existing_atom(Bin)],
+                                   Atom =/= undefined],
+
+                    %% Restore timestamps and project path if present
+                    CreatedAt = case maps:get(<<"created_at">>, Map, State#state.created_at) of
+                        CreatedAtValue when is_integer(CreatedAtValue) -> CreatedAtValue;
+                        _ -> State#state.created_at
+                    end,
+                    LastActive = case maps:get(<<"last_active">>, Map, State#state.last_activity) of
+                        LastActiveValue when is_integer(LastActiveValue) -> LastActiveValue;
+                        _ -> State#state.last_activity
+                    end,
+                    ProjectPath = case maps:get(<<"project_path">>, Map, State#state.project_path) of
+                        ProjectPathValue when is_binary(ProjectPathValue) -> ProjectPathValue;
+                        _ -> State#state.project_path
+                    end,
                     
                     State#state{
-                        supervised_actors = ActorPids,
+                        project_path = ProjectPath,
+                        created_at = CreatedAt,
+                        last_activity = LastActive,
+                        supervised_actors = [],  % Always start fresh
                         loaded_modules = ModuleAtoms
                     }
             catch
@@ -347,3 +376,11 @@ persist_metadata_to_disk(State) ->
     %% Write to disk
     Json = jsx:encode(Metadata, [{space, 2}, {indent, 2}]),
     file:write_file(Path, Json).
+
+%% @private
+safe_existing_atom(Binary) ->
+    try binary_to_existing_atom(Binary, utf8) of
+        Atom -> Atom
+    catch
+        _:_ -> undefined
+    end.

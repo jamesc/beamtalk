@@ -579,7 +579,7 @@ pub fn run(
     port_arg: Option<u16>,
     node_arg: Option<String>,
     foreground: bool,
-    _workspace_name: Option<String>, // Future: support explicit workspace names
+    workspace_name: Option<&str>,
 ) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
@@ -615,6 +615,7 @@ pub fn run(
 
         let (node_info, is_new) = workspace::get_or_start_workspace(
             &current_dir,
+            workspace_name,
             port,
             &runtime_beam_dir,
             &jsx_beam_dir,
@@ -629,7 +630,7 @@ pub fn run(
         }
 
         // Display workspace info
-        let workspace_id = workspace::generate_workspace_id(&current_dir)?;
+        let workspace_id = workspace::workspace_id_for(&current_dir, workspace_name)?;
         if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
             println!("Workspace: {workspace_id}");
             println!("Project:   {}", metadata.project_path.display());

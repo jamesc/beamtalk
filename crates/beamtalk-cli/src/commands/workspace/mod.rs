@@ -82,6 +82,36 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     Ok(format!("{result:x}")[..12].to_string())
 }
 
+/// Validate a user-provided workspace name.
+fn validate_workspace_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(miette!("Workspace name cannot be empty"));
+    }
+
+    let valid = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return Err(miette!(
+            "Workspace name must contain only letters, numbers, '-' or '_'"
+        ));
+    }
+
+    Ok(())
+}
+
+/// Determine workspace ID from project path or explicit name.
+pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Result<String> {
+    match workspace_name {
+        Some(name) => {
+            let trimmed = name.trim();
+            validate_workspace_name(trimmed)?;
+            Ok(trimmed.to_string())
+        }
+        None => generate_workspace_id(project_path),
+    }
+}
+
 /// Get the workspace directory for a given ID.
 pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
     let beamtalk_dir = dirs::home_dir()
@@ -220,8 +250,11 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
 
 /// Create a new workspace.
 #[allow(dead_code)] // Used in future phases
-pub fn create_workspace(project_path: &Path) -> Result<WorkspaceMetadata> {
-    let workspace_id = generate_workspace_id(project_path)?;
+pub fn create_workspace(
+    project_path: &Path,
+    workspace_name: Option<&str>,
+) -> Result<WorkspaceMetadata> {
+    let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
     // Check if workspace already exists
     if workspace_exists(&workspace_id)? {
@@ -362,12 +395,13 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 #[allow(dead_code)] // Used in Phase 3
 pub fn get_or_start_workspace(
     project_path: &Path,
+    workspace_name: Option<&str>,
     port: u16,
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
 ) -> Result<(NodeInfo, bool)> {
     // Create workspace if it doesn't exist
-    let metadata = create_workspace(project_path)?;
+    let metadata = create_workspace(project_path, workspace_name)?;
     let workspace_id = &metadata.workspace_id;
 
     // Check if node is already running
@@ -411,6 +445,20 @@ mod tests {
             id.chars().all(|c| c.is_ascii_hexdigit()),
             "ID should be hex"
         );
+    }
+
+    #[test]
+    fn test_workspace_id_for_explicit_name() {
+        let path = std::env::current_dir().unwrap();
+        let id = workspace_id_for(&path, Some("my_workspace-1")).unwrap();
+        assert_eq!(id, "my_workspace-1");
+    }
+
+    #[test]
+    fn test_workspace_id_for_invalid_name() {
+        let path = std::env::current_dir().unwrap();
+        assert!(workspace_id_for(&path, Some("bad/name")).is_err());
+        assert!(workspace_id_for(&path, Some("")).is_err());
     }
 
     #[test]

@@ -141,3 +141,148 @@ get_last_activity_when_not_started_test() ->
     
     %% Should return error when not started
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:get_last_activity()).
+
+%%% Alias test
+
+get_alias_returns_same_as_get_metadata_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    ?assertEqual(beamtalk_workspace_meta:get_metadata(),
+                 beamtalk_workspace_meta:get()),
+    gen_server:stop(Pid).
+
+%%% Actor tracking tests
+
+register_actor_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    
+    %% Initially no actors
+    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
+    
+    %% Spawn a process to register
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    ok = beamtalk_workspace_meta:register_actor(ActorPid),
+    timer:sleep(50),  % Let cast process
+    
+    {ok, Actors} = beamtalk_workspace_meta:supervised_actors(),
+    ?assertEqual([ActorPid], Actors),
+    
+    %% Registering same PID again should not duplicate
+    ok = beamtalk_workspace_meta:register_actor(ActorPid),
+    timer:sleep(50),
+    {ok, Actors2} = beamtalk_workspace_meta:supervised_actors(),
+    ?assertEqual([ActorPid], Actors2),
+    
+    %% Cleanup
+    ActorPid ! stop,
+    gen_server:stop(Pid).
+
+unregister_actor_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    ok = beamtalk_workspace_meta:register_actor(ActorPid),
+    timer:sleep(50),
+    
+    ok = beamtalk_workspace_meta:unregister_actor(ActorPid),
+    timer:sleep(50),
+    
+    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
+    
+    ActorPid ! stop,
+    gen_server:stop(Pid).
+
+actor_down_cleanup_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    
+    %% Spawn and register an actor that will exit
+    ActorPid = spawn(fun() -> receive stop -> ok end end),
+    ok = beamtalk_workspace_meta:register_actor(ActorPid),
+    timer:sleep(50),
+    
+    {ok, [ActorPid]} = beamtalk_workspace_meta:supervised_actors(),
+    
+    %% Kill the actor - DOWN message should auto-remove it
+    ActorPid ! stop,
+    timer:sleep(100),
+    
+    ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
+    
+    gen_server:stop(Pid).
+
+%%% Module tracking tests
+
+register_module_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    
+    %% Get initial module count
+    {ok, InitialModules} = beamtalk_workspace_meta:loaded_modules(),
+    InitialCount = length(InitialModules),
+    
+    %% Register a fresh module name unlikely to already exist
+    ModuleName = list_to_atom("test_module_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ok = beamtalk_workspace_meta:register_module(ModuleName),
+    timer:sleep(50),
+    
+    {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
+    ?assertEqual(InitialCount + 1, length(Modules)),
+    ?assert(lists:member(ModuleName, Modules)),
+    
+    %% Registering same module again should not duplicate
+    ok = beamtalk_workspace_meta:register_module(ModuleName),
+    timer:sleep(50),
+    {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
+    ?assertEqual(InitialCount + 1, length(Modules2)),
+    
+    gen_server:stop(Pid).
+
+%%% Not-started behavior tests for new APIs
+
+supervised_actors_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid), timer:sleep(10)
+    end,
+    ?assertEqual({error, not_started}, beamtalk_workspace_meta:supervised_actors()).
+
+loaded_modules_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid), timer:sleep(10)
+    end,
+    ?assertEqual({error, not_started}, beamtalk_workspace_meta:loaded_modules()).
+
+register_actor_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid), timer:sleep(10)
+    end,
+    %% Should not crash
+    ?assertEqual(ok, beamtalk_workspace_meta:register_actor(self())).
+
+register_module_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid -> gen_server:stop(Pid), timer:sleep(10)
+    end,
+    %% Should not crash
+    ?assertEqual(ok, beamtalk_workspace_meta:register_module(some_module)).

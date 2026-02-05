@@ -111,7 +111,7 @@ fn main() -> Result<()> {
             node,
             foreground,
             workspace,
-        } => commands::repl::run(port, node.clone(), foreground, workspace.clone()),
+        } => commands::repl::run(port, node, foreground, workspace.as_deref()),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");
