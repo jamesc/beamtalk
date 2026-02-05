@@ -131,3 +131,34 @@ Static checks required before any commit (must match CI exactly):
 
 Or run all at once:
 - `just ci` - Equivalent to build + clippy + fmt-check + test + test-e2e
+
+---
+
+## Documentation Feedback (Optional - Helps Us Improve!)
+
+**After completing work on an issue**, consider adding this to your PR description:
+
+```markdown
+## Docs Referenced
+- ✅ [Section Name] - How it helped
+- ⚠️ [Section Name] - Useful but could improve (explain)
+- ❌ [Section Name] - Didn't need or wasn't useful
+
+## Suggestions (Optional)
+- [Any ideas for improving the docs]
+```
+
+**Example:**
+```markdown
+## Docs Referenced
+- ✅ Syntax Verification - Prevented hallucination by checking examples/
+- ✅ Compilation Pipeline - Helped find where to implement feature
+- ⚠️ Debugging Workflow - Useful but too long, hard to scan quickly
+- ❌ Scope Control - Didn't need it for this issue
+
+## Suggestions
+- Add quick reference table at top of Compilation Pipeline
+- Consider splitting Debugging Workflow into separate file
+```
+
+This is completely optional but helps us understand which parts of AGENTS.md are useful vs noise.
