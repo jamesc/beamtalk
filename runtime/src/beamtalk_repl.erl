@@ -244,7 +244,7 @@ handle_info(accept, State) ->
             {stop, normal, State};
         {error, Reason} ->
             %% Other error, log and continue
-            io:format(standard_error, "REPL accept error: ~p~n", [Reason]),
+            logger:warning("REPL accept error", #{reason => Reason}),
             self() ! accept,
             {noreply, State}
     end;
@@ -265,9 +265,12 @@ handle_info({client_request, Request, ClientPid}, State) ->
             catch
                 Class:CrashReason:Stack ->
                     %% Crash in eval - log and send error response
-                    io:format(standard_error,
-                              "REPL eval error:~nClass: ~p~nReason: ~p~nStack: ~p~nExpression: ~p~n",
-                              [Class, CrashReason, lists:sublist(Stack, 5), Expression]),
+                    logger:error("REPL eval error", #{
+                        class => Class,
+                        reason => CrashReason,
+                        stack => lists:sublist(Stack, 5),
+                        expression => Expression
+                    }),
                     ClientPid ! {response, beamtalk_repl_server:format_error({eval_error, Class, CrashReason})},
                     {noreply, State}
             end;

@@ -68,7 +68,7 @@ init(Parent) ->
 %% Shared initialization logic
 -spec do_init() -> ok.
 do_init() ->
-    io:format("beamtalk_stdlib: Registering primitive classes...~n"),
+    logger:info("Registering primitive classes"),
     Results = [
         register_integer_class(),
         register_string_class(),
@@ -81,9 +81,9 @@ do_init() ->
     %% Log any failures but don't crash
     lists:foreach(fun
         ({ok, ClassName}) -> 
-            io:format("  Registered ~p~n", [ClassName]);
+            logger:debug("Registered primitive class", #{class => ClassName});
         ({error, ClassName, Reason}) -> 
-            io:format("  WARNING: Failed to register ~p: ~p~n", [ClassName, Reason])
+            logger:warning("Failed to register primitive class", #{class => ClassName, reason => Reason})
     end, Results),
     ok.
 
