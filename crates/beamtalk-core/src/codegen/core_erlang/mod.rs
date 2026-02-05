@@ -68,9 +68,9 @@
 //! ## Core Domain Modules
 //!
 //! - [`control_flow`] - Control flow compilation (iteration, loops, mutation analysis)
-//! - [`message_dispatch`] - Message sending and dispatch (the core Beamtalk operation)
+//! - [`dispatch_codegen`] - Message sending and dispatch (the core Beamtalk operation)
 //! - [`variable_context`] - Variable binding and scope management aggregate
-//! - [`state_threading`] - State threading service for simulated mutation
+//! - [`state_codegen`] - State threading service for simulated mutation
 //!
 //! ## Supporting Modules
 //!
@@ -88,12 +88,12 @@
 mod block_analysis;
 mod builtins;
 mod control_flow;
+mod dispatch_codegen;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;
-mod message_dispatch;
 pub mod selector_mangler;
-mod state_threading;
+mod state_codegen;
 mod util;
 mod variable_context;
 
@@ -101,7 +101,7 @@ mod variable_context;
 pub use util::to_module_name;
 
 use crate::ast::{Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, Module};
-use state_threading::StateThreading;
+use state_codegen::StateThreading;
 use std::fmt::{self, Write};
 use thiserror::Error;
 use variable_context::VariableContext;
@@ -299,7 +299,7 @@ enum CodeGenContext {
 ///
 /// The generator delegates to specialized submodules:
 /// - [`control_flow`] - Iteration and loop compilation
-/// - [`message_dispatch`] - Message sending and dispatch
+/// - [`dispatch_codegen`] - Message sending and dispatch
 /// - [`expressions`] - Expression code generation
 /// - [`gen_server`] - OTP `gen_server` scaffolding
 /// - [`builtins`] - Built-in type operations
