@@ -22,6 +22,7 @@ pub mod error;
 pub mod scope;
 
 pub use error::{SemanticError, SemanticErrorKind};
+pub use scope::BindingKind;
 
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,7 +247,9 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
 
     // Pre-define known REPL variables so they don't produce undefined errors
     for var_name in known_vars {
-        analyser.scope.define(var_name, module.span);
+        analyser
+            .scope
+            .define(var_name, module.span, BindingKind::Local);
     }
 
     analyser.analyse_module(module);
@@ -270,9 +273,9 @@ impl Analyser {
     fn analyse_module(&mut self, module: &Module) {
         // Define built-in identifiers that are always available
         // These are special values in Beamtalk (true, false, nil)
-        self.scope.define("true", module.span);
-        self.scope.define("false", module.span);
-        self.scope.define("nil", module.span);
+        self.scope.define("true", module.span, BindingKind::Local);
+        self.scope.define("false", module.span, BindingKind::Local);
+        self.scope.define("nil", module.span, BindingKind::Local);
 
         // Analyse top-level expressions
         for expr in &module.expressions {
@@ -290,7 +293,8 @@ impl Analyser {
 
         // Define state variables in class scope
         for state in &class.state {
-            self.scope.define(&state.name.name, state.span);
+            self.scope
+                .define(&state.name.name, state.span, BindingKind::InstanceField);
         }
 
         // Analyse methods
@@ -304,12 +308,25 @@ impl Analyser {
     fn analyse_method(&mut self, method: &crate::ast::MethodDefinition) {
         self.scope.push(); // Enter method scope (depth 2)
 
-        // Define 'self' - implicitly available in all method bodies
-        self.scope.define("self", method.span);
+        // Define 'self' - implicitly available in all method bodies.
+        //
+        // Although 'self' is conceptually the receiver *parameter*, we classify it
+        // as a `Local` binding rather than `Parameter` for two reasons:
+        //   - Consistency with other implicit bindings (true, false, nil), which
+        //     are also modeled as locals that are always in scope.
+        //   - It maintains a semantic distinction between explicit user-declared
+        //     parameters (marked as `Parameter`) and implicit bindings provided
+        //     by the language runtime.
+        //
+        // If future type checking or code generation needs to treat 'self' as a
+        // formal parameter, this BindingKind choice can be revisited, but the
+        // current behavior is intentional.
+        self.scope.define("self", method.span, BindingKind::Local);
 
         // Define method parameters
         for param in &method.parameters {
-            self.scope.define(&param.name, param.span);
+            self.scope
+                .define(&param.name, param.span, BindingKind::Parameter);
         }
 
         // Analyse method body
@@ -341,7 +358,7 @@ impl Analyser {
                     Identifier(id) => {
                         // Only define if not already in an outer scope
                         if self.scope.lookup(&id.name).is_none() {
-                            self.scope.define(&id.name, id.span);
+                            self.scope.define(&id.name, id.span, BindingKind::Local);
                         }
                     }
                     _ => {
@@ -449,7 +466,8 @@ impl Analyser {
 
         // Define block parameters
         for param in &block.parameters {
-            self.scope.define(&param.name, param.span);
+            self.scope
+                .define(&param.name, param.span, BindingKind::Parameter);
         }
 
         // Track captures and mutations
@@ -524,7 +542,8 @@ impl Analyser {
         self.result.diagnostics.extend(pattern_diagnostics);
 
         for binding in bindings {
-            self.scope.define(&binding.name, binding.span);
+            self.scope
+                .define(&binding.name, binding.span, BindingKind::Local);
         }
 
         // Analyze guard expression (if present) - can see pattern variables
