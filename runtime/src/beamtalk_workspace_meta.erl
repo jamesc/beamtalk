@@ -38,7 +38,8 @@
     supervised_actors :: [pid()],
     loaded_modules :: [atom()],
     metadata_path :: string(),
-    persist_timer :: reference() | undefined
+    persist_timer :: reference() | undefined,
+    monitor_refs :: #{pid() => reference()}
 }).
 
 -type metadata() :: #{
@@ -181,7 +182,8 @@ init(InitialMetadata) ->
         supervised_actors = [],
         loaded_modules = [],
         metadata_path = MetadataPath,
-        persist_timer = undefined
+        persist_timer = undefined,
+        monitor_refs = #{}
     },
     
     %% Store initial state in ETS
@@ -230,15 +232,24 @@ handle_cast({register_actor, Pid}, State) ->
     State2 = case lists:member(Pid, Actors) of
         true -> State;
         false ->
-            monitor(process, Pid),  % Monitor so we can clean up on exit
-            State#state{supervised_actors = [Pid | Actors]}
+            Ref = monitor(process, Pid),
+            MonRefs = State#state.monitor_refs,
+            State#state{supervised_actors = [Pid | Actors],
+                        monitor_refs = MonRefs#{Pid => Ref}}
     end,
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 
 handle_cast({unregister_actor, Pid}, State) ->
     Actors = State#state.supervised_actors,
-    State2 = State#state{supervised_actors = lists:delete(Pid, Actors)},
+    MonRefs = State#state.monitor_refs,
+    %% Demonitor if we have a ref for this PID
+    case maps:find(Pid, MonRefs) of
+        {ok, Ref} -> demonitor(Ref, [flush]);
+        error -> ok
+    end,
+    State2 = State#state{supervised_actors = lists:delete(Pid, Actors),
+                         monitor_refs = maps:remove(Pid, MonRefs)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 
@@ -260,9 +271,11 @@ handle_info(persist_to_disk, State) ->
     {noreply, State#state{persist_timer = undefined}};
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
-    %% Actor exited, remove from tracked list
+    %% Actor exited, remove from tracked list and monitor refs
     Actors = State#state.supervised_actors,
-    State2 = State#state{supervised_actors = lists:delete(Pid, Actors)},
+    MonRefs = State#state.monitor_refs,
+    State2 = State#state{supervised_actors = lists:delete(Pid, Actors),
+                         monitor_refs = maps:remove(Pid, MonRefs)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 
@@ -271,6 +284,11 @@ handle_info(_Info, State) ->
 
 %% @private
 terminate(_Reason, State) ->
+    %% Cancel any pending persist timer before shutdown
+    case State#state.persist_timer of
+        undefined -> ok;
+        Ref -> erlang:cancel_timer(Ref)
+    end,
     %% Persist final state before shutting down
     persist_metadata_to_disk(State),
     ok.
@@ -283,13 +301,14 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 %% Schedule a debounced persist to disk.
-%% Cancels any pending timer and sets a new one.
-schedule_persist(#state{persist_timer = undefined} = State) ->
-    Ref = erlang:send_after(?PERSIST_DELAY_MS, self(), persist_to_disk),
-    State#state{persist_timer = Ref};
-schedule_persist(State) ->
-    %% Timer already pending; no-op (the existing timer will flush)
-    State.
+%% Cancels any pending timer and resets the debounce window.
+schedule_persist(#state{persist_timer = OldTimer} = State) ->
+    case OldTimer of
+        undefined -> ok;
+        Ref -> erlang:cancel_timer(Ref)
+    end,
+    NewRef = erlang:send_after(?PERSIST_DELAY_MS, self(), persist_to_disk),
+    State#state{persist_timer = NewRef}.
 
 %% @private
 %% Store state in ETS for fast read access
@@ -375,7 +394,14 @@ persist_metadata_to_disk(State) ->
     
     %% Write to disk
     Json = jsx:encode(Metadata, [{space, 2}, {indent, 2}]),
-    file:write_file(Path, Json).
+    case file:write_file(Path, Json) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            logger:warning("Failed to persist workspace metadata to ~s: ~p",
+                           [Path, Reason]),
+            {error, Reason}
+    end.
 
 %% @private
 safe_existing_atom(Binary) ->

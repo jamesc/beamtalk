@@ -105,6 +105,9 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
     match workspace_name {
         Some(name) => {
             let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err(miette!("Workspace name cannot be empty or whitespace-only"));
+            }
             validate_workspace_name(trimmed)?;
             Ok(trimmed.to_string())
         }
@@ -399,23 +402,23 @@ pub fn get_or_start_workspace(
     port: u16,
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
-) -> Result<(NodeInfo, bool)> {
+) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
     let metadata = create_workspace(project_path, workspace_name)?;
-    let workspace_id = &metadata.workspace_id;
+    let workspace_id = metadata.workspace_id.clone();
 
     // Check if node is already running
-    if let Some(node_info) = get_node_info(workspace_id)? {
+    if let Some(node_info) = get_node_info(&workspace_id)? {
         if is_node_running(&node_info) {
-            return Ok((node_info, false)); // Existing node
+            return Ok((node_info, false, workspace_id)); // Existing node
         }
         // Stale node.info file
-        cleanup_stale_node_info(workspace_id)?;
+        cleanup_stale_node_info(&workspace_id)?;
     }
 
     // Start new detached node
-    let node_info = start_detached_node(workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
-    Ok((node_info, true)) // New node started
+    let node_info = start_detached_node(&workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
+    Ok((node_info, true, workspace_id)) // New node started
 }
 
 #[cfg(test)]
@@ -461,6 +464,9 @@ mod tests {
         assert!(workspace_id_for(&path, Some("")).is_err());
         assert!(workspace_id_for(&path, Some("has space")).is_err());
         assert!(workspace_id_for(&path, Some("has.dot")).is_err());
+        // Whitespace-only names should be rejected
+        assert!(workspace_id_for(&path, Some("   ")).is_err());
+        assert!(workspace_id_for(&path, Some("\t")).is_err());
     }
 
     #[test]

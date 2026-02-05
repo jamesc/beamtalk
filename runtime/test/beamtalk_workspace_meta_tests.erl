@@ -381,3 +381,60 @@ load_corrupt_json_falls_back_test() ->
     gen_server:stop(Pid),
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
+
+%%% Debounce coalescing test
+
+debounce_coalesces_rapid_changes_test() ->
+    %% Use a unique workspace ID to control the metadata file
+    WsId = <<"debounce_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    Home = os:getenv("HOME", "/tmp"),
+    MetaDir = filename:join([Home, ".beamtalk", "workspaces", binary_to_list(WsId)]),
+    MetaFile = filename:join(MetaDir, "metadata.json"),
+    
+    %% Clean up any leftover file
+    _ = file:delete(MetaFile),
+    
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        OldPid -> gen_server:stop(OldPid), timer:sleep(10)
+    end,
+    
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        project_path => <<"/tmp/debounce_test">>,
+        created_at => 3000000
+    }),
+    
+    %% Register 3 modules in rapid succession (< 2s debounce window)
+    Mod1 = list_to_atom("debounce_mod1_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Mod2 = list_to_atom("debounce_mod2_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Mod3 = list_to_atom("debounce_mod3_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ok = beamtalk_workspace_meta:register_module(Mod1),
+    timer:sleep(100),
+    ok = beamtalk_workspace_meta:register_module(Mod2),
+    timer:sleep(100),
+    ok = beamtalk_workspace_meta:register_module(Mod3),
+    
+    %% All 3 should be in state immediately
+    timer:sleep(50),
+    {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
+    ?assert(lists:member(Mod1, Modules)),
+    ?assert(lists:member(Mod2, Modules)),
+    ?assert(lists:member(Mod3, Modules)),
+    
+    %% Wait for debounce to fire (2s from LAST change, not first)
+    timer:sleep(2500),
+    
+    %% Verify all 3 modules were persisted to disk
+    ?assert(filelib:is_file(MetaFile)),
+    {ok, Binary} = file:read_file(MetaFile),
+    Map = jsx:decode(Binary, [return_maps]),
+    PersistedModules = maps:get(<<"loaded_modules">>, Map, []),
+    ?assert(lists:member(atom_to_binary(Mod1, utf8), PersistedModules)),
+    ?assert(lists:member(atom_to_binary(Mod2, utf8), PersistedModules)),
+    ?assert(lists:member(atom_to_binary(Mod3, utf8), PersistedModules)),
+    
+    %% Cleanup
+    gen_server:stop(Pid),
+    _ = file:delete(MetaFile),
+    _ = file:del_dir(MetaDir).

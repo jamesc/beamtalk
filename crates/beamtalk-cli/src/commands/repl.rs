@@ -613,7 +613,7 @@ pub fn run(
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
 
-        let (node_info, is_new) = workspace::get_or_start_workspace(
+        let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &current_dir,
             workspace_name,
             port,
@@ -630,7 +630,6 @@ pub fn run(
         }
 
         // Display workspace info
-        let workspace_id = workspace::workspace_id_for(&current_dir, workspace_name)?;
         if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
             println!("Workspace: {workspace_id}");
             println!("Project:   {}", metadata.project_path.display());
