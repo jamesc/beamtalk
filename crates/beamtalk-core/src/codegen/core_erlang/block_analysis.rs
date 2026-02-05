@@ -267,7 +267,7 @@ pub fn is_control_flow_construct(
 mod tests {
     use super::*;
     use crate::ast::{BlockParameter, Identifier};
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     fn make_id(name: &str) -> Identifier {
         Identifier::new(name, Span::new(0, u32::try_from(name.len()).unwrap_or(0)))

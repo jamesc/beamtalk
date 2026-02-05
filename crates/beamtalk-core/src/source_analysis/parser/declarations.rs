@@ -12,7 +12,7 @@ use crate::ast::{
     ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
     MethodKind, StateDeclaration, TypeAnnotation,
 };
-use crate::parse::TokenKind;
+use crate::source_analysis::TokenKind;
 
 use super::Parser;
 

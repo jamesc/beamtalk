@@ -109,7 +109,7 @@ pub fn escape_atom_chars(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::ast::KeywordPart;
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     #[test]
     fn format_unary_selector() {

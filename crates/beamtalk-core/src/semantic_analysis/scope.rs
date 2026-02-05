@@ -10,7 +10,7 @@
 //! - Method (depth 2)
 //! - Block (depth 3+)
 
-use crate::parse::Span;
+use crate::source_analysis::Span;
 use std::collections::HashMap;
 
 /// Tracks variable definitions across nested scopes.

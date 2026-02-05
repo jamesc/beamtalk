@@ -15,7 +15,7 @@
 //! # Example
 //!
 //! ```
-//! use beamtalk_core::parse::{Lexer, TokenKind};
+//! use beamtalk_core::source_analysis::{Lexer, TokenKind};
 //!
 //! let tokens: Vec<_> = Lexer::new("x + 1").collect();
 //! assert_eq!(tokens.len(), 3); // x, +, 1 (EOF excluded from iterator)

@@ -328,7 +328,7 @@ impl fmt::Display for ModuleName {
 mod tests {
     use super::*;
     use crate::ast::{KeywordPart, MessageSelector};
-    use crate::parse::Span;
+    use crate::source_analysis::Span;
 
     // ErlangAtom tests
 

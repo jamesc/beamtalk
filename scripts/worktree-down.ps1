@@ -10,7 +10,6 @@
     
     This script:
     - Stops and removes the devcontainer for the worktree
-    - Removes the associated Docker volume (target cache)
     - Fixes any container path issues in .git file
     - Removes the worktree directory
     - Optionally deletes the branch
@@ -19,16 +18,16 @@
     vs Docker's backslashes on Windows.
 
 .PARAMETER Branch
-    The branch name of the worktree to remove (e.g., "BT-99-feature")
+    The branch name of the worktree to remove (e.g., "feature-branch")
 
 .PARAMETER Force
     Force removal even if there are uncommitted changes
 
 .EXAMPLE
-    .\worktree-down.ps1 BT-99-feature
+    .\worktree-down.ps1 feature-branch
     
 .EXAMPLE
-    .\worktree-down.ps1 -Branch BT-99 -Force
+    .\worktree-down.ps1 -Branch issue-123 -Force
 #>
 
 param(
@@ -46,7 +45,7 @@ if (-not $Branch) {
     Write-Host "Usage: worktree-down.ps1 <branch-name> [-Force]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Gray
-    Write-Host "  .\scripts\worktree-down.ps1 BT-99-feature"
+    Write-Host "  .\scripts\worktree-down.ps1 feature-branch"
     Write-Host "  .\scripts\worktree-down.ps1 feature-branch -Force"
     exit 0
 }
@@ -84,19 +83,27 @@ function Get-WorktreePath {
         [string]$WorktreeRoot
     )
     
+    # Sanitize branch name to match directory name (same as worktree-up.ps1)
+    $dirName = $BranchName -replace '/', '-'
+    $expectedPath = Join-Path $WorktreeRoot $dirName
+    
+    # Check if this directory exists as a worktree
     $worktrees = git worktree list --porcelain 2>$null
     $wtPath = $null
     foreach ($line in $worktrees) {
         if ($line -match "^worktree\s+(.+)") {
             $wtPath = $matches[1]
-        }
-        if ($line -match "^branch\s+refs/heads/(.+)" -and $matches[1] -eq $BranchName) {
+            
             # Convert container path to host path if needed
             if ($wtPath -match "^/workspaces/(.+)$") {
                 $folderName = $matches[1]
                 $wtPath = Join-Path $WorktreeRoot $folderName
             }
-            return $wtPath
+            
+            # Match by directory name, not branch name
+            if ($wtPath -eq $expectedPath) {
+                return $wtPath
+            }
         }
     }
     return $null
@@ -152,15 +159,6 @@ function Remove-DevContainer {
     else {
         Write-Host "ℹ️  No devcontainer found for $folderName" -ForegroundColor Gray
     }
-    
-    # Also remove the target cache volume for this worktree
-    $volumeName = "$folderName-target-cache"
-    $volumeExists = docker volume ls --format "{{.Name}}" 2>$null | Where-Object { $_ -eq $volumeName }
-    if ($volumeExists) {
-        Write-Host "🗑️  Removing target cache volume: $volumeName" -ForegroundColor Cyan
-        docker volume rm $volumeName 2>$null | Out-Null
-        Write-Host "✅ Volume removed" -ForegroundColor Green
-    }
 }
 
 # Main script
@@ -198,15 +196,37 @@ try {
     
     Write-Host "📂 Worktree path: $worktreePath" -ForegroundColor Gray
     
+    # Show what branch is actually checked out (informational)
+    Push-Location $worktreePath
+    try {
+        $actualBranch = git branch --show-current 2>$null
+        if ($actualBranch -and $actualBranch -ne $Branch) {
+            Write-Host "   Note: Currently on branch '$actualBranch' (worktree was created as '$Branch')" -ForegroundColor Gray
+        }
+    }
+    finally {
+        Pop-Location
+    }
+    
     # Stop devcontainer FIRST (before removing worktree to release file locks)
     Remove-DevContainer -WorktreePath $worktreePath
     
-    # Remove .env file if it exists
-    $envPath = Join-Path $worktreePath ".env"
-    if (Test-Path $envPath) {
-        Write-Host "🗑️  Removing .env file..." -ForegroundColor Cyan
-        Remove-Item $envPath -Force
-        Write-Host "✅ .env file removed" -ForegroundColor Green
+    # Run project-specific hook if it exists (for custom cleanup like volumes)
+    $hookScript = Join-Path $worktreePath ".devcontainer\worktree-down-hook.ps1"
+    if (Test-Path $hookScript) {
+        Write-Host "🔧 Running project cleanup hook..." -ForegroundColor Cyan
+        try {
+            & $hookScript -WorktreePath $worktreePath -Branch $Branch -MainRepo $mainRepo
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✅ Project cleanup hook completed" -ForegroundColor Green
+            }
+            else {
+                Write-Host "⚠️  Project cleanup hook returned non-zero exit code" -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "⚠️  Project cleanup hook failed: $_" -ForegroundColor Yellow
+        }
     }
     
     # Check if the .git file in the worktree needs fixing

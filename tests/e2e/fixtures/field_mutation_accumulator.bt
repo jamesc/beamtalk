@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Accumulator actor with multiple fields mutated in control flow
+// Tests BT-98: Multiple field assignments in nested blocks
+
+Actor subclass: FieldMutationAccumulator
+  state: sum = 0
+  state: product = 1
+  state: count = 0
+
+  getSum => ^self.sum
+  getProduct => ^self.product
+  getCount => ^self.count
+
+  // Multiple fields mutated in do:
+  processArray: items =>
+    items do: [:item |
+      self.sum := self.sum + item.
+      self.product := self.product * item.
+      self.count := self.count + 1
+    ].
+    ^#{sum => self.sum, product => self.product, count => self.count}
+
+  // Field mutation in inject:into:
+  accumulateWithInject: items =>
+    | result |
+    result := items inject: 0 into: [:acc :item |
+      self.count := self.count + 1.
+      acc + item
+    ].
+    ^#{result => result, count => self.count}
+
+  // Mixed local variables and field mutations
+  processWithLocal: items =>
+    | localSum |
+    localSum := 0.
+    items do: [:item |
+      localSum := localSum + 1.
+      self.sum := self.sum + item
+    ].
+    ^#{localSum => localSum, sum => self.sum}

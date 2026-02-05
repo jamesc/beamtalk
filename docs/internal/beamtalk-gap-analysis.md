@@ -61,7 +61,7 @@ This document identifies where the current codebase diverges from the DDD model 
 
 #### Gap 1.1: Trivia Span Tracking (Low Priority)
 ```rust
-// crates/beamtalk-core/src/parse/parser/mod.rs:366
+// crates/beamtalk-core/src/source_analysis/parser/mod.rs:366
 comments.push(Comment {
     content: trivia.as_str().into(),
     span: start, // TODO: track trivia spans  <-- Using wrong span
@@ -89,7 +89,7 @@ comments.push(Comment {
 
 **Current State:**
 ```rust
-// crates/beamtalk-core/src/analyse/mod.rs:131-135
+// crates/beamtalk-core/src/semantic_analysis/mod.rs:131-135
 pub fn analyse(_module: &Module) -> AnalysisResult {
     // TODO: Implement semantic analysis
     // For now, return an empty result
