@@ -19,10 +19,14 @@ use std::collections::HashMap;
 
 pub mod block_context;
 pub mod error;
+pub mod name_resolver;
 pub mod scope;
+pub mod type_checker;
 
 pub use error::{SemanticError, SemanticErrorKind};
+pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
+pub use type_checker::TypeChecker;
 
 /// Result of semantic analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,10 +223,16 @@ fn extract_pattern_bindings_impl(
 
 /// Perform semantic analysis on a module.
 ///
-/// This is the main entry point for semantic analysis. It analyzes the module
-/// AST and returns diagnostics and metadata for code generation.
+/// This is the main entry point for semantic analysis. It orchestrates the
+/// `NameResolver` and `TypeChecker` domain services to analyze the module AST
+/// and returns diagnostics and metadata for code generation.
 ///
-/// Currently focuses on pattern variable binding in match expressions.
+/// **DDD Context:** Semantic Analysis
+///
+/// This function orchestrates the following domain services:
+/// - `NameResolver`: Resolves identifiers to bindings and detects undefined variables
+/// - `TypeChecker`: Validates type constraints (currently stub)
+/// - `Analyser`: Performs block context analysis, capture tracking, and mutation detection
 ///
 /// # Examples
 ///
@@ -242,10 +252,30 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 ///
 /// Variables passed in `known_vars` are treated as already defined,
 /// preventing "Undefined variable" errors for REPL session variables.
+///
+/// **DDD Context:** Semantic Analysis
+///
+/// This function orchestrates the `NameResolver`, `TypeChecker`, and block analysis
+/// services. Pre-defining known variables is essential for REPL contexts where
+/// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
+    let mut result = AnalysisResult::new();
+
+    // Phase 1: Name Resolution
+    let mut name_resolver = NameResolver::new();
+    name_resolver.define_known_vars(known_vars, module.span);
+    name_resolver.resolve_module(module);
+    result.diagnostics.extend(name_resolver.take_diagnostics());
+
+    // Phase 2: Type Checking (stub - currently does nothing)
+    let mut type_checker = TypeChecker::new();
+    type_checker.check_module(module);
+    result.diagnostics.extend(type_checker.take_diagnostics());
+
+    // Phase 3: Block Context Analysis (captures, mutations, context determination)
     let mut analyser = Analyser::new();
 
-    // Pre-define known REPL variables so they don't produce undefined errors
+    // Pre-define known REPL variables in the analyser's scope
     for var_name in known_vars {
         analyser
             .scope
@@ -253,7 +283,10 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     }
 
     analyser.analyse_module(module);
-    analyser.result
+    result.diagnostics.extend(analyser.result.diagnostics);
+    result.block_info = analyser.result.block_info;
+
+    result
 }
 
 /// Internal analyser state.
@@ -342,21 +375,18 @@ impl Analyser {
         use crate::ast::Expression::*;
 
         match expr {
-            Identifier(id) => {
-                // Check if variable is defined in scope
-                if self.scope.lookup(&id.name).is_none() {
-                    self.result.diagnostics.push(Diagnostic::error(
-                        format!("Undefined variable: {}", id.name),
-                        id.span,
-                    ));
-                }
+            Identifier(_id) => {
+                // Binding identifiers to declarations and reporting undefined variables
+                // is handled by `NameResolver`. The semantic analyser still maintains
+                // its own scope (`self.scope`), but only for capture/mutation analysis
+                // and related metadata, not for additional name-resolution diagnostics.
             }
 
             Assignment { target, value, .. } => {
                 // Handle assignment target
                 match target.as_ref() {
                     Identifier(id) => {
-                        // Only define if not already in an outer scope
+                        // Define in scope for capture tracking (even though diagnostics are in NameResolver)
                         if self.scope.lookup(&id.name).is_none() {
                             self.scope.define(&id.name, id.span, BindingKind::Local);
                         }
@@ -537,9 +567,11 @@ impl Analyser {
         // Create a new scope for this match arm
         self.scope.push();
 
-        // Extract and define all pattern variables, collect duplicate diagnostics
-        let (bindings, pattern_diagnostics) = extract_pattern_bindings(&arm.pattern);
-        self.result.diagnostics.extend(pattern_diagnostics);
+        // Pattern variable binding is now handled by NameResolver
+        // Extract bindings here just to define them in the scope for captures/mutations tracking
+        let (bindings, _pattern_diagnostics) =
+            crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+        // Note: diagnostics are already collected by NameResolver, no need to duplicate
 
         for binding in bindings {
             self.scope
