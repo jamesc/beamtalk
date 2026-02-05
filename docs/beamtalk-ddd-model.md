@@ -748,7 +748,7 @@ find_and_invoke_super_method(ServerRef, Superclass, Selector, Args, State) ->
 
 **Domain Services:**
 - `CodeLoader`: Loads new BEAM bytecode
-- `StateMigrator`: Executes code_change/3 callbacks
+- `StateMigrator`: Executes code_change/3 callbacks (implemented in `beamtalk_hot_reload`)
 - `InstanceUpgrader`: Triggers sys:change_code/4 for instances
 
 **Key Patterns:**
@@ -760,23 +760,30 @@ find_and_invoke_super_method(ServerRef, Superclass, Selector, Args, State) ->
 **Example Domain Logic:**
 
 ```erlang
-%% BEAM's code_change callback for state migration
+%% Domain service: beamtalk_hot_reload
+%% Centralizes code_change/3 callback logic for all gen_server behaviors
 code_change(OldVsn, OldState, Extra) ->
-    %% Get new field defaults from class metadata
-    Class = maps:get('__class__', OldState),
-    {ok, ClassInfo} = beamtalk_classes:lookup(Class),
-    DefaultFields = maps:get(default_fields, ClassInfo),
-    
-    %% Merge: new defaults + existing fields (existing take precedence)
-    NewState = maps:merge(DefaultFields, OldState),
-    
-    %% Call user-defined migration if present
-    case maps:find('__migrate__', maps:get('__methods__', NewState, #{})) of
-        {ok, MigrateFun} ->
-            {ok, MigrateFun(OldVsn, NewState, Extra)};
-        error ->
-            {ok, NewState}
-    end.
+    %% Current implementation: preserve state unchanged
+    %% Future: automatic field migration as shown below
+    {ok, OldState}.
+
+%% Future implementation (when field defaults are stored in class registry):
+%% code_change(OldVsn, OldState, Extra) ->
+%%     %% Get new field defaults from class metadata
+%%     Class = maps:get('__class__', OldState),
+%%     {ok, ClassInfo} = beamtalk_classes:lookup(Class),
+%%     DefaultFields = maps:get(default_fields, ClassInfo),
+%%     
+%%     %% Merge: new defaults + existing fields (existing take precedence)
+%%     NewState = maps:merge(DefaultFields, OldState),
+%%     
+%%     %% Call user-defined migration if present
+%%     case maps:find('__migrate__', maps:get('__methods__', NewState, #{})) of
+%%         {ok, MigrateFun} ->
+%%             {ok, MigrateFun(OldVsn, NewState, Extra)};
+%%         error ->
+%%             {ok, NewState}
+%%     end.
 ```
 
 ---

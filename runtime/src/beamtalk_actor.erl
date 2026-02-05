@@ -234,8 +234,8 @@ handle_info(_Msg, State) ->
 %% By default, preserves existing state unchanged.
 %% Generated actors can override this to migrate state schemas.
 -spec code_change(term(), map(), term()) -> {ok, map()}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+code_change(OldVsn, State, Extra) ->
+    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %% @doc Clean up when actor is stopping.
 %% By default, does nothing.
