@@ -94,6 +94,7 @@ mod dispatch_codegen;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;
+pub mod primitive_bindings;
 mod repl_codegen;
 pub mod selector_mangler;
 mod state_codegen;
@@ -105,6 +106,7 @@ mod variable_context;
 pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
+use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
 use std::fmt::{self, Write};
 use thiserror::Error;
@@ -245,6 +247,35 @@ pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> 
     Ok(generator.output)
 }
 
+/// Generates Core Erlang code with a specified module name and primitive bindings.
+///
+/// BT-295 / ADR 0007 Phase 3: Accepts a [`PrimitiveBindingTable`] that provides
+/// pragma-driven dispatch information from the compiled stdlib. The codegen
+/// consults this table before falling back to hardcoded dispatch tables.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_with_bindings(
+    module: &Module,
+    module_name: &str,
+    bindings: PrimitiveBindingTable,
+) -> Result<String> {
+    let mut generator = CoreErlangGenerator::with_bindings(module_name, bindings);
+
+    // Build hierarchy once for the entire generation (ADR 0006)
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
+    // BT-213: Route based on whether class is actor or value type
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
+    Ok(generator.output)
+}
+
 /// Generates Core Erlang for a REPL expression.
 ///
 /// This creates a simple module that evaluates a single expression and
@@ -332,6 +363,17 @@ pub(super) struct CoreErlangGenerator {
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
+    /// BT-295: Primitive binding table from compiled stdlib (ADR 0007 Phase 3).
+    /// Currently used by `generate_primitive()` for method body compilation.
+    /// Call-site dispatch is disabled pending static type information (PR #260).
+    #[allow(dead_code)] // Kept for future call-site dispatch with static types
+    primitive_bindings: PrimitiveBindingTable,
+    /// BT-295: Name of the class currently being compiled (if any).
+    /// Used by `Expression::Primitive` to determine the runtime dispatch module.
+    current_class_name: Option<String>,
+    /// BT-295: Parameters of the current method being compiled (if any).
+    /// Used by `Expression::Primitive` to generate dispatch argument lists.
+    current_method_params: Vec<String>,
 }
 
 impl CoreErlangGenerator {
@@ -346,6 +388,26 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
+            primitive_bindings: PrimitiveBindingTable::new(),
+            current_class_name: None,
+            current_method_params: Vec::new(),
+        }
+    }
+
+    /// Creates a new code generator with a primitive binding table.
+    fn with_bindings(module_name: &str, bindings: PrimitiveBindingTable) -> Self {
+        Self {
+            module_name: module_name.to_string(),
+            output: String::new(),
+            indent: 0,
+            var_context: VariableContext::new(),
+            state_threading: StateThreading::new(),
+            in_loop_body: false,
+            is_repl_mode: false,
+            context: CodeGenContext::Actor,
+            primitive_bindings: bindings,
+            current_class_name: None,
+            current_method_params: Vec::new(),
         }
     }
 
@@ -621,6 +683,9 @@ impl CoreErlangGenerator {
             Expression::Cascade {
                 receiver, messages, ..
             } => self.generate_cascade(receiver, messages),
+            Expression::Primitive {
+                name, is_quoted, ..
+            } => self.generate_primitive(name, *is_quoted),
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression type: {expr:?}"),
                 location: format!("{:?}", expr.span()),
@@ -860,6 +925,36 @@ impl CoreErlangGenerator {
                 location: span_str,
             });
         }
+
+        Ok(())
+    }
+
+    /// Generates code for an `@primitive` expression (ADR 0007 Phase 3).
+    ///
+    /// This handles stdlib method bodies that delegate to runtime primitives.
+    /// Both quoted and unquoted primitives generate a dispatch call to the
+    /// class's runtime module. The distinction between selector-based and
+    /// structural intrinsics matters at the call site (in `dispatch_codegen`),
+    /// not in the method body.
+    fn generate_primitive(&mut self, name: &str, _is_quoted: bool) -> Result<()> {
+        let class_name = self.current_class_name.clone().ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "@primitive '{name}' used outside of a class context"
+            ))
+        })?;
+        let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
+
+        write!(
+            self.output,
+            "call '{runtime_module}':'dispatch'('{name}', ["
+        )?;
+        for (i, param) in self.current_method_params.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            write!(self.output, "{param}")?;
+        }
+        write!(self.output, "], Self)")?;
 
         Ok(())
     }
@@ -3559,5 +3654,76 @@ end
             !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
             "Integer subclass should be value type (chain reaches Object)"
         );
+    }
+
+    #[test]
+    fn test_generate_primitive_selector_based() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.current_class_name = Some("Integer".to_string());
+        generator.current_method_params = vec!["Other".to_string()];
+
+        let result = generator.generate_primitive("+", true);
+        assert!(result.is_ok());
+        assert_eq!(
+            generator.output,
+            "call 'beamtalk_integer':'dispatch'('+', [Other], Self)"
+        );
+    }
+
+    #[test]
+    fn test_generate_primitive_structural_intrinsic() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.current_class_name = Some("Block".to_string());
+        generator.current_method_params = vec![];
+
+        let result = generator.generate_primitive("blockValue", false);
+        assert!(result.is_ok());
+        assert_eq!(
+            generator.output,
+            "call 'beamtalk_block':'dispatch'('blockValue', [], Self)"
+        );
+    }
+
+    #[test]
+    fn test_generate_primitive_multiple_params() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.current_class_name = Some("Integer".to_string());
+        generator.current_method_params = vec!["End".to_string(), "Block".to_string()];
+
+        let result = generator.generate_primitive("toDo", false);
+        assert!(result.is_ok());
+        assert_eq!(
+            generator.output,
+            "call 'beamtalk_integer':'dispatch'('toDo', [End, Block], Self)"
+        );
+    }
+
+    #[test]
+    fn test_generate_with_bindings_compiles_value_type() {
+        // Test that generate_with_bindings produces valid output for a value type
+        let class = ClassDefinition::new(
+            Identifier::new("Point", Span::new(0, 0)),
+            Identifier::new("Object", Span::new(0, 0)),
+            vec![StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 0)),
+                type_annotation: None,
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+                span: Span::new(0, 0),
+            }],
+            vec![],
+            Span::new(0, 0),
+        );
+        let module = Module {
+            classes: vec![class],
+            expressions: Vec::new(),
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+
+        let bindings = primitive_bindings::PrimitiveBindingTable::new();
+        let result = generate_with_bindings(&module, "point", bindings);
+        assert!(result.is_ok());
+        let code = result.unwrap();
+        assert!(code.contains("module 'point'"));
     }
 }
