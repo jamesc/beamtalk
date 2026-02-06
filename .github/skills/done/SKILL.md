@@ -89,19 +89,26 @@ When activated, execute this workflow to complete work and push:
     Poll: check for Copilot review every 60 seconds, up to 10 attempts (10 minutes max)
     ```
     
-    Use the GitHub MCP `pull_request_read` tool with method `get_reviews` to check for reviews. Look for a review from `copilot-pull-request-reviewer[bot]` or any review whose body contains Copilot review content.
+    Use `gh api` against the PR reviews endpoint to check for reviews, looking for a review from `copilot-pull-request-reviewer[bot]` by checking `user.login`. For example:
     
-    Also check review threads with `get_review_comments` — Copilot leaves inline code comments as review threads.
+    ```bash
+    gh api repos/{owner}/{repo}/pulls/{pr}/reviews --paginate --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")'
+    ```
+    
+    Also check review threads using `get_review_comments` — Copilot leaves inline code comments as review threads.
+    
+    **Important:** Only gate on verified bot identity (`user.login == "copilot-pull-request-reviewer[bot]"`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
     
     **If Copilot review arrives with comments:**
     - Inform the user: "Copilot review received with N comments. Resolving..."
-    - Execute the `/resolve-pr` workflow inline (steps 2-9 from resolve-pr skill):
+    - Execute the `/resolve-pr` workflow inline (steps 2-11 from resolve-pr skill):
       - Fetch and analyze all unresolved review threads
       - Plan fixes for each comment
       - Run tests, make changes, run tests again
       - Commit with message: `fix: address Copilot review comments BT-{number}`
       - Push changes
       - Reply to each review comment explaining the fix
+      - Report summary of all changes
     - After resolving, report the summary of changes made
     
     **If Copilot review arrives with no comments (approved):**
