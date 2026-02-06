@@ -19,26 +19,11 @@ Issues can become stale as the codebase evolves. This skill:
 
 ### 1. Determine Issue ID
 
-The issue ID is determined in priority order:
-
-1. **Explicit argument**: If user provides an issue ID, use that issue.
-   - `/refresh-issue BT-42` → issue BT-42
-   - `/refresh-issue 42` → issue BT-42 (BT- prefix added automatically)
-
-2. **Worktree name**: If in a git worktree with a name matching `BT-{number}`, use that issue:
-   ```bash
-   # Check if this is a worktree
-   git rev-parse --git-dir 2>/dev/null | grep -q "worktrees"
-   
-   # Extract issue ID from directory name
-   basename "$(pwd)" | grep -oE '^BT-[0-9]+'
-   ```
-   Example: `/workspaces/BT-34` → issue `BT-34`
-
-3. **Current branch name**: Extract from branch name if it starts with `BT-`:
-   ```bash
-   git branch --show-current | grep -oE '^BT-[0-9]+'
-   ```
+Use the same resolution logic as `pick-issue` step 1:
+- Explicit argument: `/refresh-issue BT-42` or `/refresh-issue 42`
+- Fall back to worktree name (e.g., `/workspaces/BT-34` → `BT-34`)
+- Fall back to branch name (e.g., `BT-10-implement-lexer` → `BT-10`)
+- If none match, ask the user
 
 ### 2. Fetch the Issue
 
@@ -81,14 +66,16 @@ For each file mentioned in "Files to Modify" or related to the issue:
 1. **Check if file exists**: Use `view` or `glob` to locate the file
 2. **Review current implementation**: Look for any existing code that addresses the issue
 3. **Check test coverage**: Look for related tests that might indicate the feature is done
+4. **Check DDD alignment**: Verify domain concepts in the issue match `docs/beamtalk-ddd-model.md`. If the issue uses outdated domain terms, flag them for update.
 
 Key directories by area:
-- **Parser**: `crates/beamtalk-core/src/parse/`
+- **Parser**: `crates/beamtalk-core/src/source_analysis/`
 - **AST**: `crates/beamtalk-core/src/ast.rs`
-- **Codegen**: `crates/beamtalk-core/src/erlang.rs`
-- **Runtime**: `runtime/src/`
+- **Codegen**: `crates/beamtalk-core/src/codegen/`
+- **Runtime**: `runtime/apps/beamtalk_runtime/src/`
 - **Stdlib**: `lib/`
 - **CLI**: `crates/beamtalk-cli/`
+- **Semantic Analysis**: `crates/beamtalk-core/src/semantic_analysis/`
 
 ### 5. Verify Issue Status
 
@@ -230,8 +217,8 @@ Comment:
 - Feature matches spec in docs/beamtalk-language-features.md
 
 **Code Review**:
-- Implementation exists in crates/beamtalk-core/src/parse/lexer.rs:145-203
-- Tests added in tests/lexer_test.rs
+- Implementation exists in crates/beamtalk-core/src/source_analysis/lexer.rs:145-203
+- Tests added in crates/beamtalk-core/src/source_analysis/parser/mod.rs
 - Snapshot tests in test-package-compiler/cases/lexer/
 
 **Acceptance Criteria Status**:
@@ -260,15 +247,15 @@ Comment:
 
 **Code Review**:
 - No implementation exists yet
-- Related parsing infrastructure in place at crates/beamtalk-core/src/parse/
+- Related parsing infrastructure in place at crates/beamtalk-core/src/source_analysis/
 
 **Updated Acceptance Criteria**:
 - Added: Support new block parameter syntax `[:x :y |]`
 - Removed: Old cascade syntax (moved to separate issue)
 
 **Files to Modify** (verified):
-- crates/beamtalk-core/src/parse/lexer.rs
-- crates/beamtalk-core/src/parse/parser.rs (new file since issue created)
+- crates/beamtalk-core/src/source_analysis/lexer.rs
+- crates/beamtalk-core/src/source_analysis/parser/mod.rs
 - crates/beamtalk-core/src/ast.rs
 ```
 

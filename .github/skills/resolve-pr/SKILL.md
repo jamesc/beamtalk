@@ -1,6 +1,6 @@
 ---
-name: pr-resolve
-description: Address PR review comments systematically. Use when user types /pr-resolve or asks to fix/address PR feedback, review comments, or requested changes.
+name: resolve-pr
+description: Address PR review comments systematically. Use when user types /resolve-pr or asks to fix/address PR feedback, review comments, or requested changes.
 ---
 
 # PR Resolve Workflow
@@ -9,22 +9,18 @@ When activated, execute this workflow to systematically address all PR review co
 
 ## Steps
 
-1. **Determine Issue ID**: Extract the issue number from the branch name (e.g., `BT-10` from `BT-10-implement-erlang-codegen`). If not in branch name, try:
-   
-   a. **Worktree name**: If in a git worktree with a name matching `BT-{number}`:
-      ```bash
-      # Check if this is a worktree
-      git rev-parse --git-dir 2>/dev/null | grep -q "worktrees"
-      
-      # Extract issue ID from directory name
-      basename "$(pwd)" | grep -oE '^BT-[0-9]+'
-      ```
-      Example: `/workspaces/BT-34` → issue `BT-34`
+1. **Determine Issue ID**: Use the same resolution logic as `pick-issue` step 1:
+   - Extract from branch name (e.g., `BT-10` from `BT-10-implement-erlang-codegen`)
+   - Fall back to worktree name (e.g., `/workspaces/BT-34` → `BT-34`)
+   - If neither works, ask the user
 
-2. **Get PR review comments**: Fetch all unresolved review comments from the active PR:
-   ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr}/comments --jq '.[] | select(.in_reply_to_id == null) | {id, path, body}'
-   ```
+2. **Get PR review comments**: Fetch all unresolved review threads and general PR comments:
+
+   **Review threads** (code-level comments): Use the GitHub MCP `pull_request_read` tool with method `get_review_comments` to get threads with `isResolved` and `isOutdated` metadata. Filter to unresolved, non-outdated threads.
+
+   **General PR comments** (conversation-level): Use the GitHub MCP `pull_request_read` tool with method `get_comments` to get top-level PR comments.
+
+   Focus on unresolved items — skip threads already marked as resolved or outdated.
 
 3. **Analyze and plan**: For each review comment:
    - Understand what the reviewer is asking for
@@ -37,10 +33,12 @@ When activated, execute this workflow to systematically address all PR review co
    ```
    This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
 
-5. **Write tests first (TDD)**: For each code fix needed:
+5. **Write tests for behavioral changes**: For code fixes that change logic or behavior:
    - Write a failing test that demonstrates the bug or missing behavior
    - Run the test to confirm it fails as expected
    - This ensures the fix is verifiable and prevents regressions
+   
+   **Skip tests for:** Naming changes, documentation updates, style/formatting fixes, comment improvements — these don't need TDD.
 
 6. **Address each comment**: For each item in the plan:
    - Make the necessary code changes to make the test pass

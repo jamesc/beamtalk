@@ -1428,23 +1428,25 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| `next-issue` | `/next-issue` | Pick up the next Linear issue from backlog |
+| **Coding Workflow** | | |
+| `pick-issue` | `/pick-issue` | Pick up the next Linear issue from backlog |
+| `review-code` | `/review-code` | Review current branch changes vs main |
 | `done` | `/done` | Complete work, commit, push, and create PR |
-| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
-| `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
-| `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
-| `code-review` | `/code-review` | Review current branch changes vs main |
-| `final-reviewer` | `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
-
-**Note:** `@final-reviewer` can accept a Linear issue ID or PR number:
-- `@final-reviewer BT-123` - Find PR for issue, checkout branch, review
-- `@final-reviewer #225` - Checkout PR #225, review
-| `add-ast-node` | "add AST node" | Add a new AST node to the compiler |
-| `add-cli-command` | "add CLI command" | Add a new command to the CLI |
-| `debug-compilation` | "debug compilation" | Troubleshoot compiler issues |
+| `resolve-pr` | `/resolve-pr` | Systematically address PR review comments |
+| `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
+| **Issue Management** | | |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
+| `refresh-issue` | `/refresh-issue BT-XX` | Refresh a Linear issue to align with current code state |
 | `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
-| `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, and resolve conflicts |
+| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
+| **Architecture** | | |
+| `draft-adr` | `/draft-adr` | Research a problem and draft an Architecture Decision Record |
+| `plan-adr` | `/plan-adr` | Break an accepted ADR into implementation issues with an Epic |
+| **Refactoring** | | |
+| `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
+| `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
+| **Review** | | |
+| `review-code` | `/review-code` | 3-pass code review: diff, system, adversarial (different model) |
 
 ### Skill Locations
 

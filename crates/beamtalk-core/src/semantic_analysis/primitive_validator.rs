@@ -238,9 +238,14 @@ mod tests {
         module
     }
 
+    /// Wraps a `@primitive` expression in a class method body for parser acceptance.
+    fn stdlib_method(primitive: &str) -> String {
+        format!("Object subclass: T\n  m => {primitive}")
+    }
+
     #[test]
     fn primitive_in_stdlib_mode_no_error() {
-        let module = parse_module("@primitive '+'");
+        let module = parse_module(&stdlib_method("@primitive '+'"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -254,7 +259,7 @@ mod tests {
 
     #[test]
     fn primitive_in_user_code_error() {
-        let module = parse_module("@primitive '+'");
+        let module = parse_module(&stdlib_method("@primitive '+'"));
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
@@ -270,7 +275,7 @@ mod tests {
 
     #[test]
     fn primitive_with_allow_primitives_warning() {
-        let module = parse_module("@primitive '+'");
+        let module = parse_module(&stdlib_method("@primitive '+'"));
         let options = CompilerOptions {
             allow_primitives: true,
             ..Default::default()
@@ -283,7 +288,7 @@ mod tests {
 
     #[test]
     fn unknown_structural_intrinsic_error() {
-        let module = parse_module("@primitive unknownFoo");
+        let module = parse_module(&stdlib_method("@primitive unknownFoo"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -296,7 +301,7 @@ mod tests {
 
     #[test]
     fn known_structural_intrinsic_no_error() {
-        let module = parse_module("@primitive basicNew");
+        let module = parse_module(&stdlib_method("@primitive basicNew"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -311,7 +316,7 @@ mod tests {
     #[test]
     fn quoted_selector_always_accepted() {
         // Quoted selectors are runtime-dispatch, no intrinsic name validation
-        let module = parse_module("@primitive 'anyRandomName'");
+        let module = parse_module(&stdlib_method("@primitive 'anyRandomName'"));
         let options = CompilerOptions {
             stdlib_mode: true,
             ..Default::default()
@@ -344,7 +349,7 @@ mod tests {
 
     #[test]
     fn multiple_primitives_multiple_errors() {
-        let source = "@primitive '+'. @primitive unknownFoo";
+        let source = "Object subclass: T\n  m => @primitive '+'. @primitive unknownFoo";
         let module = parse_module(source);
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
@@ -357,15 +362,27 @@ mod tests {
 
     #[test]
     fn primitive_in_state_default_validated() {
-        // @primitive in a state default value should be caught
+        // @primitive in a state default value is caught by the parser (not in method body),
+        // so no Expression::Primitive reaches semantic analysis — verify no false positives
         let source = "Object subclass: MyObj\n  state: x = @primitive 'bad'";
-        let module = parse_module(source);
+        let tokens = lex_with_eof(source);
+        let (module, parser_diags) = parse(tokens);
+        // Parser should catch this
+        assert!(
+            !parser_diags.is_empty(),
+            "Expected parser error for @primitive in state default"
+        );
+        assert!(
+            parser_diags[0]
+                .message
+                .contains("@primitive can only appear inside a method body")
+        );
+        // Semantic validator sees no primitives
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         assert!(
-            !diags.is_empty(),
-            "Expected error for @primitive in state default"
+            diags.is_empty(),
+            "No semantic diagnostics expected (parser already caught it)"
         );
-        assert!(diags[0].message.contains("Primitives can only be declared"));
     }
 }

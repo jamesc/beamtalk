@@ -347,7 +347,9 @@ impl Parser {
         }
 
         // Parse method body
+        self.in_method_body = true;
         let body = self.parse_method_body();
+        self.in_method_body = false;
 
         let end = body.last().map_or(start, Expression::span);
         let span = start.merge(end);

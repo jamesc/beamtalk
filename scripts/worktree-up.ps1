@@ -22,6 +22,9 @@
 .PARAMETER Command
     Command to run in container (default: "copilot")
 
+.PARAMETER Rebuild
+    Force rebuild of the devcontainer image (no cache)
+
 .EXAMPLE
     .\worktree-up.ps1 feature-branch
     
@@ -30,6 +33,9 @@
 
 .EXAMPLE
     .\worktree-up.ps1 feature-branch -Command bash
+
+.EXAMPLE
+    .\worktree-up.ps1 feature-branch -Rebuild
 #>
 
 param(
@@ -43,19 +49,23 @@ param(
     [string]$WorktreeRoot = "",
     
     [Parameter(Mandatory=$false)]
-    [string]$Command = "copilot --yolo"
+    [string]$Command = "copilot --yolo",
+    
+    [Parameter(Mandatory=$false)]
+    [switch]$Rebuild
 )
 
 $ErrorActionPreference = "Stop"
 
 # Show usage if no branch specified
 if (-not $Branch) {
-    Write-Host "Usage: worktree-up.ps1 <branch-name> [-BaseBranch <branch>] [-Command <cmd>]" -ForegroundColor Cyan
+    Write-Host "Usage: worktree-up.ps1 <branch-name> [-BaseBranch <branch>] [-Command <cmd>] [-Rebuild]" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Gray
     Write-Host "  .\scripts\worktree-up.ps1 feature-branch"
     Write-Host "  .\scripts\worktree-up.ps1 issue-123 -BaseBranch main"
     Write-Host "  .\scripts\worktree-up.ps1 feature-branch -Command bash"
+    Write-Host "  .\scripts\worktree-up.ps1 feature-branch -Rebuild"
     exit 0
 }
 
@@ -192,6 +202,13 @@ $worktreePath = Join-Path $WorktreeRoot $dirName
 # This handles the case where you've switched branches inside the container
 if (Test-Path $worktreePath) {
     if (Test-ContainerRunning -WorktreePath $worktreePath) {
+        if ($Rebuild) {
+            Write-Host "⚠️  Container already running — cannot rebuild while running." -ForegroundColor Yellow
+            Write-Host "   Run: .\scripts\worktree-down.ps1 $Branch" -ForegroundColor Gray
+            Write-Host "   Then re-run with -Rebuild" -ForegroundColor Gray
+            exit 1
+        }
+        
         Write-Host "✅ Container already running for worktree: $dirName" -ForegroundColor Green
         
         # Show what branch is actually checked out (informational only)
@@ -424,8 +441,17 @@ $env:DOCKER_CLI_HINTS = "false"
 # Build and start the container - capture output to get container ID
 # Explicitly mount the main .git directory since ${localEnv:...} doesn't work reliably
 $mountArg = "--mount=type=bind,source=$($env:MAIN_GIT_PATH),target=/workspaces/.$projectName-git"
-Write-Host "Running: devcontainer up --workspace-folder $worktreePath $mountArg" -ForegroundColor Gray
-$output = devcontainer up --workspace-folder $worktreePath $mountArg 2>&1 | ForEach-Object {
+$rebuildArgs = if ($Rebuild) { "--remove-existing-container" } else { "" }
+$displayCmd = "devcontainer up --workspace-folder $worktreePath $mountArg $rebuildArgs".Trim()
+Write-Host "Running: $displayCmd" -ForegroundColor Gray
+
+$upArgs = @("up", "--workspace-folder", $worktreePath, $mountArg)
+if ($Rebuild) {
+    $upArgs += "--remove-existing-container"
+    Write-Host "🔨 Rebuilding devcontainer (removing existing container)..." -ForegroundColor Yellow
+}
+
+$output = & devcontainer @upArgs 2>&1 | ForEach-Object {
     # Filter out PowerShell's stderr wrapper noise and Docker hints
     if ($_ -is [System.Management.Automation.ErrorRecord]) {
         $line = $_.Exception.Message
