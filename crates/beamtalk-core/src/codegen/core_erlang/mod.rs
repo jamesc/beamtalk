@@ -3963,4 +3963,97 @@ end
             "Should create beamtalk_object in success branch of case. Got:\n{code}"
         );
     }
+
+    // --- ClassHierarchy integration tests (BT-279) ---
+
+    #[test]
+    fn test_is_actor_class_direct_actor_subclass() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_object_subclass_is_value_type() {
+        let class = ClassDefinition {
+            name: Identifier::new("Point", Span::new(0, 0)),
+            superclass: Identifier::new("Object", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(!CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_multi_level_inheritance() {
+        // LoggingCounter extends Counter extends Actor
+        // Should still be detected as actor
+        let counter = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let logging_counter = ClassDefinition {
+            name: Identifier::new("LoggingCounter", Span::new(0, 0)),
+            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        // Module with both classes; first class is LoggingCounter
+        let module = Module {
+            classes: vec![counter, logging_counter.clone()],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+
+        // Test with LoggingCounter as the first class
+        let module_lc = Module {
+            classes: vec![logging_counter],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        // Build hierarchy from full module so Counter is known
+        assert!(CoreErlangGenerator::is_actor_class(&module_lc, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_no_classes_defaults_to_actor() {
+        let module = Module::new(Vec::new(), Span::new(0, 0));
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
 }

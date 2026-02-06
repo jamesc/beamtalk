@@ -2049,4 +2049,96 @@ mod tests {
             result.diagnostics
         );
     }
+
+    // --- ClassHierarchy integration tests (BT-279) ---
+
+    #[test]
+    fn test_analyse_populates_class_hierarchy() {
+        let module = Module::new(vec![], Span::default());
+        let result = analyse(&module);
+
+        // Hierarchy should be populated with built-in classes
+        assert!(result.class_hierarchy.has_class("ProtoObject"));
+        assert!(result.class_hierarchy.has_class("Object"));
+        assert!(result.class_hierarchy.has_class("Actor"));
+        assert!(result.class_hierarchy.has_class("Integer"));
+    }
+
+    #[test]
+    fn test_analyse_hierarchy_includes_user_classes() {
+        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, StateDeclaration};
+
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("count", test_span()),
+                type_annotation: None,
+                default_value: None,
+                span: test_span(),
+            }],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("increment".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        assert!(result.class_hierarchy.has_class("Counter"));
+        assert!(
+            result
+                .class_hierarchy
+                .resolves_selector("Counter", "increment")
+        );
+        // Inherited from Actor
+        assert!(result.class_hierarchy.resolves_selector("Counter", "spawn"));
+    }
+
+    #[test]
+    fn test_analyse_reports_sealed_class_diagnostic() {
+        use crate::ast::ClassDefinition;
+
+        let class = ClassDefinition {
+            name: Identifier::new("MyInt", test_span()),
+            superclass: Identifier::new("Integer", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        // Should have sealed class diagnostic
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("sealed") && d.message.contains("Integer")),
+            "Expected sealed class diagnostic, got: {:?}",
+            result.diagnostics
+        );
+    }
 }

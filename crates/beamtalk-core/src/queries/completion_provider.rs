@@ -367,4 +367,30 @@ mod tests {
             assert!(completion.documentation.is_some());
         }
     }
+
+    #[test]
+    fn completions_include_inherited_methods_for_class_module() {
+        // Parse a module with an Actor subclass
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+        let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
+
+        // Should include inherited Actor methods (spawn)
+        assert!(
+            completions.iter().any(|c| c.label == "spawn"),
+            "Should include inherited 'spawn' from Actor"
+        );
+        // Should include inherited Object methods (isNil)
+        assert!(
+            completions.iter().any(|c| c.label == "isNil"),
+            "Should include inherited 'isNil' from Object"
+        );
+        // Should include inherited ProtoObject methods (class)
+        assert!(
+            completions.iter().any(|c| c.label == "class"),
+            "Should include inherited 'class' from ProtoObject"
+        );
+    }
 }
