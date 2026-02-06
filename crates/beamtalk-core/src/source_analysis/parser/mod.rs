@@ -1823,4 +1823,24 @@ Actor subclass: Rectangle
             diagnostics[0].message
         );
     }
+
+    #[test]
+    fn parse_primitive_inside_block_in_method_body() {
+        // @primitive inside a block within a method body should still be accepted
+        let source = "Object subclass: Foo\n  m => [@primitive '+']";
+        let module = parse_ok(source);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
+        // The body is a block containing the primitive
+        if let Expression::Block(block) = &method.body[0] {
+            assert_eq!(block.body.len(), 1);
+            assert!(
+                matches!(&block.body[0], Expression::Primitive { .. }),
+                "Expected Primitive inside block, got: {:?}",
+                block.body[0]
+            );
+        } else {
+            panic!("Expected Block, got: {:?}", method.body[0]);
+        }
+    }
 }
