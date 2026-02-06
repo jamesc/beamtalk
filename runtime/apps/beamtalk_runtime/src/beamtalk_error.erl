@@ -113,6 +113,10 @@ generate_message(type_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
 generate_message(type_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
+generate_message(actor_dead, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
+generate_message(actor_dead, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Cannot send '~s' to ~s (actor process has terminated)", [Selector, Class]));
 generate_message(future_not_awaited, _Class, undefined) ->
     iolist_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
