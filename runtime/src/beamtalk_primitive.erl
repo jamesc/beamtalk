@@ -140,15 +140,15 @@ send(X, Selector, Args) ->
 %% @doc Check if a value responds to a given selector.
 %%
 %% For actors, delegates to the module's has_method/1 function.
-%% For primitives, will check both built-in methods and extension registry
-%% once primitive class modules are implemented (BT-166, BT-167, BT-168).
-%% Currently returns false for all primitives.
+%% For primitives, checks both built-in methods and extension registry
+%% via dedicated class modules (beamtalk_integer, beamtalk_string, etc.).
 %%
 %% Examples:
 %% ```
-%% responds_to(ActorObj, 'class')     % => true (actors work now)
-%% responds_to(42, '+')               % => false (primitives: TODO BT-166)
-%% responds_to(<<"hi">>, '++')        % => false (primitives: TODO BT-167)
+%% responds_to(ActorObj, 'class')     % => true
+%% responds_to(42, '+')               % => true
+%% responds_to(<<"hi">>, 'size')      % => true
+%% responds_to(3.14, '+')             % => true
 %% responds_to(42, 'unknownMsg')      % => false
 %% ```
 -spec responds_to(term(), atom()) -> boolean().

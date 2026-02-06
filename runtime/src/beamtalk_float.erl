@@ -134,11 +134,11 @@ is_builtin(_) -> false.
 builtin_dispatch('+', [Y], X) when is_number(Y) -> {ok, X + Y};
 builtin_dispatch('-', [Y], X) when is_number(Y) -> {ok, X - Y};
 builtin_dispatch('*', [Y], X) when is_number(Y) -> {ok, X * Y};
-builtin_dispatch('/', [Y], X) when is_number(Y), Y =/= 0 -> {ok, X / Y};
+builtin_dispatch('/', [Y], X) when is_number(Y), Y =/= 0, Y =/= 0.0 -> {ok, X / Y};
 
 %% Comparison operations
 builtin_dispatch('=', [Y], X) when is_number(Y) -> {ok, X =:= Y};
-builtin_dispatch('=', [Y], X) -> {ok, false};  % Non-numeric comparison always false
+builtin_dispatch('=', [_Y], _X) -> {ok, false};  % Non-numeric comparison always false
 builtin_dispatch('<', [Y], X) when is_number(Y) -> {ok, X < Y};
 builtin_dispatch('>', [Y], X) when is_number(Y) -> {ok, X > Y};
 builtin_dispatch('<=', [Y], X) when is_number(Y) -> {ok, X =< Y};
@@ -165,7 +165,7 @@ builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
     error(Error);
 
 %% Conversion
-builtin_dispatch('asString', [], X) -> {ok, float_to_binary(X)};
+builtin_dispatch('asString', [], X) -> {ok, float_to_binary(X, [short])};
 
 %% Numeric operations
 builtin_dispatch('abs', [], X) -> {ok, abs(X)};
