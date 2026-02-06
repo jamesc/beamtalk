@@ -29,6 +29,14 @@ enum Command {
         /// Source file or directory to compile
         #[arg(default_value = ".")]
         path: String,
+
+        /// Allow @primitive pragmas in non-stdlib code (advanced FFI use)
+        #[arg(long)]
+        allow_primitives: bool,
+
+        /// Compile in stdlib mode (enables @primitive without warnings)
+        #[arg(long)]
+        stdlib_mode: bool,
     },
 
     /// Compile and run a Beamtalk program
@@ -103,7 +111,17 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Command::Build { path } => commands::build::build(&path),
+        Command::Build {
+            path,
+            allow_primitives,
+            stdlib_mode,
+        } => {
+            let options = beamtalk_core::CompilerOptions {
+                stdlib_mode,
+                allow_primitives,
+            };
+            commands::build::build(&path, &options)
+        }
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
         Command::Repl {

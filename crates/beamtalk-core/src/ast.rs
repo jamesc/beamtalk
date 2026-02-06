@@ -648,6 +648,23 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A primitive pragma (`@primitive 'selector'` or `@primitive intrinsicName`).
+    ///
+    /// Declares that a method body delegates to a runtime primitive or
+    /// structural intrinsic. Only valid inside method bodies in stdlib code
+    /// (see ADR 0007).
+    ///
+    /// Example: `+ other => @primitive '+'`
+    /// Example: `new => @primitive basicNew`
+    Primitive {
+        /// The primitive name (selector string or intrinsic identifier).
+        name: EcoString,
+        /// Whether the name was quoted (`'+'`) vs bare (`basicNew`).
+        is_quoted: bool,
+        /// Source location of the entire `@primitive name` expression.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -676,6 +693,7 @@ impl Expression {
             | Self::Pipe { span, .. }
             | Self::Match { span, .. }
             | Self::MapLiteral { span, .. }
+            | Self::Primitive { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,

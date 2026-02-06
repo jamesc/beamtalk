@@ -244,4 +244,4 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 334, end: 337 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 334, end: 337 }, hint: None }

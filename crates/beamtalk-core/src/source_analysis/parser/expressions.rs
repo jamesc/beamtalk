@@ -361,6 +361,9 @@ impl Parser {
             // Map literal
             TokenKind::MapOpen => self.parse_map_literal(),
 
+            // Primitive pragma: @primitive 'name' or @primitive intrinsicName
+            TokenKind::AtPrimitive => self.parse_primitive(),
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
@@ -539,6 +542,48 @@ impl Parser {
         let span = start.merge(end);
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
+    }
+
+    /// Parses a `@primitive` pragma: `@primitive 'selector'` or `@primitive intrinsicName`.
+    ///
+    /// The `@primitive` token has already been identified by `parse_primary`.
+    /// This method consumes it and parses the primitive name that follows.
+    fn parse_primitive(&mut self) -> Expression {
+        let start_token = self.advance(); // consume AtPrimitive
+        let start = start_token.span();
+
+        match self.current_kind() {
+            // Quoted selector: @primitive '+'
+            TokenKind::String(name) => {
+                let name = name.clone();
+                let end_token = self.advance();
+                let span = start.merge(end_token.span());
+                Expression::Primitive {
+                    name,
+                    is_quoted: true,
+                    span,
+                }
+            }
+            // Bare identifier: @primitive basicNew
+            TokenKind::Identifier(name) => {
+                let name = name.clone();
+                let end_token = self.advance();
+                let span = start.merge(end_token.span());
+                Expression::Primitive {
+                    name,
+                    is_quoted: false,
+                    span,
+                }
+            }
+            _ => {
+                let span = start;
+                let message: EcoString =
+                    "@primitive must be followed by a quoted selector or identifier".into();
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
+            }
+        }
     }
 
     /// Parses a map literal: `#{key => value, ...}`

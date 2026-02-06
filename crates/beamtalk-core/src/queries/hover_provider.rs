@@ -281,6 +281,16 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 None
             }
         }
+        Expression::Primitive { name, span, .. } => {
+            if offset >= span.start() && offset < span.end() {
+                Some(HoverInfo::new(
+                    format!("Primitive: `@primitive {name}`"),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
         Expression::Error { message, span } => {
             if offset >= span.start() && offset < span.end() {
                 Some(HoverInfo::new(format!("Error: {message}"), *span))

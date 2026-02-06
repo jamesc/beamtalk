@@ -175,6 +175,8 @@ pub struct Diagnostic {
     pub message: EcoString,
     /// The source location.
     pub span: Span,
+    /// Optional hint for how to fix the issue.
+    pub hint: Option<EcoString>,
 }
 
 impl Diagnostic {
@@ -185,6 +187,7 @@ impl Diagnostic {
             severity: Severity::Error,
             message: message.into(),
             span,
+            hint: None,
         }
     }
 
@@ -195,6 +198,7 @@ impl Diagnostic {
             severity: Severity::Warning,
             message: message.into(),
             span,
+            hint: None,
         }
     }
 }
@@ -1698,5 +1702,104 @@ Actor subclass: Rectangle
         } else {
             panic!("Expected ClassReference for 'MyClass'");
         }
+    }
+
+    // ========================================================================
+    // @primitive parsing tests (BT-290)
+    // ========================================================================
+
+    #[test]
+    fn parse_primitive_quoted_selector() {
+        let module = parse_ok("@primitive '+'");
+        assert_eq!(module.expressions.len(), 1);
+        if let Expression::Primitive {
+            name,
+            is_quoted,
+            span,
+        } = &module.expressions[0]
+        {
+            assert_eq!(name.as_str(), "+");
+            assert!(is_quoted);
+            assert_eq!(span.start(), 0);
+        } else {
+            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
+        }
+    }
+
+    #[test]
+    fn parse_primitive_bare_identifier() {
+        let module = parse_ok("@primitive basicNew");
+        assert_eq!(module.expressions.len(), 1);
+        if let Expression::Primitive {
+            name,
+            is_quoted,
+            span,
+        } = &module.expressions[0]
+        {
+            assert_eq!(name.as_str(), "basicNew");
+            assert!(!is_quoted);
+            assert_eq!(span.start(), 0);
+        } else {
+            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
+        }
+    }
+
+    #[test]
+    fn parse_primitive_in_method_body() {
+        // @primitive as first expression in a method body
+        let source = "Object subclass: MyInt\n  + other => @primitive '+'";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
+        assert!(matches!(
+            &method.body[0],
+            Expression::Primitive {
+                is_quoted: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_primitive_with_fallback() {
+        // @primitive followed by fallback code in method body
+        let source = "Object subclass: MyInt\n  abs => @primitive 'abs'. self negated";
+        let module = parse_ok(source);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 2);
+        assert!(matches!(&method.body[0], Expression::Primitive { .. }));
+    }
+
+    #[test]
+    fn parse_primitive_structural_intrinsic() {
+        let source = "Object subclass: MyObj\n  new => @primitive basicNew";
+        let module = parse_ok(source);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
+        if let Expression::Primitive {
+            name, is_quoted, ..
+        } = &method.body[0]
+        {
+            assert_eq!(name.as_str(), "basicNew");
+            assert!(!is_quoted);
+        } else {
+            panic!("Expected Primitive");
+        }
+    }
+
+    #[test]
+    fn parse_primitive_missing_name_error() {
+        // @primitive without a name should produce an error
+        let diagnostics = parse_err("@primitive");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for @primitive without name"
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("@primitive must be followed by")
+        );
     }
 }
