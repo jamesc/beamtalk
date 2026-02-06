@@ -363,6 +363,22 @@ reflection_responds_to_tuple_test_() ->
          ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['+'], Tuple))
      end}.
 
+reflection_responds_to_float_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['+'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['class'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['abs'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['respondsTo'], 3.14)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['unknownMethod'], 3.14)),
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['fooBar'], 3.14))
+     end}.
+
 %%% ============================================================================
 %%% perform: dynamic message send tests (BT-165)
 %%% ============================================================================
