@@ -68,7 +68,17 @@ jobs:
       - name: Format check
         run: just fmt-check
 
+      - name: Check for Erlang changes
+        id: erlang-changes
+        run: |
+          if git diff --name-only origin/main...HEAD | grep -qE '^runtime/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Dialyzer type checking (Erlang runtime)
+        if: steps.erlang-changes.outputs.changed == 'true'
         run: just dialyzer
 
       - name: Test Rust (unit + integration)
