@@ -80,6 +80,17 @@ impl CoreErlangGenerator {
 
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
+            // BT-101: Method lookup via `>>` operator (e.g., Counter >> #increment)
+            if op.as_str() == ">>" {
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_method_lookup(&name.name, arguments);
+                }
+                // >> is only supported on class literals for now
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: ">> (method lookup) is only supported on class literals (e.g., Counter >> #increment), not on expressions".to_string(),
+                    location: format!("{receiver:?}"),
+                });
+            }
             return self.generate_binary_op(op, receiver, arguments);
         }
 
@@ -584,6 +595,30 @@ impl CoreErlangGenerator {
             write!(self.output, ")")?;
         }
 
+        Ok(())
+    }
+
+    /// Generates a method lookup via `>>` operator (BT-101).
+    ///
+    /// `Counter >> #increment` compiles to:
+    /// ```erlang
+    /// call 'beamtalk_object_class':'method'('Counter', 'increment')
+    /// ```
+    ///
+    /// Returns a `CompiledMethod` map with selector, source, and arity metadata.
+    fn generate_method_lookup(&mut self, class_name: &str, arguments: &[Expression]) -> Result<()> {
+        if arguments.len() != 1 {
+            return Err(CodeGenError::Internal(format!(
+                ">> operator requires exactly one argument, got {}",
+                arguments.len()
+            )));
+        }
+        write!(
+            self.output,
+            "call 'beamtalk_object_class':'method'('{class_name}', "
+        )?;
+        self.generate_expression(&arguments[0])?;
+        write!(self.output, ")")?;
         Ok(())
     }
 

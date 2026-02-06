@@ -232,7 +232,24 @@ pub fn generate(module: &Module) -> Result<String> {
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
+    generate_with_name_and_source(module, module_name, None)
+}
+
+/// Generates Core Erlang code with a specified module name and source text.
+///
+/// When `source_text` is provided, method source is captured in class registration
+/// metadata, enabling `CompiledMethod` introspection (BT-101).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_with_name_and_source(
+    module: &Module,
+    module_name: &str,
+    source_text: Option<&str>,
+) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.source_text = source_text.map(String::from);
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -253,6 +270,9 @@ pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> 
 /// pragma-driven dispatch information from the compiled stdlib. The codegen
 /// consults this table before falling back to hardcoded dispatch tables.
 ///
+/// When `source_text` is provided, method source is captured in class registration
+/// metadata for `CompiledMethod` introspection (BT-101).
+///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
@@ -260,8 +280,10 @@ pub fn generate_with_bindings(
     module: &Module,
     module_name: &str,
     bindings: PrimitiveBindingTable,
+    source_text: Option<&str>,
 ) -> Result<String> {
     let mut generator = CoreErlangGenerator::with_bindings(module_name, bindings);
+    generator.source_text = source_text.map(String::from);
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -363,6 +385,8 @@ pub(super) struct CoreErlangGenerator {
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
+    /// BT-101: Original source text for extracting method source.
+    source_text: Option<String>,
     /// BT-295: Primitive binding table from compiled stdlib (ADR 0007 Phase 3).
     /// Currently used by `generate_primitive()` for method body compilation.
     /// Call-site dispatch is disabled pending static type information (PR #260).
@@ -388,6 +412,7 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
+            source_text: None,
             primitive_bindings: PrimitiveBindingTable::new(),
             current_class_name: None,
             current_method_params: Vec::new(),
@@ -405,6 +430,7 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor,
+            source_text: None,
             primitive_bindings: bindings,
             current_class_name: None,
             current_method_params: Vec::new(),
@@ -3721,7 +3747,7 @@ end
         };
 
         let bindings = primitive_bindings::PrimitiveBindingTable::new();
-        let result = generate_with_bindings(&module, "point", bindings);
+        let result = generate_with_bindings(&module, "point", bindings, None);
         assert!(result.is_ok());
         let code = result.unwrap();
         assert!(code.contains("module 'point'"));

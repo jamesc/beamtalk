@@ -394,6 +394,7 @@ impl CoreErlangGenerator {
     ///         end
     ///     catch <_,_,_> -> 'ok'
     /// ```
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
@@ -481,6 +482,19 @@ impl CoreErlangGenerator {
             writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~")?;
             self.indent -= 1;
             self.write_indent()?;
+            writeln!(self.output, "}}~,")?;
+
+            // BT-101: Method source for CompiledMethod introspection
+            self.write_indent()?;
+            write!(self.output, "'method_source' => ~{{")?;
+            for (method_idx, method) in instance_methods.iter().enumerate() {
+                if method_idx > 0 {
+                    write!(self.output, ", ")?;
+                }
+                let source_str = self.extract_method_source(method);
+                write!(self.output, "'{}' => ", method.selector.name())?;
+                self.generate_binary_string(&source_str)?;
+            }
             writeln!(self.output, "}}~")?;
 
             self.indent -= 1;
@@ -525,6 +539,19 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         Ok(())
+    }
+
+    /// Extracts source text for a method from the original source (BT-101).
+    fn extract_method_source(&self, method: &MethodDefinition) -> String {
+        if let Some(ref source) = self.source_text {
+            let start = method.span.start() as usize;
+            let end = method.span.end() as usize;
+            if end <= source.len() {
+                return source[start..end].trim().to_string();
+            }
+        }
+        // Fallback: use selector name
+        method.selector.name().to_string()
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

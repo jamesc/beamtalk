@@ -171,9 +171,22 @@ module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
 %% @doc Get a compiled method object.
--spec method(pid(), selector()) -> map() | nil.
-method(ClassPid, Selector) ->
-    gen_server:call(ClassPid, {method, Selector}).
+%%
+%% Accepts either a class process pid or a class name atom.
+%% Returns a CompiledMethod map or nil if the method is not found.
+-spec method(pid() | class_name(), selector()) -> map() | nil.
+method(ClassPid, Selector) when is_pid(ClassPid) ->
+    gen_server:call(ClassPid, {method, Selector});
+method(ClassName, Selector) when is_atom(ClassName) ->
+    case whereis_class(ClassName) of
+        undefined ->
+            Error0 = beamtalk_error:new(does_not_understand, ClassName),
+            Error1 = beamtalk_error:with_selector(Error0, '>>'),
+            Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
+            error(Error2);
+        Pid ->
+            gen_server:call(Pid, {method, Selector})
+    end.
 
 %% @doc Check if a class has a method (does not walk hierarchy).
 %%
@@ -452,7 +465,8 @@ handle_call({method, Selector}, _From, #class_state{
     end;
 
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
-    MethodInfo = #{block => Fun},
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    MethodInfo = #{block => Fun, arity => Arity},
     NewMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
     NewSource = maps:put(Selector, Source, State#class_state.method_source),
     NewState = State#class_state{

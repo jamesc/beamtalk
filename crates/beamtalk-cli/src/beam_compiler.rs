@@ -389,6 +389,24 @@ pub fn write_core_erlang(
     module_name: &str,
     output_path: &Utf8Path,
 ) -> Result<()> {
+    write_core_erlang_with_source(module, module_name, output_path, None)
+}
+
+/// Writes a parsed Beamtalk module as Core Erlang to the specified path, with source text.
+///
+/// When source text is provided, method source is captured in class registration
+/// metadata for `CompiledMethod` introspection (BT-101).
+///
+/// # Errors
+///
+/// Returns an error if the module name is invalid, code generation fails,
+/// or writing to the output path fails.
+pub fn write_core_erlang_with_source(
+    module: &beamtalk_core::ast::Module,
+    module_name: &str,
+    output_path: &Utf8Path,
+    source_text: Option<&str>,
+) -> Result<()> {
     // Validate module name to prevent path traversal and injection
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -398,9 +416,10 @@ pub fn write_core_erlang(
     }
 
     // Generate Core Erlang
-    let core_erlang = beamtalk_core::erlang::generate_with_name(module, module_name)
-        .into_diagnostic()
-        .wrap_err("Failed to generate Core Erlang")?;
+    let core_erlang =
+        beamtalk_core::erlang::generate_with_name_and_source(module, module_name, source_text)
+            .into_diagnostic()
+            .wrap_err("Failed to generate Core Erlang")?;
 
     // Write to file
     std::fs::write(output_path, core_erlang)
@@ -424,6 +443,7 @@ pub fn write_core_erlang_with_bindings(
     module_name: &str,
     output_path: &Utf8Path,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    source_text: Option<&str>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -432,10 +452,14 @@ pub fn write_core_erlang_with_bindings(
         );
     }
 
-    let core_erlang =
-        beamtalk_core::erlang::generate_with_bindings(module, module_name, bindings.clone())
-            .into_diagnostic()
-            .wrap_err("Failed to generate Core Erlang")?;
+    let core_erlang = beamtalk_core::erlang::generate_with_bindings(
+        module,
+        module_name,
+        bindings.clone(),
+        source_text,
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to generate Core Erlang")?;
 
     std::fs::write(output_path, core_erlang)
         .into_diagnostic()
@@ -538,8 +562,8 @@ pub fn compile_source_with_bindings(
 
     debug!("Parsed successfully: {}", source_path);
 
-    // Generate Core Erlang with bindings
-    write_core_erlang_with_bindings(&module, module_name, core_output, bindings)
+    // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
+    write_core_erlang_with_bindings(&module, module_name, core_output, bindings, Some(&source))
         .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
     debug!("Generated Core Erlang: {}", core_output);
