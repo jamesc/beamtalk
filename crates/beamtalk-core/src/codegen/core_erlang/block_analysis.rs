@@ -96,8 +96,10 @@ fn analyze_expression(
         Expression::Literal(..)
         | Expression::Error { .. }
         | Expression::Super(_)
-        | Expression::ClassReference { .. } => {
+        | Expression::ClassReference { .. }
+        | Expression::Primitive { .. } => {
             // No variable access (ClassReference resolves at compile time)
+            // Primitive is a pragma, no variable access
         }
 
         Expression::Identifier(id) => {
