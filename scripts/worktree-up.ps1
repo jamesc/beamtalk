@@ -445,7 +445,7 @@ $rebuildArgs = if ($Rebuild) { "--rebuild --no-cache" } else { "" }
 $displayCmd = "devcontainer up --workspace-folder $worktreePath $mountArg $rebuildArgs".Trim()
 Write-Host "Running: $displayCmd" -ForegroundColor Gray
 
-$upArgs = @("up", "--workspace-folder", $worktreePath) + ($mountArg -split '\s+')
+$upArgs = @("up", "--workspace-folder", $worktreePath, $mountArg)
 if ($Rebuild) {
     $upArgs += "--rebuild"
     $upArgs += "--no-cache"
