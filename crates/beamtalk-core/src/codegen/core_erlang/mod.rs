@@ -931,44 +931,25 @@ impl CoreErlangGenerator {
     /// Generates code for an `@primitive` expression (ADR 0007 Phase 3).
     ///
     /// This handles stdlib method bodies that delegate to runtime primitives.
-    ///
-    /// - **Quoted** (`@primitive '+'`): Generates `call 'beamtalk_X':'dispatch'('selector', [Args], Self)`
-    /// - **Unquoted** (`@primitive timesRepeat`): Generates a runtime dispatch call
-    ///   for the intrinsic. The actual structural optimization happens at the call
-    ///   site in `dispatch_codegen.rs`, not in the method body.
-    fn generate_primitive(&mut self, name: &str, is_quoted: bool) -> Result<()> {
+    /// Both quoted and unquoted primitives generate a dispatch call to the
+    /// class's runtime module. The distinction between selector-based and
+    /// structural intrinsics matters at the call site (in `dispatch_codegen`),
+    /// not in the method body.
+    fn generate_primitive(&mut self, name: &str, _is_quoted: bool) -> Result<()> {
         let class_name = self.current_class_name.clone().unwrap_or_default();
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
-        if is_quoted {
-            // Selector-based: call 'beamtalk_X':'dispatch'('selector', [Args], Self)
-            write!(
-                self.output,
-                "call '{runtime_module}':'dispatch'('{name}', ["
-            )?;
-            for (i, param) in self.current_method_params.iter().enumerate() {
-                if i > 0 {
-                    write!(self.output, ", ")?;
-                }
-                write!(self.output, "{param}")?;
+        write!(
+            self.output,
+            "call '{runtime_module}':'dispatch'('{name}', ["
+        )?;
+        for (i, param) in self.current_method_params.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
             }
-            write!(self.output, "], Self)")?;
-        } else {
-            // Structural intrinsic: call 'beamtalk_X':'dispatch'('intrinsicName', [Args], Self)
-            // The actual structural optimization happens at the call site, not here.
-            // The method body just delegates to runtime dispatch.
-            write!(
-                self.output,
-                "call '{runtime_module}':'dispatch'('{name}', ["
-            )?;
-            for (i, param) in self.current_method_params.iter().enumerate() {
-                if i > 0 {
-                    write!(self.output, ", ")?;
-                }
-                write!(self.output, "{param}")?;
-            }
-            write!(self.output, "], Self)")?;
+            write!(self.output, "{param}")?;
         }
+        write!(self.output, "], Self)")?;
 
         Ok(())
     }

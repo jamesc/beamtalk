@@ -468,58 +468,13 @@ pub fn compile_source(
     core_output: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
 ) -> Result<()> {
-    use crate::diagnostic::CompileDiagnostic;
-
-    debug!("Compiling module '{}'", module_name);
-
-    // Read source file
-    let source = std::fs::read_to_string(source_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read file '{source_path}'"))?;
-
-    // Lex and parse
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-
-    // Run @primitive validation (ADR 0007)
-    let primitive_diags =
-        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, options,
-        );
-    diagnostics.extend(primitive_diags);
-
-    // Check for errors
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
-
-    // Display all diagnostics to stderr so users see them without RUST_LOG
-    if !diagnostics.is_empty() {
-        debug!(
-            diagnostic_count = diagnostics.len(),
-            "Found diagnostics during compilation"
-        );
-        for diagnostic in &diagnostics {
-            let compile_diag =
-                CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
-
-            eprintln!("{:?}", miette::Report::new(compile_diag));
-        }
-    }
-
-    if has_errors {
-        error!("Compilation failed for '{}'", source_path);
-        miette::bail!("Failed to compile '{source_path}'");
-    }
-
-    debug!("Parsed successfully: {}", source_path);
-
-    // Generate Core Erlang
-    write_core_erlang(&module, module_name, core_output)
-        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
-
-    debug!("Generated Core Erlang: {}", core_output);
-    Ok(())
+    compile_source_with_bindings(
+        source_path,
+        module_name,
+        core_output,
+        options,
+        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+    )
 }
 
 /// Compiles a Beamtalk source file to Core Erlang with primitive bindings.

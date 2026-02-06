@@ -131,21 +131,29 @@ impl PrimitiveBindingTable {
     /// Finds a selector-based primitive binding for any class.
     ///
     /// Since we don't have static type information at the call site, this searches
-    /// all classes for a matching selector. Returns the first match found with
-    /// its class name.
+    /// all classes for a matching selector. Returns the match only if EXACTLY ONE
+    /// class has a selector-based primitive for this selector name.
     ///
-    /// Only returns `SelectorBased` bindings — structural intrinsics are handled
-    /// by the hardcoded dispatch chain and should not be returned here.
+    /// Returns `None` if:
+    /// - No class has this selector
+    /// - Multiple classes have this selector (ambiguous without type info)
+    /// - The only match is a structural intrinsic
     #[must_use]
     pub fn find_selector(&self, selector: &str) -> Option<(String, PrimitiveBinding)> {
+        let mut result: Option<(String, PrimitiveBinding)> = None;
         for ((class_name, sel), binding) in &self.bindings {
             if sel == selector {
                 if let PrimitiveBinding::SelectorBased { .. } = binding {
-                    return Some((class_name.clone(), binding.clone()));
+                    if result.is_some() {
+                        // Ambiguous: multiple classes have this selector.
+                        // Fall through to generic runtime dispatch.
+                        return None;
+                    }
+                    result = Some((class_name.clone(), binding.clone()));
                 }
             }
         }
-        None
+        result
     }
 
     /// Returns the runtime module name for a class's selector-based primitives.
@@ -471,6 +479,46 @@ mod tests {
 
         // Unknown selector
         assert!(table.find_selector("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_find_selector_ambiguous_returns_none() {
+        // Same selector in multiple classes → ambiguous, should return None
+        let int_class = ClassDefinition::new(
+            Identifier::new("Integer", span()),
+            Identifier::new("Object", span()),
+            vec![],
+            vec![make_primitive_method(
+                MessageSelector::Binary("=".into()),
+                vec![Identifier::new("other", span())],
+                "=",
+                true,
+            )],
+            span(),
+        );
+
+        let str_class = ClassDefinition::new(
+            Identifier::new("String", span()),
+            Identifier::new("Object", span()),
+            vec![],
+            vec![make_primitive_method(
+                MessageSelector::Binary("=".into()),
+                vec![Identifier::new("other", span())],
+                "=",
+                true,
+            )],
+            span(),
+        );
+
+        let mod1 = Module::with_classes(vec![int_class], span());
+        let mod2 = Module::with_classes(vec![str_class], span());
+        let table = build_binding_table([&mod1, &mod2]);
+
+        // Both Integer and String have '=' → ambiguous
+        assert!(
+            table.find_selector("=").is_none(),
+            "Ambiguous selector should return None"
+        );
     }
 
     #[test]
