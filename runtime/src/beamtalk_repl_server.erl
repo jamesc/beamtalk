@@ -86,62 +86,155 @@ start_acceptor(ListenSocket) ->
 acceptor_loop(ListenSocket) ->
     case gen_tcp:accept(ListenSocket) of
         {ok, ClientSocket} ->
-            %% TODO: Get actual REPL pid from session supervisor
-            %% For now, this is a placeholder
-            ReplPid = whereis(beamtalk_repl),
-            spawn(fun() -> handle_client(ClientSocket, ReplPid) end),
+            %% Generate unique session ID
+            SessionId = generate_session_id(),
+            
+            %% Start session under supervisor
+            case beamtalk_session_sup:start_session(SessionId) of
+                {ok, SessionPid} ->
+                    logger:info("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
+                    %% Spawn client handler with session pid
+                    spawn(fun() -> handle_client(ClientSocket, SessionPid) end);
+                {error, Reason} ->
+                    logger:error("Failed to create session: ~p", [Reason]),
+                    ErrorJson = format_error({session_creation_failed, Reason}),
+                    gen_tcp:send(ClientSocket, [ErrorJson, "\n"]),
+                    gen_tcp:close(ClientSocket)
+            end,
             acceptor_loop(ListenSocket);
         {error, Reason} ->
-            io:format(standard_error, "Accept error: ~p~n", [Reason]),
+            logger:error("Accept error: ~p", [Reason]),
             timer:sleep(1000),
             acceptor_loop(ListenSocket)
     end.
 
+%% @doc Generate a unique session ID.
+%% Format: "session_{timestamp}_{random}"
+-spec generate_session_id() -> binary().
+generate_session_id() ->
+    Timestamp = erlang:system_time(microsecond),
+    Random = rand:uniform(99999),
+    list_to_binary(io_lib:format("session_~p_~p", [Timestamp, Random])).
+
 %%% Client Handling
 
 %% @doc Handle a client connection (runs in separate process).
-handle_client(Socket, ReplPid) ->
+%% SessionPid is the gen_server process for this client's session.
+handle_client(Socket, SessionPid) ->
     inet:setopts(Socket, [{active, false}, {packet, line}]),
-    handle_client_loop(Socket, ReplPid).
+    handle_client_loop(Socket, SessionPid).
 
 %% @private
-handle_client_loop(Socket, ReplPid) ->
+%% Handle requests from client and forward to session
+handle_client_loop(Socket, SessionPid) ->
     try
         case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
             {ok, Data} ->
-                %% Send request to REPL server
-                ReplPid ! {client_request, Data, self()},
-                %% Wait for response
-                receive
-                    {response, Response} ->
-                        case gen_tcp:send(Socket, [Response, "\n"]) of
-                            ok ->
-                                handle_client_loop(Socket, ReplPid);
-                            {error, SendError} ->
-                                %% Failed to send (e.g., broken pipe), close cleanly
-                                io:format(standard_error, "REPL client send error: ~p~n", [SendError]),
-                                gen_tcp:close(Socket)
-                        end
-                after ?RECV_TIMEOUT ->
-                    gen_tcp:send(Socket, [format_error(timeout), "\n"]),
-                    gen_tcp:close(Socket)
+                %% Parse request
+                Request = parse_request(Data),
+                
+                %% Process request via session or workspace APIs
+                Response = handle_request(Request, SessionPid),
+                
+                %% Send response
+                case gen_tcp:send(Socket, [Response, "\n"]) of
+                    ok ->
+                        handle_client_loop(Socket, SessionPid);
+                    {error, SendError} ->
+                        %% Failed to send (e.g., broken pipe), close cleanly
+                        logger:warning("REPL client send error: ~p", [SendError]),
+                        gen_tcp:close(Socket)
                 end;
             {error, closed} ->
                 ok;
             {error, timeout} ->
                 gen_tcp:close(Socket);
             {error, RecvError} ->
-                io:format(standard_error, "REPL client recv error: ~p~n", [RecvError]),
+                logger:warning("REPL client recv error: ~p", [RecvError]),
                 gen_tcp:close(Socket)
         end
     catch
         Class:Reason:Stack ->
             %% Unexpected crash in client handler - log and close cleanly
-            io:format(standard_error,
-                      "REPL client handler crash:~nClass: ~p~nReason: ~p~nStack: ~p~n",
-                      [Class, Reason, lists:sublist(Stack, 10)]),
+            logger:error("REPL client handler crash", #{
+                class => Class,
+                reason => Reason,
+                stack => lists:sublist(Stack, 10)
+            }),
             catch gen_tcp:close(Socket)
     end.
+
+%% @private
+%% Handle a parsed request by forwarding to appropriate API
+handle_request({eval, Expression}, SessionPid) ->
+    try
+        case beamtalk_repl_shell:eval(SessionPid, Expression) of
+            {ok, Result} ->
+                format_response(Result);
+            {error, ErrorReason} ->
+                format_error(ErrorReason)
+        end
+    catch
+        Class:CrashReason:Stack ->
+            %% Crash in eval - log and send error response
+            logger:error("REPL eval error", #{
+                class => Class,
+                reason => CrashReason,
+                stack => lists:sublist(Stack, 5),
+                expression => Expression
+            }),
+            format_error({eval_error, Class, CrashReason})
+    end;
+
+handle_request({clear_bindings}, SessionPid) ->
+    ok = beamtalk_repl_shell:clear_bindings(SessionPid),
+    format_response(ok);
+
+handle_request({get_bindings}, SessionPid) ->
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
+    format_bindings(Bindings);
+
+handle_request({load_file, Path}, SessionPid) ->
+    case beamtalk_repl_shell:load_file(SessionPid, Path) of
+        {ok, Classes} ->
+            format_loaded(Classes);
+        {error, Reason} ->
+            format_error(Reason)
+    end;
+
+handle_request({list_actors}, _SessionPid) ->
+    %% Actors are workspace-wide, not session-specific
+    %% Get registry from workspace metadata or actor supervisor
+    case beamtalk_actor_registry:whereis() of
+        undefined ->
+            format_error(no_registry);
+        RegistryPid ->
+            Actors = beamtalk_repl_actors:list_actors(RegistryPid),
+            format_actors(Actors)
+    end;
+
+handle_request({list_modules}, _SessionPid) ->
+    %% Modules are workspace-wide
+    %% For now, return empty list - proper implementation in BT-263
+    format_modules([]);
+
+handle_request({unload_module, _ModuleName}, _SessionPid) ->
+    %% Module unloading is workspace-wide - implement in BT-263
+    format_error({not_implemented, unload_module});
+
+handle_request({kill_actor, PidStr}, _SessionPid) ->
+    %% Actor killing is workspace-wide
+    try
+        Pid = list_to_pid(PidStr),
+        exit(Pid, kill),
+        format_response(ok)
+    catch
+        _:_ ->
+            format_error({invalid_pid, PidStr})
+    end;
+
+handle_request({error, Reason}, _SessionPid) ->
+    format_error(Reason).
 
 %%% Protocol Parsing and Formatting
 
