@@ -68,6 +68,7 @@
     methods/1,
     superclass/1,
     method/2,
+    has_method/2,
     put_method/3,
     put_method/4,
     instance_variables/1,
@@ -173,6 +174,43 @@ module_name(ClassPid) ->
 -spec method(pid(), selector()) -> map() | nil.
 method(ClassPid, Selector) ->
     gen_server:call(ClassPid, {method, Selector}).
+
+%% @doc Check if a class has a method (does not walk hierarchy).
+%%
+%% Returns true if the method is defined in this class, false otherwise.
+%% This is used by beamtalk_dispatch for hierarchy walking.
+%%
+%% ## Implementation
+%%
+%% First checks the class metadata (instance_methods map), then falls back
+%% to the module's has_method/1 function if available. This handles both
+%% explicitly registered methods and inlined reflection methods.
+-spec has_method(pid(), selector()) -> boolean().
+has_method(ClassPid, Selector) ->
+    %% First check the class metadata
+    case gen_server:call(ClassPid, {method, Selector}) of
+        nil ->
+            %% Not in metadata - check if module has_method/1 function exists
+            case module_name(ClassPid) of
+                undefined ->
+                    false;
+                ModuleName ->
+                    %% Check if module exports has_method/1
+                    case erlang:function_exported(ModuleName, has_method, 1) of
+                        true ->
+                            %% Call the module's has_method/1
+                            try
+                                ModuleName:has_method(Selector)
+                            catch
+                                _:_ -> false
+                            end;
+                        false ->
+                            false
+                    end
+            end;
+        _MethodInfo ->
+            true
+    end.
 
 %% @doc Replace a method with a new function (hot patching).
 -spec put_method(pid(), selector(), fun()) -> ok.
