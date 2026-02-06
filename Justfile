@@ -29,6 +29,7 @@ clean-all: clean clean-erlang
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Build all targets (Rust + Erlang)
+# TODO: Chain build-stdlib once lib/*.bt files use @primitive syntax (BT-290)
 build: build-rust build-erlang
 
 # Build Rust workspace
@@ -51,6 +52,12 @@ build-erlang:
     @echo "🔨 Building Erlang runtime..."
     @cd runtime && rebar3 compile 2>&1 | grep -v "===>" || true
     @echo "✅ Erlang build complete"
+
+# Build standard library (lib/*.bt → BEAM)
+build-stdlib: build-rust build-erlang
+    @echo "🔨 Building standard library..."
+    @cargo run --bin beamtalk --quiet -- build-stdlib
+    @echo "✅ Stdlib build complete"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format

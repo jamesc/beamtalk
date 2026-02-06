@@ -39,6 +39,9 @@ enum Command {
         stdlib_mode: bool,
     },
 
+    /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
+    BuildStdlib,
+
     /// Compile and run a Beamtalk program
     Run {
         /// Source file or directory to compile and run
@@ -122,6 +125,7 @@ fn main() -> Result<()> {
             };
             commands::build::build(&path, &options)
         }
+        Command::BuildStdlib => commands::build_stdlib::build_stdlib(),
         Command::Run { path } => commands::run::run(&path),
         Command::New { name } => commands::new::new_project(&name),
         Command::Repl {
