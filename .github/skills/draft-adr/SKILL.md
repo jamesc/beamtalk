@@ -103,7 +103,46 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    - **Affected components**: Which layers of the pipeline? (parser, codegen, runtime, REPL)
    - **Effort**: Rough size estimate (S/M/L/XL)
 
-4. **Present options to user**: Show the options with a clear recommendation:
+6. **Steelman each option**: For each option, argue *for* it from every user cohort's perspective. The goal is to find the strongest possible case for options you might otherwise dismiss.
+
+   For each option, write the best argument a member of each cohort would make:
+   
+   | Cohort | Their strongest argument for this option |
+   |--------|----------------------------------------|
+   | **Newcomer** | "This is the best option because..." |
+   | **Smalltalk purist** | "This preserves/improves on Smalltalk because..." |
+   | **Erlang/BEAM veteran** | "This works best on BEAM because..." |
+   | **Production operator** | "This is most reliable in production because..." |
+   | **Language designer** | "This is the most elegant/composable because..." |
+   
+   **Rules for steelmanning:**
+   - Argue *genuinely* — find the real strength, not a strawman
+   - If you can't steelman an option from any cohort, it's probably a weak option
+   - If an option you planned to reject gets a compelling steelman, reconsider
+   - Note when different cohorts would choose different options — that tension is valuable signal
+   
+   **Present the steelman summary to the user:**
+   ```markdown
+   ## Steelman Analysis
+   
+   ### Option A: [Name]
+   - 🧑‍💻 **Newcomer**: "This is most intuitive because [X] — I'd guess this syntax without reading docs"
+   - 🎩 **Smalltalk purist**: "This stays true to message-passing because [Y]"
+   - ⚙️ **BEAM veteran**: "This maps cleanly to OTP because [Z]"
+   - 🏭 **Operator**: "This is observable and predictable because [W]"
+   - 🎨 **Language designer**: "This composes well because [V]"
+   
+   ### Option B: [Name]
+   - 🧑‍💻 **Newcomer**: "This matches what I know from Python/JS because [X]"
+   - ...
+   
+   ### Tension Points
+   - Newcomers prefer Option B but Smalltalk purists strongly prefer Option A
+   - BEAM veterans and operators agree on Option A
+   - Language designers are split: A is more elegant, B is more pragmatic
+   ```
+
+7. **Present options to user**: Show the options with steelman analysis and a clear recommendation:
    ```markdown
    ## Option A: [Name] (Recommended)
    [Description, code example, pros/cons]
@@ -111,19 +150,22 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    ## Option B: [Name]
    [Description, code example, pros/cons]
    
+   ## Steelman Summary
+   [Condensed from step 6]
+   
    ## Recommendation
-   Option A because [reasoning]. 
+   Option A because [reasoning informed by steelman analysis].
    ```
    
    Wait for the user to choose or discuss before writing the ADR.
 
-5. **Determine next ADR number**:
+8. **Determine next ADR number**:
    ```bash
    ls docs/ADR/*.md | grep -v README | sort | tail -1
    ```
    Increment from the highest existing number.
 
-6. **Write the ADR**: Create `docs/ADR/NNNN-kebab-case-title.md` following the project format:
+9. **Write the ADR**: Create `docs/ADR/NNNN-kebab-case-title.md` following the project format:
 
    ```markdown
    # ADR NNNN: Descriptive Title
@@ -149,6 +191,10 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    ## User Impact
    [How this affects each persona: newcomer, Smalltalker, Erlang dev, operator]
    [Discoverability and learnability considerations]
+   
+   ## Steelman Analysis
+   [Best argument for each rejected alternative from each user cohort]
+   [Tension points between cohorts]
    
    ## Alternatives Considered
    ### [Alternative Name]
@@ -177,15 +223,15 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    - Documentation: [links]
    ```
 
-7. **Update the ADR index**: Add the new ADR to `docs/ADR/README.md`.
+10. **Update the ADR index**: Add the new ADR to `docs/ADR/README.md`.
 
-8. **Commit the ADR**:
+11. **Commit the ADR**:
    ```bash
    git add docs/ADR/NNNN-*.md docs/ADR/README.md
    git commit -m "docs: add ADR NNNN - <title> BT-XXX"
    ```
 
-9. **Summary**: Present the ADR to the user and suggest next steps:
+12. **Summary**: Present the ADR to the user and suggest next steps:
    - "ADR NNNN written. Ready for `/plan-adr` to break this into implementation issues?"
    - Note any open questions or decisions deferred to implementation
 
