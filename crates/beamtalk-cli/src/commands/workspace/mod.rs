@@ -161,17 +161,37 @@ pub fn generate_cookie() -> String {
 }
 
 /// Save workspace cookie with secure permissions (owner read/write only).
+///
+/// On Unix, the file is created with mode 0600 to avoid a TOCTOU race where
+/// the cookie could briefly be world-readable. Permissions are also enforced
+/// via `fchmod` on the open file descriptor so that pre-existing files with
+/// overly-permissive modes (e.g. from older versions) are tightened to 0600.
 pub fn save_workspace_cookie(workspace_id: &str, cookie: &str) -> Result<()> {
     let cookie_path = workspace_dir(workspace_id)?.join("cookie");
-    fs::write(&cookie_path, cookie).into_diagnostic()?;
 
-    // Set file permissions to 0600 (owner read/write only)
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&cookie_path).into_diagnostic()?.permissions();
-        perms.set_mode(0o600);
-        fs::set_permissions(&cookie_path, perms).into_diagnostic()?;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&cookie_path)
+            .into_diagnostic()?;
+
+        // Ensure 0600 even on overwrite of a pre-existing file (uses fchmod).
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .into_diagnostic()?;
+
+        file.write_all(cookie.as_bytes()).into_diagnostic()?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        fs::write(&cookie_path, cookie).into_diagnostic()?;
     }
 
     Ok(())
@@ -569,6 +589,69 @@ mod tests {
             let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "Cookie should be owner-only");
         }
+    }
+
+    /// Verify cookie file is created with 0600 permissions atomically
+    /// (no TOCTOU race where file is briefly world-readable).
+    #[cfg(unix)]
+    #[test]
+    fn test_cookie_permissions_atomic_at_creation() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ws = TestWorkspace::new("cookie_atomic");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        save_workspace_cookie(&ws.id, "atomic-test-cookie").unwrap();
+
+        let cookie_path = ws.dir().join("cookie");
+        let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "Cookie must be created with 0600 permissions (no race window)"
+        );
+
+        // Overwriting an existing cookie should also preserve permissions
+        save_workspace_cookie(&ws.id, "updated-cookie").unwrap();
+        let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "Overwritten cookie must retain 0600 permissions"
+        );
+
+        let content = fs::read_to_string(&cookie_path).unwrap();
+        assert_eq!(content, "updated-cookie");
+    }
+
+    /// Verify that overwriting a cookie file that already has insecure
+    /// permissions (e.g. 0644 from an older version) tightens it to 0600.
+    #[cfg(unix)]
+    #[test]
+    fn test_cookie_tightens_insecure_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ws = TestWorkspace::new("cookie_tighten");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        // Pre-create cookie with insecure permissions (simulates older version)
+        let cookie_path = ws.dir().join("cookie");
+        fs::write(&cookie_path, "old-insecure-cookie").unwrap();
+        fs::set_permissions(&cookie_path, fs::Permissions::from_mode(0o644)).unwrap();
+        let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "Precondition: cookie should be 0644");
+
+        // save_workspace_cookie must tighten permissions back to 0600
+        save_workspace_cookie(&ws.id, "new-secure-cookie").unwrap();
+        let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "Overwriting insecure cookie must tighten permissions to 0600"
+        );
+
+        let content = fs::read_to_string(&cookie_path).unwrap();
+        assert_eq!(content, "new-secure-cookie");
     }
 
     #[test]
