@@ -90,7 +90,7 @@ test: test-rust test-runtime
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print }' || true
+    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { s=$0; sub(/.*Running /, "", s); sub(/unittests /, "", s); split(s, b, / \(/); src=b[1]; crate=b[2]; gsub(/.*\//, "", crate); sub(/-[a-f0-9]+\)$/, "", crate); label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print }' || true
     @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
