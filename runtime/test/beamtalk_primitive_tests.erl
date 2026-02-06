@@ -203,10 +203,15 @@ responds_to_tuple_test_() ->
          ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
      end}.
 
-responds_to_float_test() ->
-    [?_assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
-     ?_assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
-     ?_assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))].
+responds_to_float_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))
+     end}.
 
 responds_to_other_primitives_test() ->
     %% Lists not yet implemented

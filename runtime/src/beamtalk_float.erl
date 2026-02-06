@@ -138,7 +138,7 @@ builtin_dispatch('/', [Y], X) when is_number(Y), Y =/= 0, Y =/= 0.0 -> {ok, X / 
 
 %% Comparison operations
 builtin_dispatch('=', [Y], X) when is_number(Y) -> {ok, X =:= Y};
-builtin_dispatch('=', [_Y], _X) -> {ok, false};  % Non-numeric comparison always false
+builtin_dispatch('=', [Y], X) -> {ok, false};  % Non-numeric comparison always false
 builtin_dispatch('<', [Y], X) when is_number(Y) -> {ok, X < Y};
 builtin_dispatch('>', [Y], X) when is_number(Y) -> {ok, X > Y};
 builtin_dispatch('<=', [Y], X) when is_number(Y) -> {ok, X =< Y};

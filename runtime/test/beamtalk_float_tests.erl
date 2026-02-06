@@ -42,9 +42,13 @@ division_test() ->
 
 division_by_zero_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
-        {"Division by zero raises does_not_understand", fun() ->
+        {"Division by float zero raises does_not_understand", fun() ->
             ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Float', selector = '/'},
                          beamtalk_float:dispatch('/', [0.0], 42.0))
+        end},
+        {"Division by integer zero raises does_not_understand", fun() ->
+            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Float', selector = '/'},
+                         beamtalk_float:dispatch('/', [0], 42.0))
         end}
     ]}.
 
