@@ -1055,7 +1055,7 @@ Identifies which component of the codebase the issue affects:
 | Label | Description | Key Directories |
 |-------|-------------|----------------|
 | `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
-| `stdlib` | Standard library: collections, primitives, strings | `lib/` |
+| `stdlib` | Standard library: collections, primitives, strings (compiled from `lib/*.bt` via pragmas — see [ADR 0007](../docs/ADR/0007-compilable-stdlib-with-primitive-injection.md)) | `lib/` |
 | `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
 | `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |

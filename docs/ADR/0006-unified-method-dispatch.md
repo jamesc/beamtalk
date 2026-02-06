@@ -483,4 +483,4 @@ handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State)
 
 ## Future ADRs
 
-- **ADR 0007: Stdlib Compilation and Primitive Specification** — How to compile the stdlib from Beamtalk source, including specifying primitives and core classes (analogous to Rust's `core` crate). Will address replacing the hand-written bootstrap modules with compiled Beamtalk.
+- **ADR 0007: Stdlib Compilation and Primitive Specification** — How to compile the stdlib from Beamtalk source, including specifying primitives and core classes (analogous to Rust's `core` crate). Replaces hand-written bootstrap modules with compiled Beamtalk using named intrinsic pragmas. Introduces three-kind class routing (Actor/Value Type/Primitive) driven by stdlib metadata instead of `is_actor_class()` heuristic.
