@@ -151,6 +151,10 @@ handle_load(Path, State) ->
                                     Tracker = beamtalk_repl_state:get_module_tracker(NewState1),
                                     NewTracker = beamtalk_repl_modules:add_module(ModuleName, Path, Tracker),
                                     NewState2 = beamtalk_repl_state:set_module_tracker(NewTracker, NewState1),
+                                    
+                                    %% Register module with workspace metadata
+                                    beamtalk_workspace_meta:register_module(ModuleName),
+                                    
                                     {ok, ClassNames, NewState2};
                                 {error, Reason} ->
                                     {error, {load_error, Reason}, State}

@@ -82,6 +82,39 @@ pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
     Ok(format!("{result:x}")[..12].to_string())
 }
 
+/// Validate a user-provided workspace name.
+fn validate_workspace_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(miette!("Workspace name cannot be empty"));
+    }
+
+    let valid = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return Err(miette!(
+            "Workspace name must contain only letters, numbers, '-' or '_'"
+        ));
+    }
+
+    Ok(())
+}
+
+/// Determine workspace ID from project path or explicit name.
+pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Result<String> {
+    match workspace_name {
+        Some(name) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err(miette!("Workspace name cannot be empty or whitespace-only"));
+            }
+            validate_workspace_name(trimmed)?;
+            Ok(trimmed.to_string())
+        }
+        None => generate_workspace_id(project_path),
+    }
+}
+
 /// Get the workspace directory for a given ID.
 pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
     let beamtalk_dir = dirs::home_dir()
@@ -220,8 +253,11 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
 
 /// Create a new workspace.
 #[allow(dead_code)] // Used in future phases
-pub fn create_workspace(project_path: &Path) -> Result<WorkspaceMetadata> {
-    let workspace_id = generate_workspace_id(project_path)?;
+pub fn create_workspace(
+    project_path: &Path,
+    workspace_name: Option<&str>,
+) -> Result<WorkspaceMetadata> {
+    let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
     // Check if workspace already exists
     if workspace_exists(&workspace_id)? {
@@ -362,31 +398,55 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 #[allow(dead_code)] // Used in Phase 3
 pub fn get_or_start_workspace(
     project_path: &Path,
+    workspace_name: Option<&str>,
     port: u16,
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
-) -> Result<(NodeInfo, bool)> {
+) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
-    let metadata = create_workspace(project_path)?;
-    let workspace_id = &metadata.workspace_id;
+    let metadata = create_workspace(project_path, workspace_name)?;
+    let workspace_id = metadata.workspace_id.clone();
 
     // Check if node is already running
-    if let Some(node_info) = get_node_info(workspace_id)? {
+    if let Some(node_info) = get_node_info(&workspace_id)? {
         if is_node_running(&node_info) {
-            return Ok((node_info, false)); // Existing node
+            return Ok((node_info, false, workspace_id)); // Existing node
         }
         // Stale node.info file
-        cleanup_stale_node_info(workspace_id)?;
+        cleanup_stale_node_info(&workspace_id)?;
     }
 
     // Start new detached node
-    let node_info = start_detached_node(workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
-    Ok((node_info, true)) // New node started
+    let node_info = start_detached_node(&workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
+    Ok((node_info, true, workspace_id)) // New node started
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    /// Helper to create a unique test workspace ID and clean up after.
+    struct TestWorkspace {
+        id: String,
+    }
+
+    impl TestWorkspace {
+        fn new(prefix: &str) -> Self {
+            let id = format!("{prefix}_{}", std::process::id());
+            Self { id }
+        }
+
+        fn dir(&self) -> PathBuf {
+            workspace_dir(&self.id).unwrap()
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.dir());
+        }
+    }
 
     #[test]
     fn test_generate_workspace_id_deterministic() {
@@ -414,6 +474,33 @@ mod tests {
     }
 
     #[test]
+    fn test_workspace_id_for_explicit_name() {
+        let path = std::env::current_dir().unwrap();
+        let id = workspace_id_for(&path, Some("my_workspace-1")).unwrap();
+        assert_eq!(id, "my_workspace-1");
+    }
+
+    #[test]
+    fn test_workspace_id_for_invalid_name() {
+        let path = std::env::current_dir().unwrap();
+        assert!(workspace_id_for(&path, Some("bad/name")).is_err());
+        assert!(workspace_id_for(&path, Some("")).is_err());
+        assert!(workspace_id_for(&path, Some("has space")).is_err());
+        assert!(workspace_id_for(&path, Some("has.dot")).is_err());
+        // Whitespace-only names should be rejected
+        assert!(workspace_id_for(&path, Some("   ")).is_err());
+        assert!(workspace_id_for(&path, Some("\t")).is_err());
+    }
+
+    #[test]
+    fn test_workspace_id_for_none_uses_hash() {
+        let path = std::env::current_dir().unwrap();
+        let from_none = workspace_id_for(&path, None).unwrap();
+        let from_hash = generate_workspace_id(&path).unwrap();
+        assert_eq!(from_none, from_hash, "None should fall through to hash");
+    }
+
+    #[test]
     fn test_generate_cookie_length() {
         let cookie = generate_cookie();
         assert_eq!(
@@ -428,5 +515,151 @@ mod tests {
         let c1 = generate_cookie();
         let c2 = generate_cookie();
         assert_ne!(c1, c2, "Cookies should be random");
+    }
+
+    #[test]
+    fn test_workspace_dir_contains_id() {
+        let dir = workspace_dir("test-ws-123").unwrap();
+        assert!(dir.ends_with("workspaces/test-ws-123"));
+    }
+
+    #[test]
+    fn test_save_and_read_workspace_metadata() {
+        let ws = TestWorkspace::new("meta_rt");
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: PathBuf::from("/tmp/test-project"),
+            created_at: 1_000_000,
+        };
+
+        save_workspace_metadata(&metadata).unwrap();
+        let loaded = get_workspace_metadata(&ws.id).unwrap();
+
+        assert_eq!(loaded.workspace_id, ws.id);
+        assert_eq!(loaded.project_path, PathBuf::from("/tmp/test-project"));
+        assert_eq!(loaded.created_at, 1_000_000);
+    }
+
+    #[test]
+    fn test_save_and_read_cookie() {
+        let ws = TestWorkspace::new("cookie_rt");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        save_workspace_cookie(&ws.id, "secret-cookie-123").unwrap();
+        let cookie = read_workspace_cookie(&ws.id).unwrap();
+        assert_eq!(cookie, "secret-cookie-123");
+
+        // Verify permissions (unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let cookie_path = ws.dir().join("cookie");
+            let mode = fs::metadata(&cookie_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "Cookie should be owner-only");
+        }
+    }
+
+    #[test]
+    fn test_save_and_read_node_info() {
+        let ws = TestWorkspace::new("nodeinfo_rt");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        let info = NodeInfo {
+            node_name: "beamtalk_test@localhost".to_string(),
+            port: 9999,
+            pid: 12345,
+        };
+
+        save_node_info(&ws.id, &info).unwrap();
+        let loaded = get_node_info(&ws.id).unwrap().unwrap();
+
+        assert_eq!(loaded.node_name, "beamtalk_test@localhost");
+        assert_eq!(loaded.port, 9999);
+        assert_eq!(loaded.pid, 12345);
+    }
+
+    #[test]
+    fn test_get_node_info_returns_none_when_missing() {
+        let ws = TestWorkspace::new("nodeinfo_missing");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        let result = get_node_info(&ws.id).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_workspace_exists_true_after_creation() {
+        let ws = TestWorkspace::new("exists_true");
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: PathBuf::from("/tmp/test"),
+            created_at: 1_000_000,
+        };
+        save_workspace_metadata(&metadata).unwrap();
+
+        assert!(workspace_exists(&ws.id).unwrap());
+    }
+
+    #[test]
+    fn test_workspace_exists_false_when_absent() {
+        assert!(!workspace_exists("nonexistent_ws_12345").unwrap());
+    }
+
+    #[test]
+    fn test_cleanup_stale_node_info_removes_file() {
+        let ws = TestWorkspace::new("cleanup_test");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        let info = NodeInfo {
+            node_name: "test@localhost".to_string(),
+            port: 8888,
+            pid: 99999,
+        };
+        save_node_info(&ws.id, &info).unwrap();
+        assert!(ws.dir().join("node.info").exists());
+
+        cleanup_stale_node_info(&ws.id).unwrap();
+        assert!(!ws.dir().join("node.info").exists());
+    }
+
+    #[test]
+    fn test_cleanup_stale_node_info_noop_when_missing() {
+        let ws = TestWorkspace::new("cleanup_noop");
+        fs::create_dir_all(ws.dir()).unwrap();
+
+        // Should not error when file doesn't exist
+        cleanup_stale_node_info(&ws.id).unwrap();
+    }
+
+    #[test]
+    fn test_create_workspace_creates_files() {
+        let ws = TestWorkspace::new("create_test");
+        let project_path = std::env::current_dir().unwrap();
+
+        let metadata = create_workspace(&project_path, Some(&ws.id)).unwrap();
+        assert_eq!(metadata.workspace_id, ws.id);
+        assert!(ws.dir().join("metadata.json").exists());
+        assert!(ws.dir().join("cookie").exists());
+    }
+
+    #[test]
+    fn test_create_workspace_idempotent() {
+        let ws = TestWorkspace::new("create_idem");
+        let project_path = std::env::current_dir().unwrap();
+
+        let m1 = create_workspace(&project_path, Some(&ws.id)).unwrap();
+        let m2 = create_workspace(&project_path, Some(&ws.id)).unwrap();
+        assert_eq!(m1.workspace_id, m2.workspace_id);
+        assert_eq!(m1.created_at, m2.created_at);
+    }
+
+    #[test]
+    fn test_is_node_running_false_for_fake_pid() {
+        let info = NodeInfo {
+            node_name: "fake@localhost".to_string(),
+            port: 1,
+            pid: u32::MAX, // Very unlikely to be a real PID
+        };
+        assert!(!is_node_running(&info));
     }
 }

@@ -160,6 +160,10 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
                 _ -> ClassName
             end,
             ok = beamtalk_repl_actors:register_actor(RegistryPid, Pid, Class, Module),
+            
+            %% Also register with workspace metadata for tracking
+            beamtalk_workspace_meta:register_actor(Pid),
+            
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
