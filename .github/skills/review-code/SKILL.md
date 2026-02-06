@@ -116,13 +116,13 @@ Zoom out from the diff. Think about how these changes interact with the rest of 
 
 ## Pass 3: Adversarial Review (different model, challenge assumptions)
 
-Use a **different AI model** to challenge the design with fresh eyes. This catches groupthink and blind spots.
+Use a **different model family** to challenge the design with fresh eyes. Different model families have different blind spots — that's the point.
 
 ### Steps
 
-15. **Launch adversarial review** using a different model via the task tool:
+15. **Launch adversarial review** using the task tool with a model from a **different family** than your own. If you're Claude, use GPT; if you're GPT, use Claude:
 
-    Prompt the task agent (use `claude-opus-4.5` or another premium model) with:
+    Launch via `task` with `agent_type: "general-purpose"` and `model: "gpt-5.2"` (or `model: "claude-opus-4.6"` if you're a GPT model):
     
     ```
     You are a skeptical senior engineer reviewing a PR. Your job is to find
