@@ -597,12 +597,12 @@ pub fn run(
     }
 
     // Choose startup mode: workspace (default) or foreground (debug)
-    let beam_guard_opt = if foreground {
+    let (beam_guard_opt, is_new_workspace) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        Some(BeamChildGuard {
+        (Some(BeamChildGuard {
             child: start_beam_node(port, node_name.as_ref())?,
-        })
+        }), true)
     } else {
         // Workspace mode: start or connect to detached node
         let current_dir = std::env::current_dir().into_diagnostic()?;
@@ -623,26 +623,49 @@ pub fn run(
 
         if is_new {
             println!("Started new workspace node: {}", node_info.node_name);
+            println!("Workspace: {workspace_id}");
             // Give the node time to initialize
             std::thread::sleep(Duration::from_millis(2000));
         } else {
-            println!("Connected to existing workspace: {}", node_info.node_name);
+            println!("✓ Connected to existing workspace: {}", node_info.node_name);
+            println!("  Workspace: {workspace_id}");
         }
 
         // Display workspace info
         if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
-            println!("Workspace: {workspace_id}");
-            println!("Project:   {}", metadata.project_path.display());
-            println!();
+            println!("  Project:   {}", metadata.project_path.display());
         }
+        
+        println!();
 
-        None // No guard needed - node is detached
+        (None, is_new) // No guard needed - node is detached
     };
 
     // Connect to REPL backend
     let mut client = connect_with_retries(port)?;
 
     println!("Connected to REPL backend on port {port}.");
+    
+    // If reconnecting to existing workspace, show available actors
+    if beam_guard_opt.is_none() && !is_new_workspace {
+        match client.list_actors() {
+            Ok(response) => {
+                if let Some(actors) = response.actors {
+                    if !actors.is_empty() {
+                        println!("\nAvailable actors:");
+                        for actor in actors {
+                            println!("  - {} ({})", actor.class, actor.pid);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // Log but don't fail - actor listing is nice-to-have
+                tracing::debug!("Could not list actors: {}", e);
+            }
+        }
+    }
+    
     println!();
 
     // Set up rustyline editor
