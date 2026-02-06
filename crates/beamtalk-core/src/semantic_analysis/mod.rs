@@ -21,6 +21,7 @@ pub mod block_context;
 pub mod class_hierarchy;
 pub mod error;
 pub mod name_resolver;
+pub mod primitive_validator;
 pub mod scope;
 pub mod type_checker;
 

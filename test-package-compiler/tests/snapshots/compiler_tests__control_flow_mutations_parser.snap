@@ -2288,47 +2288,47 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected '#': expected '#{' for a map literal or a valid expression", span: Span { start: 1325, end: 1326 } }
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 1328, end: 1329 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 1328, end: 1329 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1340, end: 1341 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1356, end: 1357 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1400, end: 1401 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1505, end: 1506 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1591, end: 1592 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 1605, end: 1606 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1618, end: 1619 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1718, end: 1719 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1783, end: 1784 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1799, end: 1800 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1898, end: 1899 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1984, end: 1985 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1999, end: 2000 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2208, end: 2209 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2223, end: 2224 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2231, end: 2232 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2240, end: 2241 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2586, end: 2593 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2634, end: 2635 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2671, end: 2672 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2682, end: 2683 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found incrementBy:", span: Span { start: 2779, end: 2791 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2799, end: 2801 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2848, end: 2849 } }
-Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2848, end: 2854 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2862, end: 2863 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2881, end: 2882 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2936, end: 2938 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2958, end: 2959 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2972, end: 2973 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 3111, end: 3113 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3175, end: 3176 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3190, end: 3191 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3200, end: 3201 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3330, end: 3336 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3358, end: 3359 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3545, end: 3546 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3589, end: 3590 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3676, end: 3677 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3684, end: 3685 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3692, end: 3693 } }
+Diagnostic { severity: Error, message: "Unexpected '#': expected '#{' for a map literal or a valid expression", span: Span { start: 1325, end: 1326 }, hint: None }
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 1328, end: 1329 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 1328, end: 1329 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1340, end: 1341 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1356, end: 1357 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1400, end: 1401 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1505, end: 1506 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1591, end: 1592 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 1605, end: 1606 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1618, end: 1619 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1718, end: 1719 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1783, end: 1784 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1799, end: 1800 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1898, end: 1899 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1984, end: 1985 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1999, end: 2000 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2208, end: 2209 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2223, end: 2224 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2231, end: 2232 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2240, end: 2241 }, hint: None }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2586, end: 2593 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2634, end: 2635 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2671, end: 2672 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2682, end: 2683 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found incrementBy:", span: Span { start: 2779, end: 2791 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2799, end: 2801 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2848, end: 2849 }, hint: None }
+Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2848, end: 2854 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2862, end: 2863 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2881, end: 2882 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 2936, end: 2938 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2958, end: 2959 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2972, end: 2973 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =>", span: Span { start: 3111, end: 3113 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3175, end: 3176 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3190, end: 3191 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3200, end: 3201 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3330, end: 3336 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3358, end: 3359 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3545, end: 3546 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3589, end: 3590 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3676, end: 3677 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3684, end: 3685 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3692, end: 3693 }, hint: None }

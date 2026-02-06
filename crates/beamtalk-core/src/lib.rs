@@ -34,3 +34,22 @@ pub mod prelude {
     };
     pub use crate::source_analysis::Span;
 }
+
+/// Compiler options controlling semantic analysis and code generation.
+///
+/// These flags control how the compiler handles stdlib-specific features
+/// like `@primitive` pragmas (ADR 0007).
+#[derive(Debug, Clone, Default)]
+pub struct CompilerOptions {
+    /// When true, the module being compiled is part of the standard library.
+    /// Enables `@primitive` pragmas without warnings.
+    pub stdlib_mode: bool,
+
+    /// When true, allows `@primitive` pragmas in non-stdlib code.
+    /// Emits a warning instead of an error.
+    pub allow_primitives: bool,
+
+    /// Source path for stdlib detection heuristic.
+    /// If set and starts with `lib/`, the module is treated as stdlib.
+    pub source_path: Option<String>,
+}

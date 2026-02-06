@@ -175,6 +175,8 @@ pub struct Diagnostic {
     pub message: EcoString,
     /// The source location.
     pub span: Span,
+    /// Optional hint for how to fix the issue.
+    pub hint: Option<EcoString>,
 }
 
 impl Diagnostic {
@@ -185,6 +187,7 @@ impl Diagnostic {
             severity: Severity::Error,
             message: message.into(),
             span,
+            hint: None,
         }
     }
 
@@ -195,6 +198,7 @@ impl Diagnostic {
             severity: Severity::Warning,
             message: message.into(),
             span,
+            hint: None,
         }
     }
 }

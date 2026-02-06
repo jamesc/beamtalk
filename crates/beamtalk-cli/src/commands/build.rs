@@ -14,7 +14,7 @@ use tracing::{debug, error, info, instrument, warn};
 ///
 /// This command compiles .bt files to .beam bytecode via Core Erlang.
 #[instrument(skip_all, fields(path = %path))]
-pub fn build(path: &str) -> Result<()> {
+pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()> {
     info!("Starting build");
     let source_path = Utf8PathBuf::from(path);
 
@@ -65,7 +65,7 @@ pub fn build(path: &str) -> Result<()> {
 
         let core_file = build_dir.join(format!("{module_name}.core"));
 
-        compile_file(file, module_name, &core_file)?;
+        compile_file(file, module_name, &core_file, options)?;
         core_files.push(core_file);
     }
 
@@ -125,7 +125,12 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 }
 
 #[instrument(skip_all, fields(path = %path, module = module_name))]
-fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Result<()> {
+fn compile_file(
+    path: &Utf8Path,
+    module_name: &str,
+    core_file: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+) -> Result<()> {
     debug!("Compiling module '{}'", module_name);
     println!("  Compiling {path}...");
 
@@ -136,7 +141,17 @@ fn compile_file(path: &Utf8Path, module_name: &str, core_file: &Utf8Path) -> Res
 
     // Lex and parse the source using beamtalk-core
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // Run @primitive validation (ADR 0007)
+    let mut file_options = options.clone();
+    file_options.source_path = Some(path.to_string());
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module,
+            &file_options,
+        );
+    diagnostics.extend(primitive_diags);
 
     // Check for errors
     let has_errors = diagnostics
@@ -199,6 +214,10 @@ mod tests {
 
     fn write_test_file(path: &Utf8Path, content: &str) {
         fs::write(path, content).unwrap();
+    }
+
+    fn default_options() -> beamtalk_core::CompilerOptions {
+        beamtalk_core::CompilerOptions::default()
     }
 
     #[test]
@@ -266,7 +285,7 @@ mod tests {
         let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + 2].");
 
-        let result = compile_file(&test_file, "test", &core_file);
+        let result = compile_file(&test_file, "test", &core_file, &default_options());
         assert!(result.is_ok());
         assert!(core_file.exists());
     }
@@ -279,7 +298,7 @@ mod tests {
         let core_file = project_path.join("test.core");
         write_test_file(&test_file, "test := [1 + ]."); // Syntax error
 
-        let result = compile_file(&test_file, "test", &core_file);
+        let result = compile_file(&test_file, "test", &core_file, &default_options());
         assert!(result.is_err());
     }
 
@@ -288,7 +307,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let project_path = create_test_project(&temp);
 
-        let result = build(project_path.as_str());
+        let result = build(project_path.as_str(), &default_options());
         assert!(result.is_err());
     }
 
@@ -299,7 +318,7 @@ mod tests {
         let src_path = project_path.join("src");
         write_test_file(&src_path.join("main.bt"), "main := [42].");
 
-        let result = build(project_path.as_str());
+        let result = build(project_path.as_str(), &default_options());
 
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
@@ -322,7 +341,7 @@ mod tests {
         write_test_file(&src_path.join("file1.bt"), "test1 := [1].");
         write_test_file(&src_path.join("file2.bt"), "test2 := [2].");
 
-        let result = build(project_path.as_str());
+        let result = build(project_path.as_str(), &default_options());
 
         // If escript is not available, the test should fail at the BEAM compilation stage
         // We allow this in CI environments
