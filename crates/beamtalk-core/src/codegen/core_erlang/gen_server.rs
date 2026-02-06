@@ -885,10 +885,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<OtherSelector> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% ADR 0006: Try hierarchy walk before DNU"
-        )?;
+        writeln!(self.output, "%% ADR 0006: Try hierarchy walk before DNU")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -898,7 +895,10 @@ impl CoreErlangGenerator {
 
         // Success case - inherited method found
         self.write_indent()?;
-        writeln!(self.output, "<{{'reply', InheritedResult, InheritedState}}> when 'true' ->")?;
+        writeln!(
+            self.output,
+            "<{{'reply', InheritedResult, InheritedState}}> when 'true' ->"
+        )?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "{{'reply', InheritedResult, InheritedState}}")?;
@@ -1759,10 +1759,7 @@ impl CoreErlangGenerator {
                         }
                         self.generate_expression(arg)?;
                     }
-                    write!(
-                        self.output,
-                        "], Self, {current_state}, '{class_name}')"
-                    )?;
+                    write!(self.output, "], Self, {current_state}, '{class_name}')")?;
                 }
 
                 // Extract state from the {reply, Result, NewState} tuple using element/2
