@@ -1,6 +1,6 @@
 ---
-name: code-review
-description: Review current branch changes vs main. Use when user types /code-review or asks for a code review of their changes.
+name: review-code
+description: Review current branch changes vs main. Use when user types /review-code or asks for a code review of their changes.
 ---
 
 # Code Review Workflow

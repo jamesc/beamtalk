@@ -1,6 +1,6 @@
 ---
-name: next-issue
-description: Start working on next Linear issue. Use when user types /next-issue or asks to pick up the next task from the backlog.
+name: pick-issue
+description: Start working on next Linear issue. Use when user types /pick-issue or asks to pick up the next task from the backlog.
 ---
 
 # Next Issue Workflow
@@ -14,8 +14,8 @@ When activated, execute this workflow to start working on the next Linear issue:
 The issue ID is determined in priority order:
 
 1. **Explicit argument**: If user provides an issue ID, use that issue.
-   - `/next-issue BT-42` → issue BT-42
-   - `/next-issue 42` → issue BT-42 (BT- prefix added automatically)
+   - `/pick-issue BT-42` → issue BT-42
+   - `/pick-issue 42` → issue BT-42 (BT- prefix added automatically)
 
 2. **Worktree name**: If in a git worktree with a name matching `BT-{number}`, use that issue:
    ```bash
@@ -125,17 +125,17 @@ After completing implementation:
 gh pr list --head $(git branch --show-current) --json number,state --jq '.[0]'
 ```
 
-If a PR exists and has unresolved review comments, automatically chain to `pr-resolve` skill:
+If a PR exists and has unresolved review comments, automatically chain to `resolve-pr` skill:
 - Inform the user that PR review comments need to be addressed
-- Activate the `pr-resolve` skill without waiting for user confirmation
+- Activate the `resolve-pr` skill without waiting for user confirmation
 
 If no PR exists or PR has no review comments, proceed to step 15.
 
 ### 15. Automatic Code Review
 
-After implementation is complete (no existing PR or no review comments), **automatically chain to the `code-review` skill** without waiting for user confirmation:
+After implementation is complete (no existing PR or no review comments), **automatically chain to the `review-code` skill** without waiting for user confirmation:
 - Inform the user: "Implementation complete. Running code review..."
-- Activate the `code-review` skill
+- Activate the `review-code` skill
 
 ### 16. Automatic Done (if code review passes)
 

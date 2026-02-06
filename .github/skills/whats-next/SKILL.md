@@ -60,7 +60,7 @@ When activated, execute this workflow to recommend the next issue to work on:
    - Why it's recommended (cycle, related to recent work, unblocks others, etc.)
    - Any caveats (e.g., "large scope, consider breaking down")
 
-8. **Optional: Start work**: Ask the user if they want to start on the top recommended issue (which would run the `/next-issue` workflow for that specific issue).
+8. **Optional: Start work**: Ask the user if they want to start on the top recommended issue (which would run the `/pick-issue` workflow for that specific issue).
 
 ## Scoring Logic
 

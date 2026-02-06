@@ -1428,12 +1428,12 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| `next-issue` | `/next-issue` | Pick up the next Linear issue from backlog |
+| `pick-issue` | `/pick-issue` | Pick up the next Linear issue from backlog |
 | `done` | `/done` | Complete work, commit, push, and create PR |
 | `whats-next` | `/whats-next` | Get recommendations for what to work on next |
-| `pr-resolve` | `/pr-resolve` | Systematically address PR review comments |
-| `merge-resolve` | `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
-| `code-review` | `/code-review` | Review current branch changes vs main |
+| `resolve-pr` | `/resolve-pr` | Systematically address PR review comments |
+| `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
+| `review-code` | `/review-code` | Review current branch changes vs main |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
 | `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
 | `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |

@@ -9,7 +9,7 @@ When activated, execute this workflow to complete work and push:
 
 ## Steps
 
-1. **Determine Issue ID**: Use the same resolution logic as `next-issue` step 1:
+1. **Determine Issue ID**: Use the same resolution logic as `pick-issue` step 1:
    - Extract from branch name (e.g., `BT-10` from `BT-10-implement-erlang-codegen`)
    - Fall back to worktree name (e.g., `/workspaces/BT-34` → `BT-34`)
    - If neither works, ask the user

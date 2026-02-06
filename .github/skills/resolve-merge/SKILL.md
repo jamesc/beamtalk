@@ -1,6 +1,6 @@
 ---
-name: merge-resolve
-description: Update main branch, merge into current branch, and resolve conflicts. Use when user types /merge-resolve or asks to merge main/resolve conflicts.
+name: resolve-merge
+description: Update main branch, merge into current branch, and resolve conflicts. Use when user types /resolve-merge or asks to merge main/resolve conflicts.
 ---
 
 # Merge Resolve Workflow

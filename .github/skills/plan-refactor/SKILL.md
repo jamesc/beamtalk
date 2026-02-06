@@ -7,7 +7,7 @@ description: Analyze the codebase and plan refactoring for code quality and main
 
 Perform a **whole-repo analysis** to identify refactoring opportunities that improve code quality, maintainability, and alignment with architectural principles. Produce **actionable Linear issues** ranked by impact.
 
-**Key Philosophy:** This is analysis and planning, not implementation. The output is a prioritized set of well-specified issues that agents can pick up via `/next-issue`. Focus on high-impact structural improvements, not cosmetic changes.
+**Key Philosophy:** This is analysis and planning, not implementation. The output is a prioritized set of well-specified issues that agents can pick up via `/pick-issue`. Focus on high-impact structural improvements, not cosmetic changes.
 
 ## Steps
 
