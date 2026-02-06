@@ -95,7 +95,7 @@ dispatch('instVarAt:', [FieldName], _Self, State) ->
         false ->
             Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, 'Object')),
             Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:'),
-            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName);
+            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
                           true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
                        end,
             Error2 = beamtalk_error:with_hint(Error1, <<"Field not found: ", FieldBin/binary>>),
@@ -110,7 +110,7 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
         false ->
             Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, 'Object')),
             Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName);
+            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
                           true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
                        end,
             Error2 = beamtalk_error:with_hint(Error1, <<"Field not found: ", FieldBin/binary>>),
@@ -121,7 +121,7 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
 
 dispatch('printString', [], _Self, State) ->
     ClassName = maps:get('__class__', State, 'Object'),
-    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName)]),
+    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
 
 dispatch(inspect, [], _Self, State) ->
@@ -134,12 +134,12 @@ dispatch(inspect, [], _Self, State) ->
         [] -> <<"">>;
         _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
     end,
-    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName), FieldsPart]),
+    Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]),
     {reply, Str, State};
 
 dispatch(describe, [], _Self, State) ->
     ClassName = maps:get('__class__', State, 'Object'),
-    Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName)]),
+    Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
 
 %% --- Utility methods ---
