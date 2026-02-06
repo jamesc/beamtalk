@@ -1527,76 +1527,44 @@ chained_binary_operators_test() ->
 %%% Re-enable when BT-211 is fixed.
 
 %% Setup helper for super tests
+%% Both counter and logging_counter have register_class/0 from class syntax.
+%% We call register_class() directly (not via on_load) because on_load uses
+%% start_link which links to the module loader — the process dies when
+%% on_load returns. Direct calls keep processes alive in the test process.
 setup_super_test_classes() ->
     %% Ensure test fixtures directory is in code path
-    %% (counter.beam and logging_counter.beam are compiled there by compile.sh)
     code:add_path("_build/test/lib/beamtalk_runtime/test"),
     
-    %% Ensure pg is started
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
+    %% Ensure application is started (bootstrap classes, pg, etc.)
+    application:ensure_all_started(beamtalk_runtime),
+    
+    %% Load modules and register classes explicitly
+    {module, counter} = code:ensure_loaded(counter),
+    case beamtalk_object_class:whereis_class('Counter') of
+        undefined -> counter:register_class();
         _ -> ok
     end,
     
-    %% Start Counter class process if not already running
-    case beamtalk_object_class:whereis_class('Counter') of
-        undefined ->
-            {ok, _CounterPid} = beamtalk_object_class:start_link('Counter', #{
-                name => 'Counter',
-                module => counter,
-                superclass => 'Actor',
-                instance_methods => #{
-                    increment => #{arity => 0},
-                    getValue => #{arity => 0},
-                    decrement => #{arity => 0}
-                },
-                instance_variables => [value],
-                class_variables => #{},
-                method_source => #{},
-                source_file => "tests/fixtures/counter.bt"
-            }),
-            ok;
-        _ExistingPid1 ->
-            ok
-    end,
-    
-    %% Start LoggingCounter class process if not already running
+    {module, logging_counter} = code:ensure_loaded(logging_counter),
     case beamtalk_object_class:whereis_class('LoggingCounter') of
-        undefined ->
-            {ok, _LoggingPid} = beamtalk_object_class:start_link('LoggingCounter', #{
-                name => 'LoggingCounter',
-                module => logging_counter,
-                superclass => 'Counter',
-                instance_methods => #{
-                    increment => #{arity => 0},
-                    getValue => #{arity => 0},
-                    getLogCount => #{arity => 0}
-                },
-                instance_variables => [value, logCount],
-                class_variables => #{},
-                method_source => #{},
-                source_file => "tests/fixtures/logging_counter.bt"
-            }),
-            ok;
-        _ExistingPid2 ->
-            ok
+        undefined -> logging_counter:register_class();
+        _ -> ok
     end,
     ok.
 
 %% ==========================================================================
-%% DISABLED TESTS (BT-211)
-%% 
-%% The following super_* tests are disabled because BT-211 (subclass init
-%% doesn't include inherited state fields) causes them to fail. The compiled
-%% logging_counter module lacks the 'value' field inherited from Counter.
+%% Super Keyword Tests (BT-108, BT-211)
 %%
-%% Re-enable these tests when BT-211 is fixed.
+%% These tests use the compiled logging_counter module and verify super
+%% dispatch in an inheritance hierarchy: Actor -> Counter -> LoggingCounter
+%%
+%% Previously disabled due to BT-211 (subclass init didn't merge InitArgs).
+%% Fixed: codegen now does parent defaults → child defaults → user InitArgs.
 %% ==========================================================================
 
 %% Test: Super dispatch calls parent method
 %% LoggingCounter increment calls Counter increment via super
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_calls_parent_method() ->
+super_calls_parent_method_test() ->
     setup_super_test_classes(),
     
     %% Create logging counter with initial state
@@ -1619,8 +1587,7 @@ disabled_bt211_super_calls_parent_method() ->
     gen_server:stop(Pid).
 
 %% Test: Multiple super calls accumulate properly
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_multiple_calls() ->
+super_multiple_calls_test() ->
     setup_super_test_classes(),
     
     Object = logging_counter:spawn(),
@@ -1641,8 +1608,7 @@ disabled_bt211_super_multiple_calls() ->
     gen_server:stop(Pid).
 
 %% Test: Super with getValue - different method
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_with_different_method() ->
+super_with_different_method_test() ->
     setup_super_test_classes(),
     
     InitArgs = #{value => 42},
@@ -1656,8 +1622,7 @@ disabled_bt211_super_with_different_method() ->
     gen_server:stop(Pid).
 
 %% Test: Child adds new methods alongside super
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_with_new_methods() ->
+super_with_new_methods_test() ->
     setup_super_test_classes(),
     
     Object = logging_counter:spawn(),
@@ -1679,8 +1644,7 @@ disabled_bt211_super_with_new_methods() ->
     gen_server:stop(Pid).
 
 %% Test: Super maintains state consistency
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_maintains_state() ->
+super_maintains_state_test() ->
     setup_super_test_classes(),
     
     Object = logging_counter:spawn(),
@@ -1699,8 +1663,7 @@ disabled_bt211_super_maintains_state() ->
     gen_server:stop(Pid).
 
 %% Test: Super with initial state override
-%% DISABLED: BT-211 - subclass init missing inherited fields
-disabled_bt211_super_with_init_args() ->
+super_with_init_args_test() ->
     setup_super_test_classes(),
     
     InitArgs = #{value => 100, logCount => 5},

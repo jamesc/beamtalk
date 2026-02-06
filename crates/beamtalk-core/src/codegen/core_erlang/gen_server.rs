@@ -244,7 +244,7 @@ impl CoreErlangGenerator {
     /// For classes with non-Actor superclasses, the init function:
     /// 1. Calls parent's `init(InitArgs)` to get inherited state
     /// 2. Creates a map with this class's metadata and fields
-    /// 3. Merges parent state with child fields (`ChildFields` override parent defaults)
+    /// 3. Merges: parent defaults → child defaults → user `InitArgs` (user wins)
     /// 4. Returns `{ok, FinalState}` or propagates parent init errors
     ///
     /// For base classes (extending Actor), it generates a simple init:
@@ -263,7 +263,8 @@ impl CoreErlangGenerator {
     ///                 '__methods__' => call 'logging_counter':'method_table'(),
     ///                 'logCount' => 0
     ///             }~
-    ///             in let FinalState = call 'maps':'merge'(ParentState, ChildFields)
+    ///             in let MergedState = call 'maps':'merge'(ParentState, ChildFields)
+    ///             in let FinalState = call 'maps':'merge'(MergedState, InitArgs)
     ///             in {'ok', FinalState}
     ///         <{'error', Reason}> when 'true' ->
     ///             {'error', Reason}
@@ -358,7 +359,14 @@ impl CoreErlangGenerator {
             self.write_indent()?;
             writeln!(
                 self.output,
-                "in let FinalState = call 'maps':'merge'(ParentState, ChildFields)"
+                "in let MergedState = call 'maps':'merge'(ParentState, ChildFields)"
+            )?;
+            self.write_indent()?;
+            // Merge InitArgs last so user-provided values override defaults
+            // Order: parent defaults → child defaults → user overrides
+            writeln!(
+                self.output,
+                "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)"
             )?;
             self.write_indent()?;
             writeln!(self.output, "in {{'ok', FinalState}}")?;
