@@ -36,6 +36,12 @@ Perform a **whole-repo analysis** to identify refactoring opportunities that imp
    
    # TODO/FIXME/HACK markers
    grep -rn 'TODO\|FIXME\|HACK\|XXX' crates/ runtime/apps/ --include='*.rs' --include='*.erl' | head -30
+   
+   # Churn hotspots (files that change most often — poorly factored or central)
+   git log --since="3 months ago" --format=format: --name-only | sort | uniq -c | sort -rn | head -20
+   
+   # Merge conflict magnets (large files with high churn)
+   # Cross-reference churn hotspots with file sizes above
    ```
 
 3. **Analyze architecture against principles**: Check each concern area:
@@ -80,6 +86,25 @@ Perform a **whole-repo analysis** to identify refactoring opportunities that imp
    - Unused dependencies in Cargo.toml
    - Outdated dependencies with known issues
    - Missing `# why:` comments for non-obvious dependencies
+
+   **h. Coupling & Cohesion**
+   - Shotgun surgery: one logical change requires touching many unrelated files
+   - Feature envy: functions that use another module's data more than their own
+   - Internal details leaking across module boundaries (public API too wide)
+   - Low cohesion: module has unrelated responsibilities that should be split
+   - High churn files: if a file changes in every PR, it may be a coupling bottleneck
+
+   **i. Change Velocity & Developer Friction**
+   - Churn hotspots (files modified in most PRs) — central or poorly factored?
+   - Merge conflict magnets (large files touched by multiple features simultaneously)
+   - Onboarding friction: code that requires AGENTS.md to explain should be clearer
+   - Boilerplate that could be reduced with macros, traits, or code generation
+
+   **j. Compilation Pipeline Contracts** (Beamtalk-specific)
+   - Pipeline stage boundaries (lexer → parser → semantic → codegen → runtime) — are they independently testable with clear interfaces?
+   - Runtime/codegen contract: do they agree on calling conventions, state shape, error format? Drift here causes subtle bugs.
+   - Generated Core Erlang patterns: are they consistent across similar AST nodes? Inconsistency means runtime bugs.
+   - BEAM interop surface: are Erlang module/function names predictable and documented?
 
 4. **Cross-reference with existing issues**: Check Linear for already-planned refactoring:
    ```
@@ -164,6 +189,9 @@ Perform a **whole-repo analysis** to identify refactoring opportunities that imp
 - Missing error handling that causes confusing failures
 - Test gaps in critical paths
 - DDD violations that cause naming confusion
+- High-churn files that cause merge conflicts across features
+- Tight coupling that forces shotgun surgery on every change
+- Leaky abstractions where internals bleed across module boundaries
 
 ❌ **Skip these:**
 - Renaming for personal preference (unless DDD requires it)
@@ -171,6 +199,15 @@ Perform a **whole-repo analysis** to identify refactoring opportunities that imp
 - Premature optimization without evidence of bottleneck
 - Splitting small files that are already cohesive
 - Adding abstractions that only have one implementation
+
+### Safety Principles
+
+Every refactoring issue MUST include these constraints:
+
+1. **Refactor under test** — Never refactor code that isn't tested. If tests are missing, the issue should add them first (or depend on a test issue).
+2. **Incremental delivery** — Each refactoring PR must leave the code working. No "big bang" rewrites. If a refactoring is too large for one PR, split into sequential issues.
+3. **Behavioral preservation** — Refactoring changes structure, not behavior. If behavior changes, that's a feature or bugfix — create a separate issue. Acceptance criteria should include "all existing tests pass without modification" (unless tests were testing implementation details).
+4. **Prove the problem** — Include evidence in the issue: churn count, file size, coupling example, or concrete developer friction. "This feels messy" is not enough.
 
 ### Size Estimation
 
