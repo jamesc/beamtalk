@@ -96,23 +96,7 @@ pub fn validate_primitives(module: &Module, options: &CompilerOptions) -> Vec<Di
 
 /// Determines if the current module is part of the standard library.
 fn is_stdlib_module(options: &CompilerOptions) -> bool {
-    // Priority 1: Explicit --stdlib-mode flag
-    if options.stdlib_mode {
-        return true;
-    }
-
-    // Priority 2: Source path heuristic (lib/ prefix or /lib/ component)
-    if let Some(ref path) = options.source_path {
-        if path.starts_with("lib/")
-            || path.starts_with("lib\\")
-            || path.contains("/lib/")
-            || path.contains("\\lib\\")
-        {
-            return true;
-        }
-    }
-
-    false
+    options.stdlib_mode
 }
 
 /// Recursively validates an expression for primitive usage.
@@ -265,34 +249,6 @@ mod tests {
         assert!(
             diags.is_empty(),
             "Expected no diagnostics in stdlib mode, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn primitive_in_stdlib_path_no_error() {
-        let module = parse_module("@primitive '+'");
-        let options = CompilerOptions {
-            source_path: Some("lib/Integer.bt".to_string()),
-            ..Default::default()
-        };
-        let diags = validate_primitives(&module, &options);
-        assert!(
-            diags.is_empty(),
-            "Expected no diagnostics for lib/ path, got: {diags:?}"
-        );
-    }
-
-    #[test]
-    fn primitive_in_absolute_stdlib_path_no_error() {
-        let module = parse_module("@primitive '+'");
-        let options = CompilerOptions {
-            source_path: Some("/workspaces/project/lib/Integer.bt".to_string()),
-            ..Default::default()
-        };
-        let diags = validate_primitives(&module, &options);
-        assert!(
-            diags.is_empty(),
-            "Expected no diagnostics for absolute lib/ path, got: {diags:?}"
         );
     }
 

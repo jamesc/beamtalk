@@ -119,7 +119,6 @@ fn main() -> Result<()> {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
                 allow_primitives,
-                source_path: None, // Set per-file in compile_file
             };
             commands::build::build(&path, &options)
         }

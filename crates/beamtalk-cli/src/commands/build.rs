@@ -144,12 +144,9 @@ fn compile_file(
     let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     // Run @primitive validation (ADR 0007)
-    let mut file_options = options.clone();
-    file_options.source_path = Some(path.to_string());
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module,
-            &file_options,
+            &module, options,
         );
     diagnostics.extend(primitive_diags);
 

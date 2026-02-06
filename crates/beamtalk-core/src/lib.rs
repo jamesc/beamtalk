@@ -48,8 +48,4 @@ pub struct CompilerOptions {
     /// When true, allows `@primitive` pragmas in non-stdlib code.
     /// Emits a warning instead of an error.
     pub allow_primitives: bool,
-
-    /// Source path for stdlib detection heuristic.
-    /// If set and starts with `lib/`, the module is treated as stdlib.
-    pub source_path: Option<String>,
 }
