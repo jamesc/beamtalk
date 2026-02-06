@@ -364,8 +364,9 @@ pub(super) struct CoreErlangGenerator {
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
     /// BT-295: Primitive binding table from compiled stdlib (ADR 0007 Phase 3).
-    /// Used by `dispatch_codegen` to look up pragma-driven dispatch before
-    /// falling back to hardcoded tables.
+    /// Currently used by `generate_primitive()` for method body compilation.
+    /// Call-site dispatch is disabled pending static type information (PR #260).
+    #[allow(dead_code)] // Kept for future call-site dispatch with static types
     primitive_bindings: PrimitiveBindingTable,
     /// BT-295: Name of the class currently being compiled (if any).
     /// Used by `Expression::Primitive` to determine the runtime dispatch module.

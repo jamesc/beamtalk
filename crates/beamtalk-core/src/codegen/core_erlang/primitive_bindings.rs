@@ -158,7 +158,7 @@ impl PrimitiveBindingTable {
 
     /// Returns the runtime module name for a class's selector-based primitives.
     ///
-    /// Convention: class name → snake_case with `beamtalk_` prefix.
+    /// Convention: class name → `snake_case` with `beamtalk_` prefix.
     /// Handles special cases where multiple classes share a runtime module
     /// (e.g., `True`/`False` → `beamtalk_boolean`).
     #[must_use]
