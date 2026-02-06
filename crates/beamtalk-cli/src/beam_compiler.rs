@@ -410,6 +410,40 @@ pub fn write_core_erlang(
     Ok(())
 }
 
+/// Writes Core Erlang code with primitive bindings.
+///
+/// BT-295 / ADR 0007 Phase 3: Same as [`write_core_erlang`] but accepts
+/// a binding table for pragma-driven dispatch.
+///
+/// # Errors
+///
+/// Returns an error if the module name is invalid, code generation fails,
+/// or the output file cannot be written.
+pub fn write_core_erlang_with_bindings(
+    module: &beamtalk_core::ast::Module,
+    module_name: &str,
+    output_path: &Utf8Path,
+    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+) -> Result<()> {
+    if !is_valid_module_name(module_name) {
+        miette::bail!(
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            module_name
+        );
+    }
+
+    let core_erlang =
+        beamtalk_core::erlang::generate_with_bindings(module, module_name, bindings.clone())
+            .into_diagnostic()
+            .wrap_err("Failed to generate Core Erlang")?;
+
+    std::fs::write(output_path, core_erlang)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
+
+    Ok(())
+}
+
 /// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).
 ///
 /// This is the single compilation domain service used by all CLI commands
@@ -482,6 +516,75 @@ pub fn compile_source(
 
     // Generate Core Erlang
     write_core_erlang(&module, module_name, core_output)
+        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
+
+    debug!("Generated Core Erlang: {}", core_output);
+    Ok(())
+}
+
+/// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
+///
+/// BT-295 / ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
+/// [`PrimitiveBindingTable`] for pragma-driven dispatch.
+///
+/// # Errors
+///
+/// Returns an error if reading, parsing, or code generation fails,
+/// or if any diagnostic has error severity.
+#[instrument(skip_all, fields(path = %source_path, module = module_name))]
+pub fn compile_source_with_bindings(
+    source_path: &Utf8Path,
+    module_name: &str,
+    core_output: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+) -> Result<()> {
+    use crate::diagnostic::CompileDiagnostic;
+
+    debug!("Compiling module '{}' with bindings", module_name);
+
+    // Read source file
+    let source = std::fs::read_to_string(source_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read file '{source_path}'"))?;
+
+    // Lex and parse
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // Run @primitive validation (ADR 0007)
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, options,
+        );
+    diagnostics.extend(primitive_diags);
+
+    // Check for errors
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+
+    if !diagnostics.is_empty() {
+        debug!(
+            diagnostic_count = diagnostics.len(),
+            "Found diagnostics during compilation"
+        );
+        for diagnostic in &diagnostics {
+            let compile_diag =
+                CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
+            eprintln!("{:?}", miette::Report::new(compile_diag));
+        }
+    }
+
+    if has_errors {
+        error!("Compilation failed for '{}'", source_path);
+        miette::bail!("Failed to compile '{source_path}'");
+    }
+
+    debug!("Parsed successfully: {}", source_path);
+
+    // Generate Core Erlang with bindings
+    write_core_erlang_with_bindings(&module, module_name, core_output, bindings)
         .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
     debug!("Generated Core Erlang: {}", core_output);

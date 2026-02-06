@@ -196,6 +196,14 @@ impl CoreErlangGenerator {
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
+        // BT-295 / ADR 0007 Phase 3: Pragma-driven dispatch lookup.
+        // Consult the primitive binding table before falling back to generic runtime dispatch.
+        // This handles selector-based primitives (e.g., Integer>>asFloat) that aren't
+        // covered by the hardcoded builtin handlers above.
+        if let Some(()) = self.try_generate_pragma_dispatch(receiver, selector, arguments)? {
+            return Ok(());
+        }
+
         // BT-223: Runtime dispatch - check if receiver is actor or primitive
         //
         // For actors (beamtalk_object records): Use async dispatch with futures
@@ -296,6 +304,68 @@ impl CoreErlangGenerator {
         write!(self.output, "]) end")?;
 
         Ok(())
+    }
+
+    /// BT-295 / ADR 0007 Phase 3: Try pragma-driven dispatch for a message send.
+    ///
+    /// Looks up the selector in all known stdlib classes from the binding table.
+    /// If found as a selector-based primitive, generates a runtime dispatch call
+    /// that checks the receiver type at runtime and routes accordingly.
+    ///
+    /// Returns `Ok(Some(()))` if code was generated, `Ok(None)` if no binding found.
+    fn try_generate_pragma_dispatch(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        use super::primitive_bindings::PrimitiveBinding;
+
+        if self.primitive_bindings.is_empty() {
+            return Ok(None);
+        }
+
+        let selector_atom = selector.to_erlang_atom();
+
+        // Search all classes in the binding table for this selector.
+        // Since we don't have static type information, we look for ANY class
+        // that has a selector-based primitive for this selector name.
+        // The generated code uses the runtime dispatch module which handles
+        // type checking internally.
+        let binding = self.primitive_bindings.find_selector(&selector_atom);
+        let Some((class_name, binding)) = binding else {
+            return Ok(None);
+        };
+
+        match binding {
+            PrimitiveBinding::SelectorBased { selector: prim_sel } => {
+                let runtime_module =
+                    super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
+                        &class_name,
+                    );
+                // Generate: call 'beamtalk_X':'dispatch'('selector', [Args], Receiver)
+                write!(
+                    self.output,
+                    "call '{runtime_module}':'dispatch'('{prim_sel}', ["
+                )?;
+                for (i, arg) in arguments.iter().enumerate() {
+                    if i > 0 {
+                        write!(self.output, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+                write!(self.output, "], ")?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ")")?;
+                Ok(Some(()))
+            }
+            PrimitiveBinding::StructuralIntrinsic { .. } => {
+                // Structural intrinsics are handled by the hardcoded dispatch chain above.
+                // If we reach here, the hardcoded handler didn't match, so fall through
+                // to generic runtime dispatch.
+                Ok(None)
+            }
+        }
     }
 
     /// Checks if an expression is a field assignment (`self.field := value`).

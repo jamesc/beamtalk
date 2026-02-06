@@ -37,6 +37,8 @@ impl CoreErlangGenerator {
 
         // Push a new scope for this method's parameter bindings
         self.push_scope();
+        // BT-295: Clear method params (will be populated below if present)
+        self.current_method_params.clear();
 
         let selector_name = method.selector.name();
         self.write_indent()?;
@@ -53,12 +55,15 @@ impl CoreErlangGenerator {
 
             self.write_indent()?;
             write!(self.output, "<[")?;
+            // BT-295: Track method params for @primitive codegen
+            self.current_method_params.clear();
             for (i, param) in method.parameters.iter().enumerate() {
                 if i > 0 {
                     write!(self.output, ", ")?;
                 }
                 let var_name = self.fresh_var(&param.name);
                 write!(self.output, "{var_name}")?;
+                self.current_method_params.push(var_name);
             }
             write!(self.output, "]> when 'true' ->")?;
             writeln!(self.output)?;

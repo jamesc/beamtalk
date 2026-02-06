@@ -32,6 +32,11 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
+        // BT-295: Set current class name for @primitive codegen
+        if let Some(class) = module.classes.first() {
+            self.current_class_name = Some(class.name.name.to_string());
+        }
+
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
 

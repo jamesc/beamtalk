@@ -11,7 +11,7 @@
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
-use crate::beam_compiler::{BeamCompiler, compile_source};
+use crate::beam_compiler::{BeamCompiler, compile_source_with_bindings};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
@@ -82,13 +82,24 @@ pub fn build_stdlib() -> Result<()> {
         allow_primitives: false,
     };
 
+    // BT-295 / ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.
+    // This is used during compilation so that @primitive expressions in method bodies
+    // can reference the runtime dispatch modules.
+    info!("Building primitive binding table from stdlib sources");
+    let bindings =
+        beamtalk_core::erlang::primitive_bindings::load_from_directory(lib_dir.as_std_path());
+    info!(
+        binding_count = bindings.len(),
+        "Loaded primitive bindings from stdlib"
+    );
+
     // Compile each .bt file to .core (files are independent, no ordering required)
     let mut core_files = Vec::new();
     for source_file in &to_compile {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
 
-        compile_stdlib_file(source_file, &module_name, &core_file, &options)?;
+        compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
         core_files.push(core_file);
     }
 
@@ -202,9 +213,10 @@ fn compile_stdlib_file(
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
+    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
 ) -> Result<()> {
     println!("  Compiling {path}...");
-    compile_source(path, module_name, core_file, options)
+    compile_source_with_bindings(path, module_name, core_file, options, bindings)
 }
 
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
