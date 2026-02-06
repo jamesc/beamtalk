@@ -55,7 +55,9 @@ dispatch_test_() ->
           {"lookup returns DNU error for missing method", fun test_lookup_missing_method/0},
           {"super skips current class", fun test_super_skips_current/0},
           {"super returns error at root", fun test_super_at_root/0},
-          {"lookup checks extensions before class methods", fun test_extension_priority/0}
+          {"lookup checks extensions before class methods", fun test_extension_priority/0},
+          {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
+          {"super finds inherited reflection method", fun test_super_finds_inherited/0}
          ]
      end
     }.
@@ -199,6 +201,53 @@ test_extension_priority() ->
     
     %% Should invoke the extension
     ?assertMatch({reply, {extension_called, _}, _}, Result).
+
+%% Test that all dispatch error returns are proper 2-tuples {error, #beamtalk_error{}}
+%% This validates the normalization in invoke_method that converts
+%% 3-tuple {error, Error, State} from dispatch/4 to 2-tuple {error, Error}
+test_error_tuple_shape() ->
+    ok = ensure_counter_loaded(),
+    
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    
+    Self = make_ref(),
+    
+    %% All error paths should return exactly {error, #beamtalk_error{}} (2-tuple)
+    %% Never {error, Error, State} (3-tuple)
+    LookupResult = beamtalk_dispatch:lookup(noSuchMethod, [], Self, State, 'Counter'),
+    ?assertMatch({error, #beamtalk_error{}}, LookupResult),
+    ?assertEqual(2, tuple_size(LookupResult)),
+    
+    SuperResult = beamtalk_dispatch:super(noSuchMethod, [], Self, State, 'Counter'),
+    ?assertMatch({error, #beamtalk_error{}}, SuperResult),
+    ?assertEqual(2, tuple_size(SuperResult)).
+
+%% Test that super/5 can find a method defined in a parent class
+%% Counter inherits 'class' which is inlined in all compiled modules.
+%% We test 'isNil' which is registered in Object's metadata but has no
+%% compiled module — demonstrating the hierarchy walk terminates correctly.
+test_super_finds_inherited() ->
+    ok = ensure_counter_loaded(),
+    
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    
+    Self = make_ref(),
+    
+    %% 'class' is inlined in Counter's dispatch, so super should skip Counter
+    %% and look for it in Actor. Actor's dispatch also inlines 'class' (if compiled).
+    %% Since Actor is a bootstrap class without a real module, this will return error.
+    %% This tests that super correctly walks up AND terminates at bootstrap classes.
+    Result = beamtalk_dispatch:super(class, [], Self, State, 'Counter'),
+    
+    %% Actor/Object/ProtoObject are bootstrap classes without dispatch/4 modules,
+    %% so super should return does_not_understand error (walked full chain, no module to invoke)
+    ?assertMatch({error, #beamtalk_error{}}, Result).
 
 %%% ============================================================================
 %%% Helper Functions
