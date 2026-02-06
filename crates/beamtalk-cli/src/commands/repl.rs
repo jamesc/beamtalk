@@ -600,9 +600,12 @@ pub fn run(
     let (beam_guard_opt, is_new_workspace) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        (Some(BeamChildGuard {
-            child: start_beam_node(port, node_name.as_ref())?,
-        }), true)
+        (
+            Some(BeamChildGuard {
+                child: start_beam_node(port, node_name.as_ref())?,
+            }),
+            true,
+        )
     } else {
         // Workspace mode: start or connect to detached node
         let current_dir = std::env::current_dir().into_diagnostic()?;
@@ -635,7 +638,7 @@ pub fn run(
         if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
             println!("  Project:   {}", metadata.project_path.display());
         }
-        
+
         println!();
 
         (None, is_new) // No guard needed - node is detached
@@ -645,7 +648,7 @@ pub fn run(
     let mut client = connect_with_retries(port)?;
 
     println!("Connected to REPL backend on port {port}.");
-    
+
     // If reconnecting to existing workspace, show available actors
     if beam_guard_opt.is_none() && !is_new_workspace {
         match client.list_actors() {
@@ -665,7 +668,7 @@ pub fn run(
             }
         }
     }
-    
+
     println!();
 
     // Set up rustyline editor
