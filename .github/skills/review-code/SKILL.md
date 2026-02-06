@@ -24,6 +24,31 @@ A **three-pass code review** that progressively deepens analysis. Each pass uses
 
 ---
 
+## Review Depth
+
+Not every PR needs 3 passes. Auto-scale based on change size and type:
+
+```bash
+# Count changed lines (additions + deletions)
+git --no-pager diff --shortstat $(git merge-base HEAD origin/main)..HEAD
+```
+
+| Change Size | Criteria | Passes | Rationale |
+|-------------|----------|--------|-----------|
+| **Small** | <50 lines changed, or docs/skills/config only | Pass 1 only | Surface review is sufficient |
+| **Medium** | 50-300 lines, touches 1-2 components | Pass 1 + Pass 2 | Cross-component checks needed |
+| **Large** | >300 lines, touches 3+ components, or new features | All 3 passes | Full review with adversarial |
+
+**Always run all 3 passes for:**
+- Changes touching codegen AND runtime (contract risk)
+- New language features (parser + codegen + runtime)
+- Security-sensitive changes (auth, input validation, error handling)
+- Changes the user explicitly asks for deep review on
+
+**The user can override:** `/review-code --deep` forces all 3 passes regardless of size.
+
+---
+
 ## Pass 1: Diff Review (correctness, style, DDD)
 
 The fast pass — read the diff line by line, catch surface issues.
