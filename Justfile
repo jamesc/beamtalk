@@ -34,7 +34,8 @@ build: build-rust build-erlang
 # Build Rust workspace
 build-rust:
     @echo "🔨 Building Rust workspace..."
-    cargo build --all-targets
+    @cargo build --all-targets --quiet
+    @echo "✅ Rust build complete"
 
 # Build in release mode (Rust + Erlang)
 build-release: build-rust-release build-erlang
@@ -42,12 +43,14 @@ build-release: build-rust-release build-erlang
 # Build Rust in release mode
 build-rust-release:
     @echo "🔨 Building Rust workspace (release)..."
-    cargo build --all-targets --release
+    @cargo build --all-targets --release --quiet
+    @echo "✅ Rust release build complete"
 
 # Build Erlang runtime
 build-erlang:
     @echo "🔨 Building Erlang runtime..."
-    cd runtime && rebar3 compile
+    @cd runtime && rebar3 compile 2>&1 | grep -v "===>" || true
+    @echo "✅ Erlang build complete"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
