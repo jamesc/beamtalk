@@ -1,0 +1,8 @@
+{application, beamtalk_stdlib, [
+    {description, "Beamtalk Standard Library - compiled from lib/*.bt"},
+    {vsn, "0.1.0"},
+    {modules, []},
+    {registered, []},
+    {applications, [kernel, stdlib, beamtalk_runtime]},
+    {env, []}
+]}.
