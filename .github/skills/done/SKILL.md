@@ -23,7 +23,21 @@ When activated, execute this workflow to complete work and push:
 
 2. **Check branch**: Verify we're NOT on `main` branch. If on main, stop and tell the user to create a feature branch first.
 
-3. **Run static checks**:
+3. **Run static checks** (skip for doc-only changes):
+   First, check if the changeset is documentation-only:
+   ```bash
+   # Check if all changed files are docs/config only (no code changes)
+   CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null || git diff main --name-only)
+   DOC_ONLY=true
+   for f in $CHANGED_FILES; do
+     case "$f" in
+       *.md|*.txt|AGENTS.md|docs/*|LICENSE|*.json) ;;  # doc/config files
+       *) DOC_ONLY=false; break ;;
+     esac
+   done
+   ```
+   - If `DOC_ONLY=true`: Skip CI checks entirely (no build/test needed)
+   - If `DOC_ONLY=false`: Run full CI checks:
    ```bash
    just ci
    ```
