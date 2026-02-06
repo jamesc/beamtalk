@@ -52,7 +52,7 @@ use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::commands::workspace;
 use crate::paths::{beamtalk_dir, is_daemon_running};
@@ -382,6 +382,7 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     let build_lib_dir = runtime_dir.join("_build/default/lib");
     let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
     let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
+    let stdlib_beam_dir = build_lib_dir.join("beamtalk_stdlib/ebin");
 
     // Check if runtime is built
     if !runtime_beam_dir.exists() {
@@ -398,6 +399,11 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     }
 
     info!("Starting BEAM node with REPL backend on port {port}...");
+
+    // Warn if stdlib is not compiled
+    if !stdlib_beam_dir.exists() {
+        warn!("Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL");
+    }
 
     // Build the eval command that configures the runtime via application:set_env
     // This allows runtime to read port from application environment
@@ -426,6 +432,8 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
         runtime_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
     ];
 
     // Add node name if specified (use -sname for short names without domain)
@@ -616,6 +624,14 @@ pub fn run(
         let build_lib_dir = runtime_dir.join("_build/default/lib");
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
+        let stdlib_beam_dir = build_lib_dir.join("beamtalk_stdlib/ebin");
+
+        // Warn if stdlib is not compiled
+        if !stdlib_beam_dir.exists() {
+            warn!(
+                "Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL"
+            );
+        }
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &project_root,
@@ -623,6 +639,7 @@ pub fn run(
             port,
             &runtime_beam_dir,
             &jsx_beam_dir,
+            &stdlib_beam_dir,
         )?;
 
         if is_new {

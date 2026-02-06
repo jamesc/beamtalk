@@ -281,6 +281,7 @@ impl DaemonManager {
         let runtime = runtime_dir();
         let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
         let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
+        let stdlib_dir = runtime.join("_build/default/lib/beamtalk_stdlib/ebin");
 
         // Build runtime if needed
         if !ebin_dir.exists() {
@@ -308,6 +309,8 @@ impl DaemonManager {
                 ebin_dir.to_str().unwrap_or(""),
                 "-pa",
                 jsx_dir.to_str().unwrap_or(""),
+                "-pa",
+                stdlib_dir.to_str().unwrap_or(""),
                 "-eval",
                 &format!(
                     "{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end."
