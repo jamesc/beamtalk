@@ -1428,19 +1428,24 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
+| **Coding Workflow** | | |
 | `pick-issue` | `/pick-issue` | Pick up the next Linear issue from backlog |
+| `review-code` | `/review-code` | Review current branch changes vs main |
 | `done` | `/done` | Complete work, commit, push, and create PR |
-| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
 | `resolve-pr` | `/resolve-pr` | Systematically address PR review comments |
 | `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
-| `review-code` | `/review-code` | Review current branch changes vs main |
+| **Issue Management** | | |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
+| `refresh-issue` | `/refresh-issue BT-XX` | Refresh a Linear issue to align with current code state |
+| `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
+| `whats-next` | `/whats-next` | Get recommendations for what to work on next |
+| **Architecture** | | |
 | `draft-adr` | `/draft-adr` | Research a problem and draft an Architecture Decision Record |
 | `plan-adr` | `/plan-adr` | Break an accepted ADR into implementation issues with an Epic |
-| `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
+| **Refactoring** | | |
 | `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
 | `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
-| `refresh-issue` | `/refresh-issue BT-XX` | Refresh a Linear issue to align with current code state |
+| **Review** | | |
 | `final-reviewer` | `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
 
 **Note:** `@final-reviewer` can accept a Linear issue ID or PR number:
