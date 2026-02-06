@@ -1,200 +1,58 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════
-
 // Collection - Abstract protocol for all collection types
 //
-// This is the base protocol that defines operations common to ALL collections.
-// Specific collection types provide additional operations:
-//
-// ## Collection Hierarchy
-//
-// ```
-// Collection (this file - abstract base)
-//   ├─ SequenceableCollection (ordered, indexed)
-//   │     ├─ Array (fixed-size Erlang tuple)
-//   │     └─ List (Erlang linked list)
-//   ├─ Set (unordered, unique elements)
-//   └─ Dictionary (key-value pairs)
-// ```
-//
-// ## Common Operations (this protocol)
-//
-// All collection types support:
-// - `size`, `isEmpty`, `isNotEmpty` - Size queries
-// - `includes:` - Membership test
-// - `add:`, `addAll:`, `remove:` - Modification (returns new collection)
-// - `each:`, `collect:`, `select:`, `reject:` - Iteration
-// - `detect:`, `detect:ifNone:` - Finding elements
-// - `inject:into:` - Reduction/folding
-// - `allSatisfy:`, `anySatisfy:`, `count:` - Predicate tests
-// - `asArray`, `asList`, `asSet` - Conversion
-//
-// ## Immutability
-//
-// All operations return NEW collections - they never mutate the receiver.
-// This matches BEAM's immutable data model and enables safe concurrency.
-//
-// ```beamtalk
-// original := {1, 2, 3}
-// modified := original add: 4     // => {1, 2, 3, 4}
-// // original is still {1, 2, 3}
-// ```
-//
-// ## BEAM Mapping
-//
-// Collections map to Erlang data structures:
-// - **Array**: Erlang tuple `{1, 2, 3}`
-// - **List**: Erlang list `[1, 2, 3]`
-// - **Set**: `ordsets` module `[1, 2, 3]` (sorted unique)
-// - **Dictionary**: Erlang map `#{key => value}`
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Iteration
-// numbers each: [:n | Transcript show: n]
-//
-// // Transformation (returns new collection)
-// doubled := numbers collect: [:n | n * 2]
-//
-// // Filtering
-// evens := numbers select: [:n | n isEven]
-//
-// // Reduction
-// sum := numbers inject: 0 into: [:acc :n | acc + n]
-//
-// // Membership
-// (numbers includes: 3) ifTrue: [Transcript show: 'Found']
-// ```
-//
-// ## See Also
-//
-// - `SequenceableCollection.bt` - Ordered/indexed collections
-// - `Array.bt` - Fixed-size tuple operations
-// - `List.bt` - Linked list operations
-// - `Set.bt` - Unique element collections
-// - `Dictionary.bt` - Key-value associations
+// Base protocol that defines operations common to ALL collections.
+// Concrete subtypes: Array, List, Set, Dictionary.
 
-Collection
-  // ═══════════════════════════════════════════════════════════════════
-  // Size Operations
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Number of elements in the collection
-  size => // implemented by compiler
-
-  // Test if collection has no elements
+Object subclass: Collection
+  // Size
+  size => @primitive 'size'
   isEmpty => self size = 0
-
-  // Test if collection has at least one element
   isNotEmpty => self size > 0
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Membership Testing
-  // ═══════════════════════════════════════════════════════════════════
+  // Membership
+  includes: element => @primitive 'includes:'
 
-  // Test if element is present in collection
-  // Returns: true or false
-  includes: element => // implemented by compiler
+  // Adding and removing
+  add: element => @primitive 'add:'
+  addAll: otherCollection => @primitive 'addAll:'
+  remove: element => @primitive 'remove:'
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Adding and Removing (returns new collection)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Add element, returns new collection
-  // For Set: element is added only if not already present
-  // For Dictionary: use at:put: instead
-  add: element => // implemented by compiler
-
-  // Add all elements from another collection
-  addAll: otherCollection => // implemented by compiler
-
-  // Remove element, returns new collection
-  // For Dictionary: removes key-value pair by key
-  remove: element => // implemented by compiler
-
-  // ═══════════════════════════════════════════════════════════════════
   // Iteration
-  // ═══════════════════════════════════════════════════════════════════
+  each: block => @primitive 'each:'
+  collect: block => @primitive 'collect:'
+  select: block => @primitive 'select:'
+  reject: block => @primitive 'reject:'
 
-  // Execute block for each element (side effects)
-  // For Dictionary: block receives key-value pairs
-  each: block => // implemented by compiler
-
-  // Transform each element, returns new collection
-  // For Dictionary: block receives value, returns transformed value
-  collect: block => // implemented by compiler
-
-  // Keep elements where block returns true
-  select: block => // implemented by compiler
-
-  // Remove elements where block returns true
-  reject: block => // implemented by compiler
-
-  // Find first element matching predicate
-  // Returns nil if none found
-  // Note: "first" is arbitrary for Set/Dictionary
-  detect: block => // implemented by compiler
-
-  // Find first element matching predicate, or evaluate default
+  detect: block => @primitive 'detect:'
   detect: block ifNone: defaultBlock =>
     result := self detect: block.
     result = nil ifTrue: [defaultBlock value] ifFalse: [result]
 
-  // ═══════════════════════════════════════════════════════════════════
   // Reduction
-  // ═══════════════════════════════════════════════════════════════════
+  inject: initial into: block => @primitive 'inject:into:'
 
-  // Fold over collection with accumulator
-  // block receives accumulator and element, returns new accumulator
-  inject: initial into: block => // implemented by compiler
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Predicate Tests
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Test if all elements satisfy predicate
+  // Predicate tests — pure Beamtalk
   allSatisfy: block =>
     self inject: true into: [:acc :elem |
       acc and: [block value: elem]
     ]
 
-  // Test if any element satisfies predicate
   anySatisfy: block =>
     self inject: false into: [:acc :elem |
       acc or: [block value: elem]
     ]
 
-  // Count elements matching predicate
   count: block =>
     self inject: 0 into: [:acc :elem |
       (block value: elem) ifTrue: [acc + 1] ifFalse: [acc]
     ]
 
-  // ═══════════════════════════════════════════════════════════════════
   // Conversion
-  // ═══════════════════════════════════════════════════════════════════
+  asArray => @primitive 'asArray'
+  asList => @primitive 'asList'
+  asSet => @primitive 'asSet'
 
-  // Convert to Array (Erlang tuple)
-  asArray => // implemented by compiler
-
-  // Convert to List (Erlang list)
-  asList => // implemented by compiler
-
-  // Convert to Set (unique elements)
-  asSet => // implemented by compiler
-
-  // ═══════════════════════════════════════════════════════════════════
-  // String Representation
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Return human-readable string description
-  describe => // implemented by compiler
+  describe => @primitive 'describe'

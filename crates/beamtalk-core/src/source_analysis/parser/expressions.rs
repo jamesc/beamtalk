@@ -264,6 +264,13 @@ impl Parser {
         while let TokenKind::BinarySelector(op) = self.current_kind() {
             let op = op.clone();
 
+            // BT-285: A binary selector on a new line that looks like a method definition
+            // (e.g., `- other =>`) should not be consumed as a binary operator.
+            // This mirrors the newline check in parse_unary_message.
+            if self.current_token().has_leading_newline() && self.is_at_method_definition() {
+                break;
+            }
+
             // Get binding power; unknown operators end the expression
             let Some(bp) = binary_binding_power(&op) else {
                 break;

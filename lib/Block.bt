@@ -1,114 +1,25 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════════
-
 // Block - Closures (anonymous functions)
 //
-// Blocks are first-class closures that capture their lexical environment.
-// They are the foundation of control flow and functional programming in
-// Beamtalk.
-//
-// ## Evaluation Messages
-//
-// - `value` - Evaluate block with no arguments
-// - `value: arg` - Evaluate block with one argument
-// - `value: arg1 value: arg2` - Evaluate block with two arguments
-// - `value: arg1 value: arg2 value: arg3` - Evaluate with three arguments
-//
-// ## Control Flow Messages
-//
-// - `whileTrue: bodyBlock` - Loop while this block evaluates to true
-// - `whileFalse: bodyBlock` - Loop while this block evaluates to false
-// - `repeat` - Loop forever (until return or error)
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Simple block
-// block := [Transcript show: 'Hello']
-// block value
-//
-// // Block with arguments
-// add := [:x :y | x + y]
-// result := add value: 3 value: 4  // => 7
-//
-// // Control flow
-// [counter < 10] whileTrue: [
-//   self process: counter
-//   counter := counter + 1
-// ]
-//
-// // Iteration
-// 5 timesRepeat: [Transcript show: 'X']
-// ```
-//
-// ## BEAM Mapping
-//
-// Blocks compile to Erlang funs:
-// ```erlang
-// fun() -> ... end          % no args
-// fun(X) -> ... end          % one arg
-// fun(X, Y) -> ... end       % two args
-// ```
-//
-// Closures capture variables from their lexical scope.
+// First-class closures that capture their lexical environment.
+// Foundation of control flow and functional programming in Beamtalk.
 
-Block
-  // Evaluate block with no arguments
-  value => // implemented by compiler
+Object subclass: Block
+  // Evaluation — structural intrinsics
+  value => @primitive blockValue
+  value: arg => @primitive blockValue1
+  value: arg1 value: arg2 => @primitive blockValue2
+  value: arg1 value: arg2 value: arg3 => @primitive blockValue3
 
-  // Evaluate block with one argument
-  value: arg => // implemented by compiler
+  // Control flow — structural intrinsics
+  whileTrue: bodyBlock => @primitive whileTrue
+  whileFalse: bodyBlock => @primitive whileFalse
+  repeat => @primitive repeat
 
-  // Evaluate block with two arguments
-  value: arg1 value: arg2 => // implemented by compiler
+  // Exception handling — selector-based
+  on: errorBlock => @primitive 'on:'
+  ensure: cleanupBlock => @primitive 'ensure:'
 
-  // Evaluate block with three arguments
-  value: arg1 value: arg2 value: arg3 => // implemented by compiler
-
-  // Loop while this block evaluates to true
-  // The implementation below is for documentation only. The compiler MUST
-  // implement this as a native loop construct to avoid stack overflow.
-  whileTrue: bodyBlock => // implemented by compiler
-    // Reference semantics:
-    // self value ifTrue: [
-    //   bodyBlock value.
-    //   self whileTrue: bodyBlock
-    // ]
-
-  // Loop while this block evaluates to false
-  // The implementation below is for documentation only. The compiler MUST
-  // implement this as a native loop construct to avoid stack overflow.
-  whileFalse: bodyBlock => // implemented by compiler
-    // Reference semantics:
-    // self value ifFalse: [
-    //   bodyBlock value.
-    //   self whileFalse: bodyBlock
-    // ]
-
-  // Loop forever (until return, break, or error)
-  // The compiler MUST implement this as a native loop construct.
-  repeat => // implemented by compiler
-    // Reference semantics:
-    // self value.
-    // self repeat
-
-  // On exception, evaluate error handler
-  on: errorBlock =>
-    // try/catch implementation - compiler primitive
-    // implemented by compiler
-
-  // Ensure cleanup code runs
-  ensure: cleanupBlock =>
-    // try/finally implementation - compiler primitive
-    // implemented by compiler
-
-  // String representation
   describe => 'a Block'

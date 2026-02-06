@@ -1,221 +1,72 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════
-
 // Set - Unordered collection of unique elements
 //
-// Sets contain unique elements with no defined order. Duplicate additions
-// are silently ignored. Sets are ideal for membership testing and
-// mathematical set operations.
-//
-// ## When to Use Set
-//
-// Use Set when you need:
-// - Unique elements (automatic deduplication)
-// - Fast membership testing
-// - Set operations (union, intersection, difference)
-// - Order-independent collections
-//
-// ## Key Properties
-//
-// - **Unordered**: Iteration order is not guaranteed
-// - **Unique**: Each element appears at most once
-// - **Immutable**: Operations return new sets
-//
-// ## BEAM Mapping
-//
-// Sets use Erlang's `ordsets` module (sorted lists):
-// ```erlang
-// ordsets:new()              % Beamtalk: Set new
-// ordsets:add_element(E, S)  % Beamtalk: set add: E
-// ordsets:is_element(E, S)   % Beamtalk: set includes: E
-// ordsets:union(A, B)        % Beamtalk: a union: b
-// ordsets:intersection(A, B) % Beamtalk: a intersection: b
-// ordsets:subtract(A, B)     % Beamtalk: a difference: b
-// ```
-//
-// ## Performance Characteristics
-//
-// Using `ordsets` (sorted list implementation):
-// | Operation | Time Complexity |
-// |-----------|-----------------|
-// | `size` | O(n) |
-// | `includes:` | O(log n) |
-// | `add:` | O(n) |
-// | `remove:` | O(n) |
-// | `union:` | O(n+m) |
-// | `intersection:` | O(n+m) |
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Creation
-// colors := Set new.
-// colors := colors add: #red.
-// colors := colors add: #green.
-// colors := colors add: #blue.
-// colors := colors add: #red.    // ignored (duplicate)
-// colors size                    // => 3
-//
-// // From list (removes duplicates)
-// numbers := Set fromList: [1, 2, 2, 3, 3, 3]
-// numbers size                   // => 3
-//
-// // Membership
-// (colors includes: #red) ifTrue: [Transcript show: 'Has red']
-//
-// // Set operations
-// primary := Set fromList: [#red, #green, #blue]
-// warm := Set fromList: [#red, #orange, #yellow]
-//
-// both := primary intersection: warm    // => {#red}
-// all := primary union: warm            // => {#red, #green, #blue, #orange, #yellow}
-// coolOnly := primary difference: warm  // => {#green, #blue}
-//
-// // Iteration (order not guaranteed)
-// colors each: [:color | Transcript show: color]
-// ```
-//
-// ## See Also
-//
-// - `Collection.bt` - Base collection protocol
-// - `Dictionary.bt` - Key-value pairs (keys behave like a set)
+// Uses Erlang's ordsets module. Automatic deduplication.
 
-Set
-  // ═══════════════════════════════════════════════════════════════════
+Object subclass: Set
   // Construction
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Create empty set
-  new => // implemented by compiler - ordsets:new()
-
-  // Create set from list (removes duplicates)
-  fromList: aList => // implemented by compiler - ordsets:from_list
-
-  // Create set from array (removes duplicates)
+  new => @primitive 'new'
+  fromList: aList => @primitive 'fromList:'
   fromArray: anArray => Set fromList: anArray asList
-
-  // Create set with single element
   with: element => (Set new) add: element
-
-  // Create set with multiple elements
   with: e1 with: e2 => ((Set new) add: e1) add: e2
   with: e1 with: e2 with: e3 => (((Set new) add: e1) add: e2) add: e3
 
-  // ═══════════════════════════════════════════════════════════════════
   // Size
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Number of elements
-  size => // implemented by compiler - ordsets:size or length
-
+  size => @primitive 'size'
   isEmpty => self size = 0
   isNotEmpty => self size > 0
 
-  // ═══════════════════════════════════════════════════════════════════
   // Membership
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Test if element is in set (O(log n) for ordsets)
-  includes: element => // implemented by compiler - ordsets:is_element
-
-  // Inverse of includes:
+  includes: element => @primitive 'includes:'
   excludes: element => (self includes: element) not
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Adding and Removing
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Add element, returns new set
-  // No effect if element already present
-  add: element => // implemented by compiler - ordsets:add_element
-
-  // Add all elements from another collection
+  // Adding and removing
+  add: element => @primitive 'add:'
   addAll: collection =>
     collection inject: self into: [:set :elem | set add: elem]
 
-  // Remove element, returns new set
-  // No effect if element not present
-  remove: element => // implemented by compiler - ordsets:del_element
-
-  // Remove all elements in another collection
+  remove: element => @primitive 'remove:'
   removeAll: collection =>
     collection inject: self into: [:set :elem | set remove: elem]
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Set Operations
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Union: elements in self OR other
-  union: other => // implemented by compiler - ordsets:union
-
-  // Intersection: elements in self AND other
-  intersection: other => // implemented by compiler - ordsets:intersection
-
-  // Difference: elements in self but NOT in other
-  difference: other => // implemented by compiler - ordsets:subtract
-
-  // Symmetric difference: elements in exactly one of the sets
+  // Set operations
+  union: other => @primitive 'union:'
+  intersection: other => @primitive 'intersection:'
+  difference: other => @primitive 'difference:'
   symmetricDifference: other =>
     (self union: other) difference: (self intersection: other)
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Set Predicates
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Test if self is subset of other (all elements of self are in other)
-  isSubsetOf: other => // implemented by compiler - ordsets:is_subset
-
-  // Test if self is superset of other
+  // Set predicates
+  isSubsetOf: other => @primitive 'isSubsetOf:'
   isSupersetOf: other => other isSubsetOf: self
-
-  // Test if self is proper subset (subset but not equal)
   isProperSubsetOf: other =>
     (self isSubsetOf: other) and: [self size < other size]
 
-  // Test if sets are disjoint (no common elements)
   isDisjointFrom: other =>
     (self intersection: other) isEmpty
 
-  // ═══════════════════════════════════════════════════════════════════
   // Iteration
-  // ═══════════════════════════════════════════════════════════════════
+  each: block => @primitive 'each:'
 
-  // Execute block for each element (order not guaranteed)
-  each: block => // implemented by compiler
-
-  // Transform each element, returns new set
   collect: block =>
     self inject: Set new into: [:result :elem |
       result add: (block value: elem)
     ]
 
-  // Keep elements matching predicate
   select: block =>
     self inject: Set new into: [:result :elem |
       (block value: elem) ifTrue: [result add: elem] ifFalse: [result]
     ]
 
-  // Remove elements matching predicate
   reject: block =>
     self select: [:elem | (block value: elem) not]
 
-  // Fold over elements
-  inject: initial into: block => // implemented by compiler
+  inject: initial into: block => @primitive 'inject:into:'
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Finding Elements
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Find any element matching predicate
-  // Note: "any" because sets have no defined order
+  // Finding elements
   detect: block =>
     self each: [:elem |
       (block value: elem) ifTrue: [^elem]
@@ -226,29 +77,16 @@ Set
     result := self detect: block.
     result = nil ifTrue: [defaultBlock value] ifFalse: [result]
 
-  // Get any element (useful for non-empty sets)
   anyOne =>
     self isEmpty ifTrue: [self error: 'Set is empty'].
     self detect: [:e | true]
 
-  // ═══════════════════════════════════════════════════════════════════
   // Conversion
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Convert to list (order not guaranteed)
-  asList => // implemented by compiler - ordsets:to_list
-
-  // Convert to array
+  asList => @primitive 'asList'
   asArray => self asList asArray
-
-  // Return self (already a set)
   asSet => self
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Comparison
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Set equality (same elements, regardless of order)
+  // Comparison — pure Beamtalk
   = other =>
     other isSet ifFalse: [^false].
     self size = other size ifFalse: [^false].
@@ -260,11 +98,7 @@ Set
   isSet => true
   isDictionary => false
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Cardinality Operations
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Power set (set of all subsets) - expensive!
+  // Power set
   powerSet =>
     self isEmpty ifTrue: [^Set with: Set new].
     elem := self anyOne.

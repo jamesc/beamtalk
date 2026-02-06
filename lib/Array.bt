@@ -1,214 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════
-
 // Array - Fixed-size indexed collection (Erlang tuple)
 //
-// Arrays are Beamtalk's primary indexed collection type, implemented as
-// Erlang tuples. They provide O(1) element access but O(n) modification
-// (since a new tuple is created).
-//
-// ## When to Use Array
-//
-// Use Array when you need:
-// - Fast random access by index
-// - Fixed-size collections
-// - Interop with Erlang tuple-based APIs
-// - Record-like structures
-//
-// Use List instead when you need:
-// - Frequent modifications at the head
-// - Unknown or variable length
-// - Pattern matching on head/tail
-//
-// ## Literal Syntax
-//
-// Arrays use tuple literal syntax:
-// ```beamtalk
-// empty := {}
-// numbers := {1, 2, 3, 4, 5}
-// mixed := {#name, 'Alice', 42}
-// ```
-//
-// ## Performance Characteristics
-//
-// | Operation | Time Complexity |
-// |-----------|-----------------|
-// | `size` | O(1) |
-// | `at:` | O(1) |
-// | `at:put:` | O(n) - creates new tuple |
-// | `++` | O(n+m) |
-// | `includes:` | O(n) |
-// | `first` / `last` | O(1) |
-//
-// ## BEAM Mapping
-//
-// ```erlang
-// {1, 2, 3}           % Beamtalk: {1, 2, 3}
-// element(2, Tuple)   % Beamtalk: tuple at: 2
-// setelement(2, T, X) % Beamtalk: tuple at: 2 put: X
-// tuple_size(T)       % Beamtalk: tuple size
-// tuple_to_list(T)    % Beamtalk: tuple asList
-// list_to_tuple(L)    % Beamtalk: list asArray
-// ```
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Creation
-// point := {10, 20}
-// rgb := {255, 128, 0}
-//
-// // Access (1-based indexing)
-// x := point at: 1        // => 10
-// y := point at: 2        // => 20
-//
-// // Modification (returns new array)
-// moved := point at: 1 put: 15   // => {15, 20}
-//
-// // Iteration
-// rgb each: [:c | Transcript show: c]
-//
-// // Transformation
-// doubled := rgb collect: [:c | c * 2]  // => {510, 256, 0}
-//
-// // Pattern-like access
-// {r, g, b} := rgb         // Destructuring (if supported)
-// ```
-//
-// ## Record-Style Usage
-//
-// Arrays can represent simple records:
-// ```beamtalk
-// // Person as {name, age, email}
-// person := {'Alice', 30, 'alice@example.com'}
-// name := person at: 1
-// age := person at: 2
-//
-// // Update age
-// olderPerson := person at: 2 put: 31
-// ```
-//
-// ## See Also
-//
-// - `Collection.bt` - Base collection protocol
-// - `SequenceableCollection.bt` - Ordered collection protocol
-// - `List.bt` - Alternative for variable-length sequences
+// O(1) element access, O(n) modification (new tuple created).
 
-Array
-  // ═══════════════════════════════════════════════════════════════════
-  // Construction
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Create new array with given size, filled with nil
-  new: size => // implemented by compiler
-
-  // Create array with size, each element initialized by block
-  // block receives index (1-based)
-  new: size withAll: block =>
-    1 to: size inject: (self new: size) into: [:arr :i |
-      arr at: i put: (block value: i)
-    ]
-
-  // Create array from list
-  fromList: aList => aList asArray
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Size (Inherited but optimized for tuples)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Number of elements (O(1) for tuples)
-  size => // implemented by compiler - tuple_size
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Index Access (Inherited from SequenceableCollection)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Get element at index (1-based, O(1))
-  at: index => // implemented by compiler - element(Index, Tuple)
-
-  // Return new array with element at index replaced (O(n))
-  at: index put: value => // implemented by compiler - setelement
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Array-Specific Operations
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Append element, returns new larger array
-  append: element =>
-    newSize := self size + 1.
-    result := Array new: newSize.
-    1 to: self size do: [:i |
-      result at: i put: (self at: i)
-    ].
-    result at: newSize put: element.
-    result
-
-  // Prepend element, returns new larger array
-  prepend: element =>
-    newSize := self size + 1.
-    result := Array new: newSize.
-    result at: 1 put: element.
-    1 to: self size do: [:i |
-      result at: i + 1 put: (self at: i)
-    ].
-    result
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Conversion
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Return self (already an array)
-  asArray => self
-
-  // Convert to list
-  asList => // implemented by compiler - tuple_to_list
-
-  // Convert to set (remove duplicates)
-  asSet => self asList asSet
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Comparison
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Structural equality
-  = other =>
-    other isArray ifFalse: [^false].
-    self size = other size ifFalse: [^false].
-    1 to: self size do: [:i |
-      (self at: i) = (other at: i) ifFalse: [^false]
-    ].
-    true
-
-  // Type test
-  isArray => true
-  isList => false
-  isSet => false
-  isDictionary => false
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Iteration (Optimized for tuples)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // These inherit from SequenceableCollection but may be compiler-optimized
-
-  each: block => // implemented by compiler
-  collect: block => // implemented by compiler
-  select: block => // implemented by compiler
-  inject: initial into: block => // implemented by compiler
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Concatenation
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Concatenate two arrays
+Object subclass: Array
+  // Binary operators first (parser constraint)
   ++ other =>
     other isArray ifFalse: [other := other asArray].
     newSize := self size + other size.
@@ -220,3 +18,65 @@ Array
       result at: self size + i put: (other at: i)
     ].
     result
+
+  // Construction
+  new: size => @primitive 'new:'
+
+  new: size withAll: block =>
+    1 to: size inject: (self new: size) into: [:arr :i |
+      arr at: i put: (block value: i)
+    ]
+
+  fromList: aList => aList asArray
+
+  // Size
+  size => @primitive 'size'
+
+  // Index access
+  at: index => @primitive 'at:'
+  at: index put: value => @primitive 'at:put:'
+
+  // Array-specific operations
+  append: element =>
+    newSize := self size + 1.
+    result := Array new: newSize.
+    1 to: self size do: [:i |
+      result at: i put: (self at: i)
+    ].
+    result at: newSize put: element.
+    result
+
+  prepend: element =>
+    newSize := self size + 1.
+    result := Array new: newSize.
+    result at: 1 put: element.
+    1 to: self size do: [:i |
+      result at: i + 1 put: (self at: i)
+    ].
+    result
+
+  // Conversion
+  asArray => self
+  asList => @primitive 'asList'
+  asSet => self asList asSet
+
+  // Comparison — pure Beamtalk
+  = other =>
+    other isArray ifFalse: [^false].
+    self size = other size ifFalse: [^false].
+    1 to: self size do: [:i |
+      (self at: i) = (other at: i) ifFalse: [^false]
+    ].
+    true
+
+  // Type tests
+  isArray => true
+  isList => false
+  isSet => false
+  isDictionary => false
+
+  // Iteration
+  each: block => @primitive 'each:'
+  collect: block => @primitive 'collect:'
+  select: block => @primitive 'select:'
+  inject: initial into: block => @primitive 'inject:into:'

@@ -1,113 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════════
-
 // Actor - Base class for process-based objects in Beamtalk
 //
 // Actor inherits from Object and adds process-based concurrency. Every actor
 // runs in its own BEAM process and communicates via asynchronous messages.
-// This is the base class for most application code in Beamtalk.
-//
-// ## Class Hierarchy
-//
-// ```
-// ProtoObject (minimal root - identity, DNU)
-//   └─ Object (value types - new, reflection, nil testing)
-//        ├─ Integer, String, etc. (sealed primitives)
-//        ├─ Point, Color, etc. (user value types)
-//        └─ Actor (process-based - spawn, mailbox)
-//             └─ Counter, Worker, etc. (user actors)
-// ```
-//
-// ## Value Types vs Actors
-//
-// | | Object subclass | Actor subclass |
-// |---|---|---|
-// | **Process** | ❌ No | ✅ Yes (BEAM process) |
-// | **Create with** | `new` | `spawn` |
-// | **State storage** | Caller's heap | Own process |
-// | **Concurrency** | None | Mailbox serializes |
-//
-// Actor extends Object to add:
-// - Process creation via `spawn` and `spawnWith:`
-// - Mailbox for async message handling
-// - Supervision tree integration
-// - (Note: `new` method override not yet implemented - value type instantiation TBD)
-//
-// ## Core Messages
-//
-// - `spawn` - Create a new instance of this actor with default state
-// - `spawnWith:` - Create a new instance with initialization arguments
-// - `class` - Returns the actor's class name
-// - `inspect` - Show a textual representation on Transcript
-// - `describe` - Returns a string description of this actor
-//
-// ## Spawn Messages
-//
-// ### spawn (0-arg)
-// Creates a stateless actor or one with default field values:
-// ```beamtalk
-// worker := Worker spawn
-// ```
-//
-// ### spawnWith: (1-arg)
-// Creates an actor with initialization state passed as a dictionary:
-// ```beamtalk
-// counter := Counter spawnWith: #{value => 10}
-// server := Server spawnWith: #{port => 8080, handler => myHandler}
-// ```
-//
-// The initialization dictionary is merged with default field values.
-// Keys in the dictionary override the defaults defined in the actor class.
-//
-// ## Implementation Notes
-//
-// The `spawn` message is a compiler primitive that generates:
-// ```erlang
-// gen_server:start_link(ModuleName, ~{}~, [])
-// ```
-//
-// The `spawnWith:` message passes the argument to init:
-// ```erlang
-// gen_server:start_link(ModuleName, InitArgs, [])
-// ```
-//
-// The generated `init/1` callback handles the initialization:
-// - Creates the initial state map with `__class__` and `__methods__`
-// - Merges initialization arguments into the state
-// - Field values in InitArgs override default values
-//
-// All other actors should inherit from Actor and override `describe`
-// to provide meaningful debugging output.
 
 Object subclass: Actor
-  // Returns a textual description of this actor
-  // Subclasses should override to provide detailed info
-  // (Overrides Object>>describe to provide actor-specific description)
-  describe => 'an Actor'
+  // Spawn — structural intrinsics, compiler generates gen_server wrapping
+  spawn => @primitive actorSpawn
+  spawnWith: initArgs => @primitive actorSpawnWith
 
-  // Actors cannot be instantiated with 'new' - use 'spawn' instead
-  // This enforces the value type vs actor distinction:
-  // - Value types (Object subclass): use 'new'
-  // - Actors (Actor subclass): use 'spawn'
+  // Override new with error — pure Beamtalk
   new => self error: 'Actors must use spawn, not new'
-
-  // Actors cannot be instantiated with 'new:' - use 'spawnWith:' instead
   new: initArgs => self error: 'Actors must use spawnWith:, not new:'
 
-  // Spawn a new instance with default state (compiler primitive)
-  // Generated code: gen_server:start_link(ClassName, ~{}~, [])
-  spawn => // implemented by compiler
-
-  // Spawn a new instance with initialization arguments (compiler primitive)
-  // Arguments should be a dictionary that gets merged into the actor's state.
-  // Example: Counter spawnWith: #{value => 10}
-  // Generated code: gen_server:start_link(ClassName, InitArgs, [])
-  spawnWith: initArgs => // implemented by compiler
+  describe => 'an Actor'
