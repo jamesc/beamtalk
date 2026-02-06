@@ -279,11 +279,21 @@ List loaded modules in the workspace.
 
 #### `unload` — Unload Module
 
-Unload a module from the workspace. Fails if actors of that module are still running.
+Unload a module from the workspace. Uses `code:soft_purge/1` and `code:delete/1`.
 
 **Request:**
 ```json
 {"op": "unload", "id": "msg-031", "module": "Counter"}
+```
+
+**Response:**
+```json
+{"id": "msg-031", "status": ["done"]}
+```
+
+**Error (module not loaded):**
+```json
+{"id": "msg-031", "error": "module_not_loaded: Counter", "status": ["error"]}
 ```
 
 ## Legacy Format (Backward Compatible)

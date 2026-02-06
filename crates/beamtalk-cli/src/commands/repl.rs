@@ -113,7 +113,7 @@ impl ReplResponse {
             return t == "error";
         }
         if let Some(ref status) = self.status {
-            return status.contains(&"error".to_string());
+            return status.iter().any(|s| s == "error");
         }
         false
     }

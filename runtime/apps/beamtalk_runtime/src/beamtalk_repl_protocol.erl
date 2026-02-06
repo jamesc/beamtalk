@@ -46,6 +46,8 @@ decode(Data) when is_binary(Data) ->
     case parse_json(Trimmed) of
         {ok, Map} when is_map(Map) ->
             decode_map(Map);
+        {ok, _NonMap} ->
+            {error, {invalid_request, non_object_json}};
         {error, _} ->
             %% Not JSON - treat as raw eval expression
             case Trimmed of
@@ -298,7 +300,7 @@ base_response(#protocol_msg{id = Id, session = Session}) ->
     end.
 
 %% @private Parse JSON binary to map.
--spec parse_json(binary()) -> {ok, map()} | {error, term()}.
+-spec parse_json(binary()) -> {ok, term()} | {error, term()}.
 parse_json(Data) ->
     try
         Decoded = jsx:decode(Data, [return_maps]),

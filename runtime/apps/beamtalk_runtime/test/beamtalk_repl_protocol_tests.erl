@@ -263,3 +263,17 @@ format_err(Reason) ->
 
 atom_to_binary(A) ->
     erlang:atom_to_binary(A, utf8).
+
+%%% R7: Non-map JSON decode tests
+
+decode_json_array_returns_error_test() ->
+    Result = beamtalk_repl_protocol:decode(<<"[1, 2, 3]">>),
+    ?assertMatch({error, {invalid_request, non_object_json}}, Result).
+
+decode_json_string_returns_error_test() ->
+    Result = beamtalk_repl_protocol:decode(<<"\"hello\"">>),
+    ?assertMatch({error, {invalid_request, non_object_json}}, Result).
+
+decode_json_number_returns_error_test() ->
+    Result = beamtalk_repl_protocol:decode(<<"42">>),
+    ?assertMatch({error, {invalid_request, non_object_json}}, Result).

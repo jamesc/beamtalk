@@ -320,25 +320,31 @@ handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
     PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
     try
         Pid = list_to_pid(PidStr),
-        case is_process_alive(Pid) of
-            true ->
-                %% Get actor state via sys:get_state
-                try
-                    State = sys:get_state(Pid, 5000),
-                    StateMap = case State of
-                        M when is_map(M) -> M;
-                        _ -> #{<<"raw">> => State}
-                    end,
-                    beamtalk_repl_protocol:encode_inspect(
-                        StateMap, Msg, fun term_to_json/1)
-                catch
-                    _:_ ->
-                        beamtalk_repl_protocol:encode_error(
-                            {inspect_failed, PidStr}, Msg, fun format_error_message/1)
-                end;
+        case is_known_actor(Pid) of
             false ->
                 beamtalk_repl_protocol:encode_error(
-                    {actor_not_alive, PidStr}, Msg, fun format_error_message/1)
+                    {unknown_actor, PidStr}, Msg, fun format_error_message/1);
+            true ->
+                case is_process_alive(Pid) of
+                    true ->
+                        %% Get actor state via sys:get_state
+                        try
+                            State = sys:get_state(Pid, 5000),
+                            StateMap = case State of
+                                M when is_map(M) -> M;
+                                _ -> #{<<"raw">> => State}
+                            end,
+                            beamtalk_repl_protocol:encode_inspect(
+                                StateMap, Msg, fun term_to_json/1)
+                        catch
+                            _:_ ->
+                                beamtalk_repl_protocol:encode_error(
+                                    {inspect_failed, PidStr}, Msg, fun format_error_message/1)
+                        end;
+                    false ->
+                        beamtalk_repl_protocol:encode_error(
+                            {actor_not_alive, PidStr}, Msg, fun format_error_message/1)
+                end
         end
     catch
         _:_ ->
@@ -350,8 +356,14 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
     PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
     try
         Pid = list_to_pid(PidStr),
-        exit(Pid, kill),
-        beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1)
+        case is_known_actor(Pid) of
+            false ->
+                beamtalk_repl_protocol:encode_error(
+                    {unknown_actor, PidStr}, Msg, fun format_error_message/1);
+            true ->
+                exit(Pid, kill),
+                beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1)
+        end
     catch
         _:_ ->
             beamtalk_repl_protocol:encode_error(
@@ -359,11 +371,28 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
     end;
 
 handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
-    beamtalk_repl_protocol:encode_modules([], Msg, fun term_to_json/1);
+    Loaded = code:all_loaded(),
+    Modules = [atom_to_binary(Mod, utf8) || {Mod, _File} <- Loaded],
+    beamtalk_repl_protocol:encode_modules(Modules, Msg, fun term_to_json/1);
 
-handle_op(<<"unload">>, _Params, Msg, _SessionPid) ->
-    beamtalk_repl_protocol:encode_error(
-        {not_implemented, unload_module}, Msg, fun format_error_message/1);
+handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
+    ModuleBin = maps:get(<<"module">>, Params, <<>>),
+    case ModuleBin of
+        <<>> ->
+            beamtalk_repl_protocol:encode_error(
+                {invalid_module, missing}, Msg, fun format_error_message/1);
+        _ ->
+            Module = binary_to_atom(ModuleBin, utf8),
+            case code:is_loaded(Module) of
+                {file, _} ->
+                    _ = code:soft_purge(Module),
+                    _ = code:delete(Module),
+                    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
+                false ->
+                    beamtalk_repl_protocol:encode_error(
+                        {module_not_loaded, Module}, Msg, fun format_error_message/1)
+            end
+    end;
 
 handle_op(<<"sessions">>, _Params, Msg, _SessionPid) ->
     %% List active sessions from supervisor (may not be started in legacy mode)
@@ -395,11 +424,9 @@ handle_op(<<"clone">>, _Params, Msg, _SessionPid) ->
                 {session_creation_failed, Reason}, Msg, fun format_error_message/1)
     end;
 
-handle_op(<<"close">>, _Params, Msg, SessionPid) ->
-    %% Close the current session (handler will clean up)
-    Response = beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1),
-    beamtalk_repl_shell:stop(SessionPid),
-    Response;
+handle_op(<<"close">>, _Params, Msg, _SessionPid) ->
+    %% Close the current session - acceptor cleanup handles stop
+    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
 
 handle_op(<<"complete">>, Params, Msg, _SessionPid) ->
     %% Autocompletion - return matching identifiers from loaded modules
@@ -809,8 +836,23 @@ base_protocol_response(Msg) ->
     case Session of undefined -> M1; _ -> M1#{<<"session">> => Session} end.
 
 %% @private
+%% Check whether a PID belongs to a registered Beamtalk actor.
+-spec is_known_actor(pid()) -> boolean().
+is_known_actor(Pid) when is_pid(Pid) ->
+    case whereis(beamtalk_actor_registry) of
+        undefined ->
+            false;
+        RegistryPid ->
+            case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
+                {ok, _} -> true;
+                {error, not_found} -> false
+            end
+    end.
+
+%% @private
 %% Get autocompletion suggestions for a prefix.
 -spec get_completions(binary()) -> [binary()].
+get_completions(<<>>) -> [];
 get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
     %% Collect completions from loaded class processes
