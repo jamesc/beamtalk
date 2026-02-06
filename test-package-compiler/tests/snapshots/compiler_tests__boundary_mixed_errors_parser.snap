@@ -229,6 +229,6 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 229, end: 231 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 234, end: 236 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 656, end: 658 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 229, end: 231 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 234, end: 236 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found :=", span: Span { start: 656, end: 658 }, hint: None }

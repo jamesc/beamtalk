@@ -648,16 +648,20 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A `@primitive` pragma inside a method body.
+    /// A primitive pragma (`@primitive 'selector'` or `@primitive intrinsicName`).
     ///
-    /// Represents `@primitive 'name'` or `@primitive intrinsicName` in stdlib source.
-    /// This is a first-class AST node per ADR 0007.
+    /// Declares that a method body delegates to a runtime primitive or
+    /// structural intrinsic. Only valid inside method bodies in stdlib code
+    /// (see ADR 0007).
+    ///
+    /// Example: `+ other => @primitive '+'`
+    /// Example: `new => @primitive basicNew`
     Primitive {
-        /// The primitive name (e.g., `erlang_add` or `size`).
+        /// The primitive name (selector string or intrinsic identifier).
         name: EcoString,
-        /// Whether the name was quoted (`@primitive 'name'`).
+        /// Whether the name was quoted (`'+'`) vs bare (`basicNew`).
         is_quoted: bool,
-        /// Source location.
+        /// Source location of the entire `@primitive name` expression.
         span: Span,
     },
 

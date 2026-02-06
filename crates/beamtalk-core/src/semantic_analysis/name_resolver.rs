@@ -240,7 +240,7 @@ impl NameResolver {
             }
 
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
-                // No resolution needed
+                // No name resolution needed
             }
         }
     }

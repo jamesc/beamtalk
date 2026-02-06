@@ -288,9 +288,9 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
         } => {
             if offset >= span.start() && offset < span.end() {
                 let display = if *is_quoted {
-                    format!("Primitive: @primitive '{name}'")
+                    format!("Primitive: `@primitive '{name}'`")
                 } else {
-                    format!("Primitive: @primitive {name}")
+                    format!("Primitive: `@primitive {name}`")
                 };
                 Some(HoverInfo::new(display, *span))
             } else {
@@ -433,7 +433,7 @@ mod tests {
         let hover = find_hover_in_expr(&expr, 5);
         assert!(hover.is_some());
         let hover = hover.unwrap();
-        assert!(hover.contents.contains("@primitive 'erlang_add'"));
+        assert!(hover.contents.contains("`@primitive 'erlang_add'`"));
     }
 
     #[test]
@@ -449,7 +449,7 @@ mod tests {
         let hover = find_hover_in_expr(&expr, 5);
         assert!(hover.is_some());
         let hover = hover.unwrap();
-        assert!(hover.contents.contains("@primitive size"));
+        assert!(hover.contents.contains("`@primitive size`"));
         assert!(!hover.contents.contains("'size'"));
     }
 }
