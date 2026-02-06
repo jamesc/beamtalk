@@ -642,6 +642,7 @@ pub fn run(
     } else {
         // Workspace mode: start or connect to detached node
         let current_dir = std::env::current_dir().into_diagnostic()?;
+        let project_root = workspace::discovery::discover_project_root(&current_dir);
 
         // Use the same runtime paths as foreground mode
         let runtime_dir = find_runtime_dir()?;
@@ -650,7 +651,7 @@ pub fn run(
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
 
         let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
-            &current_dir,
+            &project_root,
             workspace_name,
             port,
             &runtime_beam_dir,
@@ -659,12 +660,26 @@ pub fn run(
 
         if is_new {
             println!("Started new workspace node: {}", node_info.node_name);
-            println!("Workspace: {workspace_id}");
+            if workspace_name.is_some() {
+                println!("  Workspace: {workspace_id}");
+            } else {
+                println!(
+                    "  Workspace: {workspace_id} (auto-discovered from {})",
+                    project_root.display()
+                );
+            }
             // Give the node time to initialize
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
-            println!("  Workspace: {workspace_id}");
+            if workspace_name.is_some() {
+                println!("  Workspace: {workspace_id}");
+            } else {
+                println!(
+                    "  Workspace: {workspace_id} (auto-discovered from {})",
+                    project_root.display()
+                );
+            }
         }
 
         // Display workspace info
