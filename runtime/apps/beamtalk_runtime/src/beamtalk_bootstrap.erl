@@ -82,18 +82,30 @@ init(Parent) ->
         %% Step 2: Create Object class (inherits from ProtoObject class)
         ObjectClassInfo = #{
             name => 'Object',
-            module => 'Object',
+            module => 'beamtalk_object',
             superclass => 'ProtoObject',  % Metaclass superclass
             instance_methods => #{
-                % Inherits ProtoObject methods, adds:
+                % Core reflection (ADR 0006 Phase 1b - beamtalk_object.erl)
+                class => #{arity => 0},
+                'respondsTo:' => #{arity => 1},
+                'instVarNames' => #{arity => 0},
+                'instVarAt:' => #{arity => 1},
+                'instVarAt:put:' => #{arity => 2},
+                'perform:' => #{arity => 1},
+                'perform:withArguments:' => #{arity => 2},
+                % Display methods (BT-275)
+                'printString' => #{arity => 0},
+                inspect => #{arity => 0},
+                describe => #{arity => 0},
+                % Utility methods
+                yourself => #{arity => 0},
+                hash => #{arity => 0},
                 isNil => #{arity => 0},
                 notNil => #{arity => 0},
                 'ifNil:' => #{arity => 1},
                 'ifNotNil:' => #{arity => 1},
                 'ifNil:ifNotNil:' => #{arity => 2},
-                'ifNotNil:ifNil:' => #{arity => 2},
-                inspect => #{arity => 0},
-                describe => #{arity => 0}
+                'ifNotNil:ifNil:' => #{arity => 2}
             },
             class_methods => #{},
             instance_variables => []
