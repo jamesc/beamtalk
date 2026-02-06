@@ -75,7 +75,7 @@ init(Config) ->
         %% Actor registry (workspace-wide, shared across sessions)
         #{
             id => beamtalk_actor_registry,
-            start => {beamtalk_repl_actors, start_link, []},
+            start => {beamtalk_repl_actors, start_link, [registered]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
