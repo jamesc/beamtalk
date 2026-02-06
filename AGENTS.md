@@ -1055,7 +1055,7 @@ Identifies which component of the codebase the issue affects:
 | Label | Description | Key Directories |
 |-------|-------------|----------------|
 | `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
-| `stdlib` | Standard library: collections, primitives, strings | `lib/` |
+| `stdlib` | Standard library: collections, primitives, strings (compiled from `lib/*.bt` via pragmas — see [ADR 0007](../docs/ADR/0007-compilable-stdlib-with-primitive-injection.md)) | `lib/` |
 | `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
 | `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
@@ -1107,6 +1107,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
 | **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
 | **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |
+| **BT-286** | Compilable Standard Library (ADR 0007) | 10 issues | ~0% | Urgent |
 
 #### Epic Completed
 
