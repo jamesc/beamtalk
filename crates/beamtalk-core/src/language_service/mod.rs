@@ -433,11 +433,11 @@ mod tests {
                 .any(|c| c.label == "x" && c.kind == CompletionKind::Variable)
         );
 
-        // Should have message completions
+        // Should have message completions (from class hierarchy)
         assert!(
             completions
                 .iter()
-                .any(|c| c.label == "at:" && c.kind == CompletionKind::Function)
+                .any(|c| c.label == "isNil" && c.kind == CompletionKind::Function)
         );
     }
 

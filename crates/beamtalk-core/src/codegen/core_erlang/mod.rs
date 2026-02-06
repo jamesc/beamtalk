@@ -439,30 +439,25 @@ impl CoreErlangGenerator {
     /// This is a simplified check that only looks at the direct superclass.
     /// The stdlib `Actor` root class is explicitly treated as an actor, even though
     /// it directly subclasses `Object`, to avoid misclassifying it as a value type.
-    /// Full implementation should traverse the inheritance chain in semantic analysis.
+    ///
+    /// Uses the `ClassHierarchy` to walk the full inheritance chain and determine
+    /// if a class is an actor (inherits from Actor at any level).
     ///
     /// # Returns
     ///
-    /// - `true` if class inherits from Actor or other non-Object classes (actors by default)
-    /// - `false` if class inherits directly from Object (except for the Actor root)
+    /// - `true` if class inherits from Actor anywhere in the chain
+    /// - `false` if class inherits only from Object/ProtoObject (value type)
     /// - `true` if module contains no class (backward compatibility for REPL)
     fn is_actor_class(module: &Module) -> bool {
-        // Check if the first class in the module is an actor
-        // TODO(BT-213): Handle modules with multiple classes
         if let Some(class) = module.classes.first() {
-            // Special case: The stdlib Actor class itself (`Object subclass: Actor`)
-            // must be treated as an actor, not a value type
-            if class.name.name.as_str() == "Actor" {
-                return true;
-            }
-
-            // For BT-213 MVP: Only classes that directly inherit from Object are value types
-            // Everything else (Counter, Array, LoggingCounter, etc.) is treated as an actor
-            // TODO(BT-213): Full inheritance chain resolution in semantic analysis
-            class.superclass.name.as_str() != "Object"
+            // Use ClassHierarchy for full inheritance chain resolution (ADR 0006)
+            let hierarchy =
+                crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+            let chain = hierarchy.superclass_chain(class.name.name.as_str());
+            // A class is an actor if "Actor" appears anywhere in its superclass chain,
+            // or if the class itself IS Actor
+            class.name.name.as_str() == "Actor" || chain.iter().any(|s| s.as_str() == "Actor")
         } else {
-            // If no class definition, assume actor to maintain backward compatibility
-            // (existing tests expect gen_server generation)
             true
         }
     }

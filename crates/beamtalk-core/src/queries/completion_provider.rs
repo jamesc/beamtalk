@@ -29,6 +29,7 @@
 
 use crate::ast::{Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
+use crate::semantic_analysis::ClassHierarchy;
 use ecow::EcoString;
 use std::collections::HashSet;
 
@@ -75,8 +76,8 @@ pub fn compute_completions(module: &Module, source: &str, position: Position) ->
     // Add identifiers from the current scope
     add_identifier_completions(module, &mut completions);
 
-    // Add message completions (common Smalltalk messages)
-    add_message_completions(&mut completions);
+    // Add message completions from class hierarchy (includes inherited methods)
+    add_hierarchy_completions(module, &mut completions);
 
     // Remove duplicates
     deduplicate_completions(&mut completions);
@@ -181,28 +182,37 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
     }
 }
 
-/// Adds common message completions.
-fn add_message_completions(completions: &mut Vec<Completion>) {
-    let messages = [
-        ("at:", "Access an element by index"),
-        ("at:put:", "Set an element at index"),
-        ("size", "Get the size/length"),
-        ("do:", "Iterate over elements"),
-        ("collect:", "Map elements"),
-        ("select:", "Filter elements"),
-        ("reject:", "Filter out elements"),
-        ("isEmpty", "Check if empty"),
-        ("isNil", "Check if nil"),
-        ("ifTrue:", "Conditional execution if true"),
-        ("ifFalse:", "Conditional execution if false"),
-        ("ifTrue:ifFalse:", "Conditional branch"),
-        ("value", "Evaluate a block"),
-        ("value:", "Evaluate a block with argument"),
-    ];
+/// Adds method completions from the class hierarchy.
+///
+/// Uses the `ClassHierarchy` to provide all available methods (local + inherited)
+/// for classes defined in the module. Also includes common built-in methods
+/// from Object and other base classes for general use.
+fn add_hierarchy_completions(module: &Module, completions: &mut Vec<Completion>) {
+    let hierarchy = ClassHierarchy::build(module).0;
+    let mut seen = HashSet::new();
 
-    for (message, doc) in &messages {
-        completions
-            .push(Completion::new(*message, CompletionKind::Function).with_documentation(*doc));
+    // Add methods from classes defined in this module (local + inherited)
+    for class in &module.classes {
+        for method in hierarchy.all_methods(class.name.name.as_str()) {
+            if seen.insert(method.selector.clone()) {
+                let doc = format!("{}#{}", method.defined_in, method.selector);
+                completions.push(
+                    Completion::new(method.selector.as_str(), CompletionKind::Function)
+                        .with_documentation(doc),
+                );
+            }
+        }
+    }
+
+    // Always include common Object/ProtoObject methods for general completions
+    for method in hierarchy.all_methods("Object") {
+        if seen.insert(method.selector.clone()) {
+            let doc = format!("{}#{}", method.defined_in, method.selector);
+            completions.push(
+                Completion::new(method.selector.as_str(), CompletionKind::Function)
+                    .with_documentation(doc),
+            );
+        }
     }
 }
 
@@ -270,9 +280,10 @@ mod tests {
 
         let completions = compute_completions(&module, source, Position::new(0, 0));
 
-        assert!(completions.iter().any(|c| c.label == "at:"));
-        assert!(completions.iter().any(|c| c.label == "do:"));
-        assert!(completions.iter().any(|c| c.label == "size"));
+        // Should include Object/ProtoObject methods
+        assert!(completions.iter().any(|c| c.label == "isNil"));
+        assert!(completions.iter().any(|c| c.label == "class"));
+        assert!(completions.iter().any(|c| c.label == "respondsTo:"));
     }
 
     #[test]
@@ -352,13 +363,26 @@ mod tests {
     }
 
     #[test]
-    fn message_completions_have_correct_kind() {
-        let mut completions = Vec::new();
-        add_message_completions(&mut completions);
+    fn hierarchy_completions_include_object_methods() {
+        let source = "";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
 
-        // All message completions should have Function kind
-        for completion in completions {
-            assert!(matches!(completion.kind, CompletionKind::Function));
+        let completions = compute_completions(&module, source, Position::new(0, 0));
+
+        // Should include Object methods like isNil, class, respondsTo:
+        assert!(completions.iter().any(|c| c.label == "isNil"));
+        assert!(completions.iter().any(|c| c.label == "class"));
+        assert!(completions.iter().any(|c| c.label == "respondsTo:"));
+
+        // All method completions should have Function kind
+        let method_completions: Vec<_> = completions
+            .iter()
+            .filter(|c| matches!(c.kind, CompletionKind::Function))
+            .collect();
+        assert!(!method_completions.is_empty());
+        for completion in method_completions {
+            assert!(completion.documentation.is_some());
         }
     }
 }

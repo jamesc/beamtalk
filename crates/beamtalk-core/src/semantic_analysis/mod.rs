@@ -18,11 +18,13 @@ use ecow::EcoString;
 use std::collections::HashMap;
 
 pub mod block_context;
+pub mod class_hierarchy;
 pub mod error;
 pub mod name_resolver;
 pub mod scope;
 pub mod type_checker;
 
+pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
@@ -36,6 +38,9 @@ pub struct AnalysisResult {
 
     /// Block metadata indexed by block span.
     pub block_info: HashMap<Span, BlockInfo>,
+
+    /// Static class hierarchy (built-in + user-defined classes).
+    pub class_hierarchy: ClassHierarchy,
 }
 
 impl AnalysisResult {
@@ -45,6 +50,7 @@ impl AnalysisResult {
         Self {
             diagnostics: Vec::new(),
             block_info: HashMap::new(),
+            class_hierarchy: ClassHierarchy::with_builtins(),
         }
     }
 }
@@ -260,6 +266,11 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
     let mut result = AnalysisResult::new();
+
+    // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
+    let (hierarchy, hierarchy_diags) = ClassHierarchy::build(module);
+    result.class_hierarchy = hierarchy;
+    result.diagnostics.extend(hierarchy_diags);
 
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
