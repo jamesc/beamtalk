@@ -36,6 +36,18 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@v2
 
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-
+            ${{ runner.os }}-erlang-otp-27.0-
+
       - name: Cache cargo registry
         uses: actions/cache@v5
         with:
@@ -124,6 +136,18 @@ jobs:
 
       - name: Install Just
         uses: extractions/setup-just@v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-rebar3-3.23
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-
+            ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache cargo registry
         uses: actions/cache@v5
