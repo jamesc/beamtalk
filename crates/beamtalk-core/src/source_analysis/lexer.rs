@@ -288,8 +288,11 @@ impl<'src> Lexer<'src> {
                 }
             }
 
+            // Pragma directives
+            '@' => self.lex_at_directive(start),
+
             // Binary operators
-            '+' | '-' | '*' | '/' | '<' | '>' | '~' | '@' | '%' | '&' | '?' | ',' | '\\' => {
+            '+' | '-' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()
             }
 
@@ -536,6 +539,32 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Lexes an `@` directive: `@primitive` or error for unknown directives.
+    fn lex_at_directive(&mut self, start: u32) -> TokenKind {
+        self.advance(); // @
+
+        // Check if followed by an identifier
+        let ident_start = self.current_position();
+        if self
+            .peek_char()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        {
+            self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
+            let ident = self.text_for(self.span_from(ident_start));
+            if ident == "primitive" {
+                return TokenKind::AtPrimitive;
+            }
+            let text = self.text_for(self.span_from(start));
+            return TokenKind::Error(EcoString::from(format!(
+                "unknown directive '{text}', only '@primitive' is supported"
+            )));
+        }
+
+        TokenKind::Error(EcoString::from(
+            "expected directive name after '@', only '@primitive' is supported",
+        ))
+    }
+
     /// Lexes a binary selector (one or more operator characters).
     fn lex_binary_selector(&mut self) -> TokenKind {
         let start = self.current_position();
@@ -551,7 +580,7 @@ impl<'src> Lexer<'src> {
         self.advance_while(|c| {
             matches!(
                 c,
-                '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '@' | '%' | '&' | '?' | ',' | '\\'
+                '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
             )
         });
 
@@ -915,5 +944,63 @@ mod tests {
         let kinds = lex_kinds("'unterminated");
         assert_eq!(kinds.len(), 1);
         assert!(matches!(kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_at_primitive() {
+        assert_eq!(lex_kinds("@primitive"), vec![TokenKind::AtPrimitive]);
+    }
+
+    #[test]
+    fn lex_at_primitive_followed_by_string() {
+        assert_eq!(
+            lex_kinds("@primitive 'add'"),
+            vec![TokenKind::AtPrimitive, TokenKind::String("add".into())]
+        );
+    }
+
+    #[test]
+    fn lex_at_primitive_followed_by_identifier() {
+        assert_eq!(
+            lex_kinds("@primitive foo"),
+            vec![TokenKind::AtPrimitive, TokenKind::Identifier("foo".into()),]
+        );
+    }
+
+    #[test]
+    fn lex_at_unknown_directive_is_error() {
+        let kinds = lex_kinds("@unknown");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_at_bare_is_error() {
+        let kinds = lex_kinds("@ ");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_at_bare_at_eof_is_error() {
+        let kinds = lex_kinds("@");
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+    }
+
+    #[test]
+    fn lex_at_followed_by_number_is_error() {
+        let kinds = lex_kinds("@123");
+        assert_eq!(kinds.len(), 2);
+        assert!(matches!(kinds[0], TokenKind::Error(_)));
+        assert!(matches!(kinds[1], TokenKind::Integer(_)));
+    }
+
+    #[test]
+    fn lex_at_primitive_span_is_correct() {
+        let tokens = lex("@primitive");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].span().start(), 0);
+        assert_eq!(tokens[0].span().end(), 10);
     }
 }
