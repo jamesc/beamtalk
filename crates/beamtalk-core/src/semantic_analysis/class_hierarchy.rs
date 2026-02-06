@@ -202,7 +202,8 @@ impl ClassHierarchy {
                         format!("Cannot subclass sealed class `{}`", class.superclass.name),
                         class.superclass.span,
                     ));
-                    continue;
+                    // Still register the class so downstream passes (codegen routing,
+                    // completions) can reason about it despite the error.
                 }
             }
 
@@ -898,8 +899,8 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("sealed"));
         assert!(diags[0].message.contains("Integer"));
-        // Class should NOT be added
-        assert!(!h.has_class("MyInt"));
+        // Class IS still registered (so codegen can route correctly despite error)
+        assert!(h.has_class("MyInt"));
     }
 
     #[test]

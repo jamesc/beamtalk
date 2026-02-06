@@ -4096,4 +4096,57 @@ end
             crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
     }
+
+    #[test]
+    fn test_is_actor_class_collection_subclass_is_value_type() {
+        // Collection extends Object (built-in), so subclasses are value types.
+        let class = ClassDefinition {
+            name: Identifier::new("MyList", Span::new(0, 0)),
+            superclass: Identifier::new("Collection", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy =
+            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Collection subclass should be value type (chain reaches Object)"
+        );
+    }
+
+    #[test]
+    fn test_is_actor_class_integer_subclass_is_value_type() {
+        // Integer is a sealed built-in extending Object — subclass should be value type.
+        // (Sealed enforcement is separate; codegen should still route correctly.)
+        let class = ClassDefinition {
+            name: Identifier::new("MyInt", Span::new(0, 0)),
+            superclass: Identifier::new("Integer", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy =
+            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Integer subclass should be value type (chain reaches Object)"
+        );
+    }
 }
