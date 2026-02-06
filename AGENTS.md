@@ -1435,6 +1435,8 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
 | `review-code` | `/review-code` | Review current branch changes vs main |
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
+| `draft-adr` | `/draft-adr` | Research a problem and draft an Architecture Decision Record |
+| `plan-adr` | `/plan-adr` | Break an accepted ADR into implementation issues with an Epic |
 | `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
 | `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
 | `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
