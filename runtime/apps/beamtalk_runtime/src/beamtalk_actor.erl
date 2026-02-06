@@ -379,10 +379,6 @@ dispatch(Selector, Args, Self, State) ->
         isAlive when Args =:= [] ->
             %% Actor is alive if it's processing this message
             {reply, true, State};
-        monitor when Args =:= [] ->
-            %% Create a monitor on this actor's process
-            Ref = erlang:monitor(process, self()),
-            {reply, Ref, State};
         respondsTo when length(Args) =:= 1 ->
             %% Check if object responds to a selector
             [CheckSelector] = Args,

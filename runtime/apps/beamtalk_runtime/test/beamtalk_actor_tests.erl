@@ -968,14 +968,21 @@ monitor_sync_returns_reference_test() ->
     erlang:demonitor(Ref, [flush]),
     gen_server:stop(Counter).
 
-monitor_via_dispatch_returns_reference_test() ->
+monitor_delivers_down_on_actor_death_test() ->
     {ok, Counter} = test_counter:start_link(0),
     
-    Ref = gen_server:call(Counter, {monitor, []}),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, monitor, [], Future),
+    Ref = beamtalk_future:await(Future),
     ?assert(is_reference(Ref)),
     
-    erlang:demonitor(Ref, [flush]),
-    gen_server:stop(Counter).
+    %% Kill the actor and verify we get a DOWN message
+    gen_server:stop(Counter, normal, 1000),
+    receive
+        {'DOWN', Ref, process, Counter, normal} -> ok
+    after 1000 ->
+        ?assert(false)
+    end.
 
 async_message_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
