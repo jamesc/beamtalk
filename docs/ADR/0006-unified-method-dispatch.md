@@ -209,7 +209,7 @@ Invoke Object's method implementation
 **Bounded contexts:**
 
 - **Compilation Context**: codegen emits fast-path cases + a single runtime fallback call (no runtime knowledge).
-- **Runtime Context**: method lookup and hierarchy walking live in a dispatch domain service (e.g., `beamtalk_actor:super_dispatch/4`) and the class registry (`beamtalk_object_class`).
+- **Runtime Context**: method lookup and hierarchy walking live in a dispatch domain service (`beamtalk_dispatch`) and the class registry (`beamtalk_object_class`).
 - **Language Service Context**: completions/reflection reuse the same hierarchy lookup to avoid drift.
 
 **Ubiquitous language:** selector, method table, superclass chain, class registry, dispatch, DNU. Avoid generic “utils”; prefer domain service names in runtime.
@@ -228,7 +228,7 @@ Invoke Object's method implementation
            <'getValue'> -> ...  %% Fast path - local method
            <OtherSelector> when 'true' ->
                %% NEW: Try hierarchy walk before DNU
-               case beamtalk_actor:super_dispatch(State, OtherSelector, Args, 'Counter') of
+               case beamtalk_dispatch:super(OtherSelector, Args, Self, State, 'Counter') of
                    {'reply', Result, NewState} -> {'reply', Result, NewState};
                    {error, {not_found, _}} ->
                        %% NOW try doesNotUnderstand
@@ -237,9 +237,9 @@ Invoke Object's method implementation
        end
    ```
 
-**Runtime helper** `beamtalk_actor:super_dispatch/4`:
+**Runtime helper** `beamtalk_dispatch:super/5`:
 ```erlang
-super_dispatch(State, Selector, Args, CurrentClass) ->
+super(Selector, Args, Self, State, CurrentClass) ->
     %% Look up superclass
     case whereis_class(CurrentClass) of
         undefined -> {error, {class_not_found, CurrentClass}};
@@ -254,7 +254,7 @@ super_dispatch(State, Selector, Args, CurrentClass) ->
                             invoke_super_method(SuperName, Selector, Args, State);
                         false ->
                             %% Recurse up the chain
-                            super_dispatch(State, Selector, Args, SuperName)
+                            super(Selector, Args, Self, State, SuperName)
                     end
             end
     end.
@@ -310,7 +310,7 @@ For **sealed hierarchies** (Object → Actor is unlikely to change), inline inhe
         <'respondsTo:'> -> ...
         
         %% Runtime hierarchy walk for unknown
-        <OtherSelector> -> beamtalk_actor:super_dispatch(...)
+        <OtherSelector> -> beamtalk_dispatch:super(...)
     end
 ```
 

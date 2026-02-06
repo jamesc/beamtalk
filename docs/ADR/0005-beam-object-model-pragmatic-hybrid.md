@@ -35,7 +35,7 @@ This creates tension: Should we try to emulate Smalltalk's object model fully (s
 
 | Smalltalk Feature | BEAM Support | Beamtalk Implementation |
 |-------------------|--------------|-------------------------|
-| Classes as objects | ✅ Full | Maps with metaclass protocol, registered in ETS |
+| Classes as objects | ✅ Full | Maps with metaclass protocol, registered via process registry |
 | Methods as objects | ✅ Full | Wrapped funs with metadata (selector, arity, source) |
 | Blocks as closures | ✅ Full | Erlang funs (first-class, can capture variables) |
 | Objects with identity | ✅ Full | Actors: processes with pids + `#beamtalk_object{}` record<br>Values: tuples/maps copied by value |
