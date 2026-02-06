@@ -201,4 +201,28 @@ mod tests {
             "Should stop at .git, not escape to parent .beamtalk"
         );
     }
+
+    #[test]
+    fn test_discover_nonexistent_start_dir() {
+        // A path that doesn't exist should fall back to itself
+        let tmp = TempDir::new().unwrap();
+        let nonexistent = tmp.path().join("does").join("not").join("exist");
+
+        let root = discover_project_root(&nonexistent);
+        assert_eq!(root, nonexistent, "Should fall back to start_dir");
+    }
+
+    #[test]
+    fn test_discover_start_dir_is_file_parent() {
+        // Start dir contains a marker at the same level
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::File::create(project.join("beamtalk.toml")).unwrap();
+        fs::create_dir(project.join(".git")).unwrap();
+
+        // beamtalk.toml should win over .git at the same level
+        let root = discover_project_root(&project);
+        assert_eq!(root, project);
+    }
 }
