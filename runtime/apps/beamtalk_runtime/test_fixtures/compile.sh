@@ -8,7 +8,8 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$0")"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+FIXTURES_DIR="$REPO_ROOT/runtime/apps/beamtalk_runtime/test_fixtures"
 
 cd "$REPO_ROOT"
 
@@ -17,7 +18,7 @@ cargo build --bin beamtalk --quiet 2>/dev/null || cargo build --bin beamtalk --q
 
 # Clean old artifacts to ensure fresh compilation
 rm -f tests/e2e/fixtures/build/counter.beam tests/e2e/fixtures/build/counter.core
-rm -f runtime/test_fixtures/build/logging_counter.beam runtime/test_fixtures/build/logging_counter.core
+rm -f "$FIXTURES_DIR/build/logging_counter.beam" "$FIXTURES_DIR/build/logging_counter.core"
 
 # Build counter fixture (using E2E fixture - BT-239)
 if ! ./target/debug/beamtalk build tests/e2e/fixtures/counter.bt >/dev/null; then
@@ -37,18 +38,18 @@ for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
 done
 
 # Build logging_counter fixture (BT-108 - super keyword tests)
-if ! ./target/debug/beamtalk build runtime/test_fixtures/logging_counter.bt >/dev/null; then
+if ! ./target/debug/beamtalk build "$FIXTURES_DIR/logging_counter.bt" >/dev/null; then
     echo "✗ Failed to compile logging_counter.bt"
     exit 1
 fi
 
 # Verify build succeeded
-if [ ! -f runtime/test_fixtures/build/logging_counter.beam ]; then
+if [ ! -f "$FIXTURES_DIR/build/logging_counter.beam" ]; then
     echo "✗ Failed to compile logging_counter.bt (no .beam output)"
     exit 1
 fi
 
 # Copy to rebar3 build directories
 for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-    [ -d "$build_dir" ] && cp runtime/test_fixtures/build/logging_counter.beam "$build_dir/"
+    [ -d "$build_dir" ] && cp "$FIXTURES_DIR/build/logging_counter.beam" "$build_dir/"
 done
