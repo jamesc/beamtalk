@@ -55,6 +55,44 @@ parse_request_missing_expression_test() ->
     Result = beamtalk_repl_server:parse_request(Request),
     ?assertMatch({error, {invalid_request, _}}, Result).
 
+%%% New protocol format (op) parsing tests
+
+parse_request_op_eval_test() ->
+    Request = <<"{\"op\": \"eval\", \"id\": \"msg-001\", \"code\": \"1 + 2\"}">>,
+    ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_clear_test() ->
+    Request = <<"{\"op\": \"clear\", \"id\": \"msg-002\"}">>,
+    ?assertEqual({clear_bindings}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_bindings_test() ->
+    Request = <<"{\"op\": \"bindings\"}">>,
+    ?assertEqual({get_bindings}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_load_file_test() ->
+    Request = <<"{\"op\": \"load-file\", \"path\": \"examples/counter.bt\"}">>,
+    ?assertEqual({load_file, "examples/counter.bt"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_actors_test() ->
+    Request = <<"{\"op\": \"actors\"}">>,
+    ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_modules_test() ->
+    Request = <<"{\"op\": \"modules\"}">>,
+    ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_kill_test() ->
+    Request = <<"{\"op\": \"kill\", \"actor\": \"<0.123.0>\"}">>,
+    ?assertEqual({kill_actor, "<0.123.0>"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_unload_test() ->
+    Request = <<"{\"op\": \"unload\", \"module\": \"Counter\"}">>,
+    ?assertEqual({unload_module, "Counter"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_unknown_test() ->
+    Request = <<"{\"op\": \"foobar\"}">>,
+    ?assertMatch({error, {unknown_op, <<"foobar">>}}, beamtalk_repl_server:parse_request(Request)).
+
 %%% Response formatting tests
 
 format_response_integer_test() ->
