@@ -530,7 +530,6 @@ When you need verbose output for investigation:
 
 ```bash
 # Rust - see all test names
-cd /workspaces/infra-models
 cargo test --all-targets
 
 # Erlang - see all test names  

@@ -43,9 +43,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache cargo registry
@@ -144,9 +144,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/rebar.lock') }}-otp-27.0-
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache cargo registry

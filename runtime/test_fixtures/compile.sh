@@ -20,11 +20,14 @@ rm -f tests/e2e/fixtures/build/counter.beam tests/e2e/fixtures/build/counter.cor
 rm -f runtime/test_fixtures/build/logging_counter.beam runtime/test_fixtures/build/logging_counter.core
 
 # Build counter fixture (using E2E fixture - BT-239)
-./target/debug/beamtalk build tests/e2e/fixtures/counter.bt >/dev/null 2>&1
+if ! ./target/debug/beamtalk build tests/e2e/fixtures/counter.bt >/dev/null; then
+    echo "✗ Failed to compile counter.bt"
+    exit 1
+fi
 
 # Verify build succeeded
 if [ ! -f tests/e2e/fixtures/build/counter.beam ]; then
-    echo "✗ Failed to compile counter.bt"
+    echo "✗ Failed to compile counter.bt (no .beam output)"
     exit 1
 fi
 
@@ -34,11 +37,14 @@ for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
 done
 
 # Build logging_counter fixture (BT-108 - super keyword tests)
-./target/debug/beamtalk build runtime/test_fixtures/logging_counter.bt >/dev/null 2>&1
+if ! ./target/debug/beamtalk build runtime/test_fixtures/logging_counter.bt >/dev/null; then
+    echo "✗ Failed to compile logging_counter.bt"
+    exit 1
+fi
 
 # Verify build succeeded
 if [ ! -f runtime/test_fixtures/build/logging_counter.beam ]; then
-    echo "✗ Failed to compile logging_counter.bt"
+    echo "✗ Failed to compile logging_counter.bt (no .beam output)"
     exit 1
 fi
 
