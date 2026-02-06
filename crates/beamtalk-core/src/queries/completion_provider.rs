@@ -50,19 +50,26 @@ use std::collections::HashSet;
 /// ```
 /// use beamtalk_core::queries::completion_provider::compute_completions;
 /// use beamtalk_core::language_service::Position;
+/// use beamtalk_core::semantic_analysis::ClassHierarchy;
 /// use beamtalk_core::source_analysis::{lex_with_eof, parse};
 ///
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
 /// let (module, _) = parse(tokens);
+/// let hierarchy = ClassHierarchy::build(&module).0;
 ///
-/// let completions = compute_completions(&module, source, Position::new(0, 0));
+/// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy);
 /// assert!(!completions.is_empty());
 /// // Should include keywords like "self", "true", "false"
 /// assert!(completions.iter().any(|c| c.label == "self"));
 /// ```
 #[must_use]
-pub fn compute_completions(module: &Module, source: &str, position: Position) -> Vec<Completion> {
+pub fn compute_completions(
+    module: &Module,
+    source: &str,
+    position: Position,
+    hierarchy: &ClassHierarchy,
+) -> Vec<Completion> {
     // Validate position is within bounds
     if position.to_offset(source).is_none() {
         return Vec::new();
@@ -77,7 +84,7 @@ pub fn compute_completions(module: &Module, source: &str, position: Position) ->
     add_identifier_completions(module, &mut completions);
 
     // Add message completions from class hierarchy (includes inherited methods)
-    add_hierarchy_completions(module, &mut completions);
+    add_hierarchy_completions(module, hierarchy, &mut completions);
 
     // Remove duplicates
     deduplicate_completions(&mut completions);
@@ -184,11 +191,14 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
 
 /// Adds method completions from the class hierarchy.
 ///
-/// Uses the `ClassHierarchy` to provide all available methods (local + inherited)
-/// for classes defined in the module. Also includes common built-in methods
-/// from Object and other base classes for general use.
-fn add_hierarchy_completions(module: &Module, completions: &mut Vec<Completion>) {
-    let hierarchy = ClassHierarchy::build(module).0;
+/// Uses the provided `ClassHierarchy` to include all available methods
+/// (local + inherited) for classes defined in the module, plus common
+/// Object/ProtoObject methods for general use.
+fn add_hierarchy_completions(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    completions: &mut Vec<Completion>,
+) {
     let mut seen = HashSet::new();
 
     // Add methods from classes defined in this module (local + inherited)
@@ -247,13 +257,17 @@ mod tests {
     use super::*;
     use crate::source_analysis::{lex_with_eof, parse};
 
-    #[test]
-    fn compute_completions_includes_keywords() {
-        let source = "x := 42";
+    /// Parse source and compute completions with a fresh hierarchy.
+    fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0;
+        compute_completions(&module, source, position, &hierarchy)
+    }
 
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+    #[test]
+    fn compute_completions_includes_keywords() {
+        let completions = completions_at("x := 42", Position::new(0, 0));
 
         assert!(completions.iter().any(|c| c.label == "self"));
         assert!(completions.iter().any(|c| c.label == "true"));
@@ -262,11 +276,7 @@ mod tests {
 
     #[test]
     fn compute_completions_includes_identifiers() {
-        let source = "x := 42.\ny := x";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(1, 0));
+        let completions = completions_at("x := 42.\ny := x", Position::new(1, 0));
 
         assert!(completions.iter().any(|c| c.label == "x"));
         assert!(completions.iter().any(|c| c.label == "y"));
@@ -274,11 +284,7 @@ mod tests {
 
     #[test]
     fn compute_completions_includes_messages() {
-        let source = "";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("", Position::new(0, 0));
 
         // Should include Object/ProtoObject methods
         assert!(completions.iter().any(|c| c.label == "isNil"));
@@ -288,11 +294,7 @@ mod tests {
 
     #[test]
     fn compute_completions_no_duplicates() {
-        let source = "x := 1.\nx := 2";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("x := 1.\nx := 2", Position::new(0, 0));
 
         let x_count = completions.iter().filter(|c| c.label == "x").count();
         assert_eq!(x_count, 1);
@@ -300,12 +302,8 @@ mod tests {
 
     #[test]
     fn compute_completions_with_invalid_position() {
-        let source = "x := 42";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
         // Position beyond end of file
-        let completions = compute_completions(&module, source, Position::new(100, 100));
+        let completions = completions_at("x := 42", Position::new(100, 100));
 
         // Should return empty vec for out-of-bounds position
         assert!(completions.is_empty());
@@ -313,11 +311,7 @@ mod tests {
 
     #[test]
     fn compute_completions_with_block_expressions() {
-        let source = "block := [:x | x + 1]";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("block := [:x | x + 1]", Position::new(0, 0));
 
         // Should include both the block variable and parameter
         assert!(completions.iter().any(|c| c.label == "block"));
@@ -326,11 +320,7 @@ mod tests {
 
     #[test]
     fn compute_completions_with_message_sends() {
-        let source = "obj doSomething";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("obj doSomething", Position::new(0, 0));
 
         // Should include the identifier
         assert!(completions.iter().any(|c| c.label == "obj"));
@@ -338,11 +328,7 @@ mod tests {
 
     #[test]
     fn compute_completions_empty_source() {
-        let source = "";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("", Position::new(0, 0));
 
         // Should still return keywords and common messages
         assert!(!completions.is_empty());
@@ -364,11 +350,7 @@ mod tests {
 
     #[test]
     fn hierarchy_completions_include_object_methods() {
-        let source = "";
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-
-        let completions = compute_completions(&module, source, Position::new(0, 0));
+        let completions = completions_at("", Position::new(0, 0));
 
         // Should include Object methods like isNil, class, respondsTo:
         assert!(completions.iter().any(|c| c.label == "isNil"));

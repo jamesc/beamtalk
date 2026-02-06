@@ -117,6 +117,8 @@ struct FileData {
     module: Module,
     /// Parse diagnostics.
     diagnostics: Vec<Diagnostic>,
+    /// Cached class hierarchy (built-in + module classes).
+    class_hierarchy: crate::semantic_analysis::ClassHierarchy,
 }
 
 impl SimpleLanguageService {
@@ -308,6 +310,7 @@ impl LanguageService for SimpleLanguageService {
 
         let tokens = lex_with_eof(&content);
         let (module, diagnostics) = parse(tokens);
+        let class_hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module).0;
 
         self.files.insert(
             file,
@@ -315,6 +318,7 @@ impl LanguageService for SimpleLanguageService {
                 source: content,
                 module,
                 diagnostics,
+                class_hierarchy,
             },
         );
     }
@@ -343,6 +347,7 @@ impl LanguageService for SimpleLanguageService {
             &file_data.module,
             &file_data.source,
             position,
+            &file_data.class_hierarchy,
         )
     }
 

@@ -201,8 +201,11 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 pub fn generate(module: &Module) -> Result<String> {
     let mut generator = CoreErlangGenerator::new("beamtalk_module");
 
+    // Build hierarchy once for the entire generation (ADR 0006)
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module) {
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?;
     } else {
         generator.generate_value_type_module(module)?;
@@ -225,8 +228,11 @@ pub fn generate(module: &Module) -> Result<String> {
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
 
+    // Build hierarchy once for the entire generation (ADR 0006)
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module) {
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?;
     } else {
         generator.generate_value_type_module(module)?;
@@ -444,11 +450,11 @@ impl CoreErlangGenerator {
     /// - `true` if class inherits from Actor anywhere in the chain
     /// - `false` if class inherits only from Object/ProtoObject (value type)
     /// - `true` if module contains no class (backward compatibility for REPL)
-    fn is_actor_class(module: &Module) -> bool {
+    fn is_actor_class(
+        module: &Module,
+        hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
+    ) -> bool {
         if let Some(class) = module.classes.first() {
-            // Use ClassHierarchy for full inheritance chain resolution (ADR 0006)
-            let hierarchy =
-                crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
             let chain = hierarchy.superclass_chain(class.name.name.as_str());
             // A class is an actor if "Actor" appears anywhere in its superclass chain,
             // or if the class itself IS Actor
