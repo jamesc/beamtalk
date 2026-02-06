@@ -1,6 +1,6 @@
 ---
-name: merge-resolve
-description: Update main branch, merge into current branch, and resolve conflicts. Use when user types /merge-resolve or asks to merge main/resolve conflicts.
+name: resolve-merge
+description: Update main branch, merge into current branch, and resolve conflicts. Use when user types /resolve-merge or asks to merge main/resolve conflicts.
 ---
 
 # Merge Resolve Workflow
@@ -13,48 +13,33 @@ When activated, execute this workflow to update main and merge it into the curre
    ```bash
    git status --porcelain
    ```
-   If there are changes, commit or stash them first.
+   If there are uncommitted changes, commit them first (do not stash — stash pop after merge can introduce additional conflicts).
 
 2. **Get current branch name**:
    ```bash
    git branch --show-current
    ```
-   Save this to return to later.
+   Verify we're NOT on `main`. If on main, stop and tell the user.
 
-3. **Fetch latest from origin**:
+3. **Fetch and merge origin/main** (no branch switch needed):
    ```bash
    git fetch origin
-   ```
-
-4. **Update main branch**:
-   ```bash
-   git checkout main
-   git pull origin main
-   ```
-
-5. **Return to feature branch**:
-   ```bash
-   git checkout <feature-branch>
-   ```
-
-6. **Attempt merge**:
-   ```bash
-   git merge main
+   git merge origin/main
    ```
    
    If merge succeeds without conflicts:
-   - Run tests to verify everything still works
-   - Push the merge commit
-   - Report success and skip to step 11
+   - Run full CI to verify: `just ci`
+   - Push the merge commit: `git push origin HEAD`
+   - Report success and skip to step 8
 
-7. **If conflicts occur, analyze them**:
+4. **If conflicts occur, analyze them**:
    ```bash
    git status
    git diff --name-only --diff-filter=U
    ```
    List all files with conflicts.
 
-8. **For each conflicted file**:
+5. **For each conflicted file**:
    - Read the file to see conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
    - Understand what changed in both branches
    - Resolve the conflict by:
@@ -65,21 +50,27 @@ When activated, execute this workflow to update main and merge it into the curre
    - Remove conflict markers
    - Stage the resolved file: `git add <file>`
 
-9. **Verify resolution**:
+6. **Verify resolution**:
    ```bash
    just ci
    ```
    This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
    
    If tests fail, review and fix the merge resolution.
+   
+   If snapshot tests fail due to intentional changes from main:
+   ```bash
+   cargo insta accept
+   ```
+   Then re-run `just ci` to confirm.
 
-10. **Complete the merge**:
+7. **Complete the merge**:
     ```bash
     git commit  # Complete the merge commit
-    git push
+    git push origin HEAD
     ```
 
-11. **Report summary**:
+8. **Report summary**:
     - List files that had conflicts (if any)
     - Describe how each conflict was resolved
     - Confirm all tests pass
@@ -126,10 +117,12 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 
 ## Edge Cases
 
-- **Binary conflicts** (Cargo.lock): `git checkout --theirs Cargo.lock && cargo build`
+- **Cargo.lock conflicts**: `git checkout --theirs Cargo.lock && cargo build` (cargo will add any missing deps from feature branch)
+- **rebar.lock conflicts**: `cd runtime && git checkout --theirs rebar.lock && rebar3 upgrade --all` to regenerate
 - **Deleted files**: Determine if deletion from main is intentional; if so, `git rm <file>`
 - **Renamed files**: Git usually handles automatically; if not, manually apply feature changes to renamed file
 - **Merge commit already exists**: Skip merge step, just report current state
+- **Snapshot test failures**: Run `cargo insta accept` if changes from main are intentional, then re-verify
 
 ## Error Handling
 

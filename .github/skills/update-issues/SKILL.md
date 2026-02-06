@@ -117,6 +117,7 @@ When labels are missing, infer from context:
 - Title starts with "Refactor", "Clean up" → `Refactor`
 - Title starts with "Document" → `Documentation`
 - Title contains "Research", "Investigate" → `Research`
+- Title contains "syntax", "keyword", "operator", "language feature" → `Language Feature`
 
 **Size:**
 - Simple, single file → `S`
@@ -269,6 +270,7 @@ Issue BT-21 "Implement String class core API"
 - "Refactor", "Clean up" → `Refactor`
 - "Document", "Add docs" → `Documentation`
 - "Research", "Investigate" → `Research`
+- "syntax", "keyword", "operator", "language feature" → `Language Feature`
 
 ### Size (by scope)
 - Single file, simple change → `S`

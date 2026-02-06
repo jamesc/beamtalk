@@ -43,13 +43,13 @@ Every issue should have an area label to identify which component is affected:
 
 | Area | Description | Key Directories |
 |------|-------------|----------------|
-| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/parse/` |
+| `class-system` | Class definition, parsing, codegen, and runtime | `crates/beamtalk-core/src/ast.rs`, `crates/beamtalk-core/src/source_analysis/` |
 | `stdlib` | Standard library: collections, primitives, strings | `lib/` |
-| `repl` | REPL backend and CLI interaction | `runtime/src/beamtalk_repl.erl`, `crates/beamtalk-cli/src/repl/` |
+| `repl` | REPL backend and CLI interaction | `runtime/apps/beamtalk_runtime/src/beamtalk_repl*.erl`, `crates/beamtalk-cli/src/repl/` |
 | `cli` | Command-line interface and build tooling | `crates/beamtalk-cli/` |
-| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/erlang.rs` |
-| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/src/` |
-| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/parse/`, `crates/beamtalk-core/src/ast.rs` |
+| `codegen` | Code generation to Core Erlang/BEAM | `crates/beamtalk-core/src/codegen/` |
+| `runtime` | Erlang runtime: actors, futures, OTP integration | `runtime/apps/beamtalk_runtime/src/` |
+| `parser` | Lexer, parser, AST | `crates/beamtalk-core/src/source_analysis/`, `crates/beamtalk-core/src/ast.rs` |
 
 ## Optional Fields
 
@@ -87,8 +87,8 @@ Acceptance Criteria:
 - [ ] All tokens include source span
 
 Files to Modify:
-- crates/beamtalk-core/src/parse/token.rs
-- crates/beamtalk-core/src/parse/lexer.rs
+- crates/beamtalk-core/src/source_analysis/token.rs
+- crates/beamtalk-core/src/source_analysis/lexer.rs
 
 Dependencies: None
 
@@ -121,7 +121,7 @@ Always set one of these labels:
   "team": "BT",
   "assignee": "jamesc.000@gmail.com",
   "body": "Context:\n...\n\nAcceptance Criteria:\n- [ ] ...",
-  "labels": ["agent-ready", "Language Feature", "parser"],
+  "labels": ["agent-ready", "Language Feature", "parser", "M"],
   "priority": 3
 }
 ```
@@ -130,12 +130,14 @@ Always set one of these labels:
 - One **Agent State** label: `agent-ready`, `needs-spec`, or `blocked`
 - One **Issue Type** label: `Feature`, `Bug`, `Improvement`, etc.
 - One **Item Area** label: `parser`, `codegen`, `stdlib`, `repl`, `cli`, `runtime`, or `class-system`
+- One **Item Size** label: `S`, `M`, `L`, or `XL`
 
-After creation, use GraphQL to set estimate and project:
+After creation, add size label if not included in initial create:
 ```json
 {
-  "action": "graphql",
-  "graphql": "mutation { issueUpdate(id: \"<issue-id>\", input: { estimate: 3 }) { success } }"
+  "action": "update",
+  "id": "BT-XX",
+  "labels": ["agent-ready", "Language Feature", "parser", "M"]
 }
 ```
 
