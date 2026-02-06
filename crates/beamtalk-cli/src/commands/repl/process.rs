@@ -100,12 +100,21 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         stdlib_beam_dir.to_str().unwrap_or("").to_string(),
     ];
 
-    // Add node name if specified (use -sname for short names without domain)
+    // Add node name if specified
     if let Some(name) = node_name {
-        // Use -sname for names without dots, -name for FQDN
-        if name.contains('.') && !name.ends_with("@localhost") {
+        if let Some((local, host)) = name.split_once('@') {
+            // Full node name with host — always use -name
+            if local.is_empty() || host.is_empty() {
+                return Err(miette!(
+                    "Invalid node name '{name}': expected format 'name@host'"
+                ));
+            }
+            args.push("-name".to_string());
+        } else if name.contains('.') {
+            // FQDN without @ — use -name
             args.push("-name".to_string());
         } else {
+            // Simple short name — use -sname
             args.push("-sname".to_string());
         }
         args.push(name.clone());
