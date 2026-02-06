@@ -7,7 +7,7 @@
 //!
 //! This module generates the OTP `gen_server` boilerplate for Beamtalk actors:
 //! - Module structure with exports and attributes
-//! - `start_link/0`, `spawn/0`, `spawn/1` functions
+//! - `start_link/1`, `spawn/0`, `spawn/1` functions
 //! - `init/1` callback
 //! - `handle_cast/2` and `handle_call/3` callbacks
 //! - `code_change/3` callback for hot code reloading

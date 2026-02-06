@@ -193,7 +193,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates the dispatch/3 function for message routing.
+    /// Generates the dispatch/4 function for message routing.
     ///
     /// This function is complex because it handles both legacy expression-based modules
     /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.

@@ -23,6 +23,7 @@ impl CoreErlangGenerator {
     ///
     /// - `length` (0 args) → `string:length(String)`
     /// - `isEmpty` (0 args) → `string:length(String) =:= 0`
+    /// - `size` (0 args) → dispatched via `beamtalk_primitive:send`
     pub(in crate::codegen::core_erlang) fn try_generate_string_message(
         &mut self,
         receiver: &Expression,

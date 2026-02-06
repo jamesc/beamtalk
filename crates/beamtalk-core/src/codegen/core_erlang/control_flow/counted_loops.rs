@@ -101,7 +101,8 @@ impl CoreErlangGenerator {
         // BT-153: Only include field_writes for loop parameters (actor state),
         // local_writes are handled by updating StateAcc in the body via maps:put
         let analysis = block_analysis::analyze_block(body);
-        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        mutated_vars.sort();
 
         // Generate: let N = <receiver> in
         //           letrec 'repeat'/N+1 = fun (I, Var1, Var2, ..., StateAcc) ->
@@ -277,7 +278,8 @@ impl CoreErlangGenerator {
         // Analyze which variables are mutated
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
-        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        mutated_vars.sort();
 
         // Generate: let Start = <receiver> in let End = <limit> in
         //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->
@@ -573,7 +575,8 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Analyze which variables are mutated
         let analysis = block_analysis::analyze_block(body);
-        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        mutated_vars.sort();
 
         // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
         //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->

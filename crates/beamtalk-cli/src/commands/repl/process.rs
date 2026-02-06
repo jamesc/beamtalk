@@ -63,6 +63,15 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     // Build the eval command that configures the runtime via application:set_env
     // This allows runtime to read port from application environment
     let eval_cmd = if let Some(name) = node_name {
+        // Validate node name to prevent injection into Erlang eval string
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '@' || c == '.')
+        {
+            return Err(miette!(
+                "Invalid node name '{name}': must contain only alphanumeric characters, underscores, hyphens, dots, or @"
+            ));
+        }
         format!(
             "application:set_env(beamtalk_runtime, repl_port, {port}), \
              application:set_env(beamtalk_runtime, node_name, '{name}'), \

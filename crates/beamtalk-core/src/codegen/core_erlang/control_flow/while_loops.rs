@@ -83,7 +83,8 @@ impl CoreErlangGenerator {
         // Analyze which variables are mutated
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
-        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        mutated_vars.sort();
 
         // Generate: letrec 'while'/N = fun (Var1, Var2, ..., StateAcc) ->
         //     let _CondFun = <condition> in
@@ -281,7 +282,8 @@ impl CoreErlangGenerator {
         // Same as while_true but with false/true swapped in the case
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
-        let mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
+        mutated_vars.sort();
 
         let arity = mutated_vars.len() + 1;
         write!(self.output, "letrec 'while'/{arity} = fun (")?;
