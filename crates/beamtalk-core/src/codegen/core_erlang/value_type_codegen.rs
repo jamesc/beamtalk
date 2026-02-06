@@ -89,6 +89,7 @@ impl CoreErlangGenerator {
         writeln!(self.output)?;
 
         // Generate new/0 - creates instance with default field values
+        self.current_class_name = Some(class.name.name.to_string());
         self.generate_value_type_new(class)?;
         writeln!(self.output)?;
 
@@ -180,9 +181,12 @@ impl CoreErlangGenerator {
 
         // Bind parameters in scope
         self.push_scope();
+        // BT-295: Track method params for @primitive codegen
+        self.current_method_params.clear();
         for param in &method.parameters {
             let core_var = variable_context::VariableContext::to_core_var(&param.name);
             self.bind_var(&param.name, &core_var);
+            self.current_method_params.push(core_var);
         }
 
         // Generate method body expressions

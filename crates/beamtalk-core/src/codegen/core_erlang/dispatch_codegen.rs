@@ -207,6 +207,15 @@ impl CoreErlangGenerator {
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
+        // BT-295 / ADR 0007 Phase 3: Pragma-driven dispatch is disabled at call sites
+        // until we have static type information. Without knowing the receiver's type,
+        // routing directly to a specific primitive module (e.g., beamtalk_string:dispatch/3)
+        // is unsafe — those modules assume a specific representation and will crash on
+        // wrong-typed receivers. The binding table infrastructure is kept for:
+        // 1. generate_primitive() — stdlib method body compilation (knows class context)
+        // 2. Future phases with static typing can re-enable call-site optimization
+        // See PR #260 review discussion for rationale.
+
         // BT-223: Runtime dispatch - check if receiver is actor or primitive
         //
         // For actors (beamtalk_object records): Use async dispatch with futures
