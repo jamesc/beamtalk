@@ -4092,8 +4092,7 @@ end
             span: Span::new(0, 0),
             leading_comments: vec![],
         };
-        let hierarchy =
-            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
     }
 
@@ -4115,8 +4114,7 @@ end
             span: Span::new(0, 0),
             leading_comments: vec![],
         };
-        let hierarchy =
-            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         assert!(
             !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
             "Collection subclass should be value type (chain reaches Object)"
@@ -4142,8 +4140,7 @@ end
             span: Span::new(0, 0),
             leading_comments: vec![],
         };
-        let hierarchy =
-            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         assert!(
             !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
             "Integer subclass should be value type (chain reaches Object)"
