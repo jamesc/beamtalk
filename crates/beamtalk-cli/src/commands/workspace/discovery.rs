@@ -38,37 +38,33 @@ const PROJECT_MARKERS: &[&str] = &[".beamtalk", "beamtalk.toml", ".git"];
 /// Returns the first directory containing a marker, or `start_dir` if
 /// no marker is found.
 ///
-/// Beamtalk-specific markers (`.beamtalk/`, `beamtalk.toml`) take priority
-/// over generic markers (`.git/`). If a Beamtalk marker is found at a
-/// different level than `.git/`, the Beamtalk marker wins.
+/// At each directory level, Beamtalk-specific markers (`.beamtalk/`,
+/// `beamtalk.toml`) take priority over generic markers (`.git/`).
+/// The search stops at the innermost directory containing any marker.
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
-    let mut best_match: Option<(PathBuf, usize)> = None; // (path, marker_priority)
-
     let mut current = start_dir.to_path_buf();
     loop {
-        for (priority, marker) in PROJECT_MARKERS.iter().enumerate() {
+        // Check beamtalk-specific markers first (highest priority)
+        for marker in &PROJECT_MARKERS[..PROJECT_MARKERS.len() - 1] {
             if current.join(marker).exists() {
                 debug!(
                     marker = %marker,
-                    dir = %current.display(),
-                    "Found project marker"
+                    root = %current.display(),
+                    "Found Beamtalk project root"
                 );
-                match &best_match {
-                    Some((_, best_priority)) if *best_priority <= priority => {
-                        // Already have a higher-priority match
-                    }
-                    _ => {
-                        best_match = Some((current.clone(), priority));
-                        // If we found a beamtalk-specific marker, stop immediately
-                        if priority < PROJECT_MARKERS.len() - 1 {
-                            debug!(
-                                root = %current.display(),
-                                "Using Beamtalk-specific project root"
-                            );
-                            return current;
-                        }
-                    }
-                }
+                return current;
+            }
+        }
+
+        // Check generic markers (.git)
+        if let Some(marker) = PROJECT_MARKERS.last() {
+            if current.join(marker).exists() {
+                debug!(
+                    marker = %marker,
+                    root = %current.display(),
+                    "Found project root"
+                );
+                return current;
             }
         }
 
@@ -77,16 +73,11 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
         }
     }
 
-    if let Some((path, _)) = best_match {
-        debug!(root = %path.display(), "Using discovered project root");
-        path
-    } else {
-        debug!(
-            dir = %start_dir.display(),
-            "No project markers found, using start directory"
-        );
-        start_dir.to_path_buf()
-    }
+    debug!(
+        dir = %start_dir.display(),
+        "No project markers found, using start directory"
+    );
+    start_dir.to_path_buf()
 }
 
 #[cfg(test)]
@@ -190,5 +181,24 @@ mod tests {
 
         let root = discover_project_root(&subdir);
         assert_eq!(root, project, "Should find project with both markers");
+    }
+
+    #[test]
+    fn test_git_not_escaped_by_beamtalk_in_parent() {
+        // Regression test: .beamtalk in parent should NOT override .git in project.
+        // User has .beamtalk/ in home dir, .git in their project.
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let project = home.join("project");
+        let subdir = project.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::create_dir(home.join(".beamtalk")).unwrap();
+        fs::create_dir(project.join(".git")).unwrap();
+
+        let root = discover_project_root(&subdir);
+        assert_eq!(
+            root, project,
+            "Should stop at .git, not escape to parent .beamtalk"
+        );
     }
 }
