@@ -42,8 +42,17 @@ git --no-pager diff --shortstat $(git merge-base HEAD origin/main)..HEAD
 **Always run all 3 passes for:**
 - Changes touching codegen AND runtime (contract risk)
 - New language features (parser + codegen + runtime)
-- Security-sensitive changes (auth, input validation, error handling)
 - Changes the user explicitly asks for deep review on
+- **Any change touching these security-sensitive components:**
+
+| Component | Files | Risk |
+|-----------|-------|------|
+| **REPL server** | `beamtalk_repl_server.erl`, `beamtalk_repl.erl` | TCP listener, accepts connections, spawns per-client processes |
+| **REPL eval** | `beamtalk_repl_eval.erl` | Compiles & executes user code, file I/O |
+| **Workspace persistence** | `beamtalk_workspace_meta.erl` | Reads/writes files from user paths |
+| **Atom creation** | `beamtalk_object_class.erl`, `beamtalk_repl_eval.erl` | `list_to_atom` from user input (DoS risk) |
+| **File path handling** | `beamtalk_repl_eval.erl`, CLI file loading | Path traversal, unsanitized user paths |
+| **Process spawning** | `beamtalk_actor.erl`, `beamtalk_repl.erl` | Resource exhaustion, unbounded process creation |
 
 **The user can override:** `/review-code --deep` forces all 3 passes regardless of size.
 
