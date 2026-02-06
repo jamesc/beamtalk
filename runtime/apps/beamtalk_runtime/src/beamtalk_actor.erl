@@ -225,15 +225,28 @@ async_send(ActorPid, monitor, [], FuturePid) ->
     beamtalk_future:resolve(FuturePid, Ref),
     ok;
 async_send(ActorPid, Selector, Args, FuturePid) ->
+    %% Monitor the actor to detect death during the send window.
+    %% This narrows the TOCTOU race: if the actor dies between the
+    %% is_process_alive check and when gen_server processes the cast,
+    %% the DOWN message is already in our mailbox and we catch it.
+    MonRef = erlang:monitor(process, ActorPid),
     case is_process_alive(ActorPid) of
         true ->
-            gen_server:cast(ActorPid, {Selector, Args, FuturePid});
+            gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
+            %% Non-blocking check: did actor die between cast and now?
+            receive
+                {'DOWN', MonRef, process, ActorPid, _Reason} ->
+                    %% Actor died - reject Future (no-op if already resolved)
+                    {error, Error} = actor_dead_error(Selector),
+                    beamtalk_future:reject(FuturePid, Error)
+            after 0 ->
+                erlang:demonitor(MonRef, [flush])
+            end,
+            ok;
         false ->
-            %% Actor is dead - reject the future with structured error
-            Error0 = beamtalk_error:new(actor_dead, unknown),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
-            beamtalk_future:reject(FuturePid, Error2),
+            erlang:demonitor(MonRef, [flush]),
+            {error, Error} = actor_dead_error(Selector),
+            beamtalk_future:reject(FuturePid, Error),
             ok
     end.
 
@@ -254,13 +267,28 @@ sync_send(ActorPid, monitor, []) ->
 sync_send(ActorPid, Selector, Args) ->
     case is_process_alive(ActorPid) of
         true ->
-            gen_server:call(ActorPid, {Selector, Args});
+            try
+                gen_server:call(ActorPid, {Selector, Args})
+            catch
+                exit:{noproc, _} ->
+                    actor_dead_error(Selector);
+                exit:{normal, _} ->
+                    actor_dead_error(Selector);
+                exit:{shutdown, _} ->
+                    actor_dead_error(Selector)
+            end;
         false ->
-            Error0 = beamtalk_error:new(actor_dead, unknown),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
-            {error, Error2}
+            actor_dead_error(Selector)
     end.
+
+%% @private
+%% @doc Construct a structured actor_dead error for the given selector.
+-spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
+actor_dead_error(Selector) ->
+    Error0 = beamtalk_error:new(actor_dead, unknown),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
+    {error, Error2}.
 
 %%% gen_server callbacks
 
