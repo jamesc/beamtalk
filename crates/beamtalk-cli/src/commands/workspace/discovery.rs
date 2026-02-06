@@ -178,4 +178,17 @@ mod tests {
         let root = discover_project_root(&deep);
         assert_eq!(root, project);
     }
+
+    #[test]
+    fn test_discover_with_both_git_and_beamtalk_in_same_dir() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project");
+        let subdir = project.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::create_dir(project.join(".git")).unwrap();
+        fs::create_dir(project.join(".beamtalk")).unwrap();
+
+        let root = discover_project_root(&subdir);
+        assert_eq!(root, project, "Should find project with both markers");
+    }
 }

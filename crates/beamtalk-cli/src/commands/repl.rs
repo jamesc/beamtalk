@@ -627,18 +627,26 @@ pub fn run(
 
         if is_new {
             println!("Started new workspace node: {}", node_info.node_name);
-            println!(
-                "  Workspace: {workspace_id} (auto-discovered from {})",
-                project_root.display()
-            );
+            if workspace_name.is_some() {
+                println!("  Workspace: {workspace_id}");
+            } else {
+                println!(
+                    "  Workspace: {workspace_id} (auto-discovered from {})",
+                    project_root.display()
+                );
+            }
             // Give the node time to initialize
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("✓ Connected to existing workspace: {}", node_info.node_name);
-            println!(
-                "  Workspace: {workspace_id} (auto-discovered from {})",
-                project_root.display()
-            );
+            if workspace_name.is_some() {
+                println!("  Workspace: {workspace_id}");
+            } else {
+                println!(
+                    "  Workspace: {workspace_id} (auto-discovered from {})",
+                    project_root.display()
+                );
+            }
         }
 
         // Display workspace info
