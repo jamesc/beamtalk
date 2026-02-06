@@ -465,7 +465,8 @@ handle_call({method, Selector}, _From, #class_state{
     end;
 
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
-    MethodInfo = #{block => Fun},
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    MethodInfo = #{block => Fun, arity => Arity},
     NewMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
     NewSource = maps:put(Selector, Source, State#class_state.method_source),
     NewState = State#class_state{

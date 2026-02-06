@@ -79,15 +79,9 @@ builtin_dispatch('class', [], _Value) ->
 
 %% printString => human-readable representation
 builtin_dispatch('printString', [], #{
-    '__selector__' := Sel,
-    '__source__' := Src
+    '__selector__' := Sel
 }) ->
-    case Src of
-        <<"">> ->
-            {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
-        _ ->
-            {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))}
-    end;
+    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
 
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
