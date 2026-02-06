@@ -198,6 +198,7 @@ Use a **different model family** to challenge the design with fresh eyes. Differ
 
 17. **Triage adversarial findings**: The adversarial review will surface many concerns. For each:
     - **Valid and fixable now** → implement the fix
+    - **Security issue, can't fix now** → create Linear issue with `Bug` label + urgent priority. **Never drop security findings.**
     - **Valid but out of scope** → create Linear issue
     - **Theoretical, unlikely in practice** → note but don't act
     - **Wrong / already handled** → dismiss with explanation
@@ -211,11 +212,18 @@ Use a **different model family** to challenge the design with fresh eyes. Differ
 
 ## Summary
 
-19. **Create issues** ONLY for substantial changes that:
-    - Require architectural design decisions
-    - Affect multiple components significantly
-    - Would fundamentally change the PR's scope
-    - **The bar for "separate PR" is HIGH.** When in doubt, implement it now.
+19. **Create follow-up issues**: Anything found during review that isn't fixed in this PR **must** get a Linear issue — findings should never be just "noted" and forgotten.
+
+    **Always create an issue for:**
+    - 🔴 **Security findings not fixed now** — label `Bug` + `urgent priority`. Never let security issues be silently dropped.
+    - 🟡 **Valid concerns deferred** — out-of-scope improvements, performance concerns with evidence, architectural suggestions
+    - 🔵 **Adversarial findings worth tracking** — assumptions that could break, scaling concerns, missing test scenarios
+    
+    **Don't create issues for:**
+    - Theoretical concerns with no plausible trigger
+    - Things already handled that the adversarial reviewer missed
+    
+    **The bar for "fix it now" is still high** — prefer implementing over deferring. But if you defer, track it.
 
 20. **Final summary**:
 
@@ -238,6 +246,8 @@ Use a **different model family** to challenge the design with fresh eyes. Differ
 - ✅ REPL verified: [what was tested]
 
 ### Issues Created
+- 🔴 BT-XXX: [security finding — urgent]
+- BT-YYY: [deferred improvement]
 - BT-XXX: [only for substantial architectural work]
 
 ### Assessment
@@ -268,6 +278,8 @@ Use a **different model family** to challenge the design with fresh eyes. Differ
 - Breaking API changes requiring coordination
 - Work that would 2-3x the PR size
 - **Rule of thumb:** Only defer if it requires design decisions or cross-team coordination.
+
+**Security findings are NEVER optional.** If you find a security issue and can't fix it now, create a Linear issue with `Bug` label + urgent priority immediately. Security issues must not be "noted" without tracking.
 
 **When in doubt, implement it.**
 
