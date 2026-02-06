@@ -313,66 +313,30 @@ jobs:
 
       - name: Prepare PR Comment
         if: github.event_name == 'pull_request'
-        id: prepare_comment
         run: |
           # Get short commit hash
           COMMIT_HASH=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
           
-          # Build coverage content (without commit hash - so we can compare across commits)
-          COVERAGE_BODY=""
-          echo "### Rust Coverage" > coverage-body.md
-          if [ -f rust-coverage-results.md ]; then
-            cat rust-coverage-results.md >> coverage-body.md
-          else
-            echo "⚠️ WARNING: Rust coverage report not generated" >> coverage-body.md
-          fi
-          echo "" >> coverage-body.md
-          echo "### Erlang Coverage" >> coverage-body.md
-          if [ -f erlang-coverage-results.md ]; then
-            cat erlang-coverage-results.md >> coverage-body.md
-          else
-            echo "⚠️ WARNING: Erlang coverage report not generated" >> coverage-body.md
-          fi
-          
-          # Hash the coverage data (excludes commit hash so same coverage = same hash)
-          COVERAGE_HASH=$(sha256sum coverage-body.md | cut -c1-16)
-          
-          # Build full comment with hash marker for comparison
           cat > pr-comment.md << EOF
           ## 📊 Code Coverage Report (${COMMIT_HASH})
           
+          ### Rust Coverage
           EOF
-          cat coverage-body.md >> pr-comment.md
+          if [ -f rust-coverage-results.md ]; then
+            cat rust-coverage-results.md >> pr-comment.md
+          else
+            echo "⚠️ WARNING: Rust coverage report not generated" >> pr-comment.md
+          fi
           echo "" >> pr-comment.md
-          echo "<!-- coverage-hash:${COVERAGE_HASH} -->" >> pr-comment.md
-          
-          echo "coverage_hash=${COVERAGE_HASH}" >> $GITHUB_OUTPUT
-
-      - name: Check if coverage changed
-        if: github.event_name == 'pull_request'
-        id: check_coverage
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const botComment = comments.reverse().find(c =>
-              c.user.type === 'Bot' && c.body.includes('Code Coverage Report')
-            );
-            const newHash = '${{ steps.prepare_comment.outputs.coverage_hash }}';
-            if (botComment && botComment.body.includes(`coverage-hash:${newHash}`)) {
-              core.setOutput('changed', 'false');
-              console.log('Coverage unchanged, skipping comment update');
-            } else {
-              core.setOutput('changed', 'true');
-              console.log('Coverage changed, will update comment');
-            }
+          echo "### Erlang Coverage" >> pr-comment.md
+          if [ -f erlang-coverage-results.md ]; then
+            cat erlang-coverage-results.md >> pr-comment.md
+          else
+            echo "⚠️ WARNING: Erlang coverage report not generated" >> pr-comment.md
+          fi
 
       - name: Add PR Comment
-        if: github.event_name == 'pull_request' && steps.check_coverage.outputs.changed == 'true'
+        if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           recreate: true
