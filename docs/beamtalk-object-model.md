@@ -161,10 +161,12 @@ Beamtalk embraces BEAM's actor model rather than fighting it. We reify what we c
 |
 |Primitives (Integer, String, etc.) are **sealed value types** — they inherit from Object but cannot be subclassed. They **can be extended** with new methods via the extension registry.
 |
+|> **Note:** The `sealed` keyword is future work (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md)). Primitives are semantically sealed (subclassing a native Erlang type is meaningless on BEAM), but syntax enforcement will be added later. The stdlib uses `Object subclass: Integer` without the `sealed` modifier; primitive methods are declared with `@primitive 'name'` pragmas that route through runtime dispatch modules.
+|
 |> ⚠️ **FUTURE SYNTAX** — `Integer extend` syntax and `class >>` class-side method definitions are not yet implemented. Extension methods are added via runtime API (`beamtalk_extensions:register/4`).
 |```beamtalk
 |// ❌ Cannot subclass primitives — they are sealed
-|Integer subclass: MyInteger  // ERROR: Integer is sealed
+|Integer subclass: MyInteger  // ERROR: Integer is sealed (future enforcement)
 |
 |// FUTURE: Extension syntax not yet implemented
 |// Extensions currently added via runtime API
@@ -1053,7 +1055,7 @@ handle_call({migrate, NewModule}, _From, State) ->
 
 The explicit restart pattern is actually cleaner for distributed systems where you want clear upgrade boundaries.
 
-### 2.8 Custom VM Primitives
+### 2.8 Primitive Method Binding (Pragmas)
 
 **What Smalltalk provides:**
 
@@ -1064,29 +1066,35 @@ MyClass >> doSomethingFast
     ^self slowImplementation
 ```
 
-**BEAM alternatives:**
+**Beamtalk approach** (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md)):
+
+Beamtalk uses **named intrinsic pragmas** inside method bodies. Each pragma maps to a named entry in the compiler's intrinsic registry, which routes through runtime dispatch modules for type checking, structured errors, and extension registry support.
+
+```beamtalk
+Object subclass: Integer
+  // Primitive binding — routes through beamtalk_integer:dispatch/3
+  + other => @primitive '+'
+
+  // Optional fallback (Smalltalk-style)
+  + other => @primitive '+'
+    ^super + other
+
+  // Pure Beamtalk — compiles directly, no pragma needed
+  abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
+```
+
+Key differences from Smalltalk:
+- **Named intrinsics** instead of numbered primitives — `@primitive '+'` not `<primitive: 1>`
+- **Single binding mode** — all primitives route through runtime dispatch modules (no raw Erlang MFA calls, preventing safety bypass)
+- **~60% of stdlib methods are pure Beamtalk** — only ~12 primitive bindings per class need pragmas
+
+**BEAM-specific capabilities** (NIFs, ports) remain available via Erlang interop:
 
 | Method | Description | Use Case |
 |--------|-------------|----------|
-| BIFs | Built-in functions in Erlang | Math, list ops, etc. |
+| BIFs | Built-in functions in Erlang | Math, list ops (accessed via pragmas) |
 | NIFs | Native Implemented Functions (C) | Performance-critical code |
 | Port drivers | External programs | System integration |
-
-**Beamtalk approach:**
-
-```
-// Call existing BIFs
-result := Erlang.math sqrt: 16.0
-
-// For custom native code, write NIFs in C
-// and call from Beamtalk like any Erlang module
-result := MyNif.fastOperation: data
-
-// Foreign function declaration for type safety
-foreign MyNif.fastOperation(data: Binary) -> Binary
-```
-
-**Trade-off:** You can't write primitives *in Beamtalk*, but you can call any Erlang NIF, which is the same capability.
 
 ---
 

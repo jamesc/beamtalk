@@ -12,7 +12,7 @@ This document specifies how Beamtalk methods receive a proper "self" reference (
 **Key Decisions:**
 1. Methods receive `Self` as a separate `#beamtalk_object{}` record parameter
 2. State is kept separate from Self (no infinite recursion risk)
-3. Primitives use virtual dispatch via `beamtalk_primitive` module (not actors)
+3. Primitives use virtual dispatch via `beamtalk_primitive` module (not actors). Primitive method declarations live in compiled `lib/*.bt` files via pragmas (see [ADR 0007](../ADR/0007-compilable-stdlib-with-primitive-injection.md)).
 4. Phased rollout with backward compatibility layer
 
 ---

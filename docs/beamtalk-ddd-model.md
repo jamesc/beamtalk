@@ -382,6 +382,18 @@ impl BlockContextClassifier {
 
 **Purpose:** Transform AST into executable Core Erlang
 
+**Class Kind Routing** (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md)):
+
+The code generator routes class definitions through one of three paths based on class kind:
+
+| Class Kind | Routing | Generated Code |
+|------------|---------|----------------|
+| **Actor** | `generate_actor_module()` | gen_server with `init/1`, `handle_call/3`, `handle_cast/3`, `spawn/0` |
+| **Value Type** | `generate_value_type_module()` | Map-backed with `new/0`, `new/1`, pure function methods |
+| **Primitive Type** | `generate_primitive_module()` | Method table only — no `new`, no state management |
+
+Class kind is determined from compiled stdlib metadata: Primitive Types match a known set (Integer, String, etc.), Actors inherit from Actor, everything else is a Value Type.
+
 **Aggregates:**
 
 #### 1. CompilationUnit (Aggregate Root)
@@ -446,6 +458,33 @@ impl CoreErlangGenerator {
     }
 }
 ```
+
+### Standard Library Context
+
+**Purpose:** Compile `lib/*.bt` files into class metadata and BEAM modules via pragma-based primitive injection
+
+**DDD Context:** Standard Library (see [ADR 0007](ADR/0007-compilable-stdlib-with-primitive-injection.md))
+
+**Key Concepts:**
+
+| Term | Definition |
+|------|-----------|
+| **Pragma** | In-body annotation (`@primitive name`) declaring a method's implementation |
+| **Named Intrinsic** | Entry in compiler's finite registry mapping name → code generation function |
+| **Primitive Type** | Class backed by native Erlang value (Integer, String, etc.) — method table only, no constructor |
+| **Runtime Dispatch Module** | Erlang module (e.g., `beamtalk_integer.erl`) providing type checking, structured errors, extension registry |
+
+**Relationships:**
+- **Consumes from:** Source Analysis Context (parsed AST from `lib/*.bt` files)
+- **Feeds into:** Code Generation Context (class metadata, three-kind routing, intrinsic bindings)
+- **Collaborates with:** Object System Context (runtime dispatch modules execute the primitives)
+
+**Domain Services:**
+- `IntrinsicRegistry`: Maps intrinsic names to code generation functions (~35 entries)
+- `StdlibCompiler`: Compiles `lib/*.bt` through the normal pipeline, producing class metadata
+- `ClassKindResolver`: Determines Actor / Value Type / Primitive from class name and superclass
+
+**Key Invariant:** Every intrinsic name must resolve to exactly one code generation function. Unknown names are compile errors.
 
 ### Language Service Context
 
