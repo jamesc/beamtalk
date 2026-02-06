@@ -27,17 +27,19 @@
 //!
 //! # Protocol
 //!
-//! The REPL CLI communicates with the Erlang backend using JSON over TCP:
+//! The REPL CLI communicates with the Erlang backend using JSON over TCP.
+//! Both legacy and new protocol formats are supported:
 //!
 //! ```json
+//! // New protocol (preferred)
 //! // Request
-//! {"type": "eval", "expression": "x := 42"}
+//! {"op": "eval", "id": "msg-001", "code": "x := 42"}
 //!
 //! // Response (success)
-//! {"type": "result", "value": "42"}
+//! {"id": "msg-001", "value": "42", "status": ["done"]}
 //!
 //! // Response (error)
-//! {"type": "error", "message": "Undefined variable: foo"}
+//! {"id": "msg-001", "error": "Undefined variable: foo", "status": ["done", "error"]}
 //! ```
 
 use std::fs;
@@ -67,16 +69,75 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 const RETRY_DELAY_MS: u64 = 500;
 
 /// JSON response from the REPL backend.
+/// Supports both legacy format (type field) and new protocol format (status field).
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ReplResponse {
+    /// Legacy response type (result, error, bindings, loaded, actors, modules)
     #[serde(rename = "type")]
-    response_type: String,
+    response_type: Option<String>,
+    /// New protocol: message correlation ID
+    id: Option<String>,
+    /// New protocol: session ID
+    session: Option<String>,
+    /// New protocol: status flags
+    status: Option<Vec<String>>,
+    /// Result value (both formats)
     value: Option<serde_json::Value>,
+    /// Legacy: error message
     message: Option<String>,
+    /// New protocol: error message
+    error: Option<String>,
+    /// Bindings map (both formats)
     bindings: Option<serde_json::Value>,
+    /// Loaded classes (both formats)
     classes: Option<Vec<String>>,
+    /// Actor list (both formats)
     actors: Option<Vec<ActorInfo>>,
+    /// Module list (both formats)
     modules: Option<Vec<ModuleInfo>>,
+    /// Session list (new protocol)
+    sessions: Option<Vec<SessionInfo>>,
+    /// Completion suggestions (new protocol)
+    completions: Option<Vec<String>>,
+    /// Symbol info (new protocol)
+    info: Option<serde_json::Value>,
+    /// Actor state (new protocol: inspect op)
+    state: Option<serde_json::Value>,
+}
+
+impl ReplResponse {
+    /// Check if this is an error response (either format).
+    fn is_error(&self) -> bool {
+        if let Some(ref t) = self.response_type {
+            return t == "error";
+        }
+        if let Some(ref status) = self.status {
+            return status.iter().any(|s| s == "error");
+        }
+        false
+    }
+
+    /// Get the error message (either format).
+    fn error_message(&self) -> Option<&str> {
+        if let Some(ref msg) = self.message {
+            return Some(msg.as_str());
+        }
+        if let Some(ref err) = self.error {
+            return Some(err.as_str());
+        }
+        None
+    }
+
+    /// Check if this response has a specific legacy type.
+    #[allow(dead_code)]
+    fn has_type(&self, expected: &str) -> bool {
+        if let Some(ref t) = self.response_type {
+            return t == expected;
+        }
+        // New protocol doesn't have type field - infer from status + fields
+        false
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +157,22 @@ struct ModuleInfo {
     #[allow(dead_code)]
     load_time: i64,
     time_ago: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionInfo {
+    id: String,
+    #[allow(dead_code)]
+    created_at: Option<i64>,
+}
+
+/// Counter for generating unique message IDs.
+static MSG_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Generate a unique message ID.
+fn next_msg_id() -> String {
+    let n = MSG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("msg-{n:03}")
 }
 
 /// REPL client state.
@@ -126,83 +203,56 @@ impl ReplClient {
         })
     }
 
-    /// Send an eval request and receive the response.
-    fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
-        // Build JSON request
-        let request = serde_json::json!({
-            "type": "eval",
-            "expression": expression
-        });
+    /// Send a protocol request and receive the response.
+    fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
         let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        // Send request
         writeln!(self.stream, "{request_str}").into_diagnostic()?;
         self.stream.flush().into_diagnostic()?;
 
-        // Receive response
         let mut response_line = String::new();
         self.reader
             .read_line(&mut response_line)
             .into_diagnostic()?;
 
-        // Parse response
         serde_json::from_str(&response_line)
             .map_err(|e| miette!("Failed to parse REPL response: {e}\nRaw: {response_line}"))
     }
 
+    /// Send an eval request and receive the response.
+    fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "eval",
+            "id": next_msg_id(),
+            "code": expression
+        }))
+    }
+
     /// Send a clear bindings request.
     fn clear_bindings(&mut self) -> Result<ReplResponse> {
-        let request = serde_json::json!({ "type": "clear" });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+        self.send_request(&serde_json::json!({
+            "op": "clear",
+            "id": next_msg_id()
+        }))
     }
 
     /// Get current bindings.
     fn get_bindings(&mut self) -> Result<ReplResponse> {
-        let request = serde_json::json!({ "type": "bindings" });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+        self.send_request(&serde_json::json!({
+            "op": "bindings",
+            "id": next_msg_id()
+        }))
     }
 
     /// Load a Beamtalk file.
     fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
-        let request = serde_json::json!({
-            "type": "load",
+        let response = self.send_request(&serde_json::json!({
+            "op": "load-file",
+            "id": next_msg_id(),
             "path": path
-        });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        let response: ReplResponse = serde_json::from_str(&response_line)
-            .map_err(|e| miette!("Failed to parse response: {e}"))?;
+        }))?;
 
         // Update last loaded file on success
-        if response.response_type == "loaded" {
+        if !response.is_error() {
             self.last_loaded_file = Some(path.to_string());
         }
 
@@ -220,72 +270,53 @@ impl ReplClient {
 
     /// List running actors.
     fn list_actors(&mut self) -> Result<ReplResponse> {
-        let request = serde_json::json!({ "type": "actors" });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+        self.send_request(&serde_json::json!({
+            "op": "actors",
+            "id": next_msg_id()
+        }))
     }
 
     /// Kill an actor by PID string.
     fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
-        let request = serde_json::json!({
-            "type": "kill",
-            "pid": pid_str
-        });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+        self.send_request(&serde_json::json!({
+            "op": "kill",
+            "id": next_msg_id(),
+            "actor": pid_str
+        }))
     }
 
     /// List loaded modules.
     fn list_modules(&mut self) -> Result<ReplResponse> {
-        let request = serde_json::json!({ "type": "modules" });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+        self.send_request(&serde_json::json!({
+            "op": "modules",
+            "id": next_msg_id()
+        }))
     }
 
     /// Unload a module by name.
     fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
-        let request = serde_json::json!({
-            "type": "unload",
+        self.send_request(&serde_json::json!({
+            "op": "unload",
+            "id": next_msg_id(),
             "module": module_name
-        });
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
+        }))
+    }
 
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
+    /// List active sessions.
+    fn list_sessions(&mut self) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "sessions",
+            "id": next_msg_id()
+        }))
+    }
 
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line).map_err(|e| miette!("Failed to parse response: {e}"))
+    /// Inspect an actor's state.
+    fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "inspect",
+            "id": next_msg_id(),
+            "actor": pid_str
+        }))
     }
 }
 
@@ -537,6 +568,8 @@ fn print_help() {
     println!("  :unload <name>  Unload a module (fails if actors exist)");
     println!("  :actors         List running actors");
     println!("  :kill <pid>     Kill an actor by PID");
+    println!("  :inspect <pid>  Inspect an actor's state");
+    println!("  :sessions       List active REPL sessions");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");
@@ -784,20 +817,18 @@ pub fn run(
 
                         match client.load_file(path) {
                             Ok(response) => {
-                                if response.response_type == "loaded" {
-                                    if let Some(classes) = response.classes {
-                                        if classes.is_empty() {
-                                            println!("Loaded {path}");
-                                        } else {
-                                            println!("Loaded {}", classes.join(", "));
-                                        }
-                                    } else {
-                                        println!("Loaded {path}");
-                                    }
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
                                     }
+                                } else if let Some(classes) = response.classes {
+                                    if classes.is_empty() {
+                                        println!("Loaded {path}");
+                                    } else {
+                                        println!("Loaded {}", classes.join(", "));
+                                    }
+                                } else {
+                                    println!("Loaded {path}");
                                 }
                             }
                             Err(e) => eprintln!("Error: {e}"),
@@ -807,20 +838,18 @@ pub fn run(
                     ":reload" | ":r" => {
                         match client.reload_file() {
                             Ok(response) => {
-                                if response.response_type == "loaded" {
-                                    if let Some(classes) = response.classes {
-                                        if classes.is_empty() {
-                                            println!("Reloaded");
-                                        } else {
-                                            println!("Reloaded {}", classes.join(", "));
-                                        }
-                                    } else {
-                                        println!("Reloaded");
-                                    }
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
                                     }
+                                } else if let Some(classes) = response.classes {
+                                    if classes.is_empty() {
+                                        println!("Reloaded");
+                                    } else {
+                                        println!("Reloaded {}", classes.join(", "));
+                                    }
+                                } else {
+                                    println!("Reloaded");
                                 }
                             }
                             Err(e) => eprintln!("Error: {e}"),
@@ -830,23 +859,21 @@ pub fn run(
                     ":actors" | ":a" => {
                         match client.list_actors() {
                             Ok(response) => {
-                                if response.response_type == "actors" {
-                                    if let Some(actors) = response.actors {
-                                        if actors.is_empty() {
-                                            println!("No running actors.");
-                                        } else {
-                                            println!("Running actors:");
-                                            for actor in actors {
-                                                println!(
-                                                    "  {} - {} ({})",
-                                                    actor.pid, actor.class, actor.module
-                                                );
-                                            }
-                                        }
-                                    }
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
+                                    }
+                                } else if let Some(actors) = response.actors {
+                                    if actors.is_empty() {
+                                        println!("No running actors.");
+                                    } else {
+                                        println!("Running actors:");
+                                        for actor in actors {
+                                            println!(
+                                                "  {} - {} ({})",
+                                                actor.pid, actor.class, actor.module
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -857,33 +884,31 @@ pub fn run(
                     ":modules" | ":m" => {
                         match client.list_modules() {
                             Ok(response) => {
-                                if response.response_type == "modules" {
-                                    if let Some(modules) = response.modules {
-                                        if modules.is_empty() {
-                                            println!("No modules loaded.");
-                                        } else {
-                                            println!("Loaded modules:");
-                                            for module in modules {
-                                                let actors_text = if module.actor_count == 0 {
-                                                    String::new()
-                                                } else if module.actor_count == 1 {
-                                                    " - 1 actor".to_string()
-                                                } else {
-                                                    format!(" - {} actors", module.actor_count)
-                                                };
-                                                println!(
-                                                    "  {} ({}){} - loaded {}",
-                                                    module.name,
-                                                    module.source_file,
-                                                    actors_text,
-                                                    module.time_ago
-                                                );
-                                            }
-                                        }
-                                    }
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
+                                    }
+                                } else if let Some(modules) = response.modules {
+                                    if modules.is_empty() {
+                                        println!("No modules loaded.");
+                                    } else {
+                                        println!("Loaded modules:");
+                                        for module in modules {
+                                            let actors_text = if module.actor_count == 0 {
+                                                String::new()
+                                            } else if module.actor_count == 1 {
+                                                " - 1 actor".to_string()
+                                            } else {
+                                                format!(" - {} actors", module.actor_count)
+                                            };
+                                            println!(
+                                                "  {} ({}){} - loaded {}",
+                                                module.name,
+                                                module.source_file,
+                                                actors_text,
+                                                module.time_ago
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -900,12 +925,12 @@ pub fn run(
 
                         match client.unload_module(module_name) {
                             Ok(response) => {
-                                if response.response_type == "result" {
-                                    println!("Module {module_name} unloaded.");
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
                                     }
+                                } else {
+                                    println!("Module {module_name} unloaded.");
                                 }
                             }
                             Err(e) => eprintln!("Error: {e}"),
@@ -921,12 +946,55 @@ pub fn run(
 
                         match client.kill_actor(pid_str) {
                             Ok(response) => {
-                                if response.response_type == "result" {
-                                    println!("Actor {pid_str} killed.");
-                                } else if response.response_type == "error" {
-                                    if let Some(msg) = response.message {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
                                         eprintln!("Error: {msg}");
                                     }
+                                } else {
+                                    println!("Actor {pid_str} killed.");
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    ":sessions" => {
+                        match client.list_sessions() {
+                            Ok(response) => {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                } else if let Some(sessions) = response.sessions {
+                                    if sessions.is_empty() {
+                                        println!("No active sessions.");
+                                    } else {
+                                        println!("Active sessions:");
+                                        for s in sessions {
+                                            println!("  {}", s.id);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
+                    _ if line.starts_with(":inspect ") => {
+                        let pid_str = line.strip_prefix(":inspect ").unwrap().trim();
+                        if pid_str.is_empty() {
+                            eprintln!("Usage: :inspect <pid>");
+                            continue;
+                        }
+
+                        match client.inspect_actor(pid_str) {
+                            Ok(response) => {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                } else if let Some(state) = response.state {
+                                    println!("{}", format_value(&state));
                                 }
                             }
                             Err(e) => eprintln!("Error: {e}"),
@@ -939,14 +1007,12 @@ pub fn run(
                 // Evaluate expression
                 match client.eval(line) {
                     Ok(response) => {
-                        if response.response_type == "result" {
-                            if let Some(value) = response.value {
-                                println!("{}", format_value(&value));
-                            }
-                        } else if response.response_type == "error" {
-                            if let Some(msg) = response.message {
+                        if response.is_error() {
+                            if let Some(msg) = response.error_message() {
                                 eprintln!("Error: {msg}");
                             }
+                        } else if let Some(value) = response.value {
+                            println!("{}", format_value(&value));
                         }
                     }
                     Err(e) => {
@@ -1160,7 +1226,7 @@ mod tests {
 
         let response: ReplResponse =
             serde_json::from_str(json).expect("Failed to parse ReplResponse");
-        assert_eq!(response.response_type, "actors");
+        assert_eq!(response.response_type, Some("actors".to_string()));
 
         let actors = response.actors.expect("actors field missing");
         assert_eq!(actors.len(), 2);
@@ -1182,7 +1248,7 @@ mod tests {
 
         let response: ReplResponse =
             serde_json::from_str(json).expect("Failed to parse ReplResponse");
-        assert_eq!(response.response_type, "actors");
+        assert_eq!(response.response_type, Some("actors".to_string()));
 
         let actors = response.actors.expect("actors field missing");
         assert!(actors.is_empty());
@@ -1197,7 +1263,7 @@ mod tests {
 
         let response: ReplResponse =
             serde_json::from_str(json).expect("Failed to parse ReplResponse");
-        assert_eq!(response.response_type, "result");
+        assert_eq!(response.response_type, Some("result".to_string()));
         assert!(response.value.is_some());
     }
 
@@ -1210,7 +1276,7 @@ mod tests {
 
         let response: ReplResponse =
             serde_json::from_str(json).expect("Failed to parse ReplResponse");
-        assert_eq!(response.response_type, "error");
+        assert_eq!(response.response_type, Some("error".to_string()));
         assert_eq!(response.message, Some("not_found".to_string()));
     }
 
@@ -1223,7 +1289,7 @@ mod tests {
 
         let response: ReplResponse =
             serde_json::from_str(json).expect("Failed to parse ReplResponse");
-        assert_eq!(response.response_type, "error");
+        assert_eq!(response.response_type, Some("error".to_string()));
         assert_eq!(response.message, Some("invalid_pid".to_string()));
     }
 
