@@ -83,7 +83,42 @@ When activated, execute this workflow to complete work and push:
 
 11. **Update Linear state**: Mark the Linear issue as "In Review".
 
-12. **Report success**: Confirm the commit was pushed, PR was created/updated (include PR URL), and Linear was updated.
+12. **Wait for Copilot code review**: If a repository ruleset is configured to automatically request Copilot code review, poll for it after PR creation/update:
+    
+    ```
+    Poll: check for Copilot review every 60 seconds, up to 10 attempts (10 minutes max)
+    ```
+    
+    Use `gh api` against the PR reviews endpoint to check for reviews, looking for a review from `copilot-pull-request-reviewer[bot]` by checking `user.login`. For example:
+    
+    ```bash
+    gh api repos/{owner}/{repo}/pulls/{pr}/reviews --paginate --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]")'
+    ```
+    
+    Also check review threads using `get_review_comments` — Copilot leaves inline code comments as review threads.
+    
+    **Important:** Only gate on verified bot identity (`user.login == "copilot-pull-request-reviewer[bot]"`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
+    
+    **If Copilot review arrives with comments:**
+    - Inform the user: "Copilot review received with N comments. Resolving..."
+    - Execute the `/resolve-pr` workflow inline (steps 2-11 from resolve-pr skill):
+      - Fetch and analyze all unresolved review threads
+      - Plan fixes for each comment
+      - Run tests, make changes, run tests again
+      - Commit with message: `fix: address Copilot review comments BT-{number}`
+      - Push changes
+      - Reply to each review comment explaining the fix
+      - Report summary of all changes
+    - After resolving, report the summary of changes made
+    
+    **If Copilot review arrives with no comments (approved):**
+    - Report: "Copilot review passed with no comments ✅"
+    
+    **If timeout (no review after 10 minutes):**
+    - Report: "Copilot review not received after 10 minutes. Run `/resolve-pr` later if comments arrive."
+    - Continue to step 13 (do not block completion)
+
+13. **Report success**: Confirm the commit was pushed, PR was created/updated (include PR URL), Linear was updated, and Copilot review status.
 
 ## When PR is merged
 

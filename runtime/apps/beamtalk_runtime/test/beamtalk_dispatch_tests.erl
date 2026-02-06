@@ -239,15 +239,12 @@ test_super_finds_inherited() ->
     
     Self = make_ref(),
     
-    %% 'class' is inlined in Counter's dispatch, so super should skip Counter
-    %% and look for it in Actor. Actor's dispatch also inlines 'class' (if compiled).
-    %% Since Actor is a bootstrap class without a real module, this will return error.
-    %% This tests that super correctly walks up AND terminates at bootstrap classes.
+    %% ADR 0006 Phase 1b: 'class' is no longer inlined in Counter's dispatch.
+    %% Super walks from Counter → Actor → Object, finds 'class' in beamtalk_object.erl.
     Result = beamtalk_dispatch:super(class, [], Self, State, 'Counter'),
     
-    %% Actor/Object/ProtoObject are bootstrap classes without dispatch/4 modules,
-    %% so super should return does_not_understand error (walked full chain, no module to invoke)
-    ?assertMatch({error, #beamtalk_error{}}, Result).
+    %% Object's dispatch/4 handles 'class' by reading __class__ from State
+    ?assertMatch({reply, 'Counter', _}, Result).
 
 %%% ============================================================================
 %%% Helper Functions

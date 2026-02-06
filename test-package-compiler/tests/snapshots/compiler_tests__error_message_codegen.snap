@@ -103,116 +103,59 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             call 'erlang':'error'({'beamtalk_error', #{#<84>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#})
         <'errorWithVariable'> when 'true' ->
             let _seq1 = #{#<68>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}# in call 'erlang':'error'({'beamtalk_error', call 'maps':'get'('msg', State)})
-        <'class'> when 'true' ->
-            case Args of
-                <[]> when 'true' ->
-                    let ClassName = call 'maps':'get'('__class__', State) in
-                    {'reply', ClassName, State}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
-        <'respondsTo:'> when 'true' ->
-            case Args of
-                <[Selector]> when 'true' ->
+        <OtherSelector> when 'true' ->
+            %% ADR 0006: Try hierarchy walk before DNU
+            case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'ErrorMessage') of
+                <{'reply', InheritedResult, InheritedState}> when 'true' ->
+                    {'reply', InheritedResult, InheritedState}
+                <{'error', _DispatchError}> when 'true' ->
+                    %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
+                    let DnuSelector = 'doesNotUnderstand:args:' in
                     let Methods = call 'maps':'get'('__methods__', State) in
-                    let Result = call 'maps':'is_key'(Selector, Methods) in
-                    {'reply', Result, State}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
-        <'instVarNames'> when 'true' ->
-            case Args of
-                <[]> when 'true' ->
-                    %% Filter out internal fields starting with '__'
-                    let AllFields = call 'maps':'keys'(State) in
-                    let FilterFn = fun (Key) ->
-                        case Key of
-                            <'__class__'> when 'true' -> 'false'
-                            <'__class_mod__'> when 'true' -> 'false'
-                            <'__methods__'> when 'true' -> 'false'
-                            <'__registry_pid__'> when 'true' -> 'false'
-                            <_> when 'true' -> 'true'
-                        end
-                    in
-                    let UserFields = call 'lists':'filter'(FilterFn, AllFields) in
-                    {'reply', UserFields, State}
-                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-            end
-        <'instVarAt:'> when 'true' ->
-            case Args of
-                <[FieldName]> when 'true' ->
-                    case call 'maps':'is_key'(FieldName, State) of
+                    case call 'maps':'is_key'(DnuSelector, Methods) of
                         <'true'> when 'true' ->
-                            let Value = call 'maps':'get'(FieldName, State) in
-                            {'reply', Value, State}
+                            call 'error_message':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
                         <'false'> when 'true' ->
-                            {'reply', {'error', 'field_not_found'}, State}
-                        end
-                    <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-                end
-            <'instVarAt:put:'> when 'true' ->
-                case Args of
-                    <[FieldName, Value]> when 'true' ->
-                        case call 'maps':'is_key'(FieldName, State) of
-                            <'true'> when 'true' ->
-                                let NewState = call 'maps':'put'(FieldName, Value, State) in
-                                {'reply', Value, NewState}
-                            <'false'> when 'true' ->
-                                {'reply', {'error', 'field_not_found'}, State}
-                            end
-                        <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-                    end
-                <OtherSelector> when 'true' ->
-                    %% ADR 0006: Try hierarchy walk before DNU
-                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'ErrorMessage') of
-                        <{'reply', InheritedResult, InheritedState}> when 'true' ->
-                            {'reply', InheritedResult, InheritedState}
-                        <{'error', _DispatchError}> when 'true' ->
-                            %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
-                            let DnuSelector = 'doesNotUnderstand:args:' in
-                            let Methods = call 'maps':'get'('__methods__', State) in
-                            case call 'maps':'is_key'(DnuSelector, Methods) of
-                                <'true'> when 'true' ->
-                                    call 'error_message':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
-                                <'false'> when 'true' ->
-                                    %% No DNU handler - return #beamtalk_error{} record
-                                    let ClassName = call 'maps':'get'('__class__', State) in
-                                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
-                                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
-                                    let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
-                                    let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
-                                    {'error', Error, State}
-                            end
+                            %% No DNU handler - return #beamtalk_error{} record
+                            let ClassName = call 'maps':'get'('__class__', State) in
+                            let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
+                            let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
+                            let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
+                            let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
+                            {'error', Error, State}
                     end
             end
+    end
 
 
 'method_table'/0 = fun () ->
-            ~{'doError' => 0, 'errorWithVariable' => 0, 'class' => 0, 'respondsTo:' => 1, 'instVarNames' => 0, 'instVarAt:' => 1, 'instVarAt:put:' => 2, 'perform:' => 1, 'perform:withArguments:' => 2}~
+    ~{'doError' => 0, 'errorWithVariable' => 0}~
 
 
 'has_method'/1 = fun (Selector) ->
-            call 'lists':'member'(Selector, ['doError', 'errorWithVariable', 'class', 'respondsTo:', 'instVarNames', 'instVarAt:', 'instVarAt:put:', 'perform:', 'perform:withArguments:'])
+    call 'lists':'member'(Selector, ['doError', 'errorWithVariable'])
 
 
 'register_class'/0 = fun () ->
-            try
-                let _Reg0 = case call 'beamtalk_object_class':'start_link'('TestActor', ~{
-                    'name' => 'TestActor',
-                    'module' => 'error_message',
-                    'superclass' => 'Actor',
-                    'instance_methods' => ~{'doError' => ~{'arity' => 0}~, 'errorWithVariable' => ~{'arity' => 0}~}~,
-                    'instance_variables' => [],
-                    'class_methods' => ~{
-                        'spawn' => ~{'arity' => 0}~,
-                        'spawnWith:' => ~{'arity' => 1}~
-                    }~
-                }~) of
-                    <{'ok', _Pid0}> when 'true' -> 'ok'
-                    <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
-                    <{'error', _Reason0}> when 'true' -> 'ok'
-                end
+    try
+        let _Reg0 = case call 'beamtalk_object_class':'start_link'('TestActor', ~{
+            'name' => 'TestActor',
+            'module' => 'error_message',
+            'superclass' => 'Actor',
+            'instance_methods' => ~{'doError' => ~{'arity' => 0}~, 'errorWithVariable' => ~{'arity' => 0}~}~,
+            'instance_variables' => [],
+            'class_methods' => ~{
+                'spawn' => ~{'arity' => 0}~,
+                'spawnWith:' => ~{'arity' => 1}~
+            }~
+        }~) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', _Reason0}> when 'true' -> 'ok'
+        end
 
-                in 'ok'
-            of RegResult -> RegResult
-            catch <CatchType, CatchError, CatchStack> -> 'ok'
+        in 'ok'
+    of RegResult -> RegResult
+    catch <CatchType, CatchError, CatchStack> -> 'ok'
 
 end

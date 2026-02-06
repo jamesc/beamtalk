@@ -651,14 +651,9 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Add built-in reflection methods (BT-97)
-        methods.push(("class".to_string(), 0));
-        methods.push(("respondsTo:".to_string(), 1));
-        methods.push(("instVarNames".to_string(), 0));
-        methods.push(("instVarAt:".to_string(), 1));
-        methods.push(("instVarAt:put:".to_string(), 2));
-        methods.push(("perform:".to_string(), 1));
-        methods.push(("perform:withArguments:".to_string(), 2));
+        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
+        // instVarAt:, instVarAt:put:, perform:, perform:withArguments:) are now
+        // inherited from Object via hierarchy walking.
 
         for (i, (name, arity)) in methods.iter().enumerate() {
             if i > 0 {
@@ -717,14 +712,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Add built-in reflection methods (BT-97)
-        methods.push("class".to_string());
-        methods.push("respondsTo:".to_string());
-        methods.push("instVarNames".to_string());
-        methods.push("instVarAt:".to_string());
-        methods.push("instVarAt:put:".to_string());
-        methods.push("perform:".to_string());
-        methods.push("perform:withArguments:".to_string());
+        // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
 
         // Generate lists:member call with method list
         write!(self.output, "call 'lists':'member'(Selector, [")?;
@@ -884,8 +872,9 @@ impl CoreErlangGenerator {
             self.generate_class_method_dispatches(class)?;
         }
 
-        // Generate built-in reflection message handlers (BT-97)
-        self.generate_reflection_handlers()?;
+        // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
+        // instVarAt:, instVarAt:put:) are now inherited from Object via hierarchy
+        // walking, no longer generated per-class.
 
         // Default case: hierarchy walk via beamtalk_dispatch, then DNU fallback (ADR 0006)
         let class_name = self.to_class_name();
@@ -1018,278 +1007,6 @@ impl CoreErlangGenerator {
                 self.generate_method_dispatch(method)?;
             }
         }
-        Ok(())
-    }
-
-    /// Generates the `class` reflection handler (BT-97).
-    ///
-    /// Returns the class name as an atom.
-    fn generate_class_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'class'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let ClassName = call 'maps':'get'('__class__', State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', ClassName, State}}")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
-    /// Generates the `respondsTo:` reflection handler (BT-97).
-    ///
-    /// Checks if the object responds to a given selector.
-    fn generate_responds_to_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[Selector]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Methods = call 'maps':'get'('__methods__', State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Result = call 'maps':'is_key'(Selector, Methods) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', Result, State}}")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
-    /// Generates the `instVarNames` reflection handler (BT-97).
-    ///
-    /// Returns a list of instance variable names, filtering out internal fields.
-    fn generate_inst_var_names_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% Filter out internal fields starting with '__'"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "let AllFields = call 'maps':'keys'(State) in")?;
-        self.write_indent()?;
-        writeln!(self.output, "let FilterFn = fun (Key) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Key of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'__class__'> when 'true' -> 'false'")?;
-        self.write_indent()?;
-        writeln!(self.output, "<'__class_mod__'> when 'true' -> 'false'")?;
-        self.write_indent()?;
-        writeln!(self.output, "<'__methods__'> when 'true' -> 'false'")?;
-        self.write_indent()?;
-        writeln!(self.output, "<'__registry_pid__'> when 'true' -> 'false'")?;
-        self.write_indent()?;
-        writeln!(self.output, "<_> when 'true' -> 'true'")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "in")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let UserFields = call 'lists':'filter'(FilterFn, AllFields) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', UserFields, State}}")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
-    /// Generates the `instVarAt:` reflection handler (BT-97).
-    ///
-    /// Returns the value of an instance variable.
-    fn generate_inst_var_at_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[FieldName]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'maps':'is_key'(FieldName, State) of"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'true'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Value = call 'maps':'get'(FieldName, State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', Value, State}}")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'false'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "{{'reply', {{'error', 'field_not_found'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
-    /// Generates the `instVarAt:put:` reflection handler (BT-97).
-    ///
-    /// Sets the value of an instance variable.
-    fn generate_inst_var_at_put_handler(&mut self) -> Result<()> {
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<[FieldName, Value]> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'maps':'is_key'(FieldName, State) of"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'true'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let NewState = call 'maps':'put'(FieldName, Value, State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', Value, NewState}}")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'false'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "{{'reply', {{'error', 'field_not_found'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        Ok(())
-    }
-
-    /// Generates built-in reflection message handlers (BT-97).
-    ///
-    /// All Beamtalk objects respond to reflection messages:
-    /// - `class` → returns class name atom
-    /// - `respondsTo:` → checks if selector exists
-    /// - `instVarNames` → returns list of field names
-    /// - `instVarAt:` → returns field value
-    /// - `instVarAt:put:` → sets field value
-    /// - `perform:` → dynamic dispatch to selector with args
-    ///
-    /// These are generated after user-defined methods but before the
-    /// `doesNotUnderstand:args:` fallback.
-    pub(super) fn generate_reflection_handlers(&mut self) -> Result<()> {
-        self.generate_class_handler()?;
-        self.generate_responds_to_handler()?;
-        self.generate_inst_var_names_handler()?;
-        self.generate_inst_var_at_handler()?;
-        self.generate_inst_var_at_put_handler()?;
-        // Note: perform: and perform:withArguments: don't need handlers here
-        // They are implemented in the frontend (builtins.rs) by sending the
-        // target selector directly to handle_cast, bypassing the reflection
-        // dispatch layer entirely.
-
         Ok(())
     }
 
