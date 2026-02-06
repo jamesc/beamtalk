@@ -28,13 +28,21 @@ Perform a **deep, thorough code review** focused on **shipping high-quality code
 
 4. **Review each changed file** against the guidelines below.
 
-5. **Verify tests pass**: Run the test suite to ensure changes don't break anything:
+5. **Test coverage check**: Explicitly ask yourself:
+   - "Are there any new tests needed for these changes?"
+   - "Can I write an E2E test for this?" (check `tests/e2e/cases/*.bt`)
+   - "Are there edge cases in the changed code that aren't tested?"
+   - "Did any existing tests need updating due to behavioral changes?"
+   
+   If tests are missing, add them as part of the review (see step 6).
+
+6. **Verify tests pass**: Run the test suite to ensure changes don't break anything:
    ```bash
    just ci
    ```
    This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
 
-6. **Implement recommended suggestions**: For anything that can be done well in <2 hours, implement it directly. This includes:
+7. **Implement recommended suggestions**: For anything that can be done well in <2 hours, implement it directly. This includes:
    - Fixing bugs and edge cases
    - Adding missing tests
    - Improving documentation
@@ -43,14 +51,14 @@ Perform a **deep, thorough code review** focused on **shipping high-quality code
    - Improving naming and structure
    - **Philosophy:** Ship high quality the first time. Don't defer easy work to future PRs.
 
-7. **Create issues ONLY for substantial changes**: Only create Linear issues for work that:
+8. **Create issues ONLY for substantial changes**: Only create Linear issues for work that:
    - Requires architectural design decisions
    - Affects multiple components significantly
    - Needs cross-team coordination or breaking changes
    - Would fundamentally change the PR's scope
    - **Remember:** The bar for "separate PR" is HIGH. When in doubt, implement it now.
 
-8. **Summary**: End with an overall assessment:
+9. **Summary**: End with an overall assessment:
    - Is the code ready to merge?
    - What are the main strengths of the changes?
    - What changes were implemented during review

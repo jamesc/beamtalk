@@ -491,6 +491,59 @@ See full logging guidelines: [docs/development/erlang-guidelines.md](docs/develo
 
 ---
 
+## Test Output - AI Agent Friendly
+
+**Test commands are intentionally concise to avoid polluting AI agent context.**
+
+### Output Philosophy
+
+Tests should output:
+- ✅ Summary line (X passed, Y failed, Z seconds)
+- ✅ Failed test details (if any)
+- ❌ NOT every passing test name
+- ❌ NOT compilation progress
+
+### Current Configuration
+
+**Rust tests:** One line per test binary with `crate::source` label
+```bash
+just test-rust
+# Output: ~9 lines, one per binary with pass/fail/ignore counts
+# Example:
+#   beamtalk_core::src/lib.rs                     429 passed; 0 failed; 2 ignored; ...
+#   compiler_tests::tests/compiler_tests.rs       176 passed; 0 failed; 0 ignored; ...
+```
+
+**Erlang tests:** Use non-verbose eunit mode
+```bash
+just test-runtime
+# Output: Summary only (~2 lines)
+```
+
+### Benefits
+
+1. **Reduced context pollution** - 90% less output (500+ lines → 50 lines)
+2. **Faster agent processing** - Less text to parse and understand
+3. **Signal over noise** - See failures immediately, not buried in success spam
+4. **Still debuggable** - Failures show full details with error messages
+
+### For Debugging
+
+When you need verbose output for investigation:
+
+```bash
+# Rust - see all test names
+cargo test --all-targets
+
+# Erlang - see all test names  
+cd runtime
+rebar3 eunit
+```
+
+**Remember:** Default test commands (`just test`, `just test-rust`, `just test-runtime`) are optimized for AI agent workflows with minimal output.
+
+---
+
 ## User Experience & Developer Experience (DevEx) First
 
 **CRITICAL:** Beamtalk is an **interactive-first** language. Every feature must be validated from the user's perspective before it's considered complete.
