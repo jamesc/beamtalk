@@ -43,6 +43,8 @@
 //! beamtalk repl                         # Auto-detect/create workspace
 //! ```
 
+pub mod discovery;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -297,6 +299,7 @@ pub fn start_detached_node(
     port: u16,
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
+    stdlib_beam_dir: &Path,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -337,6 +340,8 @@ pub fn start_detached_node(
         runtime_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
         "-eval".to_string(),
         eval_cmd,
     ];
@@ -402,6 +407,7 @@ pub fn get_or_start_workspace(
     port: u16,
     runtime_beam_dir: &Path,
     jsx_beam_dir: &Path,
+    stdlib_beam_dir: &Path,
 ) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
     let metadata = create_workspace(project_path, workspace_name)?;
@@ -417,7 +423,13 @@ pub fn get_or_start_workspace(
     }
 
     // Start new detached node
-    let node_info = start_detached_node(&workspace_id, port, runtime_beam_dir, jsx_beam_dir)?;
+    let node_info = start_detached_node(
+        &workspace_id,
+        port,
+        runtime_beam_dir,
+        jsx_beam_dir,
+        stdlib_beam_dir,
+    )?;
     Ok((node_info, true, workspace_id)) // New node started
 }
 

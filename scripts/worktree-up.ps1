@@ -441,15 +441,14 @@ $env:DOCKER_CLI_HINTS = "false"
 # Build and start the container - capture output to get container ID
 # Explicitly mount the main .git directory since ${localEnv:...} doesn't work reliably
 $mountArg = "--mount=type=bind,source=$($env:MAIN_GIT_PATH),target=/workspaces/.$projectName-git"
-$rebuildArgs = if ($Rebuild) { "--rebuild --no-cache" } else { "" }
+$rebuildArgs = if ($Rebuild) { "--remove-existing-container" } else { "" }
 $displayCmd = "devcontainer up --workspace-folder $worktreePath $mountArg $rebuildArgs".Trim()
 Write-Host "Running: $displayCmd" -ForegroundColor Gray
 
 $upArgs = @("up", "--workspace-folder", $worktreePath, $mountArg)
 if ($Rebuild) {
-    $upArgs += "--rebuild"
-    $upArgs += "--no-cache"
-    Write-Host "🔨 Rebuilding devcontainer from scratch (no cache)..." -ForegroundColor Yellow
+    $upArgs += "--remove-existing-container"
+    Write-Host "🔨 Rebuilding devcontainer (removing existing container)..." -ForegroundColor Yellow
 }
 
 $output = & devcontainer @upArgs 2>&1 | ForEach-Object {
