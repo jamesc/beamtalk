@@ -3,12 +3,11 @@
 
 //! Build beamtalk projects.
 
-use crate::beam_compiler::{BeamCompiler, write_core_erlang};
-use crate::diagnostic::CompileDiagnostic;
+use crate::beam_compiler::{BeamCompiler, compile_source};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 /// Build beamtalk source files.
 ///
@@ -124,73 +123,17 @@ fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
-#[instrument(skip_all, fields(path = %path, module = module_name))]
 fn compile_file(
     path: &Utf8Path,
     module_name: &str,
     core_file: &Utf8Path,
     options: &beamtalk_core::CompilerOptions,
 ) -> Result<()> {
-    debug!("Compiling module '{}'", module_name);
     println!("  Compiling {path}...");
 
-    // Read source file
-    let source = fs::read_to_string(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read file '{path}'"))?;
+    compile_source(path, module_name, core_file, options)?;
 
-    // Lex and parse the source using beamtalk-core
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-
-    // Run @primitive validation (ADR 0007)
-    let primitive_diags =
-        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, options,
-        );
-    diagnostics.extend(primitive_diags);
-
-    // Check for errors
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
-
-    // Display all diagnostics (errors and warnings) using miette formatting
-    if !diagnostics.is_empty() {
-        debug!(
-            diagnostic_count = diagnostics.len(),
-            "Found diagnostics during compilation"
-        );
-        for diagnostic in &diagnostics {
-            let compile_diag =
-                CompileDiagnostic::from_core_diagnostic(diagnostic, path.as_str(), &source);
-
-            // Use appropriate log level based on diagnostic severity
-            match diagnostic.severity {
-                beamtalk_core::source_analysis::Severity::Error => {
-                    error!("{:?}", miette::Report::new(compile_diag));
-                }
-                beamtalk_core::source_analysis::Severity::Warning => {
-                    warn!("{:?}", miette::Report::new(compile_diag));
-                }
-            }
-        }
-    }
-
-    // Fail compilation only if there are errors
-    if has_errors {
-        error!("Compilation failed for '{}'", path);
-        miette::bail!("Failed to compile '{path}'");
-    }
-
-    debug!("Parsed successfully: {}", path);
     println!("    ✓ Parsed successfully");
-
-    // Generate Core Erlang
-    write_core_erlang(&module, module_name, core_file)
-        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{path}'"))?;
-
-    debug!("Generated Core Erlang: {}", core_file);
     println!("    ✓ Generated Core Erlang: {core_file}");
 
     Ok(())

@@ -34,7 +34,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, error, instrument, warn};
 
 /// Embedded compile.escript for batch compilation.
 const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
@@ -410,6 +410,91 @@ pub fn write_core_erlang(
     Ok(())
 }
 
+/// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).
+///
+/// This is the single compilation domain service used by all CLI commands
+/// (build, build-stdlib). It handles the full pipeline:
+/// read source → lex → parse → validate → report diagnostics → generate Core Erlang.
+///
+/// # Arguments
+///
+/// * `source_path` - Path to the `.bt` source file
+/// * `module_name` - Module name for the generated Core Erlang
+/// * `core_output` - Path where the `.core` file should be written
+/// * `options` - Compiler options (stdlib mode, primitive handling)
+///
+/// # Errors
+///
+/// Returns an error if reading, parsing, or code generation fails,
+/// or if any diagnostic has error severity.
+#[instrument(skip_all, fields(path = %source_path, module = module_name))]
+pub fn compile_source(
+    source_path: &Utf8Path,
+    module_name: &str,
+    core_output: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+) -> Result<()> {
+    use crate::diagnostic::CompileDiagnostic;
+
+    debug!("Compiling module '{}'", module_name);
+
+    // Read source file
+    let source = std::fs::read_to_string(source_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read file '{source_path}'"))?;
+
+    // Lex and parse
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // Run @primitive validation (ADR 0007)
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, options,
+        );
+    diagnostics.extend(primitive_diags);
+
+    // Check for errors
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+
+    // Display all diagnostics using miette formatting
+    if !diagnostics.is_empty() {
+        debug!(
+            diagnostic_count = diagnostics.len(),
+            "Found diagnostics during compilation"
+        );
+        for diagnostic in &diagnostics {
+            let compile_diag =
+                CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
+
+            match diagnostic.severity {
+                beamtalk_core::source_analysis::Severity::Error => {
+                    error!("{:?}", miette::Report::new(compile_diag));
+                }
+                beamtalk_core::source_analysis::Severity::Warning => {
+                    warn!("{:?}", miette::Report::new(compile_diag));
+                }
+            }
+        }
+    }
+
+    if has_errors {
+        error!("Compilation failed for '{}'", source_path);
+        miette::bail!("Failed to compile '{source_path}'");
+    }
+
+    debug!("Parsed successfully: {}", source_path);
+
+    // Generate Core Erlang
+    write_core_erlang(&module, module_name, core_output)
+        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
+
+    debug!("Generated Core Erlang: {}", core_output);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +531,53 @@ mod tests {
         let content = fs::read_to_string(output_path).unwrap();
         assert!(content.contains("module 'test_module'"));
         assert!(content.contains("attributes ['behaviour' = ['gen_server']]"));
+    }
+
+    #[test]
+    fn test_compile_source_valid() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_file = temp_path.join("test.bt");
+        let core_file = temp_path.join("test.core");
+        fs::write(&source_file, "test := [1 + 2].").unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source(&source_file, "test", &core_file, &options);
+
+        assert!(result.is_ok());
+        assert!(core_file.exists());
+        let content = fs::read_to_string(core_file).unwrap();
+        assert!(content.contains("module 'test'"));
+    }
+
+    #[test]
+    fn test_compile_source_syntax_error() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_file = temp_path.join("bad.bt");
+        let core_file = temp_path.join("bad.core");
+        fs::write(&source_file, "test := [1 + ].").unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source(&source_file, "bad", &core_file, &options);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compile_source_missing_file() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_file = temp_path.join("nonexistent.bt");
+        let core_file = temp_path.join("nonexistent.core");
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source(&source_file, "nonexistent", &core_file, &options);
+
+        assert!(result.is_err());
     }
 
     #[test]
