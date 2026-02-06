@@ -1,179 +1,65 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════
-
 // String - UTF-8 text operations
 //
-// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries), not
-// charlists. All string operations are grapheme-aware (user-perceived
-// characters), not byte-oriented.
-//
-// ## String Literals
-//
-// - Single quotes: `'hello'` - plain UTF-8 string
-// - Double quotes: `"Hello, {name}!"` - interpolated string
-//
-// ## Length and Access Messages
-//
-// - `length` - Number of graphemes (not bytes)
-// - `at: index` - Get grapheme at index (1-based)
-// - `at: index put: char` - Set character at index
-//
-// ## Comparison Messages
-//
-// - `=` - Equality
-// - `~=` - Inequality
-// - `<` - Lexicographic less than
-// - `>` - Lexicographic greater than
-//
-// ## Transformation Messages
-//
-// - `uppercase` - Convert to uppercase
-// - `lowercase` - Convert to lowercase
-// - `trim` - Remove leading/trailing whitespace
-// - `reverse` - Reverse the string (grapheme-aware)
-//
-// ## Concatenation and Splitting
-//
-// - `++` or `, other` - Concatenate strings
-// - `split: separator` - Split into collection
-// - `join: collection` - Join collection with this separator
-//
-// ## Search Messages
-//
-// - `includes: substring` - Test if substring is present
-// - `startsWith: prefix` - Test if starts with prefix
-// - `endsWith: suffix` - Test if ends with suffix
-// - `indexOf: substring` - Find first occurrence (0 if not found)
-//
-// ## Iteration Messages
-//
-// - `each: block` - Iterate over graphemes
-// - `collect: block` - Transform each grapheme
-// - `select: block` - Filter graphemes by predicate
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Concatenation
-// greeting := 'Hello, ' ++ name ++ '!'
-//
-// // Interpolation
-// message := "Welcome, {userName}!"
-//
-// // Comparison
-// ('apple' < 'banana') ifTrue: [Transcript show: 'alphabetical']
-//
-// // Transformation
-// shout := message uppercase
-// clean := input trim
-//
-// // Searching
-// (text includes: 'error') ifTrue: [self logError: text]
-//
-// // Iteration
-// word each: [:char | Transcript show: char]
-// caps := word collect: [:char | char uppercase]
-// ```
-//
-// ## BEAM Mapping
-//
-// Beamtalk strings are Erlang binaries:
-// ```erlang
-// <<"hello">>           % 'hello' in Beamtalk
-// <<"UTF-8: ", X/binary>>  % "UTF-8: {x}" in Beamtalk
-// ```
-//
-// String operations use Erlang's `:string` module (grapheme-aware):
-// ```erlang
-// string:length(<<"hello">>)      % 5 graphemes
-// string:uppercase(<<"hello">>)   % <<"HELLO">>
-// ```
+// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
+// All string operations are grapheme-aware.
 
-String
-  // Length in graphemes (not bytes)
-  length => // implemented by compiler - string:length
+Object subclass: String
+  // Binary operators first (parser constraint)
+  = other => @primitive '='
+  ~= other => (self = other) not
+  < other => @primitive '<'
+  > other => @primitive '>'
+  <= other => @primitive '<='
+  >= other => @primitive '>='
+  ++ other => @primitive '++'
 
-  // Access by grapheme index (1-based)
-  at: index => // implemented by compiler - string:nth
-
-  // Comparison (lexicographic)
-  = other => // implemented by compiler - erlang:'=:='
-  ~= other => // implemented by compiler - erlang:'=/='
-  < other => // implemented by compiler - erlang:'<'
-  > other => // implemented by compiler - erlang:'>'
-  <= other => // implemented by compiler - erlang:'=<'
-  >= other => // implemented by compiler - erlang:'>='
-
-  // Concatenation
-  ++ other => // implemented by compiler - binary concatenation
+  // Concatenation alias
   , other => self ++ other
 
-  // Case transformation (Unicode-aware)
-  uppercase => // implemented by compiler - string:uppercase
-  lowercase => // implemented by compiler - string:lowercase
-  capitalize => // implemented by compiler - first char uppercase
+  // Length and access
+  length => @primitive 'length'
+  at: index => @primitive 'at:'
+
+  // Case transformation
+  uppercase => @primitive 'uppercase'
+  lowercase => @primitive 'lowercase'
+  capitalize => @primitive 'capitalize'
 
   // Whitespace
-  trim => // implemented by compiler - string:trim
-  trimLeft => // implemented by compiler - string:trim leading
-  trimRight => // implemented by compiler - string:trim trailing
+  trim => @primitive 'trim'
+  trimLeft => @primitive 'trimLeft'
+  trimRight => @primitive 'trimRight'
 
-  // Reverse (grapheme-aware)
-  reverse => // implemented by compiler - string:reverse
+  // Reverse
+  reverse => @primitive 'reverse'
 
   // Search
-  includes: substring => (self indexOf: substring) > 0
-  startsWith: prefix => // implemented by compiler - binary:match at 0
-  endsWith: suffix => // implemented by compiler - string ends with
+  includes: substring => @primitive 'includes:'
+  startsWith: prefix => @primitive 'startsWith:'
+  endsWith: suffix => @primitive 'endsWith:'
+  indexOf: substring => @primitive 'indexOf:'
 
-  indexOf: substring =>
-    // implemented by compiler - binary:match
-    // Returns 0 if not found (Smalltalk convention - note this differs from
-    // 1-based indexing used elsewhere, as 0 is a natural "not found" sentinel)
-    // Returns 1-based index if found
+  // Splitting
+  split: separator => @primitive 'split:'
+  splitOn: pattern => @primitive 'splitOn:'
+  repeat: n => @primitive 'repeat:'
 
-  // Splitting and joining
-  split: separator => // implemented by compiler - binary:split
-  splitOn: pattern => // implemented by compiler - string:split with regex
-
-  // Repeat string N times
-  // The compiler SHOULD optimize this or provide a more efficient implementation.
-  repeat: n => // implemented by compiler
-    // Reference semantics (inefficient for large N):
-    // n = 0 ifTrue: [^''].
-    // n = 1 ifTrue: [^self].
-    // ^(self ++ (self repeat: (n - 1)))
-
-  // Test if empty
+  // Pure Beamtalk
   isEmpty => self length = 0
   isNotEmpty => self length > 0
 
   // Conversion
-  asInteger => // implemented by compiler - binary_to_integer
-  asFloat => // implemented by compiler - binary_to_float
-  asAtom => // implemented by compiler - binary_to_atom
-  asList => // implemented by compiler - binary_to_list (charlist)
+  asInteger => @primitive 'asInteger'
+  asFloat => @primitive 'asFloat'
+  asAtom => @primitive 'asAtom'
+  asList => @primitive 'asList'
 
-  // Iteration over graphemes
-  each: block =>
-    // implemented by compiler - string:next_grapheme iteration
-    // block value: eachGrapheme
+  // Iteration
+  each: block => @primitive 'each:'
+  collect: block => @primitive 'collect:'
+  select: block => @primitive 'select:'
 
-  collect: block =>
-    // implemented by compiler - map over graphemes
-    // Returns new string with transformed graphemes
-
-  select: block =>
-    // implemented by compiler - filter graphemes
-    // Returns new string with selected graphemes
-
-  // String representation
   describe => self

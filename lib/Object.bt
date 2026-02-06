@@ -1,255 +1,33 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════════
-
 // Object - Root class for value types in Beamtalk
 //
 // Object inherits from ProtoObject and adds the standard protocol that almost
-// all objects need: reflection, nil testing, debugging, and comparison.
-//
-// Object is the parent of:
-// - **Primitives** (Integer, String, Float, Boolean, etc.) - sealed, no process
-// - **User value types** (Point, Color, Config, etc.) - no process
-// - **Actor** - process-based objects with mailbox and spawn
-//
-// ## Class Hierarchy
-//
-// ```
-// ProtoObject (minimal root - identity, DNU)
-//   └─ Object (value types - new, reflection, nil testing)
-//        ├─ Integer, String, Float, etc. (sealed primitives)
-//        ├─ Point, Color, Config, etc. (user value types)
-//        └─ Actor (process-based objects - spawn, mailbox)
-//             └─ Counter, Worker, etc. (user actors)
-// ```
-//
-// ## When to Inherit from Object
-//
-// Use Object directly for:
-// - **Value types** without concurrency needs (Point, Rectangle, Color)
-// - **Data structures** that are copied when passed (Config, DTO)
-// - **Immutable data** that doesn't need process isolation
-//
-// Most application code should inherit from Actor instead, which adds
-// spawning, supervision, and async messaging on top of Object.
-//
-// ## Value Types vs Actors
-//
-// - **Object subclass:** No process, value-style semantics
-//   (Note: Universal `new` instantiation is not yet implemented - tracked in BT-221)
-// - **Actor subclass:** BEAM process, use `spawn` to instantiate
-//
-// Both use the same message-sending syntax - the difference is in state management
-// and concurrency. See Actor.bt for process-based objects.
-//
-// ## Core Protocols
-//
-// ### Reflection
-// - `class` - Returns the object's class (inherited from ProtoObject)
-// - `respondsTo:` - Check if object understands a message
-// - `instVarNames` - List of instance variable names
-// - `instVarAt:` - Read instance variable by name
-// - `instVarAt:put:` - Write instance variable by name
-// - `perform:` - Dynamically dispatch zero-arity method
-// - `perform:withArguments:` - Dynamically dispatch method with arguments
-//
-// ### Nil Testing  
-// - `isNil` - Returns false for all objects except Nil
-// - `notNil` - Returns true for all objects except Nil
-// - `ifNil:` - Conditional execution if nil
-// - `ifNotNil:` - Conditional execution if not nil
-// - `ifNil:ifNotNil:` - Two-way conditional
-//
-// ### Debugging
-// - `inspect` - Print textual representation
-// - `describe` - Return string description
-//
-// ### Comparison (TODO - not yet implemented)
-// - `=` - Value equality (subclasses override)
-// - `hash` - Hash code for collections
-// - `<`, `>`, `<=`, `>=` - Ordering (Magnitude protocol)
-//
-// ## BEAM Mapping
-//
-// Object methods compile to functions in the instance module. For example,
-// a Counter class generates `beamtalk_counter.erl` with all instance methods.
-//
-// The Object protocol is available to all classes that inherit from Object
-// (which is everything except classes directly inheriting from ProtoObject).
+// all objects need: instantiation, reflection, nil testing, and debugging.
 
 ProtoObject subclass: Object
-  // ## Nil Testing Protocol
-  //
-  // These messages allow nil-safe control flow. All objects (except Nil) return
-  // false for `isNil` and true for `notNil`.
-  //
-  // Examples:
-  // ```beamtalk
-  // 42 isNil        // => false
-  // 42 notNil       // => true
-  // 42 ifNil: [0]   // => 42
-  // 42 ifNotNil: [:v | v + 1]  // => 43
-  // ```
+  // Instantiation — structural intrinsics
+  new => @primitive basicNew
+  new: initArgs => @primitive basicNewWith
 
-  // Returns false for all objects except Nil
+  // Nil testing — pure Beamtalk
   isNil => false
-
-  // Returns true for all objects except Nil
   notNil => true
-
-  // Returns self without evaluating the block (non-nil objects)
   ifNil: nilBlock => self
-
-  // Evaluates the block passing the receiver as argument (non-nil objects)
   ifNotNil: notNilBlock => notNilBlock value: self
-
-  // Evaluates notNilBlock with receiver (non-nil objects)
   ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
-
-  // Evaluates notNilBlock with receiver (non-nil objects, reversed order)
   ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
 
-  // ## Debugging Protocol
-  //
-  // These messages help with inspecting and debugging objects.
-
-  // Show this object's description on the Transcript
+  // Debugging — pure Beamtalk
   inspect => Transcript show: self describe
-
-  // Returns a textual description of this object
-  // Subclasses should override to provide detailed info
   describe => 'an Object'
 
-  // ## Reflection Protocol
-  //
-  // These messages enable runtime introspection of object structure.
-  // Currently implemented for actors; primitive support planned (see BT-163, BT-164).
-  //
-  // Examples:
-  // ```beamtalk
-  // counter respondsTo: #increment
-  // // => true
-  //
-  // counter instVarNames
-  // // => [#value]
-  //
-  // counter instVarAt: #value
-  // // => 0
-  // ```
-  
-  // Check if this object responds to a given selector
-  // 
-  // For actors: Queries the method table in the object's state
-  // For primitives: Planned to check the primitive's method table (not yet implemented - see BT-163)
-  //
-  // Arguments:
-  // - selector: Symbol representing the message name (e.g., #increment)
-  //
-  // Returns: true if object understands the message, false otherwise
-  respondsTo: selector => // implemented by compiler
-  
-  // Returns list of instance variable names
-  //
-  // For actors: Extracts field names from the state map (excluding internals)
-  // For primitives: Planned to return empty list (not yet implemented - see BT-164)
-  //
-  // Returns: Array of symbols representing instance variable names
-  instVarNames => // implemented by compiler
-  
-  // Read an instance variable by name
-  //
-  // For actors: Reads field from the state map
-  // For primitives: Planned to return nil (not yet implemented - see BT-164)
-  //
-  // Arguments:
-  // - name: Symbol representing the instance variable name
-  //
-  // Returns: Current value of the instance variable, or {error, field_not_found} if not found
-  //
-  // Example:
-  // ```beamtalk
-  // counter instVarAt: #value
-  // // => 0
-  // ```
-  instVarAt: name => // implemented by compiler
-  
-  // Set an instance variable by name
-  //
-  // For actors: Writes value to the state map
-  // For primitives: Should raise immutability error (not yet implemented - see BT-164)
-  //
-  // Arguments:
-  // - name: Symbol representing the instance variable name
-  // - value: New value to set
-  //
-  // Returns: The new value, or {error, field_not_found} if field doesn't exist
-  //
-  // Example:
-  // ```beamtalk
-  // counter instVarAt: #value put: 42
-  // // => 42
-  // ```
-  instVarAt: name put: value => // implemented by compiler
-  
-  // Dynamically dispatch a zero-arity method by selector
-  //
-  // Shorthand for `perform:withArguments:` with empty argument list.
-  //
-  // Arguments:
-  // - selector: Symbol representing the method name
-  //
-  // Returns: Result of invoking the method
-  //
-  // Example:
-  // ```beamtalk
-  // counter perform: #getValue
-  // // => 42
-  // ```
-  //
-  // See also: `perform:withArguments:` for methods with arguments
-  perform: selector => // implemented by compiler
+  // Reflection — structural intrinsics
+  respondsTo: selector => @primitive respondsTo
+  instVarNames => @primitive instVarNames
+  instVarAt: name => @primitive instVarAt
+  instVarAt: name put: value => @primitive instVarAtPut
 
-  // ## Instantiation Protocol (Class Methods)
-  //
-  // These class messages create new instances of value types.
-  // Value types are plain Erlang terms (maps/records) with no process.
-  //
-  // **IMPORTANT:** These only work for Object subclasses (value types).
-  // Actor subclasses must use `spawn` instead.
-
-  // Create a new instance with default field values
-  //
-  // This is a class method that creates a value type instance.
-  // All fields are initialized to their default values (or nil if no default).
-  //
-  // Example:
-  // ```beamtalk
-  // Point new          // => Point instance with default x, y
-  // ```
-  //
-  // Returns: New instance of this class
-  new => // implemented by compiler
-
-  // Create a new instance with initialization arguments
-  //
-  // This is a class method that creates a value type instance with custom
-  // initial field values. Arguments should be a dictionary mapping field
-  // names to values.
-  //
-  // Example:
-  // ```beamtalk
-  // Point new: #{x => 3, y => 4}   // => Point with x=3, y=4
-  // ```
-  //
-  // Arguments:
-  // - initArgs: Dictionary of field names to initial values
-  //
-  // Returns: New instance of this class with specified field values
-  new: initArgs => // implemented by compiler
+  // Dynamic dispatch — structural intrinsic
+  perform: selector => @primitive dynamicSend

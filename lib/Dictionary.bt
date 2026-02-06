@@ -1,256 +1,76 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════
-
 // Dictionary - Key-value collection (Erlang map)
 //
-// Dictionaries store associations between keys and values. Keys must be
-// unique; values can be any object. They provide fast lookup, insertion,
-// and deletion.
-//
-// ## When to Use Dictionary
-//
-// Use Dictionary when you need:
-// - Key-value associations
-// - Fast lookup by key
-// - Named field access
-// - JSON-like data structures
-//
-// ## Literal Syntax
-//
-// Dictionaries use map literal syntax:
-// ```beamtalk
-// empty := #{}
-// person := #{#name => 'Alice', #age => 30}
-// config := #{'host' => 'localhost', 'port' => 8080}
-// ```
-//
-// ## Key Types
-//
-// Any value can be a key (atoms recommended for clarity):
-// ```beamtalk
-// #{ #symbol => 'value' }    // Atom key (most common)
-// #{ 'string' => 'value' }   // String key
-// #{ 42 => 'value' }         // Integer key
-// #{ {1, 2} => 'value' }     // Tuple key
-// ```
-//
-// ## BEAM Mapping
-//
-// Dictionaries use Erlang maps:
-// ```erlang
-// #{}                        % Beamtalk: #{}
-// #{key => value}            % Beamtalk: #{#key => value}
-// maps:get(K, M)             % Beamtalk: dict at: #key
-// maps:put(K, V, M)          % Beamtalk: dict at: #key put: value
-// maps:remove(K, M)          % Beamtalk: dict removeKey: #key
-// maps:is_key(K, M)          % Beamtalk: dict includesKey: #key
-// maps:keys(M)               % Beamtalk: dict keys
-// maps:values(M)             % Beamtalk: dict values
-// ```
-//
-// ## Performance Characteristics
-//
-// Erlang maps have excellent performance:
-// | Operation | Time Complexity |
-// |-----------|-----------------|
-// | `at:` | O(log n) |
-// | `at:put:` | O(log n) |
-// | `removeKey:` | O(log n) |
-// | `includesKey:` | O(log n) |
-// | `size` | O(1) |
-// | `keys` / `values` | O(n) |
-//
-// ## Usage Examples
-//
-// ```beamtalk
-// // Creation
-// person := #{#name => 'Alice', #age => 30, #city => 'NYC'}
-//
-// // Access
-// name := person at: #name           // => 'Alice'
-// age := person at: #age             // => 30
-//
-// // Safe access with default
-// title := person at: #title ifAbsent: ['Unknown']  // => 'Unknown'
-//
-// // Update (returns new dictionary)
-// older := person at: #age put: 31   // => #{#name => 'Alice', #age => 31, ...}
-//
-// // Add new key
-// withJob := person at: #job put: 'Engineer'
-//
-// // Remove key
-// minimal := person removeKey: #city
-//
-// // Iteration
-// person keys each: [:k | Transcript show: k]
-// person values each: [:v | Transcript show: v]
-// person keysAndValuesDo: [:k :v |
-//   Transcript show: k; show: ' => '; show: v
-// ]
-//
-// // Transformation
-// doubled := ages collect: [:v | v * 2]
-// adults := people select: [:p | (p at: #age) >= 18]
-// ```
-//
-// ## Nested Access
-//
-// ```beamtalk
-// data := #{
-//   #user => #{
-//     #name => 'Alice',
-//     #address => #{#city => 'NYC', #zip => '10001'}
-//   }
-// }
-//
-// // Deep access
-// city := (data at: #user) at: #address) at: #city
-//
-// // With safe navigation (planned)
-// city := data at: #user at: #address at: #city ifAbsent: ['Unknown']
-// ```
-//
-// ## See Also
-//
-// - `Collection.bt` - Base collection protocol
-// - `Set.bt` - Dictionary keys behave like a set
+// Fast lookup, insertion, and deletion. Keys must be unique.
 
-Dictionary
-  // ═══════════════════════════════════════════════════════════════════
+Object subclass: Dictionary
   // Construction
-  // ═══════════════════════════════════════════════════════════════════
+  new => @primitive 'new'
 
-  // Create empty dictionary
-  new => // implemented by compiler - #{}
-
-  // Create dictionary with one key-value pair
   with: key value: value => (Dictionary new) at: key put: value
 
-  // Create from list of key-value pairs
-  // pairs is a list of {key, value} tuples
   fromPairs: pairs =>
     pairs inject: Dictionary new into: [:dict :pair |
       dict at: (pair at: 1) put: (pair at: 2)
     ]
 
-  // Create from parallel lists of keys and values
   fromKeys: keys values: values =>
     keys with: values inject: Dictionary new into: [:dict :k :v |
       dict at: k put: v
     ]
 
-  // ═══════════════════════════════════════════════════════════════════
   // Size
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Number of key-value pairs
-  size => // implemented by compiler - maps:size
-
+  size => @primitive 'size'
   isEmpty => self size = 0
   isNotEmpty => self size > 0
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Key Access
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Get value for key
-  // Raises error if key not found
-  at: key => // implemented by compiler - maps:get
-
-  // Get value for key, or evaluate default block if not found
-  at: key ifAbsent: defaultBlock => // implemented by compiler
-    // maps:get(Key, Map, Default) where Default is block evaluation
-
-  // Get value for key, or nil if not found
+  // Key access
+  at: key => @primitive 'at:'
+  at: key ifAbsent: defaultBlock => @primitive 'at:ifAbsent:'
   at: key ifAbsentPut: valueBlock =>
     (self includesKey: key)
       ifTrue: [self at: key]
       ifFalse: [self at: key put: valueBlock value]
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Modification (returns new dictionary)
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Set value for key, returns new dictionary
-  // Adds key if not present, updates if present
-  at: key put: value => // implemented by compiler - maps:put
-
-  // Set multiple keys at once
+  // Modification
+  at: key put: value => @primitive 'at:put:'
   putAll: otherDict =>
     otherDict keysAndValuesDo: [:k :v | self := self at: k put: v].
     self
 
-  // Remove key, returns new dictionary
-  // No error if key not present
-  removeKey: key => // implemented by compiler - maps:remove
-
-  // Remove key, evaluate block if not present
+  removeKey: key => @primitive 'removeKey:'
   removeKey: key ifAbsent: absentBlock =>
     (self includesKey: key)
       ifTrue: [self removeKey: key]
       ifFalse: [absentBlock value]
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Key Testing
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Test if key is present
-  includesKey: key => // implemented by compiler - maps:is_key
-
-  // Test if key is not present
+  // Key testing
+  includesKey: key => @primitive 'includesKey:'
   excludesKey: key => (self includesKey: key) not
-
-  // Collection protocol: test if value is present (O(n))
   includes: value =>
     self values anySatisfy: [:v | v = value]
 
-  // ═══════════════════════════════════════════════════════════════════
   // Views
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Get all keys as a list
-  keys => // implemented by compiler - maps:keys
-
-  // Get all values as a list
-  values => // implemented by compiler - maps:values
-
-  // Get all associations as list of {key, value} tuples
+  keys => @primitive 'keys'
+  values => @primitive 'values'
   associations =>
     self keys collect: [:k | {k, self at: k}]
 
-  // Get keys as a set
   keySet => Set fromList: self keys
 
-  // ═══════════════════════════════════════════════════════════════════
   // Iteration
-  // ═══════════════════════════════════════════════════════════════════
+  keysAndValuesDo: block => @primitive 'keysAndValuesDo:'
 
-  // Iterate over keys and values
-  // block receives key and value
-  keysAndValuesDo: block => // implemented by compiler - maps:foreach
-
-  // Iterate over keys only
   keysDo: block =>
     self keys each: block
 
-  // Iterate over values only
   valuesDo: block =>
     self values each: block
 
-  // Collection protocol: iterate over values
   each: block => self valuesDo: block
 
-  // Transform values, keeping keys
-  // block receives value, returns new value
   collect: block =>
     result := Dictionary new.
     self keysAndValuesDo: [:k :v |
@@ -258,8 +78,6 @@ Dictionary
     ].
     result
 
-  // Transform with key and value
-  // block receives key and value, returns new value
   collectWithKey: block =>
     result := Dictionary new.
     self keysAndValuesDo: [:k :v |
@@ -267,7 +85,6 @@ Dictionary
     ].
     result
 
-  // Filter by predicate on values
   select: block =>
     result := Dictionary new.
     self keysAndValuesDo: [:k :v |
@@ -275,7 +92,6 @@ Dictionary
     ].
     result
 
-  // Filter by predicate on key and value
   selectWithKey: block =>
     result := Dictionary new.
     self keysAndValuesDo: [:k :v |
@@ -283,11 +99,9 @@ Dictionary
     ].
     result
 
-  // Reject by predicate on values
   reject: block =>
     self select: [:v | (block value: v) not]
 
-  // Fold over key-value pairs
   inject: initial into: block =>
     result := initial.
     self keysAndValuesDo: [:k :v |
@@ -295,16 +109,8 @@ Dictionary
     ].
     result
 
-  // ═══════════════════════════════════════════════════════════════════
   // Merging
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Merge with another dictionary
-  // other's values override self's for duplicate keys
-  merge: other => // implemented by compiler - maps:merge
-
-  // Merge with conflict resolution
-  // block receives key, selfValue, otherValue; returns merged value
+  merge: other => @primitive 'merge:'
   merge: other with: block =>
     result := self.
     other keysAndValuesDo: [:k :v |
@@ -314,24 +120,12 @@ Dictionary
     ].
     result
 
-  // ═══════════════════════════════════════════════════════════════════
   // Conversion
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Convert to list of {key, value} pairs
   asList => self associations
-
-  // Convert to array of {key, value} pairs
   asArray => self associations asArray
-
-  // Return self (already a dictionary)
   asDictionary => self
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Comparison
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Equality (same keys with same values)
+  // Comparison — pure Beamtalk
   = other =>
     other isDictionary ifFalse: [^false].
     self size = other size ifFalse: [^false].
@@ -347,12 +141,7 @@ Dictionary
   isSet => false
   isDictionary => true
 
-  // ═══════════════════════════════════════════════════════════════════
   // Utility
-  // ═══════════════════════════════════════════════════════════════════
-
-  // Invert dictionary (swap keys and values)
-  // Values must be unique; raises error otherwise
   inverted =>
     result := Dictionary new.
     self keysAndValuesDo: [:k :v |
@@ -362,11 +151,9 @@ Dictionary
     ].
     result
 
-  // Count entries matching predicate
   count: block =>
     self values count: block
 
-  // Get first entry matching predicate (as {key, value} pair)
   detect: block =>
     self keysAndValuesDo: [:k :v |
       (block value: v) ifTrue: [^{k, v}]

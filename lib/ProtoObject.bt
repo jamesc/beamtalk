@@ -1,188 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTE: This file is API DOCUMENTATION for the Beamtalk standard library.
-//
-// Messages marked "// implemented by compiler" are built-in primitives with
-// optimized implementations in the compiler. This file defines their API
-// contracts and expected behavior for users.
-// ═══════════════════════════════════════════════════════════════════════════
-
 // ProtoObject - Absolute root of the Beamtalk class hierarchy
 //
 // ProtoObject is the minimal root class providing only the most fundamental
-// messages that every object must understand. It exists to support special
-// objects that don't need the full protocol of Object (like proxies, foreign
-// objects, or minimal wrappers).
-//
-// ## Design Philosophy
-//
-// ProtoObject provides ONLY what is absolutely essential:
-// - Reflection: `class` (what kind of object am I?)
-// - Fallback: `doesNotUnderstand:args:` (handle unknown messages)
-// - Equality: `==` and `~=` (structural equality)
-//
-// All other functionality (nil testing, copying, description, comparison)
-// lives in Object, which inherits from ProtoObject. Most user code should
-// inherit from Object or Actor, not ProtoObject.
-//
-// ## Class Hierarchy
-//
-// ```
-// ProtoObject (minimal root - identity, DNU)
-//   └─ Object (value types - reflection, nil testing)
-//        ├─ Integer, String, etc. (sealed primitives)
-//        ├─ Point, Color, etc. (user value types) [instantiation TBD]
-//        └─ Actor (process-based - spawn, mailbox)
-//             └─ Counter, Worker, etc. (user actors)
-// ```
-//
-// ## When to Inherit from ProtoObject
-//
-// Only use ProtoObject directly for:
-// - **Proxy objects** that forward all messages to a delegate
-// - **Foreign objects** wrapping external resources
-// - **Minimal wrappers** that need custom message handling
-//
-// For normal user classes, inherit from Object or Actor instead.
-//
-// ## Core Messages
-//
-// ### class
-// Returns the class of the receiver. This is fundamental for reflection
-// and type checking.
-//
-// ```beamtalk
-// 42 class          // => Integer
-// 'hello' class     // => String
-// myActor class     // => MyActor
-// ```
-//
-// ### doesNotUnderstand: args:
-// Called when an object receives a message it doesn't understand. This is
-// the foundation for proxies, method_missing-style metaprogramming, and
-// error handling.
-//
-// Default behavior is to raise a MessageNotUnderstood error. Subclasses
-// can override to implement custom message handling:
-//
-// ```beamtalk
-// Proxy
-//   state: target
-//
-//   doesNotUnderstand: selector args: arguments =>
-//     // Forward all unknown messages to the target
-//     target perform: selector withArguments: arguments
-// ```
-//
-// ### ==
-// Tests structural equality. Behavior depends on the type:
-//
-// - **Value types** (Object subclass): Compares field values recursively
-// - **Actors**: Compares process identifiers (pids) - effectively identity
-// - **Primitives**: Compares values with type coercion (1.0 == 1 is true)
-//
-// ```beamtalk
-// // Primitives with coercion
-// 1.0 == 1           // => true (type coercion)
-// 'hello' == 'hello' // => true (same string value)
-//
-// // Value types - compares fields
-// p1 := Point new: #{x => 3, y => 4}
-// p2 := Point new: #{x => 3, y => 4}
-// p1 == p2           // => true (same field values)
-//
-// // Actors - compares pids (identity)
-// c1 := Counter spawn
-// c2 := Counter spawn
-// c1 == c2           // => false (different processes)
-// ```
-//
-// For strict equality without type coercion, use `=` (e.g., 1.0 = 1 is false).
-//
-// ### ~=
-// Tests structural inequality. Returns the negation of `==`.
-//
-// ```beamtalk
-// 1.0 ~= 2           // => true (different values)
-// 1.0 ~= 1           // => false (equal with coercion)
-// ```
-//
-// ## BEAM Mapping
-//
-// - `class` returns the `__class__` field from the object's state map
-// - `==` compiles to Erlang's `==` operator (value equality with coercion)
-// - `=` compiles to Erlang's `=:=` operator (strict equality, no coercion)
-// - `doesNotUnderstand:args:` is called by gen_server dispatch when no method matches
-//
-// ## Implementation Notes
-//
-// ProtoObject is a root class with NO superclass. The compiler must
-// handle ProtoObject specially:
-// - Method lookup terminates at ProtoObject
-// - ProtoObject has no `super` (calling super is an error)
-// - All other classes inherit from ProtoObject (directly or indirectly)
+// messages that every object must understand: reflection, equality, message
+// fallback, and error signalling.
 
 ProtoObject
-  // Returns the class of this object (compiler intrinsic)
-  // Implementation: reads self.__class__ from state map
-  class => // implemented by compiler
+  // Structural equality — selector-based, routes through runtime dispatch
+  == other => @primitive '=='
 
-  // Called when object receives unknown message (compiler intrinsic)
-  // Default: raises MessageNotUnderstood error
-  // Subclasses can override for custom dispatch or proxying
-  //
-  // Arguments:
-  // - selector: Symbol representing the message name (e.g., #'at:put:')
-  // - args: Array of arguments passed with the message
-  doesNotUnderstand: selector args: arguments => // implemented by compiler
-
-  // Structural equality test (compiler intrinsic)
-  // Returns true if self and other are structurally equal.
-  // - Value types: compares field values
-  // - Actors: compares pids (identity)
-  // - Primitives: value equality with type coercion
-  // Implementation: compiles to erlang:'=='(Self, Other)
-  == other => // implemented by compiler
-
-  // Structural inequality test
-  // Returns true if self and other are not structurally equal
-  // Delegates to == and negates the result
+  // Structural inequality — pure Beamtalk
   ~= other => (self == other) not
 
-  // Dynamic message dispatch (compiler intrinsic)
-  // Sends a message to an object at runtime
-  // Used by doesNotUnderstand handlers to forward messages
-  //
-  // Arguments:
-  // - selector: Symbol/atom representing the message name (e.g., #increment)
-  // - arguments: List of arguments to pass with the message
-  //
-  // Returns: Future (for async message sends to actors)
-  //
-  // Example:
-  // ```beamtalk
-  // Proxy
-  //   state: target
-  //
-  //   doesNotUnderstand: selector args: arguments =>
-  //     target perform: selector withArguments: arguments
-  // ```
-  perform: selector withArguments: arguments => // implemented by compiler
+  // Class identity — structural intrinsic, compiler generates type dispatch
+  class => @primitive classOf
 
-  // Raise an error with a message (compiler intrinsic)
-  // Terminates execution and propagates the error up the call stack
-  // For actors, the error is caught and sent as a rejected future
-  //
-  // Arguments:
-  // - message: String describing the error
-  //
-  // Example:
-  // ```beamtalk
-  // self error: 'Invalid argument'
-  // self error: 'Index out of bounds: ', index asString
-  // ```
-  //
-  // Implementation: compiles to erlang:error({beamtalk_error, Message})
-  error: message => // implemented by compiler
+  // Message fallback — structural intrinsic, compiler generates DNU dispatch
+  doesNotUnderstand: selector args: arguments => @primitive doesNotUnderstand
+
+  // Dynamic dispatch — structural intrinsic, compiler generates message send
+  perform: selector withArguments: arguments => @primitive dynamicSend
+
+  // Error signalling — selector-based, routes through runtime dispatch
+  error: message => @primitive 'error:'

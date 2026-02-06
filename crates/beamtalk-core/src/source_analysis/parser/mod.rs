@@ -1843,4 +1843,45 @@ Actor subclass: Rectangle
             panic!("Expected Block, got: {:?}", method.body[0]);
         }
     }
+
+    // BT-285: Consecutive binary method definitions
+    #[test]
+    fn parse_consecutive_binary_methods() {
+        let source = "Object subclass: Foo\n  + other => @primitive '+'\n  - other => @primitive '-'\n  * other => @primitive '*'";
+        let module = parse_ok(source);
+        assert_eq!(module.classes[0].methods.len(), 3);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "+");
+        assert_eq!(module.classes[0].methods[1].selector.name(), "-");
+        assert_eq!(module.classes[0].methods[2].selector.name(), "*");
+    }
+
+    #[test]
+    fn parse_binary_methods_followed_by_unary() {
+        let source = "Object subclass: Foo\n  + other => @primitive '+'\n  - other => @primitive '-'\n  negated => 0";
+        let module = parse_ok(source);
+        assert_eq!(module.classes[0].methods.len(), 3);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "+");
+        assert_eq!(module.classes[0].methods[1].selector.name(), "-");
+        assert_eq!(module.classes[0].methods[2].selector.name(), "negated");
+    }
+
+    #[test]
+    fn parse_binary_continuation_on_same_line() {
+        // Binary operator on same line should still work as expression continuation
+        let source = "Object subclass: Foo\n  m => 1 + 2 - 3";
+        let module = parse_ok(source);
+        assert_eq!(module.classes[0].methods.len(), 1);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "m");
+    }
+
+    #[test]
+    fn parse_binary_continuation_on_new_line() {
+        // Binary operator on new line that is NOT a method definition should
+        // continue the expression (regression test for BT-285)
+        let source = "Object subclass: Foo\n  m => 1\n    + 2\n  n => 3";
+        let module = parse_ok(source);
+        assert_eq!(module.classes[0].methods.len(), 2);
+        assert_eq!(module.classes[0].methods[0].selector.name(), "m");
+        assert_eq!(module.classes[0].methods[1].selector.name(), "n");
+    }
 }
