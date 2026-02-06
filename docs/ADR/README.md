@@ -27,6 +27,7 @@ Each ADR follows this structure:
 | [0004](0004-persistent-workspace-management.md) | Persistent Workspace Management | Accepted | 2026-02-05 |
 | [0005](0005-beam-object-model-pragmatic-hybrid.md) | BEAM Object Model - Pragmatic Hybrid Approach | Accepted | 2026-02-05 |
 | [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Accepted | 2026-02-05 |
+| [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Accepted | 2026-02-06 |
 
 ## Creating New ADRs
 

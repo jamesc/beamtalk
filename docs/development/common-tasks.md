@@ -21,15 +21,17 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
 
 **Follow this example-driven workflow:**
 
-1. **Define the API** in `lib/YourClass.bt`
+1. **Define the class** in `lib/YourClass.bt`
    - Include comprehensive documentation
-   - Mark compiler intrinsics with `// implemented by compiler`
+   - Use `@primitive intrinsicName` pragmas for methods backed by runtime dispatch (see [ADR 0007](../ADR/0007-compilable-stdlib-with-primitive-injection.md))
+   - Pure Beamtalk methods need no pragma — they compile directly
    - Provide usage examples in comments
 
-2. **Implement compiler support**
-   - Add builtin handler in `crates/beamtalk-core/src/codegen/core_erlang/builtins.rs`
-   - Integrate into dispatch chain in `message_dispatch.rs`
-   - Follow the pattern of `try_generate_*_message` functions
+2. **Implement runtime support** (for primitive methods only)
+   - Add dispatch clause in the appropriate runtime module (e.g., `runtime/src/beamtalk_integer.erl`)
+   - Runtime modules provide type checking, structured errors, and extension registry fallback
+   - Add intrinsic name mapping in the compiler's intrinsic registry (one line)
+   - For pure Beamtalk methods, skip this step — the compiler handles them directly
 
 3. **Create test fixtures** in `tests/e2e/fixtures/`
    - Create simple, reusable classes demonstrating the feature
@@ -58,8 +60,8 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Update implementation status table
 
 **Example from BT-176 (ProtoObject):**
-- ✅ API: `lib/ProtoObject.bt` (154 lines)
-- ✅ Compiler: `builtins.rs::try_generate_protoobject_message`
+- ✅ Class: `lib/ProtoObject.bt` — pragma declarations + pure Beamtalk methods
+- ✅ Runtime: `runtime/src/beamtalk_primitive.erl` — dispatch for ProtoObject methods
 - ✅ Fixtures: `tests/e2e/fixtures/simple_proxy.bt`
 - ✅ E2E Tests: `tests/e2e/cases/protoobject.bt`, `protoobject_actors.bt`
 - ✅ Example: `examples/protoobject_proxy.bt` (194 lines with walkthrough)

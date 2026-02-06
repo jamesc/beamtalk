@@ -184,6 +184,7 @@ The meta-circular interpreter loses BEAM's core value proposition. Dual-mode is 
 - **Related ADRs:**
   - [ADR 0004](0004-persistent-workspace-management.md): Persistent Workspace Management (REPL and image snapshots)
   - [ADR 0006](0006-unified-method-dispatch.md): Unified Method Dispatch with Hierarchy Walking (builds on this decision)
+  - [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md): Compilable Standard Library with Primitive Injection (pragma-based declarations for primitives replace hardcoded compiler dispatch tables; sealed enforcement is future work)
 
 ## Open Questions
 
