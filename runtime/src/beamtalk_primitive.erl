@@ -131,8 +131,7 @@ send(X, Selector, Args) when is_tuple(X) ->
             beamtalk_tuple:dispatch(Selector, Args, X)
     end;
 send(X, Selector, Args) when is_float(X) ->
-    %% TODO(BT-XXX): Implement beamtalk_float module
-    error({not_implemented, {beamtalk_float, dispatch, [Selector, Args, X]}});
+    beamtalk_float:dispatch(Selector, Args, X);
 send(X, Selector, Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -141,15 +140,15 @@ send(X, Selector, Args) ->
 %% @doc Check if a value responds to a given selector.
 %%
 %% For actors, delegates to the module's has_method/1 function.
-%% For primitives, will check both built-in methods and extension registry
-%% once primitive class modules are implemented (BT-166, BT-167, BT-168).
-%% Currently returns false for all primitives.
+%% For primitives, checks both built-in methods and extension registry
+%% via dedicated class modules (beamtalk_integer, beamtalk_string, etc.).
 %%
 %% Examples:
 %% ```
-%% responds_to(ActorObj, 'class')     % => true (actors work now)
-%% responds_to(42, '+')               % => false (primitives: TODO BT-166)
-%% responds_to(<<"hi">>, '++')        % => false (primitives: TODO BT-167)
+%% responds_to(ActorObj, 'class')     % => true
+%% responds_to(42, '+')               % => true
+%% responds_to(<<"hi">>, 'size')      % => true
+%% responds_to(3.14, '+')             % => true
 %% responds_to(42, 'unknownMsg')      % => false
 %% ```
 -spec responds_to(term(), atom()) -> boolean().
@@ -177,9 +176,8 @@ responds_to(X, Selector) when is_tuple(X) ->
             %% Regular tuple
             beamtalk_tuple:has_method(Selector)
     end;
-responds_to(_X, _Selector) when is_float(_X) ->
-    %% TODO(BT-XXX): Implement beamtalk_float:has_method/1
-    false;
+responds_to(X, Selector) when is_float(X) ->
+    beamtalk_float:has_method(Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
