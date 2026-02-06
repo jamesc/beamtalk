@@ -18,11 +18,13 @@ use ecow::EcoString;
 use std::collections::HashMap;
 
 pub mod block_context;
+pub mod class_hierarchy;
 pub mod error;
 pub mod name_resolver;
 pub mod scope;
 pub mod type_checker;
 
+pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use scope::BindingKind;
@@ -36,6 +38,9 @@ pub struct AnalysisResult {
 
     /// Block metadata indexed by block span.
     pub block_info: HashMap<Span, BlockInfo>,
+
+    /// Static class hierarchy (built-in + user-defined classes).
+    pub class_hierarchy: ClassHierarchy,
 }
 
 impl AnalysisResult {
@@ -45,6 +50,7 @@ impl AnalysisResult {
         Self {
             diagnostics: Vec::new(),
             block_info: HashMap::new(),
+            class_hierarchy: ClassHierarchy::with_builtins(),
         }
     }
 }
@@ -260,6 +266,11 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
     let mut result = AnalysisResult::new();
+
+    // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
+    let (hierarchy, hierarchy_diags) = ClassHierarchy::build(module);
+    result.class_hierarchy = hierarchy;
+    result.diagnostics.extend(hierarchy_diags);
 
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
@@ -2035,6 +2046,98 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("Undefined variable")),
             "Should not report undefined for known REPL variable reassignment, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // --- ClassHierarchy integration tests (BT-279) ---
+
+    #[test]
+    fn test_analyse_populates_class_hierarchy() {
+        let module = Module::new(vec![], Span::default());
+        let result = analyse(&module);
+
+        // Hierarchy should be populated with built-in classes
+        assert!(result.class_hierarchy.has_class("ProtoObject"));
+        assert!(result.class_hierarchy.has_class("Object"));
+        assert!(result.class_hierarchy.has_class("Actor"));
+        assert!(result.class_hierarchy.has_class("Integer"));
+    }
+
+    #[test]
+    fn test_analyse_hierarchy_includes_user_classes() {
+        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, StateDeclaration};
+
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![StateDeclaration {
+                name: Identifier::new("count", test_span()),
+                type_annotation: None,
+                default_value: None,
+                span: test_span(),
+            }],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("increment".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        assert!(result.class_hierarchy.has_class("Counter"));
+        assert!(
+            result
+                .class_hierarchy
+                .resolves_selector("Counter", "increment")
+        );
+        // Inherited from Actor
+        assert!(result.class_hierarchy.resolves_selector("Counter", "spawn"));
+    }
+
+    #[test]
+    fn test_analyse_reports_sealed_class_diagnostic() {
+        use crate::ast::ClassDefinition;
+
+        let class = ClassDefinition {
+            name: Identifier::new("MyInt", test_span()),
+            superclass: Identifier::new("Integer", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        // Should have sealed class diagnostic
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("sealed") && d.message.contains("Integer")),
+            "Expected sealed class diagnostic, got: {:?}",
             result.diagnostics
         );
     }

@@ -201,8 +201,11 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 pub fn generate(module: &Module) -> Result<String> {
     let mut generator = CoreErlangGenerator::new("beamtalk_module");
 
+    // Build hierarchy once for the entire generation (ADR 0006)
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module) {
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?;
     } else {
         generator.generate_value_type_module(module)?;
@@ -225,8 +228,11 @@ pub fn generate(module: &Module) -> Result<String> {
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
 
+    // Build hierarchy once for the entire generation (ADR 0006)
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module) {
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?;
     } else {
         generator.generate_value_type_module(module)?;
@@ -436,33 +442,40 @@ impl CoreErlangGenerator {
     ///
     /// # Implementation Note
     ///
-    /// This is a simplified check that only looks at the direct superclass.
-    /// The stdlib `Actor` root class is explicitly treated as an actor, even though
-    /// it directly subclasses `Object`, to avoid misclassifying it as a value type.
-    /// Full implementation should traverse the inheritance chain in semantic analysis.
+    /// Uses the `ClassHierarchy` to walk the full inheritance chain and determine
+    /// if a class is an actor (inherits from `Actor` at any level in the hierarchy).
     ///
     /// # Returns
     ///
-    /// - `true` if class inherits from Actor or other non-Object classes (actors by default)
-    /// - `false` if class inherits directly from Object (except for the Actor root)
+    /// - `true` if class inherits from Actor anywhere in the chain
+    /// - `false` if class inherits only from Object/ProtoObject (value type)
     /// - `true` if module contains no class (backward compatibility for REPL)
-    fn is_actor_class(module: &Module) -> bool {
-        // Check if the first class in the module is an actor
-        // TODO(BT-213): Handle modules with multiple classes
+    fn is_actor_class(
+        module: &Module,
+        hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
+    ) -> bool {
         if let Some(class) = module.classes.first() {
-            // Special case: The stdlib Actor class itself (`Object subclass: Actor`)
-            // must be treated as an actor, not a value type
-            if class.name.name.as_str() == "Actor" {
+            let name = class.name.name.as_str();
+            if name == "Actor" {
                 return true;
             }
-
-            // For BT-213 MVP: Only classes that directly inherit from Object are value types
-            // Everything else (Counter, Array, LoggingCounter, etc.) is treated as an actor
-            // TODO(BT-213): Full inheritance chain resolution in semantic analysis
+            let chain = hierarchy.superclass_chain(name);
+            if chain.iter().any(|s| s.as_str() == "Actor") {
+                return true;
+            }
+            // If the chain terminated at a known value-type root (Object/ProtoObject),
+            // this is definitely a value type.
+            let known_value_roots = ["Object", "ProtoObject"];
+            if let Some(last) = chain.last() {
+                if known_value_roots.contains(&last.as_str()) {
+                    return false;
+                }
+            }
+            // Chain is incomplete (superclass not in hierarchy) or empty with
+            // non-Object superclass. Default to actor for backward compatibility
+            // (e.g. compiling subclass files independently without parent).
             class.superclass.name.as_str() != "Object"
         } else {
-            // If no class definition, assume actor to maintain backward compatibility
-            // (existing tests expect gen_server generation)
             true
         }
     }
@@ -3964,6 +3977,173 @@ end
                 && code.contains("> when 'true' ->")
                 && code.contains("'beamtalk_object'"),
             "Should create beamtalk_object in success branch of case. Got:\n{code}"
+        );
+    }
+
+    // --- ClassHierarchy integration tests (BT-279) ---
+
+    #[test]
+    fn test_is_actor_class_direct_actor_subclass() {
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_object_subclass_is_value_type() {
+        let class = ClassDefinition {
+            name: Identifier::new("Point", Span::new(0, 0)),
+            superclass: Identifier::new("Object", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(!CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_multi_level_inheritance() {
+        // LoggingCounter extends Counter extends Actor
+        // Should still be detected as actor
+        let counter = ClassDefinition {
+            name: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let logging_counter = ClassDefinition {
+            name: Identifier::new("LoggingCounter", Span::new(0, 0)),
+            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        // Module with both classes; first class is LoggingCounter
+        let module = Module {
+            classes: vec![counter, logging_counter.clone()],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+
+        // Test with LoggingCounter as the first class
+        let module_lc = Module {
+            classes: vec![logging_counter],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        // Build hierarchy from full module so Counter is known
+        assert!(CoreErlangGenerator::is_actor_class(&module_lc, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_no_classes_defaults_to_actor() {
+        let module = Module::new(Vec::new(), Span::new(0, 0));
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
+        // LoggingCounter extends Counter, but Counter is NOT in this module.
+        // Hierarchy chain is incomplete; should default to actor (backward compat).
+        let class = ClassDefinition {
+            name: Identifier::new("LoggingCounter", Span::new(0, 0)),
+            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_collection_subclass_is_value_type() {
+        // Collection extends Object (built-in), so subclasses are value types.
+        let class = ClassDefinition {
+            name: Identifier::new("MyList", Span::new(0, 0)),
+            superclass: Identifier::new("Collection", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Collection subclass should be value type (chain reaches Object)"
+        );
+    }
+
+    #[test]
+    fn test_is_actor_class_integer_subclass_is_value_type() {
+        // Integer is a sealed built-in extending Object — subclass should be value type.
+        // (Sealed enforcement is separate; codegen should still route correctly.)
+        let class = ClassDefinition {
+            name: Identifier::new("MyInt", Span::new(0, 0)),
+            superclass: Identifier::new("Integer", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Integer subclass should be value type (chain reaches Object)"
         );
     }
 }
