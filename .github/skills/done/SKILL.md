@@ -27,7 +27,10 @@ When activated, execute this workflow to complete work and push:
    First, check if the changeset is documentation-only:
    ```bash
    # Check if all changed files are docs/config only (no code changes)
-   CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null || git diff main --name-only)
+   CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+   if [ -z "$CHANGED_FILES" ]; then
+     CHANGED_FILES=$(git diff --name-only main...HEAD 2>/dev/null || git diff --name-only main)
+   fi
    DOC_ONLY=true
    for f in $CHANGED_FILES; do
      case "$f" in

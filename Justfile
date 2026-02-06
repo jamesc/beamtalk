@@ -126,7 +126,7 @@ test-runtime:
         # Allow "cancelled" status for tests that can't run (need daemon, etc.)
         if echo "$OUTPUT" | grep -q "cancelled"; then
             # Extract summary line only (concise)
-            echo "$OUTPUT" | grep -E "^Finished in|tests.*failures.*cancelled" || echo "✓ Tests passed with some skipped"
+            echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ Tests passed with some skipped"
         else
             # Unexpected error - show full output
             echo "$OUTPUT"
@@ -135,7 +135,7 @@ test-runtime:
         fi
     else
         # Success - show only summary
-        echo "$OUTPUT" | grep -E "^Finished in|tests.*failures" || echo "✓ All tests passed"
+        echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ All tests passed"
     fi
 
 # Run Erlang runtime integration tests (requires daemon)
@@ -179,7 +179,7 @@ coverage-runtime:
     if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
         # Allow exactly 6 known failures (BT-235 super dispatch tests)
-        if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
+        if echo "$OUTPUT" | grep -qE "[7-9] failures|[1-9][0-9]+ failures"; then
             echo "❌ More than 6 tests failed! Check for regressions (expected: 6 from BT-235)."
             exit 1
         fi
