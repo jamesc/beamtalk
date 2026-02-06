@@ -459,7 +459,7 @@ pub fn compile_source(
         .iter()
         .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
 
-    // Display all diagnostics using miette formatting
+    // Display all diagnostics to stderr so users see them without RUST_LOG
     if !diagnostics.is_empty() {
         debug!(
             diagnostic_count = diagnostics.len(),
@@ -469,14 +469,7 @@ pub fn compile_source(
             let compile_diag =
                 CompileDiagnostic::from_core_diagnostic(diagnostic, source_path.as_str(), &source);
 
-            match diagnostic.severity {
-                beamtalk_core::source_analysis::Severity::Error => {
-                    error!("{:?}", miette::Report::new(compile_diag));
-                }
-                beamtalk_core::source_analysis::Severity::Warning => {
-                    warn!("{:?}", miette::Report::new(compile_diag));
-                }
-            }
+            eprintln!("{:?}", miette::Report::new(compile_diag));
         }
     }
 

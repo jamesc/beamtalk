@@ -173,7 +173,8 @@ fn is_up_to_date(source: &Utf8Path, beam: &Utf8Path) -> bool {
         return false;
     };
 
-    beam_mtime >= source_mtime
+    // Treat equal mtimes as stale to avoid missed rebuilds on coarse filesystems.
+    beam_mtime > source_mtime
 }
 
 /// Extract the module name from a `.bt` file path.
@@ -212,8 +213,8 @@ fn compile_stdlib_file(
 fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Result<()> {
     let module_names: Vec<String> = source_files
         .iter()
-        .filter_map(|f| module_name_from_path(f).ok())
-        .collect();
+        .map(|f| module_name_from_path(f))
+        .collect::<Result<_>>()?;
 
     let modules_list = module_names
         .iter()
@@ -244,8 +245,15 @@ fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use filetime::FileTime;
     use std::fs;
     use tempfile::TempDir;
+
+    /// Set a file's mtime to a specific Unix timestamp (seconds).
+    fn set_mtime(path: &Utf8Path, secs: i64) {
+        let ft = FileTime::from_unix_time(secs, 0);
+        filetime::set_file_mtime(path.as_std_path(), ft).unwrap();
+    }
 
     #[test]
     fn test_find_stdlib_files() {
@@ -324,9 +332,9 @@ mod tests {
         let beam = lib_dir.join("test.beam");
 
         fs::write(&source, "// test").unwrap();
-        // Sleep briefly to ensure different timestamp
-        std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(&beam, "fake beam").unwrap();
+        set_mtime(&source, 1000);
+        set_mtime(&beam, 2000);
 
         assert!(is_up_to_date(&source, &beam));
     }
@@ -340,9 +348,27 @@ mod tests {
         let beam = lib_dir.join("test.beam");
 
         fs::write(&beam, "fake beam").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(&source, "// updated").unwrap();
+        set_mtime(&beam, 1000);
+        set_mtime(&source, 2000);
 
+        assert!(!is_up_to_date(&source, &beam));
+    }
+
+    #[test]
+    fn test_is_up_to_date_equal_mtimes_is_stale() {
+        let temp = TempDir::new().unwrap();
+        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source = lib_dir.join("test.bt");
+        let beam = lib_dir.join("test.beam");
+
+        fs::write(&source, "// test").unwrap();
+        fs::write(&beam, "fake beam").unwrap();
+        set_mtime(&source, 1000);
+        set_mtime(&beam, 1000);
+
+        // Equal mtimes treated as stale to avoid missed rebuilds on coarse filesystems
         assert!(!is_up_to_date(&source, &beam));
     }
 
@@ -359,9 +385,11 @@ mod tests {
         fs::write(&file_a, "// alpha").unwrap();
         fs::write(&file_b, "// beta").unwrap();
 
-        // Make Alpha.beam up-to-date
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        fs::write(ebin_dir.join("Alpha.beam"), "fake").unwrap();
+        // Make Alpha.beam newer than Alpha.bt
+        let beam_a = ebin_dir.join("Alpha.beam");
+        fs::write(&beam_a, "fake").unwrap();
+        set_mtime(&file_a, 1000);
+        set_mtime(&Utf8PathBuf::from(beam_a.as_str()), 2000);
 
         let sources = vec![file_a, file_b];
         let (to_compile, skipped) = partition_by_freshness(&sources, &ebin_dir);
@@ -402,5 +430,19 @@ mod tests {
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
+    }
+
+    #[test]
+    fn test_generate_app_file_invalid_name_errors() {
+        let temp = TempDir::new().unwrap();
+        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_files = vec![
+            Utf8PathBuf::from("lib/Integer.bt"),
+            Utf8PathBuf::from("lib/my-bad-name.bt"),
+        ];
+
+        let result = generate_app_file(&ebin_dir, &source_files);
+        assert!(result.is_err());
     }
 }

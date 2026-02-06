@@ -38,8 +38,8 @@ base64.workspace = true
 tempfile = "3.14"
 
 [dev-dependencies]
-tempfile = "3.14"
 serial_test = "3"
+filetime = "0.2"
 
 [lints]
 workspace = true
