@@ -4,16 +4,18 @@
 %%% @doc Per-workspace supervisor
 %%%
 %%% This supervisor manages all components of a persistent workspace:
-%%% - REPL server for TCP connections
+%%% - Actor registry (workspace-wide actor tracking)
+%%% - REPL TCP server for client connections  
 %%% - Idle monitor for auto-cleanup
 %%% - Workspace metadata tracking
 %%% - Actor supervision (shared across sessions)
 %%% - Session supervision (one per REPL connection)
 %%%
-%%% Architecture (from ADR 0004):
+%%% Architecture (from ADR 0004, implemented in BT-262):
 %%% ```
 %%% beamtalk_workspace_sup
-%%%   ├─ beamtalk_repl             % TCP server + eval coordinator
+%%%   ├─ beamtalk_actor_registry   % Workspace-wide actor registry
+%%%   ├─ beamtalk_repl_server      % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor     % Tracks activity, self-terminates if idle
 %%%   ├─ beamtalk_workspace_meta   % Metadata (project path, created_at)
 %%%   ├─ beamtalk_actor_sup        % Supervises user actors
@@ -70,15 +72,24 @@ init(Config) ->
             modules => [beamtalk_workspace_meta]
         },
         
-        %% REPL coordinator (includes TCP server and evaluation logic)
-        %% This provides backward compatibility with existing REPL client
+        %% Actor registry (workspace-wide, shared across sessions)
         #{
-            id => beamtalk_repl,
-            start => {beamtalk_repl, start_link, [TcpPort, #{bind_ip => {127, 0, 0, 1}}]},
+            id => beamtalk_actor_registry,
+            start => {beamtalk_repl_actors, start_link, [registered]},
             restart => permanent,
             shutdown => 5000,
             type => worker,
-            modules => [beamtalk_repl]
+            modules => [beamtalk_repl_actors]
+        },
+        
+        %% REPL TCP server (session-per-connection architecture)
+        #{
+            id => beamtalk_repl_server,
+            start => {beamtalk_repl_server, start_link, [#{port => TcpPort}]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_repl_server]
         },
         
         %% Idle monitor for auto-cleanup (only if enabled)

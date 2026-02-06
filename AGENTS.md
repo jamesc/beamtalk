@@ -1476,13 +1476,19 @@ For more details, see [About Agent Skills](https://docs.github.com/en/copilot/co
 
 ```
 runtime/
-├── src/                   # Runtime source
-├── test/                  # Runtime unit tests (*.erl)
-└── test_fixtures/         # Fixtures for runtime tests (BT-239)
-    ├── logging_counter.bt
-    ├── compile.sh         # Auto-compiles fixtures via rebar3 pre-hook
-    ├── build/
-    └── README.md
+├── rebar.config            # Umbrella project config (BT-287)
+├── apps/
+│   ├── beamtalk_runtime/   # Core runtime OTP application
+│   │   ├── src/            # Runtime source
+│   │   ├── include/        # Header files (beamtalk.hrl)
+│   │   ├── test/           # Runtime unit tests (*.erl)
+│   │   ├── config/         # OTP sys.config
+│   │   └── test_fixtures/  # Fixtures for runtime tests (BT-239)
+│   │       ├── logging_counter.bt
+│   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
+│   │       └── README.md
+│   └── beamtalk_stdlib/    # Compiled stdlib (ADR 0007, placeholder)
+│       └── src/            # Will contain compiled .bt stdlib modules
 
 tests/
 └── e2e/
@@ -1501,20 +1507,20 @@ examples/
 ⚠️ **IMPORTANT:** The test suite has multiple layers. Be precise about which tests you're referring to:
 
 #### 1. Runtime Unit Tests
-**Location:** `runtime/test/*_tests.erl` (e.g., `beamtalk_actor_tests.erl`)
+**Location:** `runtime/apps/beamtalk_runtime/test/*_tests.erl` (e.g., `beamtalk_actor_tests.erl`)
 - Tests individual runtime modules in isolation
 - Uses hand-written test fixtures (e.g., `test_counter.erl`)
 - Calls `gen_server` protocol directly with raw pids
 - Appropriate for testing low-level runtime behavior
 
 #### 2. Codegen Simulation Tests  
-**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
+**Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 - Tests using **real compiled Beamtalk code** from `tests/e2e/fixtures/counter.bt` (unified fixture - BT-239)
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
 - Other tests use simulated state structures for complex scenarios
 - **Test fixtures compile automatically** via rebar3 pre-hook (no manual step needed)
-- Fixtures: `logging_counter.bt` stored in `runtime/test_fixtures/`, `counter.bt` sourced from E2E fixtures
-- Compiled by `runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
+- Fixtures: `logging_counter.bt` stored in `runtime/apps/beamtalk_runtime/test_fixtures/`, `counter.bt` sourced from E2E fixtures
+- Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 3. Real End-to-End Tests
@@ -1525,13 +1531,13 @@ examples/
 - E2E fixtures in `tests/e2e/fixtures/` (including canonical `counter.bt`)
 - **These are the TRUE end-to-end tests**
 
-**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/test/`.**
+**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/`.**
 
 #### Test Fixture Organization (BT-239)
 
-**Runtime fixtures:** `runtime/test_fixtures/`
+**Runtime fixtures:** `runtime/apps/beamtalk_runtime/test_fixtures/`
 - Colocated with runtime tests for better locality
-- Compiled by `test_fixtures/compile.sh` (rebar3 pre-hook)
+- Compiled by `apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
 - Currently: `logging_counter.bt` (super keyword tests)
 - Note: `counter.bt` consolidated to E2E fixture
 

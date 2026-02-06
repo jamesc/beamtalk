@@ -29,7 +29,7 @@
 -behaviour(gen_server).
 
 %% Public API
--export([start_link/0, register_actor/4, unregister_actor/2, 
+-export([start_link/0, start_link/1, register_actor/4, unregister_actor/2, 
          list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2]).
 
 %% gen_server callbacks
@@ -52,10 +52,15 @@
 
 %%% Public API
 
-%% @doc Start the actor registry.
+%% @doc Start the actor registry without a registered name (legacy REPL).
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
+
+%% @doc Start the actor registry with a registered name (workspace mode).
+-spec start_link(registered) -> {ok, pid()} | {error, term()}.
+start_link(registered) ->
+    gen_server:start_link({local, beamtalk_actor_registry}, ?MODULE, [], []).
 
 %% @doc Register an actor with the registry.
 %% Monitors the actor so it can be automatically unregistered on termination.

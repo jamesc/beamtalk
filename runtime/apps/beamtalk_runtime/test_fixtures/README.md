@@ -4,14 +4,14 @@ This directory contains Beamtalk source files compiled for use in runtime unit t
 
 ## Overview
 
-**Location:** `runtime/test_fixtures/` (BT-239 reorganization)  
+**Location:** `runtime/apps/beamtalk_runtime/test_fixtures/` (BT-239 reorganization, BT-287 umbrella)  
 **Purpose:** Pre-compiled BEAM bytecode for `beamtalk_codegen_simulation_tests.erl`  
 **Build:** Automatically compiled by `compile.sh` via rebar3 pre-hook before eunit
 
 ## Directory Structure
 
 ```
-runtime/test_fixtures/
+runtime/apps/beamtalk_runtime/test_fixtures/
 ├── compile.sh           # Compiles fixtures before tests
 ├── logging_counter.bt   # Super keyword test fixture
 └── README.md           # This file
@@ -28,12 +28,12 @@ Fixtures are compiled automatically by rebar3 before running tests:
 just test-runtime  # Auto-compiles fixtures via pre-hook
 
 # Or manually
-./runtime/test_fixtures/compile.sh
+./runtime/apps/beamtalk_runtime/test_fixtures/compile.sh
 ```
 
 The script:
 1. Compiles `tests/e2e/fixtures/counter.bt` (unified fixture)
-2. Compiles `runtime/test_fixtures/logging_counter.bt`
+2. Compiles `runtime/apps/beamtalk_runtime/test_fixtures/logging_counter.bt`
 3. Copies resulting `.beam` files to `runtime/_build/*/test/`
 
 ## Fixtures
@@ -56,7 +56,7 @@ with E2E fixture to reduce maintenance and confusion (BT-239).
 
 ### logging_counter.bt (BT-108)
 
-**Source:** `runtime/test_fixtures/logging_counter.bt`  
+**Source:** `runtime/apps/beamtalk_runtime/test_fixtures/logging_counter.bt`  
 **Purpose:** Super keyword testing
 
 Demonstrates super keyword for superclass method dispatch in inheritance hierarchy.
@@ -80,6 +80,6 @@ Used by `beamtalk_codegen_simulation_tests.erl` super keyword tests to verify:
 
 ## References
 
-- Runtime tests: `runtime/test/beamtalk_codegen_simulation_tests.erl`
+- Runtime tests: `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 - E2E fixtures: `tests/e2e/fixtures/`
 - E2E test cases: `tests/e2e/cases/*.bt`

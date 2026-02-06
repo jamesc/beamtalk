@@ -11,9 +11,9 @@ Beamtalk uses a multi-layered testing strategy covering both the Rust compiler a
 | Unit Tests | Rust `#[test]` | `crates/*/src/*.rs` | Test individual functions and modules |
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
-| Runtime Unit Tests | EUnit | `runtime/test/*_tests.erl` | Test Erlang runtime modules |
-| Integration Tests | EUnit + daemon | `runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
-| Codegen Simulation Tests | EUnit | `runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
+| Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
+| Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
+| Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
 | E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | Language feature validation via REPL |
 
 ## Running Tests
@@ -223,7 +223,7 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 
 EUnit tests for the Erlang runtime modules.
 
-**Location:** `runtime/test/`
+**Location:** `runtime/apps/beamtalk_runtime/test/`
 
 | Test File | Tests |
 |-----------|-------|
@@ -253,7 +253,7 @@ resolve_sets_value_test() ->
 
 Test the interaction between the Rust compiler daemon and Erlang runtime.
 
-**Location:** `runtime/test/beamtalk_repl_integration_tests.erl`
+**Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_repl_integration_tests.erl`
 
 **Requires:** Compiler daemon running (`beamtalk daemon start`)
 
@@ -281,7 +281,7 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 Tests runtime behavior using **real compiled Beamtalk code** and simulated patterns.
 
-**Location:** `runtime/test/beamtalk_codegen_simulation_tests.erl`
+**Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 
 **What they test:**
 - `spawn/0` and `spawn/1` tests use **real compiled `counter.bt`** (unified E2E fixture - BT-239)
@@ -294,7 +294,7 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 
 **Test Fixtures:** Compiled automatically by rebar3 pre-hook
 - Source: `tests/e2e/fixtures/counter.bt` (canonical implementation - BT-239)
-- Compiled by: `runtime/test_fixtures/compile.sh` (runs automatically)
+- Compiled by: `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (runs automatically)
 - Output: `runtime/_build/*/test/counter.beam`
 - **No manual compilation needed** - hook runs before every `rebar3 eunit`
 
@@ -302,7 +302,7 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 ```
 Developer runs: cargo test OR rebar3 eunit
   └─> cargo build (if needed) - creates ./target/debug/beamtalk
-  └─> rebar3 pre-hook runs: runtime/test_fixtures/compile.sh
+  └─> rebar3 pre-hook runs: runtime/apps/beamtalk_runtime/test_fixtures/compile.sh
       └─> Uses ./target/debug/beamtalk to compile tests/e2e/fixtures/counter.bt
       └─> Copies counter.beam to runtime/_build/*/test/
   └─> Tests run with compiled fixtures available
@@ -408,7 +408,7 @@ crates/beamtalk-core/src/
 ├── erlang.rs           # Code
 └── erlang.rs           # Tests in same file (#[cfg(test)])
 
-runtime/test/
+runtime/apps/beamtalk_runtime/test/
 ├── beamtalk_actor_tests.erl      # Tests for beamtalk_actor.erl
 ├── test_counter.erl              # Test fixture actor
 └── ...
@@ -473,7 +473,7 @@ fn test_directory_change() {
 See [BT-115](https://linear.app/beamtalk/issue/BT-115) for the implementation details of the named lock system.
 
 ### Test Fixtures
-- Erlang: `test_*.erl` in `runtime/test/` for reusable actors
+- Erlang: `test_*.erl` in `runtime/apps/beamtalk_runtime/test/` for reusable actors
 - Beamtalk: `test-package-compiler/cases/*/main.bt` for compiler test inputs
 
 ---
@@ -510,7 +510,7 @@ mod tests {
 
 ### Adding a Codegen Simulation Test
 
-1. Add to `runtime/test/beamtalk_codegen_simulation_tests.erl`
+1. Add to `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 2. Manually construct state as compiler would generate
 3. Run `cd runtime && rebar3 eunit --module=beamtalk_codegen_simulation_tests`
 
