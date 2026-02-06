@@ -13,7 +13,7 @@ pub fn run(path: &str) -> Result<()> {
     info!("Starting run command");
     // First, build the project
     println!("Building...");
-    super::build::build(path)?;
+    super::build::build(path, &beamtalk_core::CompilerOptions::default())?;
 
     info!("Build complete, preparing to run");
     println!("\nRunning...");

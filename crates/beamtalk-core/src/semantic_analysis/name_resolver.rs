@@ -239,8 +239,8 @@ impl NameResolver {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } => {
-                // No resolution needed
+            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
+                // No name resolution needed
             }
         }
     }

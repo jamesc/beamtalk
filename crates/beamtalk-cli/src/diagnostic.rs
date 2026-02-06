@@ -32,6 +32,9 @@ pub struct CompileDiagnostic {
     pub span: SourceSpan,
     /// Label for the error span (interpolated by miette derive macro)
     pub label: String,
+    /// Optional help text (e.g., "Use --allow-primitives flag...")
+    #[help]
+    pub help: Option<String>,
 }
 
 impl CompileDiagnostic {
@@ -56,6 +59,7 @@ impl CompileDiagnostic {
             )
                 .into(),
             label: label.to_string(),
+            help: diagnostic.hint.as_ref().map(ToString::to_string),
         }
     }
 }

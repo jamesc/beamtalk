@@ -237,6 +237,6 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:", span: Span { start: 707, end: 734 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:", span: Span { start: 747, end: 777 } }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:", span: Span { start: 789, end: 827 } }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:", span: Span { start: 707, end: 734 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:", span: Span { start: 747, end: 777 }, hint: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:", span: Span { start: 789, end: 827 }, hint: None }
