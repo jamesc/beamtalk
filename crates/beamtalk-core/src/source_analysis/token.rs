@@ -112,6 +112,10 @@ pub enum TokenKind {
     /// Fat arrow for method definitions: `=>`
     FatArrow,
 
+    // === Pragmas ===
+    /// The `@primitive` directive for primitive method injection (ADR 0007)
+    AtPrimitive,
+
     // === Special ===
     /// End of file
     Eof,
@@ -206,6 +210,7 @@ impl TokenKind {
             | Self::Colon
             | Self::Hash
             | Self::FatArrow
+            | Self::AtPrimitive
             | Self::Eof => None,
         }
     }
@@ -242,6 +247,7 @@ impl std::fmt::Display for TokenKind {
             Self::Colon => write!(f, ":"),
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
+            Self::AtPrimitive => write!(f, "@primitive"),
             Self::Eof => write!(f, "<eof>"),
         }
     }
@@ -431,6 +437,7 @@ mod tests {
         assert_eq!(TokenKind::BinarySelector("+".into()).to_string(), "+");
         assert_eq!(TokenKind::Assign.to_string(), ":=");
         assert_eq!(TokenKind::Caret.to_string(), "^");
+        assert_eq!(TokenKind::AtPrimitive.to_string(), "@primitive");
     }
 
     #[test]
