@@ -575,7 +575,12 @@ fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     clippy::too_many_lines,
     reason = "REPL main loop handles many commands"
 )]
-pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) -> Result<()> {
+pub fn run(
+    port_arg: Option<u16>,
+    node_arg: Option<String>,
+    foreground: bool,
+    workspace_name: Option<&str>,
+) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
 
@@ -608,8 +613,9 @@ pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) ->
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
 
-        let (node_info, is_new) = workspace::get_or_start_workspace(
+        let (node_info, is_new, workspace_id) = workspace::get_or_start_workspace(
             &current_dir,
+            workspace_name,
             port,
             &runtime_beam_dir,
             &jsx_beam_dir,
@@ -621,6 +627,13 @@ pub fn run(port_arg: Option<u16>, node_arg: Option<String>, foreground: bool) ->
             std::thread::sleep(Duration::from_millis(2000));
         } else {
             println!("Connected to existing workspace: {}", node_info.node_name);
+        }
+
+        // Display workspace info
+        if let Ok(metadata) = workspace::get_workspace_metadata(&workspace_id) {
+            println!("Workspace: {workspace_id}");
+            println!("Project:   {}", metadata.project_path.display());
+            println!();
         }
 
         None // No guard needed - node is detached
