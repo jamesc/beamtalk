@@ -114,9 +114,12 @@ send_to_string_test() ->
     ?assertEqual(<<"helloworld">>, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
     ?assertEqual('String', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
-send_to_float_not_implemented_test() ->
-    %% Float dispatch not yet implemented (BT-168)
-    ?assertError({not_implemented, _}, beamtalk_primitive:send(3.14, '+', [2.0])).
+send_to_float_test() ->
+    %% Float dispatch implemented (BT-277)
+    Result = beamtalk_primitive:send(3.14, '+', [2.0]),
+    ?assert(is_float(Result)),
+    ?assert(abs(Result - 5.14) < 0.0001),  % Floating point tolerance
+    ?assertEqual('Float', beamtalk_primitive:send(3.14, 'class', [])).
 
 %%% ============================================================================
 %%% responds_to/2 tests
@@ -200,9 +203,18 @@ responds_to_tuple_test_() ->
          ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
      end}.
 
+responds_to_float_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
+         ?assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
+         ?assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))
+     end}.
+
 responds_to_other_primitives_test() ->
-    %% Other primitives not yet implemented
-    ?assertEqual(false, beamtalk_primitive:responds_to(3.14, '*')),
+    %% Lists not yet implemented
     ?assertEqual(false, beamtalk_primitive:responds_to([], 'size')).
 
 %%% ============================================================================
@@ -354,6 +366,22 @@ reflection_responds_to_tuple_test_() ->
          %% False cases
          ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['unknownMethod'], Tuple)),
          ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['+'], Tuple))
+     end}.
+
+reflection_responds_to_float_test_() ->
+    {setup,
+     fun() -> beamtalk_extensions:init() end,
+     fun(_) -> ok end,
+     fun() ->
+         %% True cases
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['+'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['class'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['abs'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['respondsTo'], 3.14)),
+         
+         %% False cases
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['unknownMethod'], 3.14)),
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['fooBar'], 3.14))
      end}.
 
 %%% ============================================================================
