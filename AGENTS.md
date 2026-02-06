@@ -505,10 +505,13 @@ Tests should output:
 
 ### Current Configuration
 
-**Rust tests:** Use `cargo test --quiet`
+**Rust tests:** One line per test binary with `crate::source` label
 ```bash
 just test-rust
-# Output: Dots + summary only (~20 lines)
+# Output: ~9 lines, one per binary with pass/fail/ignore counts
+# Example:
+#   beamtalk_core::src/lib.rs                     429 passed; 0 failed; 2 ignored; ...
+#   compiler_tests::tests/compiler_tests.rs       176 passed; 0 failed; 0 ignored; ...
 ```
 
 **Erlang tests:** Use non-verbose eunit mode

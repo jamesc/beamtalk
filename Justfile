@@ -59,7 +59,8 @@ lint: clippy fmt-check dialyzer
 # Run clippy (Rust linter) - warnings are errors
 clippy:
     @echo "🔍 Running clippy..."
-    cargo clippy --all-targets -- -D warnings
+    @cargo clippy --all-targets --quiet -- -D warnings
+    @echo "✅ Clippy passed"
 
 # Check Rust code formatting
 fmt-check:
@@ -86,7 +87,8 @@ test: test-rust test-runtime
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    cargo test --all-targets --quiet
+    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print }' || true
+    @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
 test-e2e: _clean-daemon-state
