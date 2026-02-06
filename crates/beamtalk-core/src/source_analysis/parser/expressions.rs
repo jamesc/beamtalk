@@ -552,6 +552,25 @@ impl Parser {
         let start_token = self.advance(); // consume AtPrimitive
         let start = start_token.span();
 
+        // @primitive is only valid inside method bodies (after =>)
+        if !self.in_method_body {
+            let message: EcoString =
+                "@primitive can only appear inside a method body (after =>)".into();
+            self.diagnostics
+                .push(Diagnostic::error(message.clone(), start));
+            // Still parse the name for error recovery
+            if matches!(
+                self.current_kind(),
+                TokenKind::String(_) | TokenKind::Identifier(_)
+            ) {
+                self.advance();
+            }
+            return Expression::Error {
+                message,
+                span: start,
+            };
+        }
+
         match self.current_kind() {
             // Quoted selector: @primitive '+'
             TokenKind::String(name) => {

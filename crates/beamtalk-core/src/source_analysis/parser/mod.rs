@@ -220,6 +220,8 @@ pub(super) struct Parser {
     pub(super) current: usize,
     /// Accumulated diagnostics.
     pub(super) diagnostics: Vec<Diagnostic>,
+    /// Whether the parser is currently inside a method body.
+    pub(super) in_method_body: bool,
 }
 
 impl Parser {
@@ -229,6 +231,7 @@ impl Parser {
             tokens,
             current: 0,
             diagnostics: Vec::new(),
+            in_method_body: false,
         }
     }
 
@@ -1710,37 +1713,37 @@ Actor subclass: Rectangle
 
     #[test]
     fn parse_primitive_quoted_selector() {
-        let module = parse_ok("@primitive '+'");
-        assert_eq!(module.expressions.len(), 1);
+        let source = "Object subclass: Foo\n  + other => @primitive '+'";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
         if let Expression::Primitive {
-            name,
-            is_quoted,
-            span,
-        } = &module.expressions[0]
+            name, is_quoted, ..
+        } = &method.body[0]
         {
             assert_eq!(name.as_str(), "+");
             assert!(is_quoted);
-            assert_eq!(span.start(), 0);
         } else {
-            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
+            panic!("Expected Primitive, got: {:?}", method.body[0]);
         }
     }
 
     #[test]
     fn parse_primitive_bare_identifier() {
-        let module = parse_ok("@primitive basicNew");
-        assert_eq!(module.expressions.len(), 1);
+        let source = "Object subclass: Foo\n  new => @primitive basicNew";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
         if let Expression::Primitive {
-            name,
-            is_quoted,
-            span,
-        } = &module.expressions[0]
+            name, is_quoted, ..
+        } = &method.body[0]
         {
             assert_eq!(name.as_str(), "basicNew");
             assert!(!is_quoted);
-            assert_eq!(span.start(), 0);
         } else {
-            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
+            panic!("Expected Primitive, got: {:?}", method.body[0]);
         }
     }
 
@@ -1791,7 +1794,8 @@ Actor subclass: Rectangle
     #[test]
     fn parse_primitive_missing_name_error() {
         // @primitive without a name should produce an error
-        let diagnostics = parse_err("@primitive");
+        let source = "Object subclass: Foo\n  abs => @primitive";
+        let diagnostics = parse_err(source);
         assert!(
             !diagnostics.is_empty(),
             "Expected error for @primitive without name"
@@ -1800,6 +1804,23 @@ Actor subclass: Rectangle
             diagnostics[0]
                 .message
                 .contains("@primitive must be followed by")
+        );
+    }
+
+    #[test]
+    fn parse_primitive_outside_method_body_error() {
+        // @primitive at top level (outside method body) should produce an error
+        let diagnostics = parse_err("@primitive '+'");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for @primitive outside method body"
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("@primitive can only appear inside a method body"),
+            "Got: {}",
+            diagnostics[0].message
         );
     }
 }
