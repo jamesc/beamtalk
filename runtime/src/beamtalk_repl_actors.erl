@@ -55,7 +55,7 @@
 %% @doc Start the actor registry.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+    gen_server:start_link({local, beamtalk_actor_registry}, ?MODULE, [], []).
 
 %% @doc Register an actor with the registry.
 %% Monitors the actor so it can be automatically unregistered on termination.

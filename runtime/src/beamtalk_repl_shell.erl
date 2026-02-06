@@ -55,8 +55,20 @@ load_file(SessionPid, Path) ->
 init(SessionId) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
-    State = beamtalk_repl_state:new(undefined, 0),
-    {ok, {SessionId, State}}.
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    
+    %% Get workspace-wide actor registry
+    %% The registry is registered globally in the workspace
+    RegistryPid = case whereis(beamtalk_actor_registry) of
+        undefined ->
+            logger:warning("Actor registry not found for session ~p", [SessionId]),
+            undefined;
+        Pid ->
+            Pid
+    end,
+    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0),
+    
+    {ok, {SessionId, State1}}.
 
 %% @private
 handle_call({eval, Expression}, _From, {SessionId, State}) ->

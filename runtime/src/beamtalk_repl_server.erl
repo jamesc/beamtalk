@@ -204,10 +204,11 @@ handle_request({load_file, Path}, SessionPid) ->
 
 handle_request({list_actors}, _SessionPid) ->
     %% Actors are workspace-wide, not session-specific
-    %% Get registry from workspace metadata or actor supervisor
-    case beamtalk_actor_registry:whereis() of
+    %% Try to find the actor registry process (registered globally)
+    case whereis(beamtalk_actor_registry) of
         undefined ->
-            format_error(no_registry);
+            %% No registry yet - return empty list
+            format_actors([]);
         RegistryPid ->
             Actors = beamtalk_repl_actors:list_actors(RegistryPid),
             format_actors(Actors)
@@ -234,7 +235,11 @@ handle_request({kill_actor, PidStr}, _SessionPid) ->
     end;
 
 handle_request({error, Reason}, _SessionPid) ->
-    format_error(Reason).
+    format_error(Reason);
+
+handle_request(UnknownRequest, _SessionPid) ->
+    logger:warning("Unknown REPL request: ~p", [UnknownRequest]),
+    format_error({invalid_request, UnknownRequest}).
 
 %%% Protocol Parsing and Formatting
 
