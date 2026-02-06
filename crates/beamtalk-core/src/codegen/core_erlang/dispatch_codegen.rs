@@ -426,9 +426,8 @@ impl CoreErlangGenerator {
 
     /// Generates code for a super message send.
     ///
-    /// Super calls use `beamtalk_class:super_dispatch/3` to invoke the superclass
-    /// implementation. This is case #1 in the message dispatch strategy - super sends
-    /// are handled before any other message type.
+    /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass
+    /// implementation via hierarchy walking (ADR 0006).
     ///
     /// # Example
     ///
@@ -441,9 +440,9 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_object_class':'super_dispatch'(State, 'increment', [])
-    /// call 'beamtalk_object_class':'super_dispatch'(State, 'getValue', [])
-    /// call 'beamtalk_object_class':'super_dispatch'(State, 'at:put:', [1, Value])
+    /// call 'beamtalk_dispatch':'super'('increment', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super'('getValue', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super'('at:put:', [1, Value], Self, State, 'Counter')
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
@@ -452,12 +451,12 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Use the domain service method for selector-to-atom conversion
         let selector_atom = selector.to_erlang_atom();
+        let class_name = self.to_class_name();
 
-        // Generate: call 'beamtalk_object_class':'super_dispatch'(State, 'selector', [Args])
+        // Generate: call 'beamtalk_dispatch':'super'('selector', [Args], Self, State, 'ClassName')
         write!(
             self.output,
-            "call 'beamtalk_object_class':'super_dispatch'({}, '{selector_atom}', [",
-            self.current_state_var()
+            "call 'beamtalk_dispatch':'super'('{selector_atom}', [",
         )?;
 
         // Generate arguments
@@ -468,7 +467,11 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        write!(self.output, "])")?;
+        write!(
+            self.output,
+            "], Self, {}, '{class_name}')",
+            self.current_state_var()
+        )?;
         Ok(())
     }
 

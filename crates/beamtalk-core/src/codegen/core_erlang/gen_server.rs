@@ -879,14 +879,39 @@ impl CoreErlangGenerator {
         // Generate built-in reflection message handlers (BT-97)
         self.generate_reflection_handlers()?;
 
-        // Default case for unknown messages - try doesNotUnderstand:args: first (per BT-29)
+        // Default case: hierarchy walk via beamtalk_dispatch, then DNU fallback (ADR 0006)
+        let class_name = self.to_class_name();
         self.write_indent()?;
         writeln!(self.output, "<OtherSelector> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
-            "%% Try doesNotUnderstand:args: fallback (BT-29)"
+            "%% ADR 0006: Try hierarchy walk before DNU"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
+        )?;
+        self.indent += 1;
+
+        // Success case - inherited method found
+        self.write_indent()?;
+        writeln!(self.output, "<{{'reply', InheritedResult, InheritedState}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', InheritedResult, InheritedState}}")?;
+        self.indent -= 1;
+
+        // Error case - method not found in hierarchy, try DNU
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', _DispatchError}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)"
         )?;
         self.write_indent()?;
         writeln!(
@@ -907,11 +932,6 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "<'true'> when 'true' ->")?;
         self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% Call doesNotUnderstand:args: with [Selector, Args]"
-        )?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -964,6 +984,9 @@ impl CoreErlangGenerator {
         )?;
         self.write_indent()?;
         writeln!(self.output, "{{'error', Error, State}}")?;
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -1715,8 +1738,9 @@ impl CoreErlangGenerator {
                 let super_result_var = self.fresh_temp_var("SuperReply");
                 let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
+                let class_name = self.to_class_name();
 
-                // Manually generate super_dispatch call with current state (not via generate_expression)
+                // Generate beamtalk_dispatch:super/5 call (ADR 0006)
                 if let Expression::MessageSend {
                     selector,
                     arguments,
@@ -1727,7 +1751,7 @@ impl CoreErlangGenerator {
                     let selector_atom = selector.to_erlang_atom();
                     write!(
                         self.output,
-                        "let {super_result_var} = call 'beamtalk_object_class':'super_dispatch'({current_state}, '{selector_atom}', ["
+                        "let {super_result_var} = call 'beamtalk_dispatch':'super'('{selector_atom}', ["
                     )?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
@@ -1735,7 +1759,10 @@ impl CoreErlangGenerator {
                         }
                         self.generate_expression(arg)?;
                     }
-                    write!(self.output, "])")?;
+                    write!(
+                        self.output,
+                        "], Self, {current_state}, '{class_name}')"
+                    )?;
                 }
 
                 // Extract state from the {reply, Result, NewState} tuple using element/2
