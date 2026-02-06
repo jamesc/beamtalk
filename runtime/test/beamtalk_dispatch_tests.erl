@@ -130,10 +130,24 @@ test_lookup_missing_method() ->
 
 %% Test that super/5 skips the current class and starts at superclass
 test_super_skips_current() ->
-    %% SKIP: This test requires LoggingCounter which doesn't have register_class
-    %% TODO: Either convert logging_counter.bt to use class syntax,
-    %% or create a new test fixture with proper class definition
-    ok.
+    ok = ensure_counter_loaded(),
+    
+    %% Counter inherits from Actor. Call super on Counter for 'increment'.
+    %% Counter defines 'increment', but super should NOT find it in Counter.
+    %% It should look in Actor (no increment there), then Object, etc.
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    
+    Self = make_ref(),
+    
+    %% Super from Counter for 'increment' should NOT find it
+    %% (Actor/Object don't define increment)
+    Result = beamtalk_dispatch:super(increment, [], Self, State, 'Counter'),
+    
+    %% Should return does_not_understand since increment is only in Counter
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result).
 
 %% Test that super/5 returns error when at root with no superclass
 test_super_at_root() ->
@@ -181,7 +195,7 @@ test_extension_priority() ->
     Result = beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter'),
     
     %% Should invoke the extension
-    ?assertMatch({reply, {extension_called, _State}, _State}, Result).
+    ?assertMatch({reply, {extension_called, _}, _}, Result).
 
 %%% ============================================================================
 %%% Helper Functions
@@ -212,27 +226,3 @@ ensure_counter_loaded() ->
             ok
     end.
 
-%% Ensure the LoggingCounter class is loaded and registered  
-ensure_logging_counter_loaded() ->
-    %% Ensure Counter is loaded first (superclass)
-    ok = ensure_counter_loaded(),
-    
-    %% Check if LoggingCounter class is already registered
-    case beamtalk_object_class:whereis_class('LoggingCounter') of
-        undefined ->
-            %% LoggingCounter not registered
-            case code:ensure_loaded(logging_counter) of
-                {module, logging_counter} ->
-                    case erlang:function_exported(logging_counter, register_class, 0) of
-                        true ->
-                            logging_counter:register_class(),
-                            ok;
-                        false ->
-                            error(logging_counter_no_register_function)
-                    end;
-                {error, Reason} ->
-                    error({logging_counter_module_not_found, Reason})
-            end;
-        _Pid ->
-            ok
-    end.

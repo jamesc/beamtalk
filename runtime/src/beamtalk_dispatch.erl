@@ -80,7 +80,7 @@
 
 -type selector() :: atom().
 -type args() :: [term()].
--type self() :: term().  % #beamtalk_object{} or value
+-type bt_self() :: term().  % #beamtalk_object{} or value
 -type state() :: map().
 -type class_name() :: atom().
 -type dispatch_result() :: {reply, term(), state()} | {error, #beamtalk_error{}}.
@@ -112,13 +112,13 @@
 %% lookup(unknownMethod, [], Self, State, 'Counter')
 %%     -> {error, #beamtalk_error{kind=does_not_understand, class='Counter', selector=unknownMethod}}
 %% ```
--spec lookup(selector(), args(), self(), state(), class_name()) -> dispatch_result().
+-spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
     logger:debug("Dispatching ~p on class ~p", [Selector, CurrentClass]),
     
-    %% Step 1: Check extension registry first
-    case beamtalk_extensions:lookup(CurrentClass, Selector) of
-        {ok, Fun, _Owner} ->
+    %% Step 1: Check extension registry first (guard against missing ETS table)
+    case check_extension(CurrentClass, Selector) of
+        {ok, Fun} ->
             %% Found extension method - invoke it
             logger:debug("Found extension method ~p on ~p", [Selector, CurrentClass]),
             invoke_extension(Fun, Args, Self, State);
@@ -148,7 +148,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
 %%     -> delegates to Counter's increment implementation
 %%     -> returns {reply, NewValue, NewState}
 %% ```
--spec super(selector(), args(), self(), state(), class_name()) -> dispatch_result().
+-spec super(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 super(Selector, Args, Self, State, CurrentClass) ->
     logger:debug("Super dispatch ~p from class ~p", [Selector, CurrentClass]),
     
@@ -198,7 +198,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
 %%
 %% Method combinations are not yet implemented. This is a placeholder
 %% for Phase 1b. For now, this function delegates to `lookup/5`.
--spec invoke_with_combinations(selector(), args(), self(), state(), class_name()) -> dispatch_result().
+-spec invoke_with_combinations(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 invoke_with_combinations(Selector, Args, Self, State, CurrentClass) ->
     %% TODO: Implement method combinations
     %% For now, just delegate to normal lookup
@@ -218,7 +218,7 @@ invoke_with_combinations(Selector, Args, Self, State, CurrentClass) ->
 %% 3. If found, invokes the method
 %% 4. If not found, recurses to the superclass
 %% 5. Returns error if reached root without finding method
--spec lookup_in_class_chain(selector(), args(), self(), state(), class_name()) -> dispatch_result().
+-spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_object_class:whereis_class(ClassName) of
         undefined ->
@@ -231,8 +231,9 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
             case beamtalk_object_class:has_method(ClassPid, Selector) of
                 true ->
                     %% Found the method - invoke it
+                    %% Pass ClassPid to avoid redundant whereis_class lookup
                     logger:debug("Found method ~p in class ~p", [Selector, ClassName]),
-                    invoke_method(ClassName, Selector, Args, Self, State);
+                    invoke_method(ClassName, ClassPid, Selector, Args, Self, State);
                 false ->
                     %% Not found in this class - try superclass
                     case beamtalk_object_class:superclass(ClassPid) of
@@ -259,42 +260,30 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 %% - Dynamic classes: call apply(Fun, [Self, Args, State])
 %%
 %% The class process knows the module name, so we can determine which strategy to use.
--spec invoke_method(class_name(), selector(), args(), self(), state()) -> dispatch_result().
-invoke_method(ClassName, Selector, Args, Self, State) ->
-    case beamtalk_object_class:whereis_class(ClassName) of
+%% ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
+-spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) -> dispatch_result().
+invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
+    %% Get the module name for this class
+    case beamtalk_object_class:module_name(ClassPid) of
         undefined ->
-            Error0 = beamtalk_error:new(class_not_found, ClassName),
+            %% Dynamic class or error
+            Error0 = beamtalk_error:new(internal_error, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
-            {error, Error1};
-        ClassPid ->
-            %% Get the module name for this class
-            case beamtalk_object_class:module_name(ClassPid) of
-                undefined ->
-                    %% Dynamic class or error
+            Error2 = beamtalk_error:with_hint(Error1, <<"Class has no module name">>),
+            {error, Error2};
+        ModuleName ->
+            %% Verify the module exports dispatch/4 before calling it.
+            %% This avoids catching error:undef broadly, which could mask
+            %% bugs inside the dispatch function itself.
+            case erlang:function_exported(ModuleName, dispatch, 4) of
+                false ->
                     Error0 = beamtalk_error:new(internal_error, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Class has no module name">>),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Module missing dispatch/4 function">>),
                     {error, Error2};
-                ModuleName ->
-                    %% Compiled class - call its dispatch function
-                    logger:debug("Invoking ~p:dispatch(~p, ~p, ~p, ~p)", [ModuleName, Selector, Args, Self, State]),
-                    try
-                        ModuleName:dispatch(Selector, Args, Self, State)
-                    catch
-                        error:undef ->
-                            %% Module doesn't have dispatch/4 - might be dynamic
-                            %% TODO: Handle dynamic classes
-                            Error0 = beamtalk_error:new(internal_error, ClassName),
-                            Error1 = beamtalk_error:with_selector(Error0, Selector),
-                            Error2 = beamtalk_error:with_hint(Error1, <<"Module missing dispatch/4 function">>),
-                            {error, Error2};
-                        error:Reason:Stacktrace ->
-                            %% Method threw an error
-                            logger:error("Method ~p:~p threw error: ~p~nStacktrace: ~p",
-                                        [ClassName, Selector, Reason, Stacktrace]),
-                            %% Re-throw the error
-                            erlang:raise(error, Reason, Stacktrace)
-                    end
+                true ->
+                    logger:debug("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
+                    ModuleName:dispatch(Selector, Args, Self, State)
             end
     end.
 
@@ -309,16 +298,8 @@ invoke_method(ClassName, Selector, Args, Self, State) ->
 %% Extensions return results directly, not {reply, Result, NewState} tuples.
 %% This is because extensions operate on value types (Integer, String) which
 %% have no mutable state. For actors, extensions would need to be wrapped.
-%%
-%% TODO: Verify this is correct behavior. May need to handle actor extensions differently.
--spec invoke_extension(fun(), args(), self(), state()) -> dispatch_result().
+-spec invoke_extension(fun(), args(), bt_self(), state()) -> dispatch_result().
 invoke_extension(Fun, Args, _Self, State) ->
-    %% Extract the receiver value from state
-    %% For primitives, state might contain the value directly
-    %% For actors, we need to be careful about state management
-    %%
-    %% TODO: This needs to handle both value types and actor types correctly
-    %% For now, assume extensions operate on primitives and return values directly
     try
         Result = apply(Fun, [Args, State]),
         {reply, Result, State}
@@ -327,4 +308,20 @@ invoke_extension(Fun, Args, _Self, State) ->
             logger:error("Extension method threw error: ~p~nStacktrace: ~p",
                         [Reason, Stacktrace]),
             erlang:raise(error, Reason, Stacktrace)
+    end.
+
+%% @private
+%% @doc Safe extension registry lookup.
+%%
+%% Guards against the ETS table not existing (e.g., during early bootstrap).
+%% Returns {ok, Fun} if found, not_found otherwise.
+-spec check_extension(class_name(), selector()) -> {ok, fun()} | not_found.
+check_extension(ClassName, Selector) ->
+    try beamtalk_extensions:lookup(ClassName, Selector) of
+        {ok, Fun, _Owner} -> {ok, Fun};
+        not_found -> not_found
+    catch
+        error:badarg ->
+            %% ETS table doesn't exist yet (early bootstrap)
+            not_found
     end.
