@@ -1107,6 +1107,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
 | **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
 | **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |
+| **BT-286** | Compilable Standard Library (ADR 0007) | 10 issues | ~0% | Urgent |
 
 #### Epic Completed
 
