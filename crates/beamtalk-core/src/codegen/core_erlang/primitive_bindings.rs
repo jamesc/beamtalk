@@ -158,11 +158,16 @@ impl PrimitiveBindingTable {
 
     /// Returns the runtime module name for a class's selector-based primitives.
     ///
-    /// Convention: class name → lowercase with `beamtalk_` prefix.
-    /// Example: `Integer` → `beamtalk_integer`
+    /// Convention: class name → snake_case with `beamtalk_` prefix.
+    /// Handles special cases where multiple classes share a runtime module
+    /// (e.g., `True`/`False` → `beamtalk_boolean`).
     #[must_use]
     pub fn runtime_module_for_class(class_name: &str) -> String {
-        format!("beamtalk_{}", class_name.to_lowercase())
+        match class_name {
+            "True" | "False" => "beamtalk_boolean".to_string(),
+            "SequenceableCollection" => "beamtalk_sequenceable_collection".to_string(),
+            _ => format!("beamtalk_{}", class_name.to_lowercase()),
+        }
     }
 }
 
@@ -432,6 +437,20 @@ mod tests {
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("Block"),
             "beamtalk_block"
+        );
+        // Special cases: True/False share beamtalk_boolean
+        assert_eq!(
+            PrimitiveBindingTable::runtime_module_for_class("True"),
+            "beamtalk_boolean"
+        );
+        assert_eq!(
+            PrimitiveBindingTable::runtime_module_for_class("False"),
+            "beamtalk_boolean"
+        );
+        // Multi-word class names use snake_case
+        assert_eq!(
+            PrimitiveBindingTable::runtime_module_for_class("SequenceableCollection"),
+            "beamtalk_sequenceable_collection"
         );
     }
 

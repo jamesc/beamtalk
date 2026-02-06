@@ -936,7 +936,11 @@ impl CoreErlangGenerator {
     /// structural intrinsics matters at the call site (in `dispatch_codegen`),
     /// not in the method body.
     fn generate_primitive(&mut self, name: &str, _is_quoted: bool) -> Result<()> {
-        let class_name = self.current_class_name.clone().unwrap_or_default();
+        let class_name = self.current_class_name.clone().ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "@primitive '{name}' used outside of a class context"
+            ))
+        })?;
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         write!(

@@ -56,7 +56,6 @@ impl CoreErlangGenerator {
             self.write_indent()?;
             write!(self.output, "<[")?;
             // BT-295: Track method params for @primitive codegen
-            self.current_method_params.clear();
             for (i, param) in method.parameters.iter().enumerate() {
                 if i > 0 {
                     write!(self.output, ", ")?;
