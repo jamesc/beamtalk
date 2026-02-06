@@ -269,6 +269,7 @@ impl CoreErlangGenerator {
                     let int_var = self.fresh_temp_var("I");
                     let str_var = self.fresh_temp_var("S");
                     let obj_var = self.fresh_temp_var("O");
+                    let map_var = self.fresh_temp_var("M");
 
                     write!(self.output, "let {recv_var} = ")?;
                     self.generate_expression(receiver)?;
@@ -280,6 +281,7 @@ impl CoreErlangGenerator {
                          <'true'> when 'true' -> 'True' \
                          <'false'> when 'true' -> 'False' \
                          <'nil'> when 'true' -> 'Nil' \
+                         <{map_var}> when call 'erlang':'is_map'({map_var}) -> call 'beamtalk_primitive':'class_of'({map_var}) \
                          <{obj_var}> when 'true' -> call 'erlang':'element'(2, {obj_var}) \
                          end"
                     )?;

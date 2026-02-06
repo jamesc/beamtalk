@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for CompiledMethod (BT-101)
+//
+// Tests the >> operator for method lookup and CompiledMethod introspection:
+// - Counter >> #selector returns a CompiledMethod object
+// - CompiledMethod responds to: selector, source, argumentCount, class
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// METHOD LOOKUP WITH >>
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Look up an existing method
+// ---------------------------------------------------------------------------
+
+method := Counter >> #getValue
+// => _
+
+// ---------------------------------------------------------------------------
+// CompiledMethod class
+// ---------------------------------------------------------------------------
+
+method class
+// => CompiledMethod
+
+// ---------------------------------------------------------------------------
+// CompiledMethod selector
+// ---------------------------------------------------------------------------
+
+method selector
+// => getValue
+
+// ---------------------------------------------------------------------------
+// CompiledMethod argumentCount
+// ---------------------------------------------------------------------------
+
+method argumentCount
+// => 0
+
+// ---------------------------------------------------------------------------
+// CompiledMethod source contains the method definition
+// ---------------------------------------------------------------------------
+
+src := method source
+// => _
+
+// ---------------------------------------------------------------------------
+// Look up another method
+// ---------------------------------------------------------------------------
+
+incMethod := Counter >> #increment
+// => _
+
+incMethod selector
+// => increment
+
+incMethod class
+// => CompiledMethod
+
+// ---------------------------------------------------------------------------
+// Look up non-existent method returns nil
+// ---------------------------------------------------------------------------
+
+Counter >> #nonExistent
+// => nil

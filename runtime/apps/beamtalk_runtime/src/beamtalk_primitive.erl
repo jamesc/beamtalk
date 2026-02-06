@@ -79,7 +79,11 @@ class_of(nil) -> 'UndefinedObject';
 class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'Array';
-class_of(X) when is_map(X) -> 'Dictionary';
+class_of(X) when is_map(X) ->
+    case maps:find('__class__', X) of
+        {ok, Class} -> Class;
+        error -> 'Dictionary'
+    end;
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     element(2, X);  % Extract class field from #beamtalk_object{}
 class_of(X) when is_tuple(X) -> 'Tuple';
@@ -132,6 +136,16 @@ send(X, Selector, Args) when is_tuple(X) ->
     end;
 send(X, Selector, Args) when is_float(X) ->
     beamtalk_float:dispatch(Selector, Args, X);
+send(X, Selector, Args) when is_map(X) ->
+    %% Check for tagged maps (e.g., CompiledMethod)
+    case maps:find('__class__', X) of
+        {ok, 'CompiledMethod'} ->
+            beamtalk_compiled_method:dispatch(Selector, Args, X);
+        _ ->
+            %% Generic map dispatch (Dictionary)
+            Class = class_of(X),
+            error({not_implemented, {Class, Selector, Args}})
+    end;
 send(X, Selector, Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -178,6 +192,12 @@ responds_to(X, Selector) when is_tuple(X) ->
     end;
 responds_to(X, Selector) when is_float(X) ->
     beamtalk_float:has_method(Selector);
+responds_to(X, Selector) when is_map(X) ->
+    case maps:find('__class__', X) of
+        {ok, 'CompiledMethod'} ->
+            beamtalk_compiled_method:has_method(Selector);
+        _ -> false
+    end;
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.

@@ -316,7 +316,12 @@ fn handle_compile(
         // Derive module name from file path
         let module_name = file_path.file_stem().unwrap_or("module").to_string();
 
-        let core = beamtalk_core::erlang::generate_with_name(&module, &module_name).ok();
+        let core = beamtalk_core::erlang::generate_with_name_and_source(
+            &module,
+            &module_name,
+            Some(&source),
+        )
+        .ok();
         let classes = extract_class_names(&module);
         (core, classes)
     };

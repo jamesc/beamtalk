@@ -230,7 +230,24 @@ pub fn generate(module: &Module) -> Result<String> {
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_with_name(module: &Module, module_name: &str) -> Result<String> {
+    generate_with_name_and_source(module, module_name, None)
+}
+
+/// Generates Core Erlang code with a specified module name and source text.
+///
+/// When `source_text` is provided, method source is captured in class registration
+/// metadata, enabling `CompiledMethod` introspection (BT-101).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_with_name_and_source(
+    module: &Module,
+    module_name: &str,
+    source_text: Option<&str>,
+) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.source_text = source_text.map(String::from);
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -332,6 +349,8 @@ pub(super) struct CoreErlangGenerator {
     /// BT-213: Code generation context (`Actor`, `ValueType`, or `Repl`).
     /// Determines variable naming and method dispatch strategy.
     context: CodeGenContext,
+    /// BT-101: Original source text for extracting method source.
+    source_text: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -346,6 +365,7 @@ impl CoreErlangGenerator {
             in_loop_body: false,
             is_repl_mode: false,
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
+            source_text: None,
         }
     }
 

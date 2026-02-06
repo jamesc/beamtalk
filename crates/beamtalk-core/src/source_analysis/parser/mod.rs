@@ -110,10 +110,11 @@ impl BindingPower {
 ///
 /// | Level | Operators | Associativity |
 /// |-------|-----------|---------------|
-/// | 10 | `=` `~=` | Left |
-/// | 20 | `<` `>` `<=` `>=` | Left |
-/// | 30 | `+` `-` | Left |
-/// | 40 | `*` `/` `%` | Left |
+/// | 5  | `>>`                | Left |
+/// | 10 | `=` `~=`            | Left |
+/// | 20 | `<` `>` `<=` `>=`   | Left |
+/// | 30 | `+` `-`             | Left |
+/// | 40 | `*` `/` `%`         | Left |
 ///
 /// To add a new operator, just add an entry here. For example:
 /// ```ignore
@@ -125,6 +126,10 @@ impl BindingPower {
 /// ```
 pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
+        // Method lookup (lowest binary precedence)
+        // `Counter >> #increment` returns CompiledMethod object
+        ">>" => Some(BindingPower::left_assoc(5)),
+
         // Equality (lowest binary precedence)
         // `~=` is the Smalltalk-style not-equal operator
         "=" | "==" | "~=" => Some(BindingPower::left_assoc(10)),
