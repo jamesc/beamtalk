@@ -13,34 +13,37 @@ Perform a **deep, thorough code review** focused on **shipping high-quality code
 
 1. **Identify the base branch**: Determine the comparison point:
    ```bash
-   git merge-base HEAD main
+   git fetch origin main
+   git merge-base HEAD origin/main
    ```
 
 2. **Get the diff**: Fetch all changes between current branch and main:
    ```bash
-   git --no-pager diff $(git merge-base HEAD main)..HEAD
+   git --no-pager diff $(git merge-base HEAD origin/main)..HEAD
    ```
 
 3. **List changed files**: Get a summary of what files were modified:
    ```bash
-   git --no-pager diff --stat $(git merge-base HEAD main)..HEAD
+   git --no-pager diff --stat $(git merge-base HEAD origin/main)..HEAD
    ```
 
 4. **Review each changed file** against the guidelines below.
 
-5. **Test coverage check**: Explicitly ask yourself:
+5. **DDD compliance check**: For each new or renamed module/type/function:
+   - Does the name match the ubiquitous language in `docs/beamtalk-ddd-model.md`?
+   - Is the bounded context documented in the module header?
+   - If a new domain concept is introduced, is it added to the DDD model doc?
+   - Are dependency directions correct (core never imports cli/lsp)?
+   
+   If the DDD model doc needs updating, update it as part of the review.
+
+6. **Test coverage check**: Explicitly ask yourself:
    - "Are there any new tests needed for these changes?"
    - "Can I write an E2E test for this?" (check `tests/e2e/cases/*.bt`)
    - "Are there edge cases in the changed code that aren't tested?"
    - "Did any existing tests need updating due to behavioral changes?"
    
-   If tests are missing, add them as part of the review (see step 6).
-
-6. **Verify tests pass**: Run the test suite to ensure changes don't break anything:
-   ```bash
-   just ci
-   ```
-   This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
+   If tests are missing, add them as part of the review (see step 7).
 
 7. **Implement recommended suggestions**: For anything that can be done well in <2 hours, implement it directly. This includes:
    - Fixing bugs and edge cases
@@ -48,17 +51,25 @@ Perform a **deep, thorough code review** focused on **shipping high-quality code
    - Improving documentation
    - Refactoring for clarity
    - Adding error handling
-   - Improving naming and structure
+   - Improving naming and DDD alignment
+   - Updating `docs/beamtalk-ddd-model.md` for new domain concepts
    - **Philosophy:** Ship high quality the first time. Don't defer easy work to future PRs.
 
-8. **Create issues ONLY for substantial changes**: Only create Linear issues for work that:
+8. **Verify tests pass**: After implementing any changes, run the full CI suite:
+   ```bash
+   just ci
+   ```
+   This runs all CI checks (build, clippy, fmt-check, test, test-e2e).
+   If fixes introduced new failures, address them before proceeding.
+
+9. **Create issues ONLY for substantial changes**: Only create Linear issues for work that:
    - Requires architectural design decisions
    - Affects multiple components significantly
    - Needs cross-team coordination or breaking changes
    - Would fundamentally change the PR's scope
    - **Remember:** The bar for "separate PR" is HIGH. When in doubt, implement it now.
 
-9. **Summary**: End with an overall assessment:
+10. **Summary**: End with an overall assessment:
    - Is the code ready to merge?
    - What are the main strengths of the changes?
    - What changes were implemented during review
@@ -126,6 +137,32 @@ The goal is to ship high-quality code the first time. If something can be fixed 
 - Flag missing types (TS), docstrings (Python), or JSDoc.
 - Suggest assertions for edge cases.
 
+### Domain Driven Design (DDD) Compliance
+
+**Reference:** `docs/beamtalk-ddd-model.md` defines the authoritative domain model.
+
+**Naming & Ubiquitous Language:**
+- Module/type/function names MUST use domain terms from the DDD model, not generic technical terms.
+  - ✅ `CompletionProvider`, `DiagnosticProvider`, `ClassHierarchy`
+  - ❌ `completions`, `diagnostics`, `class_utils`
+- If a new domain term is introduced (new type, module, or concept), verify it exists in `docs/beamtalk-ddd-model.md`. If not, **add it** to the DDD model doc as part of the review.
+- Flag names that drift from the ubiquitous language (e.g., using "handler" when the domain says "provider").
+
+**Bounded Context Alignment:**
+- Every new module must belong to a clear bounded context (Language Service, Compilation, Runtime, REPL).
+- Flag modules that mix concerns across contexts (e.g., codegen logic in a runtime module).
+- Check module-level doc comments include `//! **DDD Context:** <context name>`.
+
+**Architectural Layering:**
+- Dependencies must flow downward only: `beamtalk-core` must never import `beamtalk-cli` or `beamtalk-lsp`.
+- Domain services should be stateless and operate on domain objects (AST, Module, ClassHierarchy).
+- Value objects (Span, Position, Token) must be immutable.
+
+**DDD Model Doc Updates:**
+- If the PR introduces new domain concepts, types, or services not in the DDD model, update `docs/beamtalk-ddd-model.md` to include them.
+- If the PR renames or reorganizes domain concepts, update the DDD model to match.
+- This is **not optional** — the DDD model must stay in sync with the code.
+
 ---
 
 ## Language-Specific Guidelines
@@ -137,6 +174,10 @@ The goal is to ship high-quality code the first time. If something can be fixed 
 - Avoid process dictionary; pass state explicitly.
 - Check for missing `-spec` and `-type` declarations.
 - Ensure proper supervision tree structure for fault tolerance.
+- **Beamtalk-specific:**
+  - ALL errors MUST use `#beamtalk_error{}` records — no bare tuple errors (`{error, reason}`). Use `beamtalk_error:new/2`, `with_selector/2`, `with_hint/2`.
+  - ALL logging MUST use OTP `logger` module — no `io:format(standard_error, ...)` for diagnostics. Use `logger:error/2`, `logger:warning/2`, `logger:debug/2` with structured metadata maps.
+  - ALL source files MUST include Apache 2.0 license header.
 
 ### JavaScript/TypeScript
 - Use strict mode, const/let over var.
