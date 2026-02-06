@@ -43,7 +43,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -372,6 +372,18 @@ fn start_daemon() -> Result<()> {
     Ok(())
 }
 
+/// Check if a directory contains any `.beam` files.
+fn has_beam_files(dir: &Path) -> bool {
+    dir.is_dir()
+        && std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+            })
+            .unwrap_or(false)
+}
+
 /// Start the BEAM node with REPL backend.
 fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
@@ -382,7 +394,8 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     let build_lib_dir = runtime_dir.join("_build/default/lib");
     let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
     let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
-    let stdlib_beam_dir = build_lib_dir.join("beamtalk_stdlib/ebin");
+    // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
+    let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");
 
     // Check if runtime is built
     if !runtime_beam_dir.exists() {
@@ -400,8 +413,8 @@ fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
 
     info!("Starting BEAM node with REPL backend on port {port}...");
 
-    // Warn if stdlib is not compiled
-    if !stdlib_beam_dir.exists() {
+    // Warn if stdlib is not compiled (directory may exist without .beam files)
+    if !has_beam_files(&stdlib_beam_dir) {
         warn!("Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL");
     }
 
@@ -624,10 +637,11 @@ pub fn run(
         let build_lib_dir = runtime_dir.join("_build/default/lib");
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
-        let stdlib_beam_dir = build_lib_dir.join("beamtalk_stdlib/ebin");
+        // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
+        let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");
 
-        // Warn if stdlib is not compiled
-        if !stdlib_beam_dir.exists() {
+        // Warn if stdlib is not compiled (directory may exist without .beam files)
+        if !has_beam_files(&stdlib_beam_dir) {
             warn!(
                 "Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL"
             );

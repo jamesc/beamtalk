@@ -281,7 +281,7 @@ impl DaemonManager {
         let runtime = runtime_dir();
         let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
         let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
-        let stdlib_dir = runtime.join("_build/default/lib/beamtalk_stdlib/ebin");
+        let stdlib_dir = runtime.join("apps/beamtalk_stdlib/ebin");
 
         // Build runtime if needed
         if !ebin_dir.exists() {
