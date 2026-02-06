@@ -175,7 +175,7 @@ lookup(Class, Selector) when is_atom(Class), is_atom(Selector) ->
 %% ```
 -spec list(atom()) -> [{atom(), atom()}].
 list(Class) when is_atom(Class) ->
-    MatchPattern = {{{Class, '$1'}, '_', '$2'}},
+    MatchPattern = {{Class, '$1'}, '_', '$2'},
     ets:select(?EXTENSIONS_TABLE, [{MatchPattern, [], [{{'$1', '$2'}}]}]).
 
 %% @doc Show all methods that have been registered by multiple owners.
