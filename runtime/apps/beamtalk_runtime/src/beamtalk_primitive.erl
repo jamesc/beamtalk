@@ -81,8 +81,8 @@ class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'Array';
 class_of(X) when is_map(X) ->
     case maps:find('__class__', X) of
-        {ok, Class} -> Class;
-        error -> 'Dictionary'
+        {ok, Class} when is_atom(Class) -> Class;
+        _ -> 'Dictionary'
     end;
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     element(2, X);  % Extract class field from #beamtalk_object{}

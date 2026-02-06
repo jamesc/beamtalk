@@ -81,7 +81,7 @@ builtin_dispatch('class', [], _Value) ->
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
-    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
+    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~p)", [Sel]))};
 
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
@@ -103,5 +103,5 @@ does_not_understand(Selector, _Args, _Value) ->
     Error0 = beamtalk_error:new(does_not_understand, 'CompiledMethod'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1,
-        <<"CompiledMethod supports: selector, source, argumentCount, class, printString">>),
+        <<"CompiledMethod supports: selector, source, argumentCount, class, printString, asString, respondsTo:">>),
     error(Error2).

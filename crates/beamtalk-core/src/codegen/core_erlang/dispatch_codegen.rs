@@ -85,6 +85,11 @@ impl CoreErlangGenerator {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_method_lookup(&name.name, arguments);
                 }
+                // >> is only supported on class literals for now
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: ">> (method lookup) is only supported on class literals (e.g., Counter >> #increment), not on expressions".to_string(),
+                    location: format!("{receiver:?}"),
+                });
             }
             return self.generate_binary_op(op, receiver, arguments);
         }

@@ -130,7 +130,7 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
 
-        // Equality (lowest binary precedence)
+        // Equality
         // `~=` is the Smalltalk-style not-equal operator
         "=" | "==" | "~=" => Some(BindingPower::left_assoc(10)),
 
