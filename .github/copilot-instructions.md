@@ -6,13 +6,16 @@ This repository has custom skills in `.github/skills/` that provide detailed wor
 
 | Command | Description |
 |---------|-------------|
-| `/next-issue` | Start working on next Linear issue from backlog |
+| `/pick-issue` | Start working on next Linear issue from backlog |
 | `/done` | Complete work, commit, push, and create PR |
 | `/whats-next` | Get recommendations for what to work on next |
-| `/pr-resolve` | Address all PR review comments systematically |
-| `/merge-resolve` | Update main, merge into current branch, resolve conflicts |
-| `/code-review` | Review current branch changes vs main |
-| `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
+| `/resolve-pr` | Address all PR review comments systematically |
+| `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
+| `/review-code` | 3-pass code review: diff, system, adversarial |
+| `/draft-adr` | Research a problem and draft an ADR |
+| `/plan-adr` | Break an accepted ADR into implementation issues |
+| `/plan-refactor` | Analyze repo and plan refactoring work |
+| `/do-refactor` | Execute a refactoring epic on one branch |
 
 See `.github/skills/` for full workflow details, or ask Copilot about any command.
 

@@ -1446,11 +1446,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
 | `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
 | **Review** | | |
-| `final-reviewer` | `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
-
-**Note:** `@final-reviewer` can accept a Linear issue ID or PR number:
-- `@final-reviewer BT-123` - Find PR for issue, checkout branch, review
-- `@final-reviewer #225` - Checkout PR #225, review
+| `review-code` | `/review-code` | 3-pass code review: diff, system, adversarial (different model) |
 
 ### Skill Locations
 
