@@ -5,24 +5,17 @@
 // This fixture tests super calls in inheritance hierarchy:
 //   Actor -> Counter -> LoggingCounter
 
-// Instance variables
-value := 0.
-logCount := 0.
+Counter subclass: LoggingCounter
+  state: logCount = 0
 
-// Override increment to add logging, then call super
-increment := [
+  // Override increment to add logging, then call super
+  increment =>
     self.logCount := self.logCount + 1.
-    super increment.
-    ^self.value
-].
+    super increment
 
-// New method to get log count
-getLogCount := [
-    ^self.logCount
-].
+  // New method to get log count
+  getLogCount => self.logCount
 
-// Override getValue to test super with different method
-getValue := [
-    super getValue
-].
+  // Override getValue to test super with different method
+  getValue => super getValue
 
