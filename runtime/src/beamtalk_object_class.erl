@@ -239,16 +239,11 @@ add_after(ClassPid, Selector, Fun) ->
 
 %% @doc Super dispatch - invoke a method from the superclass chain.
 %%
-%% This is used when compiling `super` sends in methods. The State map
-%% must contain a `'__class__'` field indicating the current class.
+%% @deprecated Use {@link beamtalk_dispatch:super/5} instead (ADR 0006).
+%% This function is retained for backward compatibility with existing compiled
+%% modules. New codegen uses beamtalk_dispatch:super/5 directly.
 %%
 %% Returns `{reply, Result, NewState}` to match the actor dispatch protocol.
-%%
-%% Example generated code:
-%% ```erlang
-%% %% In subclass method:
-%% {reply, Result, NewState} = beamtalk_class:super_dispatch(State, 'methodName', [arg1, arg2])
-%% ```
 -spec super_dispatch(map(), selector(), list()) -> {reply, term(), map()} | {error, term()}.
 super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state

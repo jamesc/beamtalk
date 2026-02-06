@@ -194,6 +194,9 @@ test_extension_priority() ->
     %% Call the extension method
     Result = beamtalk_dispatch:lookup(testExtension, [], Self, State, 'Counter'),
     
+    %% Clean up the extension to avoid leaking between tests
+    catch ets:delete(beamtalk_extensions, {'Counter', testExtension}),
+    
     %% Should invoke the extension
     ?assertMatch({reply, {extension_called, _}, _}, Result).
 

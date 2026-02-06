@@ -283,7 +283,15 @@ invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
                     {error, Error2};
                 true ->
                     logger:debug("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
-                    ModuleName:dispatch(Selector, Args, Self, State)
+                    %% Normalize the return value: dispatch/4 returns either
+                    %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
+                    %% We normalize {error, Error, State} to {error, Error} to match
+                    %% the dispatch_result() type and the codegen pattern matching.
+                    case ModuleName:dispatch(Selector, Args, Self, State) of
+                        {reply, _, _} = Reply -> Reply;
+                        {error, Error, _State} -> {error, Error};
+                        Other -> Other
+                    end
             end
     end.
 
