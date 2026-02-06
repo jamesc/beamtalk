@@ -239,7 +239,7 @@ impl NameResolver {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } => {
+            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No resolution needed
             }
         }

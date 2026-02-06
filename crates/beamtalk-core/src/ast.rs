@@ -648,6 +648,19 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A `@primitive` pragma inside a method body.
+    ///
+    /// Represents `@primitive 'name'` or `@primitive intrinsicName` in stdlib source.
+    /// This is a first-class AST node per ADR 0007.
+    Primitive {
+        /// The primitive name (e.g., `erlang_add` or `size`).
+        name: EcoString,
+        /// Whether the name was quoted (`@primitive 'name'`).
+        is_quoted: bool,
+        /// Source location.
+        span: Span,
+    },
+
     /// An error node for unparseable code.
     ///
     /// This allows the parser to recover from errors and continue.
@@ -676,6 +689,7 @@ impl Expression {
             | Self::Pipe { span, .. }
             | Self::Match { span, .. }
             | Self::MapLiteral { span, .. }
+            | Self::Primitive { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
             Self::Block(block) => block.span,
