@@ -73,7 +73,7 @@ workspace_meta_spec_test() ->
     ?assertEqual(start_link, Fun),
     ?assert(maps:is_key(workspace_id, Config)).
 
-beamtalk_repl_spec_test() ->
+actor_registry_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
     %% Find actor_registry child spec
@@ -81,13 +81,16 @@ beamtalk_repl_spec_test() ->
     ?assertEqual(worker, maps:get(type, RegistrySpec)),
     ?assertEqual(permanent, maps:get(restart, RegistrySpec)),
     ?assertEqual({beamtalk_repl_actors, start_link, [registered]}, 
-                 maps:get(start, RegistrySpec)),
+                 maps:get(start, RegistrySpec)).
+
+repl_server_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
     %% Find repl_server child spec
     [ReplSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_repl_server],
     ?assertEqual(worker, maps:get(type, ReplSpec)),
     ?assertEqual(permanent, maps:get(restart, ReplSpec)),
-    ?assertEqual({beamtalk_repl_server, start_link, [49152]}, 
+    ?assertEqual({beamtalk_repl_server, start_link, [#{port => 49152}]}, 
                  maps:get(start, ReplSpec)).
 
 idle_monitor_spec_test() ->

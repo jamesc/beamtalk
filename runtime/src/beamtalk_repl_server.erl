@@ -30,16 +30,21 @@
 
 %% @doc Start the REPL TCP server.
 %% Listens on the specified port for incoming REPL connections.
--spec start_link(inet:port_number()) -> {ok, pid()} | {error, term()}.
-start_link(Port) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Port, []).
+%% Accepts a map with `port` key, or a plain port number for backward compatibility.
+-spec start_link(map() | inet:port_number()) -> {ok, pid()} | {error, term()}.
+start_link(#{port := _} = Config) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, Config, []);
+start_link(Port) when is_integer(Port) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, #{port => Port}, []).
 
 %%% gen_server callbacks
 
 %% @private
-init(Port) ->
-    %% Start listening on TCP port
-    case gen_tcp:listen(Port, [binary, {packet, line}, {active, false}, {reuseaddr, true}]) of
+init(#{port := Port}) ->
+    %% Start listening on TCP port, bound to loopback only for security
+    ListenOpts = [binary, {packet, line}, {active, false}, {reuseaddr, true},
+                  {ip, {127, 0, 0, 1}}],
+    case gen_tcp:listen(Port, ListenOpts) of
         {ok, ListenSocket} ->
             %% Start acceptor process
             {ok, AcceptorPid} = start_acceptor(ListenSocket),
@@ -94,7 +99,14 @@ acceptor_loop(ListenSocket) ->
                 {ok, SessionPid} ->
                     logger:info("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
                     %% Spawn client handler with session pid in session mode
-                    spawn(fun() -> handle_client(ClientSocket, SessionPid, session) end);
+                    %% Monitor session so handler exits if session crashes
+                    spawn(fun() ->
+                        MonRef = erlang:monitor(process, SessionPid),
+                        handle_client(ClientSocket, SessionPid, session),
+                        %% Client disconnected — terminate the session
+                        erlang:demonitor(MonRef, [flush]),
+                        beamtalk_repl_shell:stop(SessionPid)
+                    end);
                 {error, Reason} ->
                     logger:error("Failed to create session: ~p", [Reason]),
                     ErrorJson = format_error({session_creation_failed, Reason}),

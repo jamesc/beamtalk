@@ -85,7 +85,7 @@ init(Config) ->
         %% REPL TCP server (session-per-connection architecture)
         #{
             id => beamtalk_repl_server,
-            start => {beamtalk_repl_server, start_link, [TcpPort]},
+            start => {beamtalk_repl_server, start_link, [#{port => TcpPort}]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

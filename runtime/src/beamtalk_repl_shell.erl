@@ -16,7 +16,7 @@
 -behaviour(gen_server).
 
 %% Public API
--export([start_link/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2]).
+-export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -28,6 +28,11 @@
 -spec start_link(binary()) -> {ok, pid()} | {error, term()}.
 start_link(SessionId) ->
     gen_server:start_link(?MODULE, SessionId, []).
+
+%% @doc Stop a REPL shell session.
+-spec stop(pid()) -> ok.
+stop(SessionPid) ->
+    gen_server:stop(SessionPid, normal, 5000).
 
 %% @doc Evaluate an expression in this session.
 -spec eval(pid(), string()) -> {ok, term()} | {error, term()}.
