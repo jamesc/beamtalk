@@ -283,6 +283,34 @@ jobs:
           
           echo "✅ Coverage thresholds met"
 
+      - name: Check Erlang Coverage Thresholds
+        run: |
+          if [ ! -f erlang-coverage-results.md ]; then
+            echo "⚠️ WARNING: erlang-coverage-results.md not found, skipping threshold check"
+            exit 0
+          fi
+          
+          erlang_coverage=$(grep -E 'Summary.*\|.*%' erlang-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
+          erlang_branch=$(grep -E 'Summary.*\|.*%' erlang-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
+          
+          echo "Erlang Line Coverage: ${erlang_coverage}%"
+          echo "Erlang Branch Coverage: ${erlang_branch}%"
+          
+          line_check=$(awk -v cov="$erlang_coverage" 'BEGIN { if (cov < 50.0) print "FAIL"; else print "PASS" }')
+          branch_check=$(awk -v cov="$erlang_branch" 'BEGIN { if (cov < 60.0) print "WARN"; else print "PASS" }')
+          
+          if [ "$line_check" = "FAIL" ]; then
+            echo "❌ FAILURE: Erlang line coverage ${erlang_coverage}% is below 50% threshold"
+            exit 1
+          fi
+          
+          if [ "$branch_check" = "WARN" ]; then
+            echo "⚠️ WARNING: Erlang branch coverage ${erlang_branch}% is below 60% threshold"
+            echo "This will become a failure in future releases"
+          fi
+          
+          echo "✅ Erlang coverage thresholds met"
+
       - name: Prepare PR Comment
         if: github.event_name == 'pull_request'
         id: prepare_comment
