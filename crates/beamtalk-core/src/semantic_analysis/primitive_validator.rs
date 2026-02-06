@@ -10,9 +10,9 @@
 //! - Validates structural intrinsic names against the known registry
 //! - Supports `--allow-primitives` escape hatch for advanced FFI use
 
+use crate::CompilerOptions;
 use crate::ast::{Expression, Module};
 use crate::source_analysis::{Diagnostic, Span};
-use crate::CompilerOptions;
 
 /// Known structural intrinsic names (ADR 0007).
 ///
@@ -148,7 +148,10 @@ fn validate_expr(
                 validate_expr(body_expr, is_stdlib, options, diagnostics);
             }
         }
-        Expression::Return { value, .. } | Expression::Parenthesized { expression: value, .. } => {
+        Expression::Return { value, .. }
+        | Expression::Parenthesized {
+            expression: value, ..
+        } => {
             validate_expr(value, is_stdlib, options, diagnostics);
         }
         Expression::FieldAccess { receiver, .. } => {
@@ -216,9 +219,7 @@ fn validate_stdlib_restriction(
             "Primitives can only be declared in the standard library",
             span,
         );
-        diag.hint = Some(
-            "Use --allow-primitives flag only if implementing FFI bindings".into(),
-        );
+        diag.hint = Some("Use --allow-primitives flag only if implementing FFI bindings".into());
         diagnostics.push(diag);
     }
 }
@@ -227,10 +228,7 @@ fn validate_stdlib_restriction(
 fn validate_intrinsic_name(name: &str, span: Span, diagnostics: &mut Vec<Diagnostic>) {
     if !STRUCTURAL_INTRINSICS.contains(&name) {
         let known = STRUCTURAL_INTRINSICS.join(", ");
-        let mut diag = Diagnostic::error(
-            format!("Unknown intrinsic '{name}'"),
-            span,
-        );
+        let mut diag = Diagnostic::error(format!("Unknown intrinsic '{name}'"), span);
         diag.hint = Some(format!("Known intrinsics: {known}").into());
         diagnostics.push(diag);
     }
@@ -255,7 +253,10 @@ mod tests {
             ..Default::default()
         };
         let diags = validate_primitives(&module, &options);
-        assert!(diags.is_empty(), "Expected no diagnostics in stdlib mode, got: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "Expected no diagnostics in stdlib mode, got: {diags:?}"
+        );
     }
 
     #[test]
@@ -266,7 +267,10 @@ mod tests {
             ..Default::default()
         };
         let diags = validate_primitives(&module, &options);
-        assert!(diags.is_empty(), "Expected no diagnostics for lib/ path, got: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "Expected no diagnostics for lib/ path, got: {diags:?}"
+        );
     }
 
     #[test]
@@ -276,7 +280,13 @@ mod tests {
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Primitives can only be declared"));
-        assert!(diags[0].hint.as_ref().unwrap().contains("--allow-primitives"));
+        assert!(
+            diags[0]
+                .hint
+                .as_ref()
+                .unwrap()
+                .contains("--allow-primitives")
+        );
     }
 
     #[test]
@@ -289,10 +299,7 @@ mod tests {
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Using primitives outside stdlib"));
-        assert_eq!(
-            diags[0].severity,
-            crate::source_analysis::Severity::Warning
-        );
+        assert_eq!(diags[0].severity, crate::source_analysis::Severity::Warning);
     }
 
     #[test]
@@ -316,7 +323,10 @@ mod tests {
             ..Default::default()
         };
         let diags = validate_primitives(&module, &options);
-        assert!(diags.is_empty(), "Expected no diagnostics for known intrinsic, got: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "Expected no diagnostics for known intrinsic, got: {diags:?}"
+        );
     }
 
     #[test]
@@ -360,6 +370,9 @@ mod tests {
         let options = CompilerOptions::default();
         let diags = validate_primitives(&module, &options);
         // At least 2 errors: one for stdlib restriction on '+', one for stdlib + unknown on unknownFoo
-        assert!(diags.len() >= 2, "Expected multiple diagnostics, got: {diags:?}");
+        assert!(
+            diags.len() >= 2,
+            "Expected multiple diagnostics, got: {diags:?}"
+        );
     }
 }

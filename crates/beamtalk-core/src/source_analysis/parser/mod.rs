@@ -1722,10 +1722,7 @@ Actor subclass: Rectangle
             assert!(is_quoted);
             assert_eq!(span.start(), 0);
         } else {
-            panic!(
-                "Expected Primitive, got: {:?}",
-                module.expressions[0]
-            );
+            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
         }
     }
 
@@ -1743,10 +1740,7 @@ Actor subclass: Rectangle
             assert!(!is_quoted);
             assert_eq!(span.start(), 0);
         } else {
-            panic!(
-                "Expected Primitive, got: {:?}",
-                module.expressions[0]
-            );
+            panic!("Expected Primitive, got: {:?}", module.expressions[0]);
         }
     }
 
@@ -1758,7 +1752,13 @@ Actor subclass: Rectangle
         assert_eq!(module.classes.len(), 1);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
-        assert!(matches!(&method.body[0], Expression::Primitive { is_quoted: true, .. }));
+        assert!(matches!(
+            &method.body[0],
+            Expression::Primitive {
+                is_quoted: true,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1777,7 +1777,10 @@ Actor subclass: Rectangle
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
-        if let Expression::Primitive { name, is_quoted, .. } = &method.body[0] {
+        if let Expression::Primitive {
+            name, is_quoted, ..
+        } = &method.body[0]
+        {
             assert_eq!(name.as_str(), "basicNew");
             assert!(!is_quoted);
         } else {
@@ -1793,8 +1796,10 @@ Actor subclass: Rectangle
             !diagnostics.is_empty(),
             "Expected error for @primitive without name"
         );
-        assert!(diagnostics[0]
-            .message
-            .contains("@primitive must be followed by"));
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("@primitive must be followed by")
+        );
     }
 }
