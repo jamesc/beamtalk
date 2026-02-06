@@ -9,13 +9,19 @@ ADRs document significant architectural and design decisions, including:
 
 ## Format
 
-Each ADR follows this structure:
-- **Title:** Descriptive title with sequential number (ADR 0001, ADR 0002, etc.)
+Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
+
 - **Status:** Proposed, Accepted, Deprecated, Superseded
-- **Context:** Background and problem statement
-- **Decision:** The decision made
+- **Context:** Background, problem statement, constraints
+- **Decision:** What was decided, with code and REPL examples
+- **Prior Art:** How reference languages handle this
+- **User Impact:** How this affects each user persona
+- **Steelman Analysis:** Best argument for rejected alternatives from each user cohort
+- **Alternatives Considered:** What else was evaluated and why it was rejected
 - **Consequences:** Positive, negative, and neutral impacts
-- **References:** Related issues, documentation, discussions
+- **Implementation:** Affected components and rough phases
+- **Migration Path:** How to migrate existing code (if applicable)
+- **References:** Related issues, ADRs, documentation
 
 ## ADR List
 

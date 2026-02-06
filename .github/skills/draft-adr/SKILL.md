@@ -165,63 +165,13 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    ```
    Increment from the highest existing number.
 
-9. **Write the ADR**: Create `docs/ADR/NNNN-kebab-case-title.md` following the project format:
+9. **Write the ADR**: Copy `docs/ADR/TEMPLATE.md` to `docs/ADR/NNNN-kebab-case-title.md` and fill in all sections using the research, options analysis, and steelman results from previous steps.
 
-   ```markdown
-   # ADR NNNN: Descriptive Title
-   
-   ## Status
-   Accepted (YYYY-MM-DD)
-   
-   ## Context
-   [Problem statement — why this decision is needed]
-   [Current state — how things work today]
-   [Constraints — what limits the solution space]
-   
-   ## Decision
-   [Clear, concise statement of what was decided]
-   [Code examples showing the decided approach]
-   [REPL session showing the feature in use]
-   [Error examples showing what happens on misuse]
-   
-   ## Prior Art
-   [How reference languages handle this]
-   [What we adopted, adapted, or rejected and why]
-   
-   ## User Impact
-   [How this affects each persona: newcomer, Smalltalker, Erlang dev, operator]
-   [Discoverability and learnability considerations]
-   
-   ## Steelman Analysis
-   [Best argument for each rejected alternative from each user cohort]
-   [Tension points between cohorts]
-   
-   ## Alternatives Considered
-   ### [Alternative Name]
-   [Description and why it was rejected]
-   
-   ## Consequences
-   ### Positive
-   - [Benefits]
-   
-   ### Negative
-   - [Costs and trade-offs]
-   
-   ### Neutral
-   - [Other impacts]
-   
-   ## Implementation
-   [High-level implementation approach]
-   [Affected components and rough phases]
-   
-   ## Migration Path
-   [If this changes existing behavior: how to migrate]
-   
-   ## References
-   - Related issues: BT-XXX
-   - Related ADRs: ADR NNNN
-   - Documentation: [links]
+   ```bash
+   cp docs/ADR/TEMPLATE.md docs/ADR/NNNN-kebab-case-title.md
    ```
+   
+   Fill in every section. Remove Migration Path if not applicable. The Prior Art, User Impact, and Steelman Analysis sections should draw directly from steps 2d, 3, and 6.
 
 10. **Update the ADR index**: Add the new ADR to `docs/ADR/README.md`.
 
