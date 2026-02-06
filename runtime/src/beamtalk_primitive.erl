@@ -131,8 +131,7 @@ send(X, Selector, Args) when is_tuple(X) ->
             beamtalk_tuple:dispatch(Selector, Args, X)
     end;
 send(X, Selector, Args) when is_float(X) ->
-    %% TODO(BT-XXX): Implement beamtalk_float module
-    error({not_implemented, {beamtalk_float, dispatch, [Selector, Args, X]}});
+    beamtalk_float:dispatch(Selector, Args, X);
 send(X, Selector, Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -177,9 +176,8 @@ responds_to(X, Selector) when is_tuple(X) ->
             %% Regular tuple
             beamtalk_tuple:has_method(Selector)
     end;
-responds_to(_X, _Selector) when is_float(_X) ->
-    %% TODO(BT-XXX): Implement beamtalk_float:has_method/1
-    false;
+responds_to(X, Selector) when is_float(X) ->
+    beamtalk_float:has_method(Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.

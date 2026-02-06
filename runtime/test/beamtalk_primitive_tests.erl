@@ -114,9 +114,12 @@ send_to_string_test() ->
     ?assertEqual(<<"helloworld">>, beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
     ?assertEqual('String', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
-send_to_float_not_implemented_test() ->
-    %% Float dispatch not yet implemented (BT-168)
-    ?assertError({not_implemented, _}, beamtalk_primitive:send(3.14, '+', [2.0])).
+send_to_float_test() ->
+    %% Float dispatch implemented (BT-277)
+    Result = beamtalk_primitive:send(3.14, '+', [2.0]),
+    ?assert(is_float(Result)),
+    ?assert(abs(Result - 5.14) < 0.0001),  % Floating point tolerance
+    ?assertEqual('Float', beamtalk_primitive:send(3.14, 'class', [])).
 
 %%% ============================================================================
 %%% responds_to/2 tests
@@ -200,9 +203,13 @@ responds_to_tuple_test_() ->
          ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
      end}.
 
+responds_to_float_test() ->
+    [?_assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
+     ?_assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
+     ?_assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))].
+
 responds_to_other_primitives_test() ->
-    %% Other primitives not yet implemented
-    ?assertEqual(false, beamtalk_primitive:responds_to(3.14, '*')),
+    %% Lists not yet implemented
     ?assertEqual(false, beamtalk_primitive:responds_to([], 'size')).
 
 %%% ============================================================================
