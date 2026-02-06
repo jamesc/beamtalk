@@ -43,9 +43,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/src/**', 'runtime/include/**') }}-otp-27.0-rebar3-3.23
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache cargo registry
@@ -68,7 +68,17 @@ jobs:
       - name: Format check
         run: just fmt-check
 
+      - name: Check for Erlang changes
+        id: erlang-changes
+        run: |
+          if git diff --name-only origin/main...HEAD | grep -qE '^runtime/'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Dialyzer type checking (Erlang runtime)
+        if: steps.erlang-changes.outputs.changed == 'true'
         run: just dialyzer
 
       - name: Test Rust (unit + integration)
@@ -144,9 +154,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/src/**', 'runtime/include/**') }}-otp-27.0-rebar3-3.23
           restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.23
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache cargo registry
