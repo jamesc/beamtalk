@@ -496,7 +496,7 @@ impl Analyser {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } => {
+            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No analysis needed
             }
         }
@@ -729,7 +729,7 @@ impl Analyser {
                 }
             }
 
-            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } => {
+            Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No captures or mutations
             }
         }
