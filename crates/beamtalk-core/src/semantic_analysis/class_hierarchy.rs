@@ -16,7 +16,7 @@
 use crate::ast::{MethodKind, Module};
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Information about a method in the hierarchy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,10 +95,14 @@ impl ClassHierarchy {
     /// Returns the ordered superclass chain for a class (excluding the class itself).
     ///
     /// Example: `superclass_chain("Counter")` → `["Actor", "Object", "ProtoObject"]`
+    ///
+    /// Handles cycles gracefully by tracking visited classes.
     #[must_use]
     pub fn superclass_chain(&self, class_name: &str) -> Vec<EcoString> {
         let mut chain = Vec::new();
         let mut current = class_name.to_string();
+        let mut visited = HashSet::new();
+        visited.insert(class_name.to_string());
 
         loop {
             let Some(info) = self.classes.get(current.as_str()) else {
@@ -107,6 +111,9 @@ impl ClassHierarchy {
             let Some(ref superclass) = info.superclass else {
                 break;
             };
+            if !visited.insert(superclass.to_string()) {
+                break; // Cycle detected
+            }
             chain.push(superclass.clone());
             current = superclass.to_string();
         }
@@ -119,14 +126,20 @@ impl ClassHierarchy {
     /// Methods are returned in MRO order: local methods first, then inherited.
     /// If a subclass overrides a superclass method (same selector), only the
     /// subclass version is included.
+    ///
+    /// Handles cycles gracefully by tracking visited classes.
     #[must_use]
     pub fn all_methods(&self, class_name: &str) -> Vec<MethodInfo> {
         let mut seen_selectors: HashMap<EcoString, usize> = HashMap::new();
         let mut methods = Vec::new();
+        let mut visited = HashSet::new();
 
         // Walk MRO: class itself, then superclass chain
         let mut current = Some(class_name.to_string());
         while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break; // Cycle detected
+            }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
                     if method.kind == MethodKind::Primary {
@@ -152,10 +165,16 @@ impl ClassHierarchy {
     }
 
     /// Check if a class can respond to a given selector (local or inherited).
+    ///
+    /// Handles cycles gracefully by tracking visited classes.
     #[must_use]
     pub fn resolves_selector(&self, class_name: &str, selector: &str) -> bool {
         let mut current = Some(class_name.to_string());
+        let mut visited = HashSet::new();
         while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break; // Cycle detected
+            }
             if let Some(info) = self.classes.get(name.as_str()) {
                 if info.methods.iter().any(|m| m.selector.as_str() == selector) {
                     return true;
@@ -936,5 +955,119 @@ mod tests {
             .position(|m| m.defined_in == "Object")
             .unwrap();
         assert!(actor_idx < object_idx);
+    }
+
+    // --- Edge case tests ---
+
+    #[test]
+    fn cycle_detection_in_superclass_chain() {
+        // Manually create a cycle: A -> B -> A
+        let mut h = ClassHierarchy::with_builtins();
+        h.classes.insert(
+            "A".into(),
+            ClassInfo {
+                name: "A".into(),
+                superclass: Some("B".into()),
+                is_sealed: false,
+                is_abstract: false,
+                state: vec![],
+                methods: vec![builtin_method("methodA", 0, "A")],
+            },
+        );
+        h.classes.insert(
+            "B".into(),
+            ClassInfo {
+                name: "B".into(),
+                superclass: Some("A".into()),
+                is_sealed: false,
+                is_abstract: false,
+                state: vec![],
+                methods: vec![builtin_method("methodB", 0, "B")],
+            },
+        );
+
+        // Should not loop forever
+        let chain = h.superclass_chain("A");
+        assert!(chain.len() <= 2);
+
+        let methods = h.all_methods("A");
+        assert!(!methods.is_empty());
+
+        // Should not hang
+        let _ = h.resolves_selector("A", "methodB");
+    }
+
+    #[test]
+    fn multiple_user_classes_in_module() {
+        let base = ClassDefinition {
+            name: Identifier::new("Base", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+        let derived = ClassDefinition {
+            name: Identifier::new("Derived", test_span()),
+            superclass: Identifier::new("Base", test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![base, derived],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+        assert!(diags.is_empty());
+
+        // Derived should inherit from Base -> Actor -> Object -> ProtoObject
+        assert!(h.resolves_selector("Derived", "derivedMethod"));
+        assert!(h.resolves_selector("Derived", "baseMethod"));
+        assert!(h.resolves_selector("Derived", "spawn"));
+        assert!(h.resolves_selector("Derived", "class"));
+    }
+
+    #[test]
+    fn user_class_with_unknown_superclass() {
+        let module = Module {
+            classes: vec![make_user_class("Orphan", "NonExistent")],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        // No diagnostic for unknown superclass (sealed check passes)
+        assert!(diags.is_empty());
+        // Class is still added
+        assert!(h.has_class("Orphan"));
+        // Local method resolves
+        assert!(h.resolves_selector("Orphan", "increment"));
+        // Chain stops at unknown superclass
+        let chain = h.superclass_chain("Orphan");
+        assert_eq!(chain, vec![EcoString::from("NonExistent")]);
     }
 }

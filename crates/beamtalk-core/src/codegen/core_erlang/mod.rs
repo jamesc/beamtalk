@@ -436,12 +436,8 @@ impl CoreErlangGenerator {
     ///
     /// # Implementation Note
     ///
-    /// This is a simplified check that only looks at the direct superclass.
-    /// The stdlib `Actor` root class is explicitly treated as an actor, even though
-    /// it directly subclasses `Object`, to avoid misclassifying it as a value type.
-    ///
     /// Uses the `ClassHierarchy` to walk the full inheritance chain and determine
-    /// if a class is an actor (inherits from Actor at any level).
+    /// if a class is an actor (inherits from `Actor` at any level in the hierarchy).
     ///
     /// # Returns
     ///
