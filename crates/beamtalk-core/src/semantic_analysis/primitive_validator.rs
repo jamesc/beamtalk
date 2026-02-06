@@ -77,8 +77,13 @@ pub fn validate_primitives(module: &Module, options: &CompilerOptions) -> Vec<Di
         validate_expr(expr, is_stdlib, options, &mut diagnostics);
     }
 
-    // Check class methods
+    // Check class methods and state default values
     for class in &module.classes {
+        for state in &class.state {
+            if let Some(ref default_expr) = state.default_value {
+                validate_expr(default_expr, is_stdlib, options, &mut diagnostics);
+            }
+        }
         for method in &class.methods {
             for expr in &method.body {
                 validate_expr(expr, is_stdlib, options, &mut diagnostics);
@@ -96,9 +101,13 @@ fn is_stdlib_module(options: &CompilerOptions) -> bool {
         return true;
     }
 
-    // Priority 2: Source path heuristic (lib/ prefix)
+    // Priority 2: Source path heuristic (lib/ prefix or /lib/ component)
     if let Some(ref path) = options.source_path {
-        if path.starts_with("lib/") || path.starts_with("lib\\") {
+        if path.starts_with("lib/")
+            || path.starts_with("lib\\")
+            || path.contains("/lib/")
+            || path.contains("\\lib\\")
+        {
             return true;
         }
     }
@@ -274,6 +283,20 @@ mod tests {
     }
 
     #[test]
+    fn primitive_in_absolute_stdlib_path_no_error() {
+        let module = parse_module("@primitive '+'");
+        let options = CompilerOptions {
+            source_path: Some("/workspaces/project/lib/Integer.bt".to_string()),
+            ..Default::default()
+        };
+        let diags = validate_primitives(&module, &options);
+        assert!(
+            diags.is_empty(),
+            "Expected no diagnostics for absolute lib/ path, got: {diags:?}"
+        );
+    }
+
+    #[test]
     fn primitive_in_user_code_error() {
         let module = parse_module("@primitive '+'");
         let options = CompilerOptions::default();
@@ -374,5 +397,19 @@ mod tests {
             diags.len() >= 2,
             "Expected multiple diagnostics, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn primitive_in_state_default_validated() {
+        // @primitive in a state default value should be caught
+        let source = "Object subclass: MyObj\n  state: x = @primitive 'bad'";
+        let module = parse_module(source);
+        let options = CompilerOptions::default();
+        let diags = validate_primitives(&module, &options);
+        assert!(
+            !diags.is_empty(),
+            "Expected error for @primitive in state default"
+        );
+        assert!(diags[0].message.contains("Primitives can only be declared"));
     }
 }
