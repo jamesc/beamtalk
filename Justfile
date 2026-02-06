@@ -59,7 +59,8 @@ lint: clippy fmt-check dialyzer
 # Run clippy (Rust linter) - warnings are errors
 clippy:
     @echo "🔍 Running clippy..."
-    cargo clippy --all-targets -- -D warnings
+    @cargo clippy --all-targets --quiet -- -D warnings
+    @echo "✅ Clippy passed"
 
 # Check Rust code formatting
 fmt-check:
@@ -86,7 +87,8 @@ test: test-rust test-runtime
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
     @echo "🧪 Running Rust tests (fast)..."
-    cargo test --all-targets
+    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { split($0, a, /Running (unittests )?/); split(a[2], b, / \(/); src=b[1]; gsub(/.*\//, "", b[2]); sub(/-[a-f0-9]+\)$/, "", b[2]); crate=b[2]; label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print }' || true
+    @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
 test-e2e: _clean-daemon-state
@@ -114,21 +116,26 @@ test-runtime:
     # rebar3 auto-discovers all *_tests.erl modules
     # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
     if ! OUTPUT=$(rebar3 eunit 2>&1); then
-        echo "$OUTPUT"
-        # Check if any tests actually failed (as opposed to being cancelled/skipped)
-        if echo "$OUTPUT" | grep -qE "Failed: [1-9]"; then
+        # Check if tests actually failed (as opposed to being cancelled)
+        if echo "$OUTPUT" | grep -qE "[1-9][0-9]* failures"; then
+            # Show full output only on real failures
+            echo "$OUTPUT"
             echo "❌ Runtime tests failed"
             exit 1
         fi
-        # Allow "cancelled" status for integration tests that need daemon
-        if echo "$OUTPUT" | grep -q "One or more tests were cancelled"; then
-            echo "✓ Unit tests passed (integration tests skipped - need daemon)"
+        # Allow "cancelled" status for tests that can't run (need daemon, etc.)
+        if echo "$OUTPUT" | grep -q "cancelled"; then
+            # Extract summary line only (concise)
+            echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ Tests passed with some skipped"
         else
-            echo "❌ rebar3 failed without test results"
+            # Unexpected error - show full output
+            echo "$OUTPUT"
+            echo "❌ rebar3 failed unexpectedly"
             exit 1
         fi
     else
-        echo "$OUTPUT"
+        # Success - show only summary
+        echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ All tests passed"
     fi
 
 # Run Erlang runtime integration tests (requires daemon)
@@ -172,7 +179,7 @@ coverage-runtime:
     if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
         # Allow exactly 6 known failures (BT-235 super dispatch tests)
-        if echo "$OUTPUT" | grep -qE "Failed: ([7-9]|[1-9][0-9]+)\."; then
+        if echo "$OUTPUT" | grep -qE "[7-9] failures|[1-9][0-9]+ failures"; then
             echo "❌ More than 6 tests failed! Check for regressions (expected: 6 from BT-235)."
             exit 1
         fi

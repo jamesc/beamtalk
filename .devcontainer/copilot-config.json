@@ -2,7 +2,7 @@
   "banner": "never",
   "render_markdown": true,
   "theme": "auto",
-  "model": "claude-sonnet-4.5",
+  "model": "claude-opus-4.6",
   "trusted_folders": ["${containerWorkspaceFolder}"],
   "allowed_urls": [
     "https://api.github.com",

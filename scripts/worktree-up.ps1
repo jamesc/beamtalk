@@ -432,7 +432,19 @@ $output = devcontainer up --workspace-folder $worktreePath $mountArg 2>&1 | ForE
     } else {
         $line = $_
     }
-    if ($line -and $line -notmatch '^System\.Management\.Automation\.RemoteException' -and $line -notmatch "What's next:|Try Docker Debug|Learn more at https://docs\.docker\.com") {
+    # Suppress Docker build noise (layer steps, apt output, download progress, etc.)
+    # Keep devcontainer lifecycle output (postCreateCommand, postStartCommand, etc.)
+    if ($line -and
+        $line -notmatch '^System\.Management\.Automation\.RemoteException' -and
+        $line -notmatch "What's next:|Try Docker Debug|Learn more at https://docs\.docker\.com" -and
+        $line -notmatch '^\s*#\d+\s' -and          # Docker BuildKit step lines (#1, #2 [internal], etc.)
+        $line -notmatch '^\s*--->' -and              # Legacy Docker builder layer IDs
+        $line -notmatch '^(Step \d+/\d+|Removing intermediate|Successfully (built|tagged))' -and
+        $line -notmatch '^(Sending build context|COPY|RUN|FROM|ENV|WORKDIR|ARG|LABEL|EXPOSE|CMD|ENTRYPOINT|ADD|VOLUME|USER|SHELL|ONBUILD|STOPSIGNAL|HEALTHCHECK)' -and
+        $line -notmatch '^\s*(Get:|Hit:|Ign:|Fetched |Reading |Building )' -and   # apt-get output
+        $line -notmatch '^\s*(\d+\.\d+ [kMG]B|Downloading|Unpacking|Setting up|Selecting|Preparing|Processing)' -and
+        $line -notmatch '^\s*(sha256:|digest:|resolve |resolved |DONE |CACHED )' -and
+        $line -notmatch '^\[[\d/ ]+\]') {            # Docker progress like [1/5]
         Write-Host $line
     }
     $line  # Pass through to capture
