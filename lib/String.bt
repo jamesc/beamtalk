@@ -37,7 +37,7 @@ Object subclass: String
   reverse => @primitive 'reverse'
 
   // Search
-  includes: substring => (self indexOf: substring) > 0
+  includes: substring => @primitive 'includes:'
   startsWith: prefix => @primitive 'startsWith:'
   endsWith: suffix => @primitive 'endsWith:'
   indexOf: substring => @primitive 'indexOf:'
