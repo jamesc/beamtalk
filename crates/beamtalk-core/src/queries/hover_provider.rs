@@ -281,12 +281,18 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 None
             }
         }
-        Expression::Primitive { name, span, .. } => {
+        Expression::Primitive {
+            name,
+            is_quoted,
+            span,
+        } => {
             if offset >= span.start() && offset < span.end() {
-                Some(HoverInfo::new(
-                    format!("Primitive: `@primitive {name}`"),
-                    *span,
-                ))
+                let display = if *is_quoted {
+                    format!("Primitive: `@primitive '{name}'`")
+                } else {
+                    format!("Primitive: `@primitive {name}`")
+                };
+                Some(HoverInfo::new(display, *span))
             } else {
                 None
             }
@@ -412,5 +418,38 @@ mod tests {
         assert!(hover.contents.contains("module `my_counter_actor`"));
         // Ensure it's NOT using naive to_lowercase
         assert!(!hover.contents.contains("module `mycounteractor`"));
+    }
+
+    #[test]
+    fn hover_on_primitive_quoted() {
+        use crate::ast::Expression;
+        use crate::source_analysis::Span;
+
+        let expr = Expression::Primitive {
+            name: "erlang_add".into(),
+            is_quoted: true,
+            span: Span::new(0, 22),
+        };
+        let hover = find_hover_in_expr(&expr, 5);
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("`@primitive 'erlang_add'`"));
+    }
+
+    #[test]
+    fn hover_on_primitive_unquoted() {
+        use crate::ast::Expression;
+        use crate::source_analysis::Span;
+
+        let expr = Expression::Primitive {
+            name: "size".into(),
+            is_quoted: false,
+            span: Span::new(0, 15),
+        };
+        let hover = find_hover_in_expr(&expr, 5);
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        assert!(hover.contents.contains("`@primitive size`"));
+        assert!(!hover.contents.contains("'size'"));
     }
 }
