@@ -902,3 +902,106 @@ perform_recursive_dispatch_test() ->
     ?assertEqual(50, Result2),
     
     gen_server:stop(Counter).
+
+%%% Actor lifecycle tests (BT-170)
+
+isAlive_returns_true_for_running_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% isAlive via async_send should resolve to true
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, isAlive, [], Future),
+    ?assertEqual(true, beamtalk_future:await(Future)),
+    
+    gen_server:stop(Counter).
+
+isAlive_returns_false_after_actor_stops_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, normal, 1000),
+    timer:sleep(10),
+    
+    %% isAlive via async_send should resolve to false
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, isAlive, [], Future),
+    ?assertEqual(false, beamtalk_future:await(Future)).
+
+isAlive_sync_returns_true_for_running_actor_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    
+    ?assertEqual(true, beamtalk_actor:sync_send(Counter, isAlive, [])),
+    
+    gen_server:stop(Counter).
+
+isAlive_sync_returns_false_after_actor_stops_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, normal, 1000),
+    timer:sleep(10),
+    
+    ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
+
+isAlive_via_dispatch_returns_true_test() ->
+    %% When called via gen_server:call (dispatch path), always true
+    {ok, Counter} = test_counter:start_link(0),
+    
+    ?assertEqual(true, gen_server:call(Counter, {isAlive, []})),
+    
+    gen_server:stop(Counter).
+
+monitor_returns_reference_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, monitor, [], Future),
+    Ref = beamtalk_future:await(Future),
+    ?assert(is_reference(Ref)),
+    
+    %% Clean up the monitor
+    erlang:demonitor(Ref, [flush]),
+    gen_server:stop(Counter).
+
+monitor_sync_returns_reference_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Ref = beamtalk_actor:sync_send(Counter, monitor, []),
+    ?assert(is_reference(Ref)),
+    
+    erlang:demonitor(Ref, [flush]),
+    gen_server:stop(Counter).
+
+monitor_delivers_down_on_actor_death_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, monitor, [], Future),
+    Ref = beamtalk_future:await(Future),
+    ?assert(is_reference(Ref)),
+    
+    %% Kill the actor and verify we get a DOWN message
+    gen_server:stop(Counter, normal, 1000),
+    receive
+        {'DOWN', Ref, process, Counter, normal} -> ok
+    after 1000 ->
+        ?assert(false)
+    end.
+
+async_message_to_dead_actor_rejects_future_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, normal, 1000),
+    timer:sleep(10),
+    
+    %% Sending to dead actor should reject the future
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, increment, [], Future),
+    
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = actor_dead, selector = increment}},
+        beamtalk_future:await(Future, 1000)
+    ).
+
+sync_message_to_dead_actor_returns_error_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter, normal, 1000),
+    timer:sleep(10),
+    
+    Result = beamtalk_actor:sync_send(Counter, getValue, []),
+    ?assertMatch({error, #beamtalk_error{kind = actor_dead, selector = getValue}}, Result).

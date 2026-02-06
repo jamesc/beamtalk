@@ -6,6 +6,28 @@
 %%% Every Beamtalk actor is a BEAM process running a gen_server.
 %%% This module provides the actor behavior template and message dispatch.
 %%%
+%%% ## Actor Lifecycle
+%%%
+%%% Actors support lifecycle methods:
+%%% - `isAlive` - Returns true/false depending on whether the actor process is running
+%%% - `monitor` - Creates an Erlang monitor on the actor process
+%%%
+%%% These methods are handled at the SEND site (via async_send/4 and sync_send/3)
+%%% rather than inside the actor, because a dead actor can't process messages.
+%%%
+%%% WARNING: isAlive check-then-act is inherently racy. The actor could die
+%%% between the isAlive check and a subsequent message send. For robust
+%%% lifecycle management, use monitors instead of isAlive polling:
+%%%
+%%% ```
+%%% %% Racy pattern (avoid):
+%%% counter isAlive ifTrue: [counter increment]
+%%%
+%%% %% Robust pattern (preferred):
+%%% ref := counter monitor
+%%% counter increment   %% handle 'DOWN' message if actor dies
+%%% ```
+%%%
 %%% ## Actor State Structure
 %%%
 %%% Each actor maintains state in a map:
@@ -106,6 +128,9 @@
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4]).
 
+%% Message send helpers (lifecycle-aware wrappers)
+-export([async_send/4, sync_send/3]).
+
 %% gen_server callbacks (for generated actors to delegate to)
 -export([init/1, handle_cast/2, handle_call/3, handle_info/2,
          code_change/3, terminate/2]).
@@ -168,6 +193,102 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+%%% Message Send Helpers
+%%%
+%%% These functions wrap gen_server:cast/call with lifecycle-aware behavior:
+%%% - `isAlive` and `monitor` are handled locally (no gen_server message needed)
+%%% - Dead actor detection rejects futures / returns errors immediately
+%%%
+%%% WARNING: Race condition! is_process_alive/1 is a snapshot check.
+%%% The actor could die between the alive check and the gen_server:cast.
+%%% For robust lifecycle management, use monitors instead of isAlive polling.
+
+%% @doc Send an asynchronous message to an actor, with lifecycle handling.
+%%
+%% Handles lifecycle methods locally without involving the actor process:
+%% - `isAlive` - checks if process is alive, resolves Future with boolean
+%% - `monitor` - creates a monitor reference, resolves Future with ref
+%%
+%% For all other messages, checks if the actor is alive first:
+%% - If alive, sends via gen_server:cast (normal async path)
+%% - If dead, rejects the Future with an `actor_dead` error
+-spec async_send(pid(), atom(), list(), pid()) -> ok.
+async_send(ActorPid, isAlive, [], FuturePid) ->
+    %% isAlive is handled locally - no message to the actor
+    Result = is_process_alive(ActorPid),
+    beamtalk_future:resolve(FuturePid, Result),
+    ok;
+async_send(ActorPid, monitor, [], FuturePid) ->
+    %% monitor is handled locally - creates an Erlang monitor
+    Ref = erlang:monitor(process, ActorPid),
+    beamtalk_future:resolve(FuturePid, Ref),
+    ok;
+async_send(ActorPid, Selector, Args, FuturePid) ->
+    %% Monitor the actor to detect death during the send window.
+    %% This narrows the TOCTOU race: if the actor dies between the
+    %% is_process_alive check and when gen_server processes the cast,
+    %% the DOWN message is already in our mailbox and we catch it.
+    MonRef = erlang:monitor(process, ActorPid),
+    case is_process_alive(ActorPid) of
+        true ->
+            gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
+            %% Non-blocking check: did actor die between cast and now?
+            receive
+                {'DOWN', MonRef, process, ActorPid, _Reason} ->
+                    %% Actor died - reject Future (no-op if already resolved)
+                    {error, Error} = actor_dead_error(Selector),
+                    beamtalk_future:reject(FuturePid, Error)
+            after 0 ->
+                erlang:demonitor(MonRef, [flush])
+            end,
+            ok;
+        false ->
+            erlang:demonitor(MonRef, [flush]),
+            {error, Error} = actor_dead_error(Selector),
+            beamtalk_future:reject(FuturePid, Error),
+            ok
+    end.
+
+%% @doc Send a synchronous message to an actor, with lifecycle handling.
+%%
+%% Handles lifecycle methods locally without involving the actor process:
+%% - `isAlive` - checks if process is alive, returns boolean
+%% - `monitor` - creates a monitor reference, returns ref
+%%
+%% For all other messages, checks if the actor is alive first:
+%% - If alive, sends via gen_server:call (normal sync path)
+%% - If dead, returns `{error, #beamtalk_error{kind = actor_dead}}`
+-spec sync_send(pid(), atom(), list()) -> term().
+sync_send(ActorPid, isAlive, []) ->
+    is_process_alive(ActorPid);
+sync_send(ActorPid, monitor, []) ->
+    erlang:monitor(process, ActorPid);
+sync_send(ActorPid, Selector, Args) ->
+    case is_process_alive(ActorPid) of
+        true ->
+            try
+                gen_server:call(ActorPid, {Selector, Args})
+            catch
+                exit:{noproc, _} ->
+                    actor_dead_error(Selector);
+                exit:{normal, _} ->
+                    actor_dead_error(Selector);
+                exit:{shutdown, _} ->
+                    actor_dead_error(Selector)
+            end;
+        false ->
+            actor_dead_error(Selector)
+    end.
+
+%% @private
+%% @doc Construct a structured actor_dead error for the given selector.
+-spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
+actor_dead_error(Selector) ->
+    Error0 = beamtalk_error:new(actor_dead, unknown),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Use 'isAlive' to check, or use monitors for lifecycle events">>),
+    {error, Error2}.
 
 %%% gen_server callbacks
 
@@ -283,6 +404,9 @@ make_self(State) ->
 dispatch(Selector, Args, Self, State) ->
     %% First, check for built-in Object reflection methods
     case Selector of
+        isAlive when Args =:= [] ->
+            %% Actor is alive if it's processing this message
+            {reply, true, State};
         respondsTo when length(Args) =:= 1 ->
             %% Check if object responds to a selector
             [CheckSelector] = Args,
