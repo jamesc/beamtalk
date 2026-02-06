@@ -127,35 +127,80 @@ When labels are missing, infer from context:
 
 ## Step 4: Apply Updates
 
-For each issue, apply all needed updates in one call:
+### Updating Priority, State, Assignee
+
+Use the `update` action for these fields:
 
 ```json
 {
   "action": "update",
   "id": "BT-123",
-  "labels": ["agent-ready", "Feature", "parser", "M"],
   "assignee": "jamesc.000@gmail.com",
   "priority": 3
 }
 ```
 
-**Preserve existing labels!** Merge inferred labels with existing ones:
-```
-existing_labels = ["Feature"]
-inferred_labels = ["agent-ready", "parser", "M"]
-final_labels = ["Feature", "agent-ready", "parser", "M"]
+### Updating Labels (REQUIRES GraphQL)
+
+**IMPORTANT:** The `update` action does NOT support labels. You MUST use GraphQL.
+
+#### Step 4a: Look Up Label UUIDs (once per session)
+
+Query all available labels and store the ID mapping:
+
+```json
+{
+  "action": "graphql",
+  "graphql": "query { issueLabels(first: 50) { nodes { id name } } }"
+}
 ```
 
-### Available Fields
+Store the results in a SQL table for reuse:
 
-| Field | Description | Example Values |
-|-------|-------------|----------------|
-| `labels` | Array of label names | `["agent-ready", "Feature", "parser"]` |
-| `assignee` | Email address | `"jamesc.000@gmail.com"` |
-| `priority` | Number 0-4 | `1` (Urgent), `2` (High), `3` (Medium), `4` (Low) |
-| `state` | Workflow state | `"Backlog"`, `"Todo"`, `"In Progress"`, `"In Review"`, `"Done"` |
-| `title` | Issue title | `"Implement lexer tokens"` |
-| `body` | Issue description | Markdown text |
+```sql
+CREATE TABLE label_map (name TEXT PRIMARY KEY, id TEXT);
+INSERT INTO label_map VALUES ('agent-ready', '<uuid>'), ('Bug', '<uuid>'), ...;
+```
+
+#### Step 4b: Get Issue UUIDs in Bulk
+
+Query multiple issues at once to get their UUIDs and existing labels:
+
+```json
+{
+  "action": "graphql",
+  "graphql": "query { issues(filter: { number: { in: [308, 309, 310] }, team: { key: { eq: \"BT\" } } }) { nodes { id identifier labels { nodes { name id } } } } }"
+}
+```
+
+#### Step 4c: Apply Labels via GraphQL Mutation
+
+**Preserve existing labels!** Merge inferred label IDs with existing ones.
+
+Batch up to 6 updates per mutation using aliases:
+
+```json
+{
+  "action": "graphql",
+  "graphql": "mutation { bt308: issueUpdate(id: \"<issue-uuid>\", input: { labelIds: [\"<label-uuid-1>\", \"<label-uuid-2>\", \"<label-uuid-3>\", \"<label-uuid-4>\"] }) { success issue { identifier } } bt309: issueUpdate(id: \"<issue-uuid>\", input: { labelIds: [\"<label-uuid-1>\", \"<label-uuid-2>\"] }) { success issue { identifier } } }"
+}
+```
+
+**Key rules:**
+- `labelIds` REPLACES all labels (not additive) — always include existing label IDs
+- Batch multiple issues in one mutation using GraphQL aliases (`bt308:`, `bt309:`, etc.)
+- Maximum ~6 updates per mutation to avoid query size limits
+
+### Available Update Fields
+
+| Field | Via `update` | Via GraphQL | Example |
+|-------|-------------|-------------|---------|
+| `state` | ✅ | ✅ | `"Backlog"`, `"Done"` |
+| `priority` | ✅ | ✅ | `1` (Urgent) to `4` (Low) |
+| `assignee` | ✅ | ✅ | `"jamesc.000@gmail.com"` |
+| `labels` | ❌ | ✅ `labelIds` | Array of label UUIDs |
+| `title` | ❌ | ✅ | String |
+| `body` | ❌ | ✅ `description` | Markdown |
 
 ## Step 5: Report Changes
 
@@ -175,78 +220,72 @@ Updated 5 issues:
 
 ### Scenario 1: `/update-issues for ones with no labels`
 
-1. **Search for all open issues:**
+1. **Look up label UUIDs** (once per session):
 
 ```json
 {
-  "action": "search",
-  "query": {}
+  "action": "graphql",
+  "graphql": "query { issueLabels(first: 50) { nodes { id name } } }"
 }
 ```
 
-2. **For each issue without labels:**
-   - Get full issue details
-   - Analyze title and description
-   - Infer appropriate labels
-   - Apply update
+Store in SQL: `CREATE TABLE label_map (name TEXT PRIMARY KEY, id TEXT);`
 
-3. **Example update:**
-
-Issue BT-21 "Implement String class core API"
-- Has acceptance criteria → `agent-ready`
-- Mentions "String" and "class" → `stdlib` (or `class-system`)
-- Title starts with "Implement" → `Feature`
-- Multiple methods to implement → `M`
+2. **Search for all open issues and get details** (batch by number range):
 
 ```json
 {
-  "action": "update",
-  "id": "BT-21",
-  "labels": ["agent-ready", "Feature", "stdlib", "M"],
-  "assignee": "jamesc.000@gmail.com",
-  "priority": 3
+  "action": "graphql",
+  "graphql": "query { issues(filter: { number: { in: [308, 309, 310, 311, 312] }, team: { key: { eq: \"BT\" } } }) { nodes { id identifier title labels { nodes { name id } } state { name } } } }"
+}
+```
+
+3. **Filter to issues with empty labels** — check `labels.nodes` is empty
+
+4. **For each unlabeled issue:**
+   - Read title and description to infer labels
+   - Look up label UUIDs from your `label_map` table
+   - Apply via batched GraphQL mutation
+
+5. **Example: BT-21 "Implement String class core API"**
+   - Has acceptance criteria → `agent-ready`
+   - Mentions "String" → `stdlib`
+   - Title starts with "Implement" → `Feature`
+   - Multiple methods → `M`
+
+```json
+{
+  "action": "graphql",
+  "graphql": "mutation { bt21: issueUpdate(id: \"<bt21-uuid>\", input: { labelIds: [\"<agent-ready-uuid>\", \"<Feature-uuid>\", \"<stdlib-uuid>\", \"<M-uuid>\"] }) { success issue { identifier } } }"
 }
 ```
 
 ### Scenario 2: `/update-issues for missing agent-ready`
 
-1. **Search for open issues:**
+1. **Get all open issues with their labels** (same GraphQL query as above)
 
-```json
-{
-  "action": "search",
-  "query": {}
-}
-```
+2. **Filter to issues where `labels.nodes` has NO entry with name in** `[agent-ready, needs-spec, blocked, human-review, done]`
 
-2. **Filter to issues without agent-state labels:**
-   - Check if labels include `agent-ready`, `needs-spec`, `blocked`, etc.
-   - If not, analyze and add appropriate state
+3. **For each, analyze and infer agent-state label**
 
-3. **Update each:**
-
-```json
-{
-  "action": "update",
-  "id": "BT-XX",
-  "labels": ["agent-ready", "...existing labels..."]
-}
-```
+4. **Apply via batched GraphQL mutation** — include ALL existing label IDs plus the new one
 
 ### Scenario 3: `/update-issues for BT-21 through BT-40`
 
-1. **Get each issue in range:**
+1. **Get all issues in range with labels in one query:**
 
 ```json
 {
-  "action": "get",
-  "id": "BT-21"
+  "action": "graphql",
+  "graphql": "query { issues(filter: { number: { gte: 21, lte: 40 }, team: { key: { eq: \"BT\" } } }) { nodes { id identifier title description labels { nodes { name id } } state { name } } } }"
 }
 ```
 
 2. **Analyze and update each one**
 
-3. **Skip issues that are already complete or properly labeled**
+3. **Skip issues in Done or Canceled states**
+
+4. **Batch updates in groups of 6 per mutation**
 
 ## Label Inference Rules (Summary)
 
@@ -325,13 +364,16 @@ Linear supports these relationship types:
 
 ## Tips
 
-1. **Always get issue first** to retrieve UUID and existing data
-2. **Preserve existing labels** when updating - merge with new labels, don't replace
-3. **Use GraphQL for relationships** - update action doesn't support relations
-4. **Set blocking relationships** whenever dependencies are mentioned
-5. **Batch updates efficiently** - group related API calls in the same turn
-6. **Skip done issues** - Don't update issues in Done or Canceled states
-7. **Report clearly** - Show what changed for each issue
+1. **Labels REQUIRE GraphQL** — the `update` action does NOT support labels
+2. **Look up label UUIDs once** per session, store in SQL `label_map` table
+3. **Get issue UUIDs in bulk** — use `issues(filter: { number: { in: [...] } })` not individual gets
+4. **`labelIds` REPLACES all labels** — always merge existing IDs with new ones
+5. **Batch mutations with aliases** — `bt308: issueUpdate(...)  bt309: issueUpdate(...)` in one call
+6. **Preserve existing labels** when updating — fetch current labels first, add to them
+7. **Use GraphQL for relationships** — update action doesn't support relations
+8. **Skip done issues** — Don't update issues in Done or Canceled states
+9. **Report clearly** — Show what changed for each issue
+10. **Max ~6 updates per mutation** — keep GraphQL query size manageable
 
 ## Workflow States
 
