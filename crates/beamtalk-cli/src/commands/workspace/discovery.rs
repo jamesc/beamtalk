@@ -30,7 +30,21 @@ use tracing::debug;
 ///
 /// Earlier markers take priority: if `.beamtalk/` is found, we stop
 /// even if `.git/` exists in a parent directory.
+///
+/// Note: `.beamtalk` is skipped when it matches the global config
+/// directory (`~/.beamtalk`) to avoid collapsing unrelated directories
+/// under `$HOME` into the same workspace.
 const PROJECT_MARKERS: &[&str] = &[".beamtalk", "beamtalk.toml", ".git"];
+
+/// Returns the global beamtalk config directory (`~/.beamtalk`), if resolvable.
+fn global_beamtalk_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".beamtalk"))
+}
+
+/// Check if a `.beamtalk` marker is the global config dir, not a project marker.
+fn is_global_config_dir(candidate: &Path) -> bool {
+    global_beamtalk_dir().is_some_and(|global| candidate == global)
+}
 
 /// Discover the project root by walking up the directory tree.
 ///
@@ -46,7 +60,16 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
     loop {
         // Check beamtalk-specific markers first (highest priority)
         for marker in &PROJECT_MARKERS[..PROJECT_MARKERS.len() - 1] {
-            if current.join(marker).exists() {
+            let candidate = current.join(marker);
+            if candidate.exists() {
+                // Skip ~/.beamtalk — that's global config, not a project marker
+                if *marker == ".beamtalk" && is_global_config_dir(&candidate) {
+                    debug!(
+                        dir = %current.display(),
+                        "Skipping global config dir ~/.beamtalk"
+                    );
+                    continue;
+                }
                 debug!(
                     marker = %marker,
                     root = %current.display(),
@@ -213,8 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn test_discover_start_dir_is_file_parent() {
-        // Start dir contains a marker at the same level
+    fn test_beamtalk_toml_wins_over_git_at_same_level() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path().join("project");
         fs::create_dir_all(&project).unwrap();
@@ -224,5 +246,31 @@ mod tests {
         // beamtalk.toml should win over .git at the same level
         let root = discover_project_root(&project);
         assert_eq!(root, project);
+    }
+
+    #[test]
+    fn test_global_beamtalk_dir_skipped() {
+        // ~/.beamtalk is global config, not a project marker.
+        // Discovery should NOT use home dir as project root just because
+        // ~/.beamtalk exists. It should fall back to .git or start_dir.
+        let home = dirs::home_dir().expect("home dir");
+        let global = home.join(".beamtalk");
+
+        if !global.exists() {
+            // Can't test without ~/.beamtalk existing; skip gracefully
+            return;
+        }
+
+        // Create a temp dir under home with no markers
+        let tmp = TempDir::new_in(&home).unwrap();
+        let subdir = tmp.path().join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+
+        let root = discover_project_root(&subdir);
+        // Should NOT return home dir; should fall back to subdir or find .git higher up
+        assert_ne!(
+            root, home,
+            "Should not use home dir as project root via global ~/.beamtalk"
+        );
     }
 }
