@@ -43,6 +43,8 @@
 //! beamtalk repl                         # Auto-detect/create workspace
 //! ```
 
+pub mod discovery;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
