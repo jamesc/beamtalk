@@ -67,7 +67,8 @@
 -export([
     lookup/5,
     super/5,
-    invoke_with_combinations/5
+    invoke_with_combinations/5,
+    responds_to/2
 ]).
 
 -include("beamtalk.hrl").
@@ -205,6 +206,36 @@ invoke_with_combinations(Selector, Args, Self, State, CurrentClass) ->
     logger:debug("Method combinations not yet implemented, using normal lookup", []),
     lookup(Selector, Args, Self, State, CurrentClass).
 
+%% @doc Check if a class or any of its ancestors responds to a selector.
+%%
+%% Walks the class hierarchy from ClassName upward, checking each class's
+%% method table (metadata + module has_method/1). Returns true if any class
+%% in the chain has the method.
+%%
+%% Used by Object's `respondsTo:` implementation to check the full hierarchy.
+-spec responds_to(selector(), class_name()) -> boolean().
+responds_to(Selector, ClassName) ->
+    %% Check extension registry first (covers all classes)
+    case check_extension(ClassName, Selector) of
+        {ok, _Fun} ->
+            true;
+        not_found ->
+            case beamtalk_object_class:whereis_class(ClassName) of
+                undefined ->
+                    false;
+                ClassPid ->
+                    case beamtalk_object_class:has_method(ClassPid, Selector) of
+                        true ->
+                            true;
+                        false ->
+                            case beamtalk_object_class:superclass(ClassPid) of
+                                none -> false;
+                                SuperclassName -> responds_to(Selector, SuperclassName)
+                            end
+                    end
+            end
+    end.
+
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
@@ -272,6 +303,10 @@ invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
             Error2 = beamtalk_error:with_hint(Error1, <<"Class has no module name">>),
             {error, Error2};
         ModuleName ->
+            %% Ensure the module is loaded before checking exports.
+            %% BEAM lazy-loads modules, and function_exported/3 only checks
+            %% loaded modules.
+            _ = code:ensure_loaded(ModuleName),
             %% Verify the module exports dispatch/4 before calling it.
             %% This avoids catching error:undef broadly, which could mask
             %% bugs inside the dispatch function itself.

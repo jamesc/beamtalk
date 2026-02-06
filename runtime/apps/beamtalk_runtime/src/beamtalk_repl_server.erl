@@ -4,7 +4,7 @@
 %%% @doc TCP server and client handling for Beamtalk REPL
 %%%
 %%% This module handles TCP connections, client communication, and
-%%% the JSON protocol for REPL requests/responses.
+%%% dispatching REPL protocol messages via beamtalk_repl_protocol.
 
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
@@ -12,7 +12,8 @@
 -include("beamtalk.hrl").
 
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
-         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1]).
+         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,
+         term_to_json/1, format_error_message/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -192,19 +193,29 @@ handle_client_loop(Socket, SessionPid, session) ->
     try
         case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
             {ok, Data} ->
-                %% Parse request
-                Request = parse_request(Data),
-                
-                %% Process request via session or workspace APIs
-                Response = handle_request(Request, SessionPid),
-                
-                %% Send response
-                case gen_tcp:send(Socket, [Response, "\n"]) of
-                    ok ->
-                        handle_client_loop(Socket, SessionPid, session);
-                    {error, SendError} ->
-                        logger:warning("REPL client send error: ~p", [SendError]),
-                        gen_tcp:close(Socket)
+                %% Decode request using protocol module
+                case beamtalk_repl_protocol:decode(Data) of
+                    {ok, Msg} ->
+                        %% Process request via session or workspace APIs
+                        Response = handle_protocol_request(Msg, SessionPid),
+                        
+                        %% Send response
+                        case gen_tcp:send(Socket, [Response, "\n"]) of
+                            ok ->
+                                handle_client_loop(Socket, SessionPid, session);
+                            {error, SendError} ->
+                                logger:warning("REPL client send error: ~p", [SendError]),
+                                gen_tcp:close(Socket)
+                        end;
+                    {error, DecodeError} ->
+                        ErrorJson = format_error(DecodeError),
+                        case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
+                            ok ->
+                                handle_client_loop(Socket, SessionPid, session);
+                            {error, SendError} ->
+                                logger:warning("REPL client send error: ~p", [SendError]),
+                                gen_tcp:close(Socket)
+                        end
                 end;
             {error, closed} ->
                 ok;
@@ -224,83 +235,233 @@ handle_client_loop(Socket, SessionPid, session) ->
             catch gen_tcp:close(Socket)
     end.
 
+
+%%% Protocol-aware request handling
+
 %% @private
-%% Handle a parsed request by forwarding to appropriate API
-handle_request({eval, Expression}, SessionPid) ->
+%% Handle a protocol message by dispatching to appropriate API.
+%% Returns JSON binary response using protocol encoding.
+handle_protocol_request(Msg, SessionPid) ->
+    Op = beamtalk_repl_protocol:get_op(Msg),
+    Params = beamtalk_repl_protocol:get_params(Msg),
     try
-        case beamtalk_repl_shell:eval(SessionPid, Expression) of
-            {ok, Result} ->
-                format_response(Result);
-            {error, ErrorReason} ->
-                format_error(ErrorReason)
-        end
+        handle_op(Op, Params, Msg, SessionPid)
     catch
-        Class:CrashReason:Stack ->
-            %% Crash in eval - log and send error response
-            logger:error("REPL eval error", #{
+        Class:Reason:Stack ->
+            logger:error("REPL protocol handler crash", #{
                 class => Class,
-                reason => CrashReason,
+                reason => Reason,
                 stack => lists:sublist(Stack, 5),
-                expression => Expression
+                op => Op
             }),
-            format_error({eval_error, Class, CrashReason})
+            beamtalk_repl_protocol:encode_error(
+                {eval_error, Class, Reason}, Msg, fun format_error_message/1)
+    end.
+
+%% @private
+handle_op(<<"eval">>, Params, Msg, SessionPid) ->
+    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
+    case Code of
+        [] ->
+            beamtalk_repl_protocol:encode_error(
+                empty_expression, Msg, fun format_error_message/1);
+        _ ->
+            case beamtalk_repl_shell:eval(SessionPid, Code) of
+                {ok, Result} ->
+                    beamtalk_repl_protocol:encode_result(
+                        Result, Msg, fun term_to_json/1);
+                {error, ErrorReason} ->
+                    beamtalk_repl_protocol:encode_error(
+                        ErrorReason, Msg, fun format_error_message/1)
+            end
     end;
 
-handle_request({clear_bindings}, SessionPid) ->
+handle_op(<<"clear">>, _Params, Msg, SessionPid) ->
     ok = beamtalk_repl_shell:clear_bindings(SessionPid),
-    format_response(ok);
+    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
 
-handle_request({get_bindings}, SessionPid) ->
+handle_op(<<"bindings">>, _Params, Msg, SessionPid) ->
     {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
-    format_bindings(Bindings);
+    beamtalk_repl_protocol:encode_bindings(
+        Bindings, Msg, fun term_to_json/1);
 
-handle_request({load_file, Path}, SessionPid) ->
+handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
+    Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
-            format_loaded(Classes);
+            beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun term_to_json/1);
         {error, Reason} ->
-            format_error(Reason)
+            beamtalk_repl_protocol:encode_error(
+                Reason, Msg, fun format_error_message/1)
     end;
 
-handle_request({list_actors}, _SessionPid) ->
-    %% Actors are workspace-wide, not session-specific
-    %% Try to find the actor registry process (registered globally)
+handle_op(<<"reload">>, Params, Msg, SessionPid) ->
+    Module = binary_to_list(maps:get(<<"module">>, Params, <<>>)),
+    %% Reload is load with the same path - delegate to load-file
+    %% For now, treat as load-file if path is available
+    case maps:get(<<"path">>, Params, undefined) of
+        undefined ->
+            beamtalk_repl_protocol:encode_error(
+                {not_implemented, {reload, Module}}, Msg, fun format_error_message/1);
+        Path ->
+            handle_op(<<"load-file">>, #{<<"path">> => Path}, Msg, SessionPid)
+    end;
+
+handle_op(<<"actors">>, _Params, Msg, _SessionPid) ->
     case whereis(beamtalk_actor_registry) of
         undefined ->
-            %% No registry yet - return empty list
-            format_actors([]);
+            beamtalk_repl_protocol:encode_actors([], Msg, fun term_to_json/1);
         RegistryPid ->
             Actors = beamtalk_repl_actors:list_actors(RegistryPid),
-            format_actors(Actors)
+            beamtalk_repl_protocol:encode_actors(Actors, Msg, fun term_to_json/1)
     end;
 
-handle_request({list_modules}, _SessionPid) ->
-    %% Modules are workspace-wide
-    %% For now, return empty list - proper implementation in BT-263
-    format_modules([]);
-
-handle_request({unload_module, _ModuleName}, _SessionPid) ->
-    %% Module unloading is workspace-wide - implement in BT-263
-    format_error({not_implemented, unload_module});
-
-handle_request({kill_actor, PidStr}, _SessionPid) ->
-    %% Actor killing is workspace-wide
+handle_op(<<"inspect">>, Params, Msg, _SessionPid) ->
+    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
     try
         Pid = list_to_pid(PidStr),
-        exit(Pid, kill),
-        format_response(ok)
+        case is_known_actor(Pid) of
+            false ->
+                beamtalk_repl_protocol:encode_error(
+                    {unknown_actor, PidStr}, Msg, fun format_error_message/1);
+            true ->
+                case is_process_alive(Pid) of
+                    true ->
+                        %% Get actor state via sys:get_state
+                        try
+                            State = sys:get_state(Pid, 5000),
+                            StateMap = case State of
+                                M when is_map(M) -> M;
+                                _ -> #{<<"raw">> => State}
+                            end,
+                            beamtalk_repl_protocol:encode_inspect(
+                                StateMap, Msg, fun term_to_json/1)
+                        catch
+                            _:_ ->
+                                beamtalk_repl_protocol:encode_error(
+                                    {inspect_failed, PidStr}, Msg, fun format_error_message/1)
+                        end;
+                    false ->
+                        beamtalk_repl_protocol:encode_error(
+                            {actor_not_alive, PidStr}, Msg, fun format_error_message/1)
+                end
+        end
     catch
         _:_ ->
-            format_error({invalid_pid, PidStr})
+            beamtalk_repl_protocol:encode_error(
+                {invalid_pid, PidStr}, Msg, fun format_error_message/1)
     end;
 
-handle_request({error, Reason}, _SessionPid) ->
-    format_error(Reason).
+handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
+    PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
+    try
+        Pid = list_to_pid(PidStr),
+        case is_known_actor(Pid) of
+            false ->
+                beamtalk_repl_protocol:encode_error(
+                    {unknown_actor, PidStr}, Msg, fun format_error_message/1);
+            true ->
+                exit(Pid, kill),
+                beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1)
+        end
+    catch
+        _:_ ->
+            beamtalk_repl_protocol:encode_error(
+                {invalid_pid, PidStr}, Msg, fun format_error_message/1)
+    end;
+
+handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
+    Loaded = code:all_loaded(),
+    Modules = [atom_to_binary(Mod, utf8) || {Mod, _File} <- Loaded],
+    beamtalk_repl_protocol:encode_modules(Modules, Msg, fun term_to_json/1);
+
+handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
+    ModuleBin = maps:get(<<"module">>, Params, <<>>),
+    case ModuleBin of
+        <<>> ->
+            beamtalk_repl_protocol:encode_error(
+                {invalid_module, missing}, Msg, fun format_error_message/1);
+        _ ->
+            Module = binary_to_atom(ModuleBin, utf8),
+            case code:is_loaded(Module) of
+                {file, _} ->
+                    _ = code:soft_purge(Module),
+                    _ = code:delete(Module),
+                    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
+                false ->
+                    beamtalk_repl_protocol:encode_error(
+                        {module_not_loaded, Module}, Msg, fun format_error_message/1)
+            end
+    end;
+
+handle_op(<<"sessions">>, _Params, Msg, _SessionPid) ->
+    %% List active sessions from supervisor (may not be started in legacy mode)
+    case whereis(beamtalk_session_sup) of
+        undefined ->
+            beamtalk_repl_protocol:encode_sessions([], Msg, fun term_to_json/1);
+        _Sup ->
+            Children = supervisor:which_children(beamtalk_session_sup),
+            Sessions = lists:filtermap(
+                fun({_Id, Pid, _Type, _Modules}) when is_pid(Pid) ->
+                    {true, #{id => list_to_binary(pid_to_list(Pid))}};
+                   (_) ->
+                    false
+                end,
+                Children
+            ),
+            beamtalk_repl_protocol:encode_sessions(Sessions, Msg, fun term_to_json/1)
+    end;
+
+handle_op(<<"clone">>, _Params, Msg, _SessionPid) ->
+    %% Create a new session
+    NewSessionId = generate_session_id(),
+    case beamtalk_session_sup:start_session(NewSessionId) of
+        {ok, _NewPid} ->
+            beamtalk_repl_protocol:encode_result(
+                NewSessionId, Msg, fun term_to_json/1);
+        {error, Reason} ->
+            beamtalk_repl_protocol:encode_error(
+                {session_creation_failed, Reason}, Msg, fun format_error_message/1)
+    end;
+
+handle_op(<<"close">>, _Params, Msg, _SessionPid) ->
+    %% Close the current session - acceptor cleanup handles stop
+    beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
+
+handle_op(<<"complete">>, Params, Msg, _SessionPid) ->
+    %% Autocompletion - return matching identifiers from loaded modules
+    Prefix = maps:get(<<"code">>, Params, <<>>),
+    Completions = get_completions(Prefix),
+    case beamtalk_repl_protocol:is_legacy(Msg) of
+        true ->
+            jsx:encode(#{<<"type">> => <<"completions">>,
+                        <<"completions">> => Completions});
+        false ->
+            Base = base_protocol_response(Msg),
+            jsx:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
+    end;
+
+handle_op(<<"info">>, Params, Msg, _SessionPid) ->
+    %% Symbol info lookup
+    Symbol = maps:get(<<"symbol">>, Params, <<>>),
+    Info = get_symbol_info(Symbol),
+    case beamtalk_repl_protocol:is_legacy(Msg) of
+        true ->
+            jsx:encode(#{<<"type">> => <<"info">>, <<"info">> => Info});
+        false ->
+            Base = base_protocol_response(Msg),
+            jsx:encode(Base#{<<"info">> => Info, <<"status">> => [<<"done">>]})
+    end;
+
+handle_op(Op, _Params, Msg, _SessionPid) ->
+    beamtalk_repl_protocol:encode_error(
+        {unknown_op, Op}, Msg, fun format_error_message/1).
 
 %%% Protocol Parsing and Formatting
 
-%% @doc Parse a request from the CLI.
+%% @doc Parse a request from the CLI (legacy interface).
 %% Expected format: JSON with "type" field.
+%% New code should use beamtalk_repl_protocol:decode/1 instead.
 -spec parse_request(binary()) -> 
     {eval, string()} | 
     {clear_bindings} | 
@@ -317,6 +478,9 @@ parse_request(Data) when is_binary(Data) ->
         Trimmed = string:trim(Data),
         %% Try to parse as JSON
         case parse_json(Trimmed) of
+            {ok, #{<<"op">> := Op} = Map} ->
+                %% New protocol format - translate to internal tuples
+                op_to_request(Op, Map);
             {ok, #{<<"type">> := <<"eval">>, <<"expression">> := Expr}} ->
                 {eval, binary_to_list(Expr)};
             {ok, #{<<"type">> := <<"clear">>}} ->
@@ -347,6 +511,35 @@ parse_request(Data) when is_binary(Data) ->
         _:Error ->
             {error, {parse_error, Error}}
     end.
+
+%% @private
+%% Translate new protocol op to internal request tuple.
+-spec op_to_request(binary(), map()) ->
+    {eval, string()} | {clear_bindings} | {get_bindings} |
+    {load_file, string()} | {list_actors} | {list_modules} |
+    {kill_actor, string()} | {unload_module, string()} | {error, term()}.
+op_to_request(<<"eval">>, Map) ->
+    Code = maps:get(<<"code">>, Map, <<>>),
+    {eval, binary_to_list(Code)};
+op_to_request(<<"clear">>, _Map) ->
+    {clear_bindings};
+op_to_request(<<"bindings">>, _Map) ->
+    {get_bindings};
+op_to_request(<<"load-file">>, Map) ->
+    Path = maps:get(<<"path">>, Map, <<>>),
+    {load_file, binary_to_list(Path)};
+op_to_request(<<"actors">>, _Map) ->
+    {list_actors};
+op_to_request(<<"modules">>, _Map) ->
+    {list_modules};
+op_to_request(<<"unload">>, Map) ->
+    Module = maps:get(<<"module">>, Map, <<>>),
+    {unload_module, binary_to_list(Module)};
+op_to_request(<<"kill">>, Map) ->
+    Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
+    {kill_actor, binary_to_list(Pid)};
+op_to_request(Op, _Map) ->
+    {error, {unknown_op, Op}}.
 
 %% @doc Format a successful response as JSON.
 -spec format_response(term()) -> binary().
@@ -617,8 +810,110 @@ format_error_message({actors_exist, ModuleName, Count}) ->
         <<"Cannot unload ">>, atom_to_binary(ModuleName, utf8), 
         <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
     ]);
+format_error_message({unknown_op, Op}) ->
+    iolist_to_binary([<<"Unknown operation: ">>, Op]);
+format_error_message({inspect_failed, PidStr}) ->
+    iolist_to_binary([<<"Failed to inspect actor: ">>, list_to_binary(PidStr)]);
+format_error_message({actor_not_alive, PidStr}) ->
+    iolist_to_binary([<<"Actor is not alive: ">>, list_to_binary(PidStr)]);
+format_error_message({not_implemented, {reload, Module}}) ->
+    iolist_to_binary([<<"Reload not yet implemented for: ">>, list_to_binary(Module)]);
+format_error_message({session_creation_failed, Reason}) ->
+    iolist_to_binary([<<"Failed to create session: ">>, format_name(Reason)]);
 format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
+
+%%% Completion and Info helpers
+
+%% @private
+%% Build base response map with id/session for protocol responses.
+-spec base_protocol_response(term()) -> map().
+base_protocol_response(Msg) ->
+    Id = beamtalk_repl_protocol:get_id(Msg),
+    Session = beamtalk_repl_protocol:get_session(Msg),
+    M0 = #{},
+    M1 = case Id of undefined -> M0; _ -> M0#{<<"id">> => Id} end,
+    case Session of undefined -> M1; _ -> M1#{<<"session">> => Session} end.
+
+%% @private
+%% Check whether a PID belongs to a registered Beamtalk actor.
+-spec is_known_actor(pid()) -> boolean().
+is_known_actor(Pid) when is_pid(Pid) ->
+    case whereis(beamtalk_actor_registry) of
+        undefined ->
+            false;
+        RegistryPid ->
+            case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
+                {ok, _} -> true;
+                {error, not_found} -> false
+            end
+    end.
+
+%% @private
+%% Get autocompletion suggestions for a prefix.
+-spec get_completions(binary()) -> [binary()].
+get_completions(<<>>) -> [];
+get_completions(Prefix) when is_binary(Prefix) ->
+    PrefixStr = binary_to_list(Prefix),
+    %% Collect completions from loaded class processes
+    ClassPids = try beamtalk_object_class:all_classes()
+                catch _:_ -> [] end,
+    ClassNames = lists:filtermap(
+        fun(Pid) ->
+            try
+                Name = beamtalk_object_class:class_name(Pid),
+                {true, atom_to_binary(Name, utf8)}
+            catch _:_ -> false
+            end
+        end,
+        ClassPids
+    ),
+    %% Filter by prefix
+    [Name || Name <- ClassNames, binary:match(Name, Prefix) =:= {0, byte_size(Prefix)}]
+    ++
+    %% Add built-in keywords
+    [Kw || Kw <- builtin_keywords(), binary:match(Kw, Prefix) =:= {0, byte_size(Prefix)},
+           PrefixStr =/= ""].
+
+%% @private
+-spec builtin_keywords() -> [binary()].
+builtin_keywords() ->
+    [<<"self">>, <<"super">>, <<"true">>, <<"false">>, <<"nil">>,
+     <<"ifTrue:">>, <<"ifFalse:">>, <<"ifTrue:ifFalse:">>,
+     <<"whileTrue:">>, <<"timesRepeat:">>,
+     <<"subclass:">>, <<"spawn">>, <<"new">>].
+
+%% @private
+%% Get info about a symbol.
+-spec get_symbol_info(binary()) -> map().
+get_symbol_info(Symbol) when is_binary(Symbol) ->
+    SymAtom = try binary_to_existing_atom(Symbol, utf8)
+              catch _:_ -> undefined end,
+    case SymAtom of
+        undefined ->
+            #{<<"found">> => false,
+              <<"symbol">> => Symbol};
+        _ ->
+            %% Check if it's a known class
+            IsClass = try
+                ClassPids2 = beamtalk_object_class:all_classes(),
+                lists:any(fun(Pid) ->
+                    try
+                        beamtalk_object_class:class_name(Pid) =:= SymAtom
+                    catch _:_ -> false
+                    end
+                end, ClassPids2)
+            catch _:_ -> false end,
+            case IsClass of
+                true ->
+                    #{<<"found">> => true,
+                      <<"symbol">> => Symbol,
+                      <<"kind">> => <<"class">>};
+                false ->
+                    #{<<"found">> => false,
+                      <<"symbol">> => Symbol}
+            end
+    end.
 
 %% @private
 format_name(Name) when is_atom(Name) ->

@@ -281,6 +281,7 @@ impl DaemonManager {
         let runtime = runtime_dir();
         let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
         let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
+        let stdlib_dir = runtime.join("apps/beamtalk_stdlib/ebin");
 
         // Build runtime if needed
         if !ebin_dir.exists() {
@@ -308,6 +309,8 @@ impl DaemonManager {
                 ebin_dir.to_str().unwrap_or(""),
                 "-pa",
                 jsx_dir.to_str().unwrap_or(""),
+                "-pa",
+                stdlib_dir.to_str().unwrap_or(""),
                 "-eval",
                 &format!(
                     "{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end."
@@ -420,10 +423,14 @@ impl ReplClient {
 
     /// Evaluate an expression and return the result.
     fn eval(&mut self, expression: &str) -> Result<String, String> {
-        // Send JSON request
+        // Send JSON request using new protocol format
         let request = serde_json::json!({
-            "type": "eval",
-            "expression": expression
+            "op": "eval",
+            "id": format!("e2e-{}", std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros()),
+            "code": expression
         });
 
         writeln!(self.stream, "{request}").map_err(|e| format!("Failed to send request: {e}"))?;
@@ -438,16 +445,40 @@ impl ReplClient {
             .read_line(&mut response_line)
             .map_err(|e| format!("Failed to read response: {e}"))?;
 
-        // Parse JSON response
+        // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse response: {e}"))?;
 
+        // New protocol: check status for errors
+        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
+            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
+            if is_error {
+                let message = response
+                    .get("error")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(message.to_string());
+            }
+            // Success - extract value
+            let value = response.get("value").map_or_else(
+                || "null".to_string(),
+                |v| {
+                    if v.is_string() {
+                        v.as_str().unwrap().to_string()
+                    } else {
+                        v.to_string()
+                    }
+                },
+            );
+            return Ok(value);
+        }
+
+        // Legacy protocol fallback
         match response.get("type").and_then(|t| t.as_str()) {
             Some("result") => {
                 let value = response.get("value").map_or_else(
                     || "null".to_string(),
                     |v| {
-                        // Format the value appropriately
                         if v.is_string() {
                             v.as_str().unwrap().to_string()
                         } else {
@@ -471,7 +502,8 @@ impl ReplClient {
     /// Clear REPL bindings between tests.
     fn clear_bindings(&mut self) -> Result<(), String> {
         let request = serde_json::json!({
-            "type": "clear"
+            "op": "clear",
+            "id": "e2e-clear"
         });
 
         writeln!(self.stream, "{request}")
@@ -496,7 +528,8 @@ impl ReplClient {
     /// making them available for spawning and messaging.
     fn load_file(&mut self, path: &str) -> Result<Vec<String>, String> {
         let request = serde_json::json!({
-            "type": "load",
+            "op": "load-file",
+            "id": "e2e-load",
             "path": path
         });
 
@@ -513,13 +546,36 @@ impl ReplClient {
             .read_line(&mut response_line)
             .map_err(|e| format!("Failed to read load response: {e}"))?;
 
-        // Parse JSON response
+        // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse load response: {e}"))?;
 
+        // New protocol: check status for errors
+        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
+            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
+            if is_error {
+                let message = response
+                    .get("error")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(message.to_string());
+            }
+            // Success - extract classes
+            let classes = response
+                .get("classes")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Ok(classes);
+        }
+
+        // Legacy protocol fallback
         match response.get("type").and_then(|t| t.as_str()) {
             Some("loaded") => {
-                // Extract loaded class names
                 let classes = response
                     .get("classes")
                     .and_then(|c| c.as_array())
