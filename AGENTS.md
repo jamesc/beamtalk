@@ -1437,6 +1437,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `create-issue` | "create issue" | Create Linear issues with blocking relationships |
 | `update-issues` | `/update-issues` | Find and update Linear issues with missing labels or metadata |
 | `plan-refactor` | `/plan-refactor` | Analyze repo and plan refactoring for code quality/maintainability |
+| `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
 | `refresh-issue` | `/refresh-issue BT-XX` | Refresh a Linear issue to align with current code state |
 | `final-reviewer` | `@final-reviewer` | Agent: Comprehensive code + doc + REPL review using gpt-5.2-codex (xhigh) |
 
