@@ -2,6 +2,8 @@
 
 How Beamtalk maps Smalltalk's "everything is an object" philosophy to the BEAM virtual machine.
 
+> **Decision Record:** The formal architectural decision based on this analysis is recorded in [ADR 0005: BEAM Object Model — Pragmatic Hybrid Approach](ADR/0005-beam-object-model-pragmatic-hybrid.md). This document serves as the detailed feasibility study and supporting analysis.
+
 This document analyzes the feasibility of Smalltalk-style object reification on BEAM and recommends pragmatic design decisions for Beamtalk. **Note:** Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**—we make pragmatic trade-offs for BEAM's architecture.
 
 **Related documents:**
@@ -9,6 +11,7 @@ This document analyzes the feasibility of Smalltalk-style object reification on 
 - [Architecture](beamtalk-architecture.md) — Compiler, runtime, and code generation details
 - [BEAM Interop](beamtalk-interop.md) — Erlang/Elixir integration specification
 - [Language Features](beamtalk-language-features.md) — Syntax and feature reference
+- [ADR 0006: Unified Method Dispatch](ADR/0006-unified-method-dispatch.md) — How dispatch and hierarchy walking work
 
 **Important:** Beamtalk is **async-first** (see [Principle 7](beamtalk-principles.md#7-async-first-sync-when-needed)). All message sends return futures by default. This document focuses on object reification; see [Architecture](beamtalk-architecture.md#futurePromise-implementation) for async/future implementation details.
 
@@ -16,9 +19,9 @@ This document analyzes the feasibility of Smalltalk-style object reification on 
 
 ## Executive Summary
 
-**Recommendation: Pragmatic Hybrid Approach**
+**Decision: Pragmatic Hybrid Approach** (see [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md))
 
-Beamtalk should embrace BEAM's actor model rather than fight it. We reify what we can (classes, methods, blocks, processes) and explicitly document what we cannot (active stack frames, `become:`, global reference scanning).
+Beamtalk embraces BEAM's actor model rather than fighting it. We reify what we can (classes, methods, blocks, processes) and explicitly document what we cannot (active stack frames, `become:`, global reference scanning).
 
 **Key insight:** BEAM's "everything is a process" aligns well with Smalltalk's "everything is an object" — we just shift the reification from memory-level objects to process-level actors.
 
@@ -39,6 +42,19 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 | Continuations | ❌ None | Not available on BEAM |
 
 |**Trade-off:** We gain massive concurrency, distribution, and fault tolerance. We lose some metaprogramming requiring global heap access and runtime stack manipulation.
+|
+|### Key Design Decisions (from [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md))
+|
+|- **ProtoObject/Object split** follows Pharo — ProtoObject is minimal (`class`, `==`, DNU), Object provides common behavior
+|- **Single dispatch** — method lookup based on receiver only; composition via traits/mixins (future ADR)
+|- **`#beamtalk_object{}` record** wraps actors (class + module + pid); value types are bare Erlang terms (no wrapper)
+|- **Equality** follows Erlang operators (`==` value equality, `===` exact equality, per [ADR 0002](ADR/0002-use-erlang-comparison-operators.md))
+|- **`nil`** is `UndefinedObject` singleton, maps to Erlang atom `'nil'`, dispatched through `beamtalk_nil.erl`
+|- **Blocks** are Erlang funs, dispatched through `beamtalk_block.erl` — respond to `value`, `value:`, `class`, etc.
+|- **`self`** in blocks refers to the enclosing object (lexical capture), following Smalltalk
+|- **Extension methods** are logically part of the class's method dictionary, checked during hierarchy walk (matches Pharo)
+|- **Metaclasses** — commit to full Smalltalk model, phased implementation (fixed protocol now, full metaclass hierarchy later)
+|- **Method dispatch** is unified — see [ADR 0006](ADR/0006-unified-method-dispatch.md) for hierarchy walking and fast path policy
 |
 |---
 |
@@ -110,6 +126,7 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 || **`new` method** | ✅ Creates instance | ❌ Error (use `spawn`) |
 |
 |**Value types** inherit from Object directly:
+|> ⚠️ **FUTURE SYNTAX** — Value type `new` with keyword arguments is not yet implemented (BT-213). `Point new` works; `Point new x: 3 y: 4` does not.
 |```beamtalk
 |// Value type - no process, copied when sent between actors
 |Object subclass: Point
@@ -118,7 +135,7 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |  + other => Point new x: (self.x + other x) y: (self.y + other y)
 |  distance => (self.x squared + self.y squared) sqrt
 |
-|p := Point new x: 3 y: 4    // ✅ Value types use new
+|p := Point new x: 3 y: 4    // FUTURE: keyword new not yet implemented
 |p distance  // => 5.0
 |```
 |
@@ -144,11 +161,13 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |Primitives (Integer, String, etc.) are **sealed value types** — they inherit from Object but cannot be subclassed. They **can be extended** with new methods via the extension registry.
 |
+|> ⚠️ **FUTURE SYNTAX** — `Integer extend` syntax and `class >>` class-side method definitions are not yet implemented. Extension methods are added via runtime API (`beamtalk_extensions:register/4`).
 |```beamtalk
 |// ❌ Cannot subclass primitives — they are sealed
 |Integer subclass: MyInteger  // ERROR: Integer is sealed
 |
-|// ✅ CAN add new methods via extension
+|// FUTURE: Extension syntax not yet implemented
+|// Extensions currently added via runtime API
 |Integer extend
 |  factorial => 
 |    self <= 1 ifTrue: [1] ifFalse: [self * (self - 1) factorial]
@@ -197,16 +216,17 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |### Key Points
 |
-|1. **ProtoObject** — The absolute root for ALL objects. Provides only the most essential messages that every object must understand.
+|1. **ProtoObject** — The absolute root for ALL objects (follows Pharo). Provides only the most essential messages:
 |   - `class` — Returns the object's class (fundamental for reflection)
 |   - `doesNotUnderstand:args:` — Fallback for unknown messages
-|   - `==` / `~=` — Object identity and equality
+|   - `==` / `~=` — Object identity and equality (maps to Erlang operators per [ADR 0002](ADR/0002-use-erlang-comparison-operators.md))
 |
 |2. **Object** — Common behavior for all non-minimal objects. Provides:
 |   - `new` — Create a new instance (for value types)
 |   - Nil testing: `isNil`, `notNil`, `ifNil:ifNotNil:`
-|   - Reflection: `respondsTo:`, `instVarNames`, `instVarAt:`
-|   - Debugging: `inspect`, `describe`
+|   - Reflection: `respondsTo:`, `instVarNames`, `instVarAt:`, `perform:`, `perform:withArguments:`
+|   - Display: `printString`, `printOn:`, `inspect`, `describe`
+|   - Other: `yourself`, `hash`
 |
 |3. **Primitives** (Integer, Float, String, Boolean, Atom, Array, List) — Sealed subclasses of Object. BEAM values that respond to messages via compiled function calls. No process, no pid.
 |
@@ -260,7 +280,10 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |### Metaclass Hierarchy
 |
-|Just as in Smalltalk, Beamtalk's metaclass hierarchy mirrors the class hierarchy:
+|Just as in Smalltalk, Beamtalk's metaclass hierarchy mirrors the class hierarchy.
+|**Implementation is phased** (see [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md)):
+|- **Phase 1 (current):** Class objects understand a fixed protocol via `beamtalk_object_class.erl`. Class method sends (e.g., `Integer methods`) route through `gen_server:call` to the class process.
+|- **Phase 2 (future):** Real metaclass hierarchy with class-side method inheritance through the metaclass chain.
 |
 |```
 |Instance Side:          Metaclass Side:
@@ -273,6 +296,7 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |
 |When you define a class, a metaclass is automatically created. For example:
 |
+|> ⚠️ **FUTURE SYNTAX** — `class >>` for class-side method definitions is not yet implemented. Class methods are currently limited to `spawn`/`spawnWith:`.
 |```beamtalk
 |Actor subclass: Counter
 |  state: value = 0
@@ -280,13 +304,11 @@ Beamtalk should embrace BEAM's actor model rather than fight it. We reify what w
 |  // Instance methods
 |  increment => self.value := self.value + 1
 |  
-|  // Class methods (defined on the metaclass automatically)
+|  // FUTURE: Class methods (class >> syntax not yet implemented)
 |  class >> create: initialValue => self spawnWith: #{value => initialValue}
 |```
 |
-|The compiler generates both:
-|- `beamtalk_counter` — Instance behavior (handles messages to instances)
-|- `beamtalk_counter_class` — Class behavior (handles messages to the Counter class itself)
+|> **Note:** The compiler currently generates a single module per class (e.g., `counter`), not two separate modules. The class process is handled by `beamtalk_object_class.erl`.
 |
 |See [Part 1.2](#12-classes-as-objects) for implementation details.
 |
@@ -310,6 +332,7 @@ Object subclass: Counter
 ```
 
 **BEAM Mapping:**
+> ⚠️ **ILLUSTRATIVE SKETCH** — The actual generated code uses Core Erlang (not Erlang source) and a different module structure. See `examples/build/counter.core` after `beamtalk build examples/counter.bt` for real output.
 ```erlang
 -module(beamtalk_counter).
 -behaviour(gen_server).
@@ -337,6 +360,7 @@ init(_Args) ->
 In Smalltalk, classes are objects too — instances of their metaclass. This enables runtime class modification, introspection, and factory patterns.
 
 **Beamtalk class object representation:**
+> ⚠️ **ILLUSTRATIVE SKETCH** — The actual implementation uses `beamtalk_object_class.erl` with a `#class_state{}` record. Module naming is `counter` not `beamtalk_counter`. See `runtime/src/beamtalk_object_class.erl` for actual code.
 ```erlang
 %% Class object is a process holding class metadata
 #{
@@ -356,6 +380,7 @@ In Smalltalk, classes are objects too — instances of their metaclass. This ena
 ```
 
 **Usage:**
+> ⚠️ **PARTIALLY IMPLEMENTED** — `Counter spawn` works. `Counter methods`, `Counter superclass` work via Erlang API but not yet as Beamtalk message sends (see [ADR 0005 Q2](ADR/0005-beam-object-model-pragmatic-hybrid.md#open-questions)). `Counter new` correctly raises error for actors.
 ```
 // Get class from instance
 counter class             // => Counter class object
@@ -1067,6 +1092,8 @@ foreign MyNif.fastOperation(data: Binary) -> Binary
 
 ## Part 3: Implementation Options Analysis
 
+> **Decision made:** Option 1 (Pragmatic Hybrid) was selected. See [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md) for the formal decision record and rationale. The analysis below is preserved as supporting documentation.
+
 The Linear issue identified four potential approaches. Here's a detailed analysis of each.
 
 ### Option 1: Pragmatic Hybrid (Recommended)
@@ -1230,6 +1257,8 @@ factorial_cps(N, K) ->
 
 ## Part 4: Recommendation
 
+> **Accepted:** The Pragmatic Hybrid approach was formally adopted in [ADR 0005](ADR/0005-beam-object-model-pragmatic-hybrid.md). Method dispatch is addressed in [ADR 0006](ADR/0006-unified-method-dispatch.md).
+
 ### Primary Recommendation: Pragmatic Hybrid
 
 For Beamtalk v1, we should implement the **Pragmatic Hybrid** approach for these reasons:
@@ -1337,6 +1366,8 @@ This brings Beamtalk closer to Flavors' efficiency for abstract classes while en
 
 ## Part 5: Code Sketches
 
+> **Note:** These sketches were early design explorations. The actual implementation has evolved — see `runtime/src/beamtalk_object_class.erl`, `runtime/src/beamtalk_actor.erl`, and `runtime/include/beamtalk.hrl` for current code. The `#beamtalk_object{}` record and gen_server patterns below informed the implementation but are not exact matches.
+
 The following sketches incorporate learnings from [LFE Flavors](https://github.com/rvirding/flavors), Robert Virding's successful OOP implementation on BEAM.
 
 ### Actor Instance Record
@@ -1344,19 +1375,24 @@ The following sketches incorporate learnings from [LFE Flavors](https://github.c
 Following Flavors' `#flavor-instance{}` pattern, we define a record that bundles class info with the process. This enables reflection and makes "self" a proper object reference.
 
 ```erlang
-%% In beamtalk.hrl
+%% In beamtalk.hrl (actual implementation)
 -record(beamtalk_object, {
     class :: atom(),           % Class name (e.g., 'Counter')
-    class_mod :: atom(),       % Class module (e.g., 'beamtalk_counter_class')
+    class_mod :: atom(),       % Class module (e.g., 'counter')
     pid :: pid()               % The actor process
 }).
 
-%% Usage: pass this around instead of raw pid
-%% obj#beamtalk_object.pid for the process
-%% obj#beamtalk_object.class for reflection
+%% Value types (Integer, String, Point, etc.) have NO wrapper —
+%% they are bare Erlang terms. Dispatch must know receiver type
+%% at compile time. This gives free Erlang interop for value types.
+%%
+%% Actors are wrapped: {beamtalk_object, 'Counter', 'counter', <0.123.0>}
+%% Dispatch extracts the pid: gen_server:call(Pid, {Selector, Args})
 ```
 
 ### Actor Instance Implementation
+
+> ⚠️ **EARLY DESIGN SKETCH** — The actual implementation differs significantly. See `runtime/src/beamtalk_actor.erl` for current code. Key differences: state is a flat map (not a `#state{}` record), dispatch goes through compiled `Module:dispatch/4`, and errors use `#beamtalk_error{}` records.
 
 Each actor is a gen_server. Key patterns from Flavors:
 - **Error isolation:** Catch errors and re-raise at caller (don't crash the instance)
@@ -1477,6 +1513,8 @@ terminate(_Reason, #state{class = Class, class_mod = Mod, self = Self, fields = 
 
 ### Class Object Implementation
 
+> ⚠️ **EARLY DESIGN SKETCH** — The actual implementation is in `runtime/src/beamtalk_object_class.erl`. Key differences: single module per class (not two-module pattern), uses `beamtalk_object_class` as the gen_server for all classes, module names are lowercase (e.g., `counter` not `beamtalk_counter_class`).
+
 Following Flavors' two-module pattern, we separate:
 - **`beamtalk_<class>_class`** — Class metadata, factory methods (one per class)
 - **`beamtalk_<class>`** — Generated instance behavior module
@@ -1574,6 +1612,8 @@ notify_instances(ClassName, NewMethods) ->
 
 ### Instance Tracking
 
+> ⚠️ **EARLY DESIGN SKETCH** — Instance tracking is implemented in `runtime/src/beamtalk_object_instances.erl`. The API has changed from this sketch.
+
 ```erlang
 -module(beamtalk_instances).
 
@@ -1601,6 +1641,8 @@ count(Class) ->
 ```
 
 ### StackTrace Wrapper
+
+> ⚠️ **FUTURE PROPOSAL** — `beamtalk_stack_frame` is not yet implemented. Stack traces currently use raw Erlang format. See `runtime/src/beamtalk_error.erl` for current error formatting.
 
 ```erlang
 -module(beamtalk_stack_frame).

@@ -21,10 +21,12 @@ Each ADR follows this structure:
 
 | Number | Title | Status | Date |
 |--------|-------|--------|------|
-| [0001](0001-no-compound-assignment.md) | No Compound Assignment in Beamtalk | Proposed | 2026-02-03 |
-| [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Proposed | 2026-02-03 |
+| [0001](0001-no-compound-assignment.md) | No Compound Assignment in Beamtalk | Accepted | 2026-02-03 |
+| [0002](0002-use-erlang-comparison-operators.md) | Use Erlang Comparison Operators Directly | Accepted | 2026-02-03 |
 | [0003](0003-core-erlang-vs-erlang-source.md) | Keep Core Erlang as Primary Code Generation Target | Accepted | 2026-02-04 |
 | [0004](0004-persistent-workspace-management.md) | Persistent Workspace Management | Accepted | 2026-02-05 |
+| [0005](0005-beam-object-model-pragmatic-hybrid.md) | BEAM Object Model - Pragmatic Hybrid Approach | Accepted | 2026-02-05 |
+| [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Accepted | 2026-02-05 |
 
 ## Creating New ADRs
 

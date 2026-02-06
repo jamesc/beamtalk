@@ -1,7 +1,6 @@
 # ADR 0003: Keep Core Erlang as Primary Code Generation Target
 
 ## Status
-
 Accepted (2026-02-04)
 
 ## Context
