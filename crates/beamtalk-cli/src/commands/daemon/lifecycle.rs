@@ -154,9 +154,8 @@ fn init_logging() {
     let _ = tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "warn".parse().expect("Failed to parse tracing directive")
-            }),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn".parse().expect("Failed to parse tracing directive")),
         )
         .try_init();
 }
