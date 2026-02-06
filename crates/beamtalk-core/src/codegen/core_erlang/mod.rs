@@ -455,10 +455,26 @@ impl CoreErlangGenerator {
         hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
         if let Some(class) = module.classes.first() {
-            let chain = hierarchy.superclass_chain(class.name.name.as_str());
-            // A class is an actor if "Actor" appears anywhere in its superclass chain,
-            // or if the class itself IS Actor
-            class.name.name.as_str() == "Actor" || chain.iter().any(|s| s.as_str() == "Actor")
+            let name = class.name.name.as_str();
+            if name == "Actor" {
+                return true;
+            }
+            let chain = hierarchy.superclass_chain(name);
+            if chain.iter().any(|s| s.as_str() == "Actor") {
+                return true;
+            }
+            // If the chain terminated at a known value-type root (Object/ProtoObject),
+            // this is definitely a value type.
+            let known_value_roots = ["Object", "ProtoObject"];
+            if let Some(last) = chain.last() {
+                if known_value_roots.contains(&last.as_str()) {
+                    return false;
+                }
+            }
+            // Chain is incomplete (superclass not in hierarchy) or empty with
+            // non-Object superclass. Default to actor for backward compatibility
+            // (e.g. compiling subclass files independently without parent).
+            class.superclass.name.as_str() != "Object"
         } else {
             true
         }
@@ -4054,6 +4070,30 @@ end
     fn test_is_actor_class_no_classes_defaults_to_actor() {
         let module = Module::new(Vec::new(), Span::new(0, 0));
         let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
+    }
+
+    #[test]
+    fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
+        // LoggingCounter extends Counter, but Counter is NOT in this module.
+        // Hierarchy chain is incomplete; should default to actor (backward compat).
+        let class = ClassDefinition {
+            name: Identifier::new("LoggingCounter", Span::new(0, 0)),
+            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy =
+            crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
     }
 }
