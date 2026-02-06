@@ -37,18 +37,69 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    - `docs/development/architecture-principles.md` — Architectural constraints?
    - `docs/beamtalk-ddd-model.md` — DDD implications?
    
-   **d. Prior art:**
-   - How do reference languages handle this? (Smalltalk, Erlang, Gleam, Newspeak)
-   - What does the BEAM VM support or constrain?
-   - Are there relevant academic papers or blog posts?
+   **d. Prior art — how do similar languages/platforms handle this?**
+   
+   Compare against these reference points (use web search when needed):
+   
+   | Category | Languages/Platforms | Why compare |
+   |----------|-------------------|-------------|
+   | **Smalltalk family** | Pharo, Squeak, Newspeak, GNU Smalltalk | Direct ancestors — what works, what we'd improve |
+   | **BEAM languages** | Erlang, Elixir, Gleam, LFE | Same VM — what's possible, what's idiomatic on BEAM |
+   | **Modern interactive** | Swift Playgrounds, Jupyter, Livebook | Interactive-first peers — UX expectations |
+   | **Actor languages** | Pony, Akka (Scala), Dart (isolates) | Actor model — messaging, concurrency patterns |
+   
+   For each relevant comparison:
+   - How does language X solve this?
+   - What's good about their approach?
+   - What doesn't translate to Beamtalk/BEAM?
+   - What can we steal/adapt?
 
-3. **Identify options**: List 2-4 concrete approaches with trade-offs:
+3. **User perspective analysis**: Evaluate the decision from each user persona's viewpoint:
+   
+   **a. Newcomer** (learning Beamtalk, coming from Python/JS/Ruby):
+   - Is this intuitive? Would they guess the syntax?
+   - What error messages would they see if they get it wrong?
+   - Can they discover this feature through REPL exploration?
+   
+   **b. Smalltalk developer** (experienced, opinionated about Smalltalk purity):
+   - Does this feel like Smalltalk? If not, is the departure justified?
+   - Would they find this in Pharo/Squeak? If not, why are we adding it?
+   - Does this preserve message-passing semantics?
+   
+   **c. Erlang/Elixir developer** (using Beamtalk for BEAM interop):
+   - Does this work naturally with OTP patterns?
+   - Can they call this from Erlang/Elixir? Can Beamtalk call their code?
+   - Does this generate predictable, debuggable BEAM code?
+   
+   **d. Production operator** (running Beamtalk in production):
+   - Does this affect hot code reloading?
+   - Performance implications at scale?
+   - Observable/debuggable with standard BEAM tools? (observer, recon, dbg)
+   
+   **e. Tooling developer** (building IDE support, LSP, debugger):
+   - Can the LSP provide completions/diagnostics for this?
+   - Does this make static analysis easier or harder?
+   - Is the AST representation clean enough for tooling?
+
+4. **DevEx validation**: Before finalizing options, check each against the DevEx checklist:
+   - Can you demonstrate this in 1-2 lines of REPL code?
+   - What does the error look like when used incorrectly?
+   - Is the feature discoverable (via tab completion, help, reflection)?
+   - Does it compose well with existing features?
+   
+   **If you can't write a compelling REPL example, the design needs more work.**
+
+5. **Identify options**: List 2-4 concrete approaches with trade-offs:
    
    For each option:
    - **Description**: What would this look like in practice?
    - **Code example**: Show how it would appear in Beamtalk syntax or implementation
+   - **REPL example**: 1-2 lines showing the feature in use interactively
+   - **Error example**: What happens when used incorrectly?
    - **Pros**: Benefits, alignment with principles
    - **Cons**: Costs, complexity, limitations
+   - **User impact**: How each persona (newcomer, Smalltalker, Erlang dev) would experience this
+   - **Comparison**: Which reference language is this closest to? Where does it diverge?
    - **Affected components**: Which layers of the pipeline? (parser, codegen, runtime, REPL)
    - **Effort**: Rough size estimate (S/M/L/XL)
 
@@ -88,6 +139,16 @@ Research a problem, explore trade-offs, and draft an **Architecture Decision Rec
    ## Decision
    [Clear, concise statement of what was decided]
    [Code examples showing the decided approach]
+   [REPL session showing the feature in use]
+   [Error examples showing what happens on misuse]
+   
+   ## Prior Art
+   [How reference languages handle this]
+   [What we adopted, adapted, or rejected and why]
+   
+   ## User Impact
+   [How this affects each persona: newcomer, Smalltalker, Erlang dev, operator]
+   [Discoverability and learnability considerations]
    
    ## Alternatives Considered
    ### [Alternative Name]
