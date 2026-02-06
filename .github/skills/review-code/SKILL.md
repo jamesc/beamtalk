@@ -122,7 +122,7 @@ Use a **different model family** to challenge the design with fresh eyes. Differ
 
 15. **Launch adversarial review** using the task tool with a model from a **different family** than your own. If you're Claude, use GPT; if you're GPT, use Claude:
 
-    Launch via `task` with `agent_type: "general-purpose"` and `model: "gpt-5.2"` (or `model: "claude-opus-4.6"` if you're a GPT model):
+    Launch via `task` with `agent_type: "general-purpose"` and `model: "gpt-5.2-codex"` (or `model: "claude-opus-4.6"` if you're a GPT model):
     
     ```
     You are a skeptical senior engineer reviewing a PR. Your job is to find
