@@ -430,6 +430,7 @@ pub fn get_or_start_workspace(
     workspace_name: Option<&str>,
     port: u16,
     runtime_beam_dir: &Path,
+    repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
     stdlib_beam_dir: &Path,
 ) -> Result<(NodeInfo, bool, String)> {
@@ -451,6 +452,7 @@ pub fn get_or_start_workspace(
         &workspace_id,
         port,
         runtime_beam_dir,
+        repl_beam_dir,
         jsx_beam_dir,
         stdlib_beam_dir,
     )?;
