@@ -332,7 +332,7 @@ impl CoreErlangGenerator {
                 let super_result_var = self.fresh_temp_var("SuperReply");
                 let current_state = self.current_state_var();
                 let new_state = self.next_state_var();
-                let class_name = self.to_class_name();
+                let class_name = self.class_name();
 
                 // Generate beamtalk_dispatch:super/5 call (ADR 0006)
                 if let Expression::MessageSend {

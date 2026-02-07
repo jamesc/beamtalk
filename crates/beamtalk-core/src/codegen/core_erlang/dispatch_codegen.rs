@@ -471,7 +471,7 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Use the domain service method for selector-to-atom conversion
         let selector_atom = selector.to_erlang_atom();
-        let class_name = self.to_class_name();
+        let class_name = self.class_name();
 
         // Generate: call 'beamtalk_dispatch':'super'('selector', [Args], Self, State, 'ClassName')
         write!(

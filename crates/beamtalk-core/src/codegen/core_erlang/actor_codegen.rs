@@ -9,6 +9,7 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
+use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::Module;
 use std::fmt::Write;
@@ -32,9 +33,9 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
-        // BT-295: Set current class name for @primitive codegen
+        // BT-295: Set class identity for @primitive codegen
         if let Some(class) = module.classes.first() {
-            self.current_class_name = Some(class.name.name.to_string());
+            self.class_identity = Some(ClassIdentity::new(&class.name.name));
         }
 
         // Check if module has class definitions for registration

@@ -63,7 +63,7 @@ impl CoreErlangGenerator {
     ///
     /// Beamtalk is a special class with only class methods (no instances).
     fn generate_beamtalk_registration(&mut self, class: &ClassDefinition) -> Result<()> {
-        let class_name = self.to_class_name();
+        let class_name = self.class_name();
 
         writeln!(self.output, "'register_class'/0 = fun () ->")?;
         self.indent += 1;

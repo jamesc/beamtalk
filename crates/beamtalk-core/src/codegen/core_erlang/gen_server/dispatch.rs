@@ -291,7 +291,7 @@ impl CoreErlangGenerator {
         // walking, no longer generated per-class.
 
         // Default case: hierarchy walk via beamtalk_dispatch, then DNU fallback (ADR 0006)
-        let class_name = self.to_class_name();
+        let class_name = self.class_name();
         self.write_indent()?;
         writeln!(self.output, "<OtherSelector> when 'true' ->")?;
         self.indent += 1;

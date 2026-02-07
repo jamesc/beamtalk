@@ -117,7 +117,7 @@ impl CoreErlangGenerator {
             writeln!(self.output, "let ChildFields = ~{{")?;
             self.indent += 1;
             self.write_indent()?;
-            writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
+            writeln!(self.output, "'__class__' => '{}',", self.class_name())?;
             self.write_indent()?;
             writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
             self.write_indent()?;
@@ -164,7 +164,7 @@ impl CoreErlangGenerator {
             writeln!(self.output, "let DefaultState = ~{{")?;
             self.indent += 1;
             self.write_indent()?;
-            writeln!(self.output, "'__class__' => '{}',", self.to_class_name())?;
+            writeln!(self.output, "'__class__' => '{}',", self.class_name())?;
             self.write_indent()?;
             writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
             self.write_indent()?;

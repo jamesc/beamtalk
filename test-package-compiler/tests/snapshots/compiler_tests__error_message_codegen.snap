@@ -12,7 +12,7 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('error_message', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'ErrorMessage', 'error_message', Pid}
+            {'beamtalk_object', 'TestActor', 'error_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('error_message', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'ErrorMessage', 'error_message', Pid}
+            {'beamtalk_object', 'TestActor', 'error_message', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -41,7 +41,7 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'ErrorMessage',
+        '__class__' => 'TestActor',
         '__class_mod__' => 'error_message',
         '__methods__' => call 'error_message':'method_table'()
     }~
@@ -105,7 +105,7 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             let _seq1 = #{#<68>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}# in call 'erlang':'error'({'beamtalk_error', call 'maps':'get'('msg', State)})
         <OtherSelector> when 'true' ->
             %% ADR 0006: Try hierarchy walk before DNU
-            case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'ErrorMessage') of
+            case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'TestActor') of
                 <{'reply', InheritedResult, InheritedState}> when 'true' ->
                     {'reply', InheritedResult, InheritedState}
                 <{'error', _DispatchError}> when 'true' ->

@@ -392,9 +392,9 @@ pub(super) struct CoreErlangGenerator {
     /// Call-site dispatch is disabled pending static type information (PR #260).
     #[allow(dead_code)] // Kept for future call-site dispatch with static types
     primitive_bindings: PrimitiveBindingTable,
-    /// BT-295: Name of the class currently being compiled (if any).
-    /// Used by `Expression::Primitive` to determine the runtime dispatch module.
-    current_class_name: Option<String>,
+    /// Identity of the class currently being compiled (if any).
+    /// Set from the AST class definition at the start of module generation.
+    class_identity: Option<util::ClassIdentity>,
     /// BT-295: Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.
     current_method_params: Vec<String>,
@@ -414,7 +414,7 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor, // Default to Actor for backward compatibility
             source_text: None,
             primitive_bindings: PrimitiveBindingTable::new(),
-            current_class_name: None,
+            class_identity: None,
             current_method_params: Vec::new(),
         }
     }
@@ -432,7 +432,7 @@ impl CoreErlangGenerator {
             context: CodeGenContext::Actor,
             source_text: None,
             primitive_bindings: bindings,
-            current_class_name: None,
+            class_identity: None,
             current_method_params: Vec::new(),
         }
     }
@@ -963,11 +963,15 @@ impl CoreErlangGenerator {
     /// structural intrinsics matters at the call site (in `dispatch_codegen`),
     /// not in the method body.
     fn generate_primitive(&mut self, name: &str, _is_quoted: bool) -> Result<()> {
-        let class_name = self.current_class_name.clone().ok_or_else(|| {
-            CodeGenError::Internal(format!(
-                "@primitive '{name}' used outside of a class context"
-            ))
-        })?;
+        let class_name = self
+            .class_identity
+            .as_ref()
+            .map(|id| id.class_name().to_string())
+            .ok_or_else(|| {
+                CodeGenError::Internal(format!(
+                    "@primitive '{name}' used outside of a class context"
+                ))
+            })?;
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         write!(
@@ -1135,12 +1139,19 @@ mod tests {
     }
 
     #[test]
-    fn test_module_name_to_class_name() {
+    fn test_class_name_derived_from_module() {
         let generator = CoreErlangGenerator::new("my_counter_actor");
-        assert_eq!(generator.to_class_name(), "MyCounterActor");
+        assert_eq!(generator.class_name(), "MyCounterActor");
 
         let generator = CoreErlangGenerator::new("simple");
-        assert_eq!(generator.to_class_name(), "Simple");
+        assert_eq!(generator.class_name(), "Simple");
+    }
+
+    #[test]
+    fn test_class_name_from_identity_overrides_module() {
+        let mut generator = CoreErlangGenerator::new("bt_stdlib_string");
+        generator.class_identity = Some(util::ClassIdentity::new("String"));
+        assert_eq!(generator.class_name(), "String");
     }
 
     #[test]
@@ -3685,7 +3696,7 @@ end
     #[test]
     fn test_generate_primitive_selector_based() {
         let mut generator = CoreErlangGenerator::new("test");
-        generator.current_class_name = Some("Integer".to_string());
+        generator.class_identity = Some(util::ClassIdentity::new("Integer"));
         generator.current_method_params = vec!["Other".to_string()];
 
         let result = generator.generate_primitive("+", true);
@@ -3699,7 +3710,7 @@ end
     #[test]
     fn test_generate_primitive_structural_intrinsic() {
         let mut generator = CoreErlangGenerator::new("test");
-        generator.current_class_name = Some("Block".to_string());
+        generator.class_identity = Some(util::ClassIdentity::new("Block"));
         generator.current_method_params = vec![];
 
         let result = generator.generate_primitive("blockValue", false);
@@ -3713,7 +3724,7 @@ end
     #[test]
     fn test_generate_primitive_multiple_params() {
         let mut generator = CoreErlangGenerator::new("test");
-        generator.current_class_name = Some("Integer".to_string());
+        generator.class_identity = Some(util::ClassIdentity::new("Integer"));
         generator.current_method_params = vec!["End".to_string(), "Block".to_string()];
 
         let result = generator.generate_primitive("toDo", false);
