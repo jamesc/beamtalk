@@ -171,12 +171,12 @@ load_stdlib(State) ->
     end.
 
 %% @private
-%% Find the stdlib beamtalk.bt file in common locations
+%% Find the stdlib Beamtalk.bt file in common locations
 find_stdlib_path() ->
     %% Try various locations relative to the running code
     BaseCandidates = [
-        "lib/beamtalk.bt",                    % Running from repo root
-        "../lib/beamtalk.bt"                  % Running from runtime/
+        "lib/Beamtalk.bt",                    % Running from repo root
+        "../lib/Beamtalk.bt"                  % Running from runtime/
     ],
     %% code:lib_dir can return {error, bad_name} if app not loaded
     LibDir = code:lib_dir(beamtalk_runtime),
@@ -185,7 +185,7 @@ find_stdlib_path() ->
             {error, _} ->
                 [];
             _ ->
-                [filename:join([LibDir, "..", "..", "lib", "beamtalk.bt"])]
+                [filename:join([LibDir, "..", "..", "lib", "Beamtalk.bt"])]
         end,
     Candidates = BaseCandidates ++ RuntimeCandidate,
     find_first_existing(Candidates).

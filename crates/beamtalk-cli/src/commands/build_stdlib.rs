@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn test_module_name_from_path_lowercase() {
-        let path = Utf8PathBuf::from("lib/beamtalk.bt");
+        let path = Utf8PathBuf::from("lib/Beamtalk.bt");
         assert_eq!(module_name_from_path(&path).unwrap(), "bt_stdlib_beamtalk");
     }
 

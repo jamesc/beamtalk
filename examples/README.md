@@ -17,11 +17,11 @@ The tutorial walks you through:
 
 ### Simple Examples
 
-- **hello.bt** - Minimal example showing file loading
+- **hello.bt** - Minimal example showing a simple class
   ```bash
   beamtalk repl
   > :load examples/hello.bt
-  > message
+  > Hello new
   ```
 
 - **counter.bt** - Counter actor with state and methods

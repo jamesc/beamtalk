@@ -67,10 +67,10 @@ Load a Beamtalk source file and compile it as a module:
 
 ```beamtalk
 > :load examples/hello.bt
-Loaded examples/hello.bt
+Loaded Hello
 ```
 
-**Note:** Currently, loaded files compile as modules but don't export their bindings to the REPL directly. This is useful for loading actor classes that you can then instantiate.
+**Note:** `:load` is for loading class definitions. The class name in the file determines the module name, not the filename.
 
 ## Working with Modules
 
@@ -278,7 +278,7 @@ Variable bindings:
   z = 2184
 
 > :load examples/hello.bt
-Loaded examples/hello.bt
+Loaded Hello
 
 > :modules
 Loaded modules:
