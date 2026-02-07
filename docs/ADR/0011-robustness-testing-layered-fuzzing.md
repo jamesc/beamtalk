@@ -7,7 +7,7 @@ Proposed (2026-02-07)
 
 Beamtalk's parser is designed for error recovery — it **must** produce a partial AST with diagnostics even when input is malformed (critical for IDE support). However, the current test suite has almost no coverage of this capability:
 
-- **Only 9 error test cases** exist (3 runtime, 3 syntax, 3 arity) in `tests/e2e/cases/errors.bt`
+- **Only 9 error test cases** exist in `tests/e2e/cases/errors.bt`
 - **Zero fuzz testing** — no `cargo-fuzz`, `proptest`, or equivalent
 - **No property-based testing** — parser invariants (always returns AST, spans always valid, diagnostics non-empty for errors) are untested
 - **No near-miss syntax testing** — typos, wrong brackets, missing colons, misplaced keywords
@@ -48,14 +48,13 @@ Coverage-guided fuzzing feeds random bytes to the parser. The parser must **neve
 // fuzz/fuzz_targets/parse_arbitrary.rs
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use beamtalk_core::source_analysis::parser;
-use beamtalk_core::source_analysis::lexer;
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 fuzz_target!(|data: &[u8]| {
     // Only test valid UTF-8 (parser expects strings)
     if let Ok(source) = std::str::from_utf8(data) {
-        let tokens = lexer::lex(source);
-        let (_module, _diagnostics) = parser::parse(tokens);
+        let tokens = lex_with_eof(source);
+        let (_module, _diagnostics) = parse(tokens);
         // Success = no panic. That's the only assertion.
     }
 });
@@ -79,13 +78,14 @@ Generate syntactically-structured (but sometimes invalid) Beamtalk and verify pa
 
 ```rust
 use proptest::prelude::*;
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 // Property 1: Parser never panics on any string
 proptest! {
     #[test]
     fn parser_never_panics(input in "\\PC*") {
-        let tokens = lexer::lex(&input);
-        let (_module, _diagnostics) = parser::parse(tokens);
+        let tokens = lex_with_eof(&input);
+        let (_module, _diagnostics) = parse(tokens);
     }
 }
 
@@ -93,10 +93,10 @@ proptest! {
 proptest! {
     #[test]
     fn diagnostic_spans_within_input(input in gen_near_valid_beamtalk()) {
-        let tokens = lexer::lex(&input);
-        let (_module, diagnostics) = parser::parse(tokens);
+        let tokens = lex_with_eof(&input);
+        let (_module, diagnostics) = parse(tokens);
         for d in &diagnostics {
-            prop_assert!(d.span.end <= input.len(),
+            prop_assert!(d.span.end() as usize <= input.len(),
                 "Span {:?} exceeds input length {}", d.span, input.len());
         }
     }
@@ -106,12 +106,12 @@ proptest! {
 proptest! {
     #[test]
     fn errors_produce_diagnostics(input in gen_invalid_beamtalk()) {
-        let tokens = lexer::lex(&input);
-        let (module, diagnostics) = parser::parse(tokens);
-        if module.has_error_nodes() {
-            prop_assert!(!diagnostics.is_empty(),
-                "AST has error nodes but no diagnostics reported");
-        }
+        let tokens = lex_with_eof(&input);
+        let (_module, diagnostics) = parse(tokens);
+        prop_assert!(
+            !diagnostics.is_empty(),
+            "Invalid input did not produce any diagnostics"
+        );
     }
 }
 
@@ -119,8 +119,8 @@ proptest! {
 proptest! {
     #[test]
     fn error_messages_are_user_facing(input in gen_near_valid_beamtalk()) {
-        let tokens = lexer::lex(&input);
-        let (_module, diagnostics) = parser::parse(tokens);
+        let tokens = lex_with_eof(&input);
+        let (_module, diagnostics) = parse(tokens);
         for d in &diagnostics {
             prop_assert!(!d.message.is_empty(), "Empty error message");
             prop_assert!(!d.message.contains("TokenKind"),
@@ -143,8 +143,11 @@ fn gen_near_valid_beamtalk() -> impl Strategy<Value = String> {
         gen_block().prop_map(|b| b.replace(']', ')')),
         // Missing keyword colons
         gen_keyword_msg().prop_map(|m| m.replace(':', "")),
-        // Truncated input
-        gen_valid_expr().prop_map(|e| e[..e.len()/2].to_string()),
+        // Truncated input (character-based to avoid invalid UTF-8 slices)
+        gen_valid_expr().prop_map(|e| {
+            let mid = e.chars().count() / 2;
+            e.chars().take(mid).collect()
+        }),
         // Duplicated operators
         gen_binary_expr().prop_map(|e| e.replace("+", "+ +")),
     ]
