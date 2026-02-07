@@ -238,6 +238,7 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
 struct DaemonManager {
     daemon_process: Option<Child>,
     beam_process: Option<Child>,
+    cover_enabled: bool,
 }
 
 /// Build the `-eval` command for the BEAM node.
@@ -248,7 +249,10 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
     if cover {
         format!(
             "cover:start(), \
-             cover:compile_beam_directory(\"{ebin}\"), \
+             case cover:compile_beam_directory(\"{ebin}\") of \
+                 {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
+                 _ -> ok \
+             end, \
              {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
              WaitFun = fun Wait() -> \
                  case filelib:is_file(\"{signal}\") of \
@@ -257,7 +261,10 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  end \
              end, \
              WaitFun(), \
-             cover:export(\"{export}\"), \
+             case cover:export(\"{export}\") of \
+                 ok -> ok; \
+                 ExpErr -> io:format(standard_error, \"Cover export failed: ~p~n\", [ExpErr]), halt(1) \
+             end, \
              cover:stop(), \
              init:stop()."
         )
@@ -273,6 +280,7 @@ impl DaemonManager {
     /// and not start its own processes. This is useful for development but means
     /// the test won't manage the lifecycle. If the external REPL fails or stops
     /// mid-test, errors may be confusing. For CI, always start with a clean state.
+    #[expect(clippy::too_many_lines, reason = "startup orchestrates daemon + BEAM + cover setup")]
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
@@ -280,6 +288,7 @@ impl DaemonManager {
             return Self {
                 daemon_process: None,
                 beam_process: None,
+                cover_enabled: false,
             };
         }
 
@@ -352,20 +361,24 @@ impl DaemonManager {
         let _ = fs::remove_file(&cover_signal_path);
         let eval_cmd = beam_eval_cmd(
             cover_enabled,
-            ebin_dir.to_str().unwrap_or(""),
-            cover_signal_path.to_str().unwrap_or(""),
-            cover_export_path.to_str().unwrap_or(""),
+            ebin_dir.to_str().expect("ebin path must be UTF-8"),
+            cover_signal_path
+                .to_str()
+                .expect("signal path must be UTF-8"),
+            cover_export_path
+                .to_str()
+                .expect("export path must be UTF-8"),
         );
 
         let beam_child = Command::new("erl")
             .args([
                 "-noshell",
                 "-pa",
-                ebin_dir.to_str().unwrap_or(""),
+                ebin_dir.to_str().expect("ebin path must be UTF-8"),
                 "-pa",
-                jsx_dir.to_str().unwrap_or(""),
+                jsx_dir.to_str().expect("jsx path must be UTF-8"),
                 "-pa",
-                stdlib_dir.to_str().unwrap_or(""),
+                stdlib_dir.to_str().expect("stdlib path must be UTF-8"),
                 "-eval",
                 &eval_cmd,
             ])
@@ -383,6 +396,7 @@ impl DaemonManager {
                 return Self {
                     daemon_process: Some(daemon_child),
                     beam_process: Some(beam_child),
+                    cover_enabled,
                 };
             }
             retries -= 1;
@@ -393,6 +407,7 @@ impl DaemonManager {
         Self {
             daemon_process: Some(daemon_child),
             beam_process: Some(beam_child),
+            cover_enabled,
         }
     }
 
@@ -406,7 +421,7 @@ impl DaemonManager {
     )]
     fn stop(&mut self) {
         if let Some(ref mut child) = self.beam_process {
-            if env::var("E2E_COVER").is_ok() {
+            if self.cover_enabled {
                 // Signal the BEAM to export cover data and shut down gracefully
                 // by creating the signal file it polls for.
                 let runtime = runtime_dir();
@@ -415,9 +430,13 @@ impl DaemonManager {
                 let _ = fs::write(&signal, "stop");
                 // Wait up to 30s for BEAM to export and call init:stop()
                 let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                let mut clean_exit = false;
                 loop {
                     match child.try_wait() {
-                        Ok(Some(_)) => break,
+                        Ok(Some(_)) => {
+                            clean_exit = true;
+                            break;
+                        }
                         Ok(None) if std::time::Instant::now() < deadline => {
                             std::thread::sleep(Duration::from_millis(200));
                         }
@@ -430,7 +449,13 @@ impl DaemonManager {
                     }
                 }
                 let _ = fs::remove_file(&signal);
-                eprintln!("E2E: Cover data exported.");
+                if clean_exit {
+                    eprintln!("E2E: Cover data exported.");
+                } else {
+                    eprintln!(
+                        "E2E: Warning - cover data may be incomplete (BEAM was force-killed)."
+                    );
+                }
             } else {
                 eprintln!("E2E: Stopping BEAM...");
                 // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
