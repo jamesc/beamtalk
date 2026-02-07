@@ -36,7 +36,8 @@ stdlib_test_() ->
         {"init is idempotent", fun init_idempotent_test/0},
         {"Integer class is registered", fun integer_class_registered_test/0},
         {"String class is registered", fun string_class_registered_test/0},
-        {"Boolean class is registered", fun boolean_class_registered_test/0},
+        {"True class is registered", fun true_class_registered_test/0},
+        {"False class is registered", fun false_class_registered_test/0},
         {"UndefinedObject class is registered", fun nil_class_registered_test/0},
         {"Block class is registered", fun block_class_registered_test/0},
         {"Tuple class is registered", fun tuple_class_registered_test/0},
@@ -62,7 +63,7 @@ init_registers_all_classes_test() ->
     
     %% After init, should have bootstrap + stdlib classes
     ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(11, length(ClassesAfter)),  % 3 bootstrap + 8 stdlib
+    ?assertEqual(13, length(ClassesAfter)),  % 3 bootstrap + 10 stdlib
     
     %% Verify expected classes are present
     ?assert(lists:member('ProtoObject', ClassesAfter)),
@@ -70,10 +71,13 @@ init_registers_all_classes_test() ->
     ?assert(lists:member('Actor', ClassesAfter)),
     ?assert(lists:member('Integer', ClassesAfter)),
     ?assert(lists:member('String', ClassesAfter)),
-    ?assert(lists:member('Boolean', ClassesAfter)),
+    ?assert(lists:member('True', ClassesAfter)),
+    ?assert(lists:member('False', ClassesAfter)),
     ?assert(lists:member('UndefinedObject', ClassesAfter)),
     ?assert(lists:member('Block', ClassesAfter)),
     ?assert(lists:member('Tuple', ClassesAfter)),
+    ?assert(lists:member('Float', ClassesAfter)),
+    ?assert(lists:member('Transcript', ClassesAfter)),
     ?assert(lists:member('Beamtalk', ClassesAfter)).
 
 init_idempotent_test() ->
@@ -83,7 +87,7 @@ init_idempotent_test() ->
     
     %% Should still have same number of classes (no duplicates)
     Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(11, length(Classes)).
+    ?assertEqual(13, length(Classes)).
 
 integer_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
@@ -97,11 +101,17 @@ string_class_registered_test() ->
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('String', beamtalk_object_class:class_name(Pid)).
 
-boolean_class_registered_test() ->
+true_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Boolean'),
+    Pid = beamtalk_object_class:whereis_class('True'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Boolean', beamtalk_object_class:class_name(Pid)).
+    ?assertEqual('True', beamtalk_object_class:class_name(Pid)).
+
+false_class_registered_test() ->
+    ok = beamtalk_stdlib:init(),
+    Pid = beamtalk_object_class:whereis_class('False'),
+    ?assertNotEqual(undefined, Pid),
+    ?assertEqual('False', beamtalk_object_class:class_name(Pid)).
 
 nil_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
@@ -162,7 +172,8 @@ beamtalk_all_classes_test() ->
     %% All stdlib classes should be present
     ?assert(lists:member('Integer', Classes)),
     ?assert(lists:member('String', Classes)),
-    ?assert(lists:member('Boolean', Classes)),
+    ?assert(lists:member('True', Classes)),
+    ?assert(lists:member('False', Classes)),
     ?assert(lists:member('Block', Classes)),
     ?assert(lists:member('Beamtalk', Classes)),
     ?assert(lists:member('ProtoObject', Classes)),

@@ -97,6 +97,7 @@ mod gen_server;
 mod intrinsics;
 mod operators;
 pub mod primitive_bindings;
+mod primitive_implementations;
 mod repl_codegen;
 pub mod selector_mangler;
 mod state_codegen;
@@ -960,12 +961,18 @@ impl CoreErlangGenerator {
 
     /// Generates code for an `@primitive` expression (ADR 0007 Phase 3).
     ///
-    /// This handles stdlib method bodies that delegate to runtime primitives.
-    /// Both quoted and unquoted primitives generate a dispatch call to the
-    /// class's runtime module. The distinction between selector-based and
-    /// structural intrinsics matters at the call site (in `dispatch_codegen`),
-    /// not in the method body.
-    fn generate_primitive(&mut self, name: &str, _is_quoted: bool) -> Result<()> {
+    /// For **selector-based** primitives (quoted, e.g., `@primitive '+'`), generates
+    /// direct Erlang BIF calls when a known implementation exists. This makes the
+    /// compiled stdlib module self-sufficient — no delegation to hand-written
+    /// Erlang dispatch modules.
+    ///
+    /// Falls back to a `does_not_understand` error for selectors with no known
+    /// BIF implementation.
+    ///
+    /// For **structural intrinsics** (unquoted, e.g., `@primitive blockValue`),
+    /// these are handled at the call site by `dispatch_codegen`, not here.
+    /// The method body for structural intrinsics is never directly called.
+    fn generate_primitive(&mut self, name: &str, is_quoted: bool) -> Result<()> {
         let class_name = self
             .class_identity
             .as_ref()
@@ -975,6 +982,25 @@ impl CoreErlangGenerator {
                     "@primitive '{name}' used outside of a class context"
                 ))
             })?;
+
+        // BT-340: For selector-based primitives, try to emit a direct BIF call
+        // instead of delegating through a hand-written dispatch module.
+        if is_quoted {
+            let params = self.current_method_params.clone();
+            if let Some(()) = primitive_implementations::generate_primitive_bif(
+                &mut self.output,
+                &class_name,
+                name,
+                &params,
+            ) {
+                return Ok(());
+            }
+        }
+
+        // Fallback: delegate to runtime dispatch module.
+        // This path is used for:
+        // - Structural intrinsics (unquoted) — handled at call site, body is placeholder
+        // - Selector-based primitives with no known BIF (unimplemented or complex)
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         write!(
@@ -3702,10 +3728,8 @@ end
 
         let result = generator.generate_primitive("+", true);
         assert!(result.is_ok());
-        assert_eq!(
-            generator.output,
-            "call 'beamtalk_integer':'dispatch'('+', [Other], Self)"
-        );
+        // BT-340: Now emits direct Erlang BIF instead of dispatch delegation
+        assert_eq!(generator.output, "call 'erlang':'+'(Self, Other)");
     }
 
     #[test]

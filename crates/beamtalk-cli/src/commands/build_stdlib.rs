@@ -190,9 +190,12 @@ fn is_up_to_date(source: &Utf8Path, beam: &Utf8Path) -> bool {
 
 /// Extract the module name from a `.bt` file path.
 ///
-/// Converts the file stem to a prefixed, lowercase module name to avoid
-/// shadowing Erlang built-in modules on case-insensitive filesystems.
-/// E.g., `String.bt` → `bt_stdlib_string`, `SequenceableCollection.bt` → `bt_stdlib_sequenceable_collection`.
+/// For **primitive types** (Integer, Float, String, True, False, `UndefinedObject`, Block),
+/// uses `beamtalk_*` prefix to replace hand-written Erlang dispatch modules
+/// with the compiled stdlib (BT-340).
+///
+/// For other types, uses `bt_stdlib_*` prefix to avoid shadowing Erlang
+/// built-in modules on case-insensitive filesystems (BT-333).
 fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     let stem = path
         .file_stem()
@@ -207,7 +210,27 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     }
 
     let snake = beamtalk_core::codegen::core_erlang::to_module_name(stem);
-    Ok(format!("bt_stdlib_{snake}"))
+
+    // BT-340: Primitive types use beamtalk_* prefix so the compiled stdlib
+    // module directly replaces the hand-written Erlang dispatch module.
+    if is_primitive_type(stem) {
+        Ok(format!("beamtalk_{snake}"))
+    } else {
+        Ok(format!("bt_stdlib_{snake}"))
+    }
+}
+
+/// Returns true if the class name identifies a primitive type.
+///
+/// Primitive types are backed by native Erlang values and need `dispatch/3`
+/// for runtime dispatch via `beamtalk_primitive:send/3`.
+///
+/// NOTE: Must stay in sync with `value_type_codegen::is_primitive_type()`.
+fn is_primitive_type(class_name: &str) -> bool {
+    matches!(
+        class_name,
+        "Integer" | "Float" | "String" | "True" | "False" | "UndefinedObject" | "Block"
+    )
 }
 
 /// Compile a single stdlib `.bt` file to Core Erlang.
@@ -310,7 +333,7 @@ mod tests {
     #[test]
     fn test_module_name_from_path() {
         let path = Utf8PathBuf::from("lib/Integer.bt");
-        assert_eq!(module_name_from_path(&path).unwrap(), "bt_stdlib_integer");
+        assert_eq!(module_name_from_path(&path).unwrap(), "beamtalk_integer");
     }
 
     #[test]
@@ -441,8 +464,8 @@ mod tests {
 
         let content = fs::read_to_string(app_file).unwrap();
         assert!(content.contains("beamtalk_stdlib"));
-        assert!(content.contains("'bt_stdlib_integer'"));
-        assert!(content.contains("'bt_stdlib_string'"));
+        assert!(content.contains("'beamtalk_integer'"));
+        assert!(content.contains("'beamtalk_string'"));
     }
 
     #[test]

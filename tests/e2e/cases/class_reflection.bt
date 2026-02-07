@@ -176,11 +176,11 @@ integerClass := Beamtalk classNamed: #Integer
 integerClass class_name
 // => Integer
 
-booleanClass := Beamtalk classNamed: #Boolean
+trueClass := Beamtalk classNamed: #True
 // => _
 
-booleanClass class_name
-// => Boolean
+trueClass class_name
+// => True
 
 // ===========================================================================
 // IMPLEMENTATION STATUS

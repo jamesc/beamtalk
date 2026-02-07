@@ -22,4 +22,7 @@ Object subclass: Block
   on: errorBlock => @primitive 'on:'
   ensure: cleanupBlock => @primitive 'ensure:'
 
+  // Reflection
+  arity => @primitive 'arity'
+
   describe => 'a Block'

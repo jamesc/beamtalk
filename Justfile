@@ -28,9 +28,8 @@ clean-all: clean clean-erlang
 # Build Tasks
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Build all targets (Rust + Erlang)
-# TODO: Chain build-stdlib once lib/*.bt files use @primitive syntax (BT-290)
-build: build-rust build-erlang
+# Build all targets (Rust + Erlang + stdlib)
+build: build-rust build-erlang build-stdlib
 
 # Build Rust workspace
 build-rust:
@@ -123,9 +122,9 @@ test-runtime:
     set -euo pipefail
     cd runtime
     echo "🧪 Running Erlang runtime unit tests..."
-    # rebar3 auto-discovers all *_tests.erl modules
+    # Only run beamtalk_runtime tests (stdlib has no test modules)
     # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
-    if ! OUTPUT=$(rebar3 eunit 2>&1); then
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime 2>&1); then
         # Check if tests actually failed (as opposed to being cancelled)
         if echo "$OUTPUT" | grep -qE "[1-9][0-9]* failures"; then
             # Show full output only on real failures
@@ -185,8 +184,8 @@ coverage-runtime:
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    # rebar3 auto-discovers all *_tests.erl modules
-    if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
+    # Only run beamtalk_runtime tests (stdlib has no test modules)
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime --cover 2>&1); then
         echo "$OUTPUT"
         # Allow exactly 6 known failures (BT-235 super dispatch tests)
         if echo "$OUTPUT" | grep -qE "[7-9] failures|[1-9][0-9]+ failures"; then
