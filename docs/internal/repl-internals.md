@@ -223,12 +223,14 @@ sequenceDiagram
     Server->>BEAM: compile:file/2 (from_core, binary)
     BEAM-->>Server: {ok, Module, Binary}
     Server->>BEAM: code:load_binary/3
+    Server->>Server: Redirect group_leader (I/O capture)
     Server->>BEAM: apply(Module, eval, [Bindings])
-    BEAM-->>Server: Result value
+    BEAM-->>Server: Result value + captured stdout
+    Server->>Server: Restore group_leader
     Server->>Server: Update bindings (if assignment)
     Server->>Server: code:purge + code:delete (cleanup)
-    Server-->>CLI: {"type":"result","value":"..."}
-    CLI-->>User: Display formatted result
+    Server-->>CLI: {"type":"result","value":"...","output":"..."}
+    CLI-->>User: Display captured output, then result
 ```
 
 ### Step-by-Step Details
@@ -296,6 +298,17 @@ compile:file(TempFile, [from_core, binary, return_errors])
 code:load_binary(beamtalk_repl_eval_5, "", Binary),
 Result = apply(beamtalk_repl_eval_5, eval, [Bindings])
 ```
+
+#### 6a. I/O Capture
+
+During evaluation, stdout is captured by temporarily redirecting the process's group leader to an I/O capture process. Any output from `io:put_chars`, `io:format`, or `Transcript show:` is accumulated and returned alongside the result:
+
+```erlang
+{ok, Result, Output, NewState} = beamtalk_repl_eval:do_eval(Expression, State)
+%% Output is a binary containing captured stdout (<<>> if none)
+```
+
+The captured output is included in the protocol response as the `output` field (omitted when empty), and the CLI displays it before the result value:
 
 #### 7. Binding Update
 

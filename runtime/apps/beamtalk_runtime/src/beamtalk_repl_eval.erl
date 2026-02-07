@@ -27,7 +27,8 @@
          format_formatted_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
-         strip_internal_bindings/1, parse_file_compile_result/1]).
+         strip_internal_bindings/1, parse_file_compile_result/1,
+         capture_io/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -40,7 +41,7 @@
 %% This is the core of the REPL - compile, load, and execute.
 %% If the result is a Future PID, automatically awaits it before returning.
 -spec do_eval(string(), beamtalk_repl_state:state()) -> 
-    {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+    {ok, term(), binary(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
     %% Generate unique module name for this evaluation
     Counter = beamtalk_repl_state:get_eval_counter(State),
@@ -66,7 +67,11 @@ do_eval(Expression, State) ->
                             undefined -> Bindings;
                             _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
                         end,
-                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
+                        %% Capture stdout (io:put_chars) during evaluation
+                        {CapturedOutput, {RawResult, UpdatedBindings}} =
+                            capture_io(fun() ->
+                                apply(ModuleName, eval, [BindingsWithRegistry])
+                            end),
                         %% Strip internal keys before persisting bindings
                         CleanBindings = strip_internal_bindings(UpdatedBindings),
                         %% Auto-await futures for synchronous REPL experience
@@ -85,11 +90,11 @@ do_eval(Expression, State) ->
                                         %% Assignment: merge updated bindings with new assignment
                                         NewBindings = maps:put(VarName, Result, CleanBindings),
                                         FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
-                                        {ok, Result, FinalState};
+                                        {ok, Result, CapturedOutput, FinalState};
                                     none ->
                                         %% No assignment: use updated bindings from mutations
                                         FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                                        {ok, Result, FinalState}
+                                        {ok, Result, CapturedOutput, FinalState}
                                 end
                         end
                     catch
@@ -696,3 +701,62 @@ should_purge_module(ModuleName, RegistryPid) ->
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
     maps:remove(?INTERNAL_REGISTRY_KEY, Bindings).
+
+%%% ============================================================================
+%%% I/O Capture
+%%% ============================================================================
+
+%% @doc Capture stdout output during execution of a function.
+%%
+%% Redirects the group leader to an I/O capture process, runs the function,
+%% and returns {CapturedOutput, FunctionResult}. This allows the REPL to
+%% see output from Transcript show: and other io:put_chars calls.
+-spec capture_io(fun(() -> T)) -> {binary(), T} when T :: term().
+capture_io(Fun) ->
+    OldGL = group_leader(),
+    CaptureProc = spawn_link(fun() -> io_capture_loop([]) end),
+    group_leader(CaptureProc, self()),
+    try
+        Result = Fun(),
+        Output = get_captured_output(CaptureProc),
+        {Output, Result}
+    catch
+        Class:Reason:Stack ->
+            %% Restore group leader before re-raising
+            group_leader(OldGL, self()),
+            CaptureProc ! stop,
+            erlang:raise(Class, Reason, Stack)
+    after
+        group_leader(OldGL, self()),
+        CaptureProc ! stop
+    end.
+
+%% @private
+%% I/O server process that accumulates put_chars output.
+io_capture_loop(Acc) ->
+    receive
+        {io_request, From, ReplyAs, {put_chars, _Encoding, Chars}} ->
+            From ! {io_reply, ReplyAs, ok},
+            io_capture_loop([Acc, Chars]);
+        {io_request, From, ReplyAs, {put_chars, Chars}} ->
+            From ! {io_reply, ReplyAs, ok},
+            io_capture_loop([Acc, Chars]);
+        {io_request, From, ReplyAs, _Other} ->
+            %% Handle other io requests (e.g., get_geometry) gracefully
+            From ! {io_reply, ReplyAs, {error, enotsup}},
+            io_capture_loop(Acc);
+        {get_captured, From} ->
+            From ! {captured_output, iolist_to_binary(Acc)},
+            io_capture_loop(Acc);
+        stop ->
+            ok
+    end.
+
+%% @private
+get_captured_output(Pid) ->
+    Pid ! {get_captured, self()},
+    receive
+        {captured_output, Data} -> Data
+    after 1000 ->
+        <<>>
+    end.

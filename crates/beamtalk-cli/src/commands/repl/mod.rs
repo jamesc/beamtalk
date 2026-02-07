@@ -90,6 +90,8 @@ struct ReplResponse {
     status: Option<Vec<String>>,
     /// Result value (both formats)
     value: Option<serde_json::Value>,
+    /// Captured stdout output from evaluation (e.g., Transcript show:)
+    output: Option<String>,
     /// Legacy: error message
     message: Option<String>,
     /// New protocol: error message
@@ -567,8 +569,20 @@ pub fn run(
                             if let Some(msg) = response.error_message() {
                                 eprintln!("Error: {msg}");
                             }
-                        } else if let Some(value) = response.value {
-                            println!("{}", format_value(&value));
+                        } else {
+                            // Print captured stdout (e.g., from Transcript show:)
+                            if let Some(ref output) = response.output {
+                                if !output.is_empty() {
+                                    print!("{output}");
+                                    // Ensure output ends with newline before printing value
+                                    if !output.ends_with('\n') {
+                                        println!();
+                                    }
+                                }
+                            }
+                            if let Some(value) = response.value {
+                                println!("{}", format_value(&value));
+                            }
                         }
                     }
                     Err(e) => {
