@@ -313,6 +313,40 @@ This gives us Smalltalk's elegant control flow WITH mutations that actually work
 
 See [beamtalk-language-features.md](beamtalk-language-features.md#control-flow-and-mutations-bt-90) for full specification.
 
+### Class Definition: Message Send → Syntax
+
+**Before (Smalltalk):**
+```smalltalk
+Object subclass: #Counter
+    instanceVariableNames: 'value'
+    classVariableNames: ''
+    package: 'MyApp'
+```
+
+In Smalltalk, `Object subclass: #Counter` is a **real message send** to the `Object` class object. The class is created dynamically at runtime. Classes are first-class objects with a full metaclass protocol.
+
+**After (Beamtalk):**
+```
+Object subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1
+```
+
+In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message send. The parser recognizes this pattern and produces a `ClassDefinition` AST node. The class is compiled to a BEAM module — there is no runtime class creation.
+
+**Why change:**
+- BEAM modules are compiled artifacts, not runtime-created objects
+- Erlang has no concept of "create a module at runtime" (hot code loading swaps entire modules, but doesn't create them from scratch)
+- Compile-time class definitions enable static analysis, better error messages, and IDE support
+- The `subclass:` syntax is familiar to Smalltalk developers while being honest about the compile-time semantics
+
+**What this means:**
+- You cannot create classes dynamically in the REPL (unlike Smalltalk's workspace)
+- Class hierarchy is fixed at compile time
+- No metaclass protocol (yet) — `Counter class` returns a name, not a mutable class object
+
+**Future consideration:** If Beamtalk gains a full metaclass protocol (BT-162: BEAM Object Model), `subclass:` could potentially become a real message send that creates classes at runtime via dynamic module generation. This would require significant runtime infrastructure but would restore full Smalltalk semantics.
+
 ---
 
 ## Complete Syntax Summary
@@ -361,6 +395,7 @@ Use parentheses to override: `(2 + 3) * 4`
 | Math precedence | Left-to-right | Standard PEMDAS |
 | Statement terminator | Required `.` | Optional (newline) |
 | String interpolation | None | `"Hello, {name}!"` |
+| Class definition | `Object subclass: #Counter` (message send) | `Object subclass: Counter` (syntax) |
 | Keyword messages | ✅ Same | ✅ Same |
 | Blocks | ✅ Same | ✅ Same |
 | Cascades | ✅ Same | ✅ Same |
