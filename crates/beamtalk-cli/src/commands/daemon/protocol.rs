@@ -282,15 +282,17 @@ fn handle_compile(
     // Update the language service
     service.update_file(file_path.clone(), source.clone());
 
-    // Get diagnostics from language service
+    // Get diagnostics from language service (includes parse errors)
     let mut core_diagnostics = service.diagnostics(&file_path);
 
-    // Parse module for additional validation
+    // Parse module again for primitive validation (parse diagnostics already
+    // captured by language service above, so we can safely discard them here)
     let tokens = lex_with_eof(&source);
     let (module, _) = parse(tokens);
 
     // Run @primitive validation (ADR 0007)
-    let options = beamtalk_core::CompilerOptions::default(); // Non-stdlib, primitives disallowed
+    // Default options: stdlib_mode=false, allow_primitives=false
+    let options = beamtalk_core::CompilerOptions::default();
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
             &module, &options,
@@ -489,7 +491,8 @@ fn handle_compile_expression(
             &known_vars,
         );
 
-    // Run @primitive validation (ADR 0007) - REPL is never stdlib
+    // Run @primitive validation (ADR 0007)
+    // Default options: stdlib_mode=false (REPL is never stdlib), allow_primitives=false
     let options = beamtalk_core::CompilerOptions::default();
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
