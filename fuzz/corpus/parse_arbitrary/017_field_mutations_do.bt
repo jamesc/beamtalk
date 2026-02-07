@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for field mutations (BT-98)
+//
+// TODO: Re-enable sumArray: test once collection literals are implemented
+// Cannot use [1, 2, 3] (conflicts with block syntax) or {1, 2, 3} (not implemented)
+//
+// For now, test field mutations directly with setValue: method
+
+// @load tests/e2e/fixtures/field_mutation_counter.bt
+
+counter := FieldMutationCounter spawn
+// => _
+
+counter getValue
+// => 0
+
+counter setValue: 5
+// => _
+
+counter getValue
+// => 5
+
+counter setValue: 10
+// => _
+
+counter getValue
+// => 10

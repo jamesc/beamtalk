@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// LoggingCounter demonstrates the 'super' keyword for calling superclass methods
+//
+// This class extends Counter and adds logging functionality.
+// When increment is called, it logs the action and then delegates
+// to the superclass implementation using 'super'.
+//
+// IMPORTANT: Load counter.bt first to define the Counter class:
+//   > :load examples/counter.bt
+//   > :load examples/logging_counter.bt
+
+Counter subclass: LoggingCounter
+  
+  // Override increment to add logging before delegating to superclass
+  // The 'super' keyword calls Counter's increment method
+  increment => 
+    // TODO: Add actual logging when we have IO/logging support
+    // For now, just delegate to super
+    super increment
