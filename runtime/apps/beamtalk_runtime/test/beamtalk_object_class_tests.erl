@@ -58,7 +58,13 @@ teardown(_) ->
          beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
          beamtalk_class_TestClassA, beamtalk_class_TestClassB,
          beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
-         beamtalk_class_CounterNoMethods]
+         beamtalk_class_CounterNoMethods,
+         beamtalk_class_RootTestClass, beamtalk_class_TestParentClass,
+         beamtalk_class_TestChildClass, beamtalk_class_TestArityParent,
+         beamtalk_class_AsyncTestClass, beamtalk_class_AsyncSuperTest,
+         beamtalk_class_AsyncNameTest, beamtalk_class_AsyncModTest,
+         beamtalk_class_AsyncUnkTest, beamtalk_class_AsyncIgnoreTest,
+         beamtalk_class_InfoTestClass, beamtalk_class_TermTestClass]
     ),
     ok.
 
@@ -451,3 +457,317 @@ duplicate_registration_test_() ->
 whereis_nonexistent_class_test() ->
     Result = beamtalk_object_class:whereis_class('NonexistentClass'),
     ?assertEqual(undefined, Result).
+
+%%====================================================================
+%% BT-344: Super dispatch tests
+%%====================================================================
+
+super_dispatch_missing_class_field_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% State without __class__ field
+              State = #{value => 0},
+              Result = beamtalk_object_class:super_dispatch(State, increment, []),
+              ?assertMatch({error, missing_class_field_in_state}, Result)
+          end)]
+     end}.
+
+super_dispatch_class_not_found_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% State with class that doesn't exist
+              State = #{'__class__' => 'NonexistentClass999'},
+              Result = beamtalk_object_class:super_dispatch(State, increment, []),
+              ?assertMatch({error, {class_not_found, 'NonexistentClass999'}}, Result)
+          end)]
+     end}.
+
+super_dispatch_no_superclass_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Create a root class (no superclass)
+              ClassInfo = #{
+                  name => 'RootTestClass',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, _Pid} = beamtalk_object_class:start_link('RootTestClass', ClassInfo),
+              State = #{'__class__' => 'RootTestClass'},
+              Result = beamtalk_object_class:super_dispatch(State, someMethod, []),
+              ?assertMatch({error, {no_superclass, 'RootTestClass', someMethod}}, Result)
+          end)]
+     end}.
+
+%%====================================================================
+%% BT-344: create_subclass tests
+%%====================================================================
+
+create_subclass_nonexistent_superclass_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              Result = beamtalk_object_class:create_subclass(
+                  'NoSuchSuperclass', 'TestChild', #{instance_variables => []}),
+              ?assertMatch({error, {superclass_not_found, 'NoSuchSuperclass'}}, Result)
+          end)]
+     end}.
+
+create_subclass_success_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Create a parent class first
+              ParentInfo = #{
+                  name => 'TestParentClass',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, _ParentPid} = beamtalk_object_class:start_link('TestParentClass', ParentInfo),
+
+              %% Create subclass
+              Result = beamtalk_object_class:create_subclass(
+                  'TestParentClass', 'TestChildClass', #{
+                      instance_variables => [x],
+                      instance_methods => #{
+                          'getX' => fun(_Self, [], State) ->
+                              {reply, maps:get(x, State, nil), State}
+                          end
+                      }
+                  }),
+              ?assertMatch({ok, _Pid}, Result),
+
+              %% Verify child class is registered
+              ?assertNotEqual(undefined, beamtalk_object_class:whereis_class('TestChildClass')),
+
+              %% Verify superclass
+              ChildPid = beamtalk_object_class:whereis_class('TestChildClass'),
+              ?assertEqual('TestParentClass', beamtalk_object_class:superclass(ChildPid))
+          end)]
+     end}.
+
+create_subclass_invalid_method_arity_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              %% Create a parent class
+              ParentInfo = #{
+                  name => 'TestArityParent',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, _ParentPid} = beamtalk_object_class:start_link('TestArityParent', ParentInfo),
+
+              %% Try to create subclass with wrong arity method (should be 3)
+              Result = beamtalk_object_class:create_subclass(
+                  'TestArityParent', 'TestArityChild', #{
+                      instance_methods => #{
+                          'bad' => fun(X) -> X end  % Arity 1, not 3
+                      }
+                  }),
+              ?assertMatch({error, _}, Result)
+          end)]
+     end}.
+
+%%====================================================================
+%% BT-344: Async cast dispatch (Future protocol) tests
+%%====================================================================
+
+async_cast_methods_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncTestClass',
+                  module => test_class,
+                  superclass => none,
+                  instance_methods => #{
+                      increment => #{arity => 0}
+                  }
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncTestClass', ClassInfo),
+
+              %% Test async methods query
+              FuturePid = self(),
+              gen_server:cast(ClassPid, {methods, [], FuturePid}),
+              receive
+                  {resolve, Methods} ->
+                      ?assert(is_list(Methods)),
+                      ?assert(lists:member(increment, Methods))
+              after 1000 ->
+                  ?assert(false)
+              end
+          end)]
+     end}.
+
+async_cast_superclass_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncSuperTest',
+                  module => test_class,
+                  superclass => 'Object'
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncSuperTest', ClassInfo),
+
+              FuturePid = self(),
+              gen_server:cast(ClassPid, {superclass, [], FuturePid}),
+              receive
+                  {resolve, Super} ->
+                      ?assertEqual('Object', Super)
+              after 1000 ->
+                  ?assert(false)
+              end
+          end)]
+     end}.
+
+async_cast_class_name_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncNameTest',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncNameTest', ClassInfo),
+
+              FuturePid = self(),
+              gen_server:cast(ClassPid, {class_name, [], FuturePid}),
+              receive
+                  {resolve, Name} ->
+                      ?assertEqual('AsyncNameTest', Name)
+              after 1000 ->
+                  ?assert(false)
+              end
+          end)]
+     end}.
+
+async_cast_module_name_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncModTest',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncModTest', ClassInfo),
+
+              FuturePid = self(),
+              gen_server:cast(ClassPid, {module_name, [], FuturePid}),
+              receive
+                  {resolve, Mod} ->
+                      ?assertEqual(test_class, Mod)
+              after 1000 ->
+                  ?assert(false)
+              end
+          end)]
+     end}.
+
+async_cast_unknown_message_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncUnkTest',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncUnkTest', ClassInfo),
+
+              FuturePid = self(),
+              gen_server:cast(ClassPid, {unknownSelector, [arg1], FuturePid}),
+              receive
+                  {reject, {error, {unknown_class_message, unknownSelector}}} ->
+                      ok
+              after 1000 ->
+                  ?assert(false)
+              end
+          end)]
+     end}.
+
+async_cast_non_tuple_ignored_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'AsyncIgnoreTest',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('AsyncIgnoreTest', ClassInfo),
+
+              gen_server:cast(ClassPid, some_random_atom),
+              timer:sleep(50),
+              ?assert(is_process_alive(ClassPid))
+          end)]
+     end}.
+
+%%====================================================================
+%% BT-344: handle_info / terminate / code_change tests
+%%====================================================================
+
+handle_info_unknown_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'InfoTestClass',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('InfoTestClass', ClassInfo),
+
+              ClassPid ! random_info_message,
+              timer:sleep(50),
+              ?assert(is_process_alive(ClassPid))
+          end)]
+     end}.
+
+terminate_graceful_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [?_test(begin
+              ClassInfo = #{
+                  name => 'TermTestClass',
+                  module => test_class,
+                  superclass => none
+              },
+              {ok, ClassPid} = beamtalk_object_class:start_link('TermTestClass', ClassInfo),
+              gen_server:stop(ClassPid),
+              timer:sleep(50),
+              ?assertNot(is_process_alive(ClassPid))
+          end)]
+     end}.

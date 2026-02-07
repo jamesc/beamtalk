@@ -417,3 +417,120 @@ format_error_generic_test() ->
     Message = maps:get(<<"message">>, Decoded),
     %% Generic errors are formatted with io_lib:format("~p", [Reason])
     ?assertMatch(<<"some_unknown_error">>, Message).
+
+%%% BT-343: handle_info client_request tests
+
+handle_info_client_request_clear_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    try
+        Request = <<"{\"type\": \"clear\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
+
+handle_info_client_request_bindings_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    try
+        Request = <<"{\"type\": \"bindings\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)),
+                ?assert(maps:is_key(<<"bindings">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
+
+handle_info_client_request_actors_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    try
+        Request = <<"{\"type\": \"actors\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
+
+handle_info_client_request_modules_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    try
+        Request = <<"{\"type\": \"modules\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
+
+handle_info_client_request_parse_error_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    try
+        %% Send request with unknown type
+        Request = <<"{\"type\": \"eval\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                %% Missing expression field triggers unknown_type error
+                ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
+
+handle_info_unknown_message_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Pid ! completely_unexpected_message,
+    timer:sleep(50),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_repl:stop(Pid).
+
+handle_cast_unknown_message_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    gen_server:cast(Pid, unknown_cast),
+    timer:sleep(50),
+    ?assert(is_process_alive(Pid)),
+    beamtalk_repl:stop(Pid).
+
+handle_call_unknown_request_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    Result = gen_server:call(Pid, unknown_request),
+    ?assertEqual({error, unknown_request}, Result),
+    beamtalk_repl:stop(Pid).
+
+handle_call_stop_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    ok = gen_server:call(Pid, stop),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Pid)).
+
+clear_bindings_via_api_test() ->
+    {ok, Pid} = beamtalk_repl:start_link(0, #{}),
+    ok = beamtalk_repl:clear_bindings(Pid),
+    ?assertEqual(#{}, beamtalk_repl:get_bindings(Pid)),
+    beamtalk_repl:stop(Pid).

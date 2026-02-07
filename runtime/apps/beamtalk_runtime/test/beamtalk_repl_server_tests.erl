@@ -447,3 +447,244 @@ format_rejection_reason_fallback_test() ->
     %% Should format the tuple with ~p
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
     ?assert(is_binary(Value)).
+
+%%% BT-342: Additional term_to_json edge case tests
+
+term_to_json_integer_test() ->
+    ?assertEqual(42, beamtalk_repl_server:term_to_json(42)).
+
+term_to_json_float_test() ->
+    ?assertEqual(3.14, beamtalk_repl_server:term_to_json(3.14)).
+
+term_to_json_boolean_test() ->
+    ?assertEqual(true, beamtalk_repl_server:term_to_json(true)),
+    ?assertEqual(false, beamtalk_repl_server:term_to_json(false)).
+
+term_to_json_atom_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json(hello)),
+    ?assertEqual(<<"nil">>, beamtalk_repl_server:term_to_json(nil)).
+
+term_to_json_binary_test() ->
+    ?assertEqual(<<"foo">>, beamtalk_repl_server:term_to_json(<<"foo">>)).
+
+term_to_json_printable_list_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json("hello")).
+
+term_to_json_non_printable_list_test() ->
+    Result = beamtalk_repl_server:term_to_json([1, 2, 3]),
+    ?assertEqual([1, 2, 3], Result).
+
+term_to_json_nested_list_test() ->
+    Result = beamtalk_repl_server:term_to_json([<<"a">>, 1, true]),
+    ?assertEqual([<<"a">>, 1, true], Result).
+
+term_to_json_empty_list_test() ->
+    %% Empty list is a printable list in Erlang, so converts to empty binary
+    ?assertEqual(<<>>, beamtalk_repl_server:term_to_json([])).
+
+term_to_json_map_with_atom_keys_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{name => <<"test">>, count => 5}),
+    ?assertEqual(<<"test">>, maps:get(<<"name">>, Result)),
+    ?assertEqual(5, maps:get(<<"count">>, Result)).
+
+term_to_json_map_with_binary_keys_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{<<"key">> => <<"val">>}),
+    ?assertEqual(<<"val">>, maps:get(<<"key">>, Result)).
+
+term_to_json_map_with_list_keys_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{"stringkey" => 42}),
+    ?assertEqual(42, maps:get(<<"stringkey">>, Result)).
+
+term_to_json_map_with_non_printable_list_key_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{[1,2,3] => <<"val">>}),
+    ?assert(is_map(Result)).
+
+term_to_json_map_with_integer_key_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{99 => <<"val">>}),
+    ?assert(is_map(Result)).
+
+term_to_json_dead_pid_test() ->
+    Pid = spawn(fun() -> ok end),
+    timer:sleep(50),
+    ?assertNot(is_process_alive(Pid)),
+    Result = beamtalk_repl_server:term_to_json(Pid),
+    ?assert(binary:match(Result, <<"#Dead<">>) =/= nomatch).
+
+term_to_json_alive_pid_test() ->
+    Parent = self(),
+    Pid = spawn(fun() -> receive stop -> Parent ! done end end),
+    Result = beamtalk_repl_server:term_to_json(Pid),
+    ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
+    Pid ! stop,
+    receive done -> ok after 200 -> ok end.
+
+term_to_json_function_arity_0_test() ->
+    Result = beamtalk_repl_server:term_to_json(fun() -> ok end),
+    ?assertEqual(<<"a Block/0">>, Result).
+
+term_to_json_function_arity_2_test() ->
+    Result = beamtalk_repl_server:term_to_json(fun(A, B) -> {A, B} end),
+    ?assertEqual(<<"a Block/2">>, Result).
+
+term_to_json_beamtalk_object_tuple_test() ->
+    Pid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_repl_server:term_to_json({beamtalk_object, 'Counter', counter, Pid}),
+    ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
+    exit(Pid, kill).
+
+term_to_json_future_timeout_test() ->
+    Pid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_repl_server:term_to_json({future_timeout, Pid}),
+    ?assert(binary:match(Result, <<"#Future<timeout,">>) =/= nomatch),
+    exit(Pid, kill).
+
+term_to_json_future_rejected_test() ->
+    Result = beamtalk_repl_server:term_to_json({future_rejected, some_reason}),
+    ?assert(binary:match(Result, <<"#Future<rejected:">>) =/= nomatch).
+
+term_to_json_generic_tuple_test() ->
+    Result = beamtalk_repl_server:term_to_json({a, b, c}),
+    ?assert(is_map(Result)),
+    ?assert(maps:is_key(<<"__tuple__">>, Result)),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], maps:get(<<"__tuple__">>, Result)).
+
+term_to_json_fallback_reference_test() ->
+    Ref = make_ref(),
+    Result = beamtalk_repl_server:term_to_json(Ref),
+    ?assert(is_binary(Result)).
+
+%%% BT-342: Additional format_error_message tests
+
+format_error_message_module_not_found_test() ->
+    Msg = beamtalk_repl_server:format_error_message({module_not_found, <<"counter">>}),
+    ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
+
+format_error_message_invalid_module_name_test() ->
+    Msg = beamtalk_repl_server:format_error_message({invalid_module_name, <<"123bad">>}),
+    ?assert(binary:match(Msg, <<"Invalid module name">>) =/= nomatch).
+
+format_error_message_actors_exist_singular_test() ->
+    Msg = beamtalk_repl_server:format_error_message({actors_exist, counter, 1}),
+    ?assert(binary:match(Msg, <<"1 actor still running">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<":kill">>) =/= nomatch).
+
+format_error_message_actors_exist_plural_test() ->
+    Msg = beamtalk_repl_server:format_error_message({actors_exist, counter, 3}),
+    ?assert(binary:match(Msg, <<"3 actors still running">>) =/= nomatch).
+
+format_error_message_unknown_op_test() ->
+    Msg = beamtalk_repl_server:format_error_message({unknown_op, <<"badop">>}),
+    ?assert(binary:match(Msg, <<"Unknown operation">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<"badop">>) =/= nomatch).
+
+format_error_message_inspect_failed_test() ->
+    Msg = beamtalk_repl_server:format_error_message({inspect_failed, "<0.1.0>"}),
+    ?assert(binary:match(Msg, <<"Failed to inspect actor">>) =/= nomatch).
+
+format_error_message_actor_not_alive_test() ->
+    Msg = beamtalk_repl_server:format_error_message({actor_not_alive, "<0.1.0>"}),
+    ?assert(binary:match(Msg, <<"Actor is not alive">>) =/= nomatch).
+
+format_error_message_not_implemented_reload_test() ->
+    Msg = beamtalk_repl_server:format_error_message({not_implemented, {reload, "counter"}}),
+    ?assert(binary:match(Msg, <<"Reload not yet implemented">>) =/= nomatch).
+
+format_error_message_session_creation_failed_test() ->
+    Msg = beamtalk_repl_server:format_error_message({session_creation_failed, max_children}),
+    ?assert(binary:match(Msg, <<"Failed to create session">>) =/= nomatch).
+
+format_error_message_invalid_request_test() ->
+    Msg = beamtalk_repl_server:format_error_message({invalid_request, bad_format}),
+    ?assert(binary:match(Msg, <<"Invalid request">>) =/= nomatch).
+
+format_error_message_parse_error_test() ->
+    Msg = beamtalk_repl_server:format_error_message({parse_error, syntax}),
+    ?assert(binary:match(Msg, <<"Parse error">>) =/= nomatch).
+
+format_error_message_compile_error_list_test() ->
+    Msg = beamtalk_repl_server:format_error_message({compile_error, "something wrong"}),
+    ?assertEqual(<<"something wrong">>, Msg).
+
+format_error_message_fallback_test() ->
+    Msg = beamtalk_repl_server:format_error_message({completely_unknown, stuff}),
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+%%% BT-342: format_actors tests
+
+format_actors_empty_test() ->
+    Response = beamtalk_repl_server:format_actors([]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual([], maps:get(<<"actors">>, Decoded)).
+
+format_actors_single_test() ->
+    Pid = self(),
+    Actors = [#{pid => Pid, class => 'Counter', module => counter, spawned_at => 1234567890}],
+    Response = beamtalk_repl_server:format_actors(Actors),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ActorList = maps:get(<<"actors">>, Decoded),
+    ?assertEqual(1, length(ActorList)),
+    [Actor] = ActorList,
+    ?assertEqual(<<"Counter">>, maps:get(<<"class">>, Actor)),
+    ?assertEqual(<<"counter">>, maps:get(<<"module">>, Actor)),
+    ?assertEqual(1234567890, maps:get(<<"spawned_at">>, Actor)).
+
+format_actors_multiple_test() ->
+    Pid = self(),
+    Actors = [
+        #{pid => Pid, class => 'Counter', module => counter, spawned_at => 100},
+        #{pid => Pid, class => 'Timer', module => timer_actor, spawned_at => 200}
+    ],
+    Response = beamtalk_repl_server:format_actors(Actors),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ActorList = maps:get(<<"actors">>, Decoded),
+    ?assertEqual(2, length(ActorList)).
+
+%%% BT-342: format_modules tests
+
+format_modules_empty_test() ->
+    Response = beamtalk_repl_server:format_modules([]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual([], maps:get(<<"modules">>, Decoded)).
+
+format_modules_single_test() ->
+    Info = {counter, #{
+        name => <<"Counter">>,
+        source_file => "/tmp/counter.bt",
+        actor_count => 3,
+        load_time => 1234567890,
+        time_ago => "2 minutes ago"
+    }},
+    Response = beamtalk_repl_server:format_modules([Info]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Modules = maps:get(<<"modules">>, Decoded),
+    ?assertEqual(1, length(Modules)),
+    [Mod] = Modules,
+    ?assertEqual(<<"Counter">>, maps:get(<<"name">>, Mod)),
+    ?assertEqual(<<"/tmp/counter.bt">>, maps:get(<<"source_file">>, Mod)),
+    ?assertEqual(3, maps:get(<<"actor_count">>, Mod)).
+
+%%% BT-342: format_response edge cases
+
+format_response_empty_map_test() ->
+    Response = beamtalk_repl_server:format_response(#{}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(#{}, maps:get(<<"value">>, Decoded)).
+
+format_response_nested_map_test() ->
+    Response = beamtalk_repl_server:format_response(#{a => #{b => 1}}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    Inner = maps:get(<<"a">>, Value),
+    ?assertEqual(1, maps:get(<<"b">>, Inner)).
+
+format_response_true_false_test() ->
+    ResponseT = beamtalk_repl_server:format_response(true),
+    DecodedT = jsx:decode(ResponseT, [return_maps]),
+    ?assertEqual(true, maps:get(<<"value">>, DecodedT)),
+    ResponseF = beamtalk_repl_server:format_response(false),
+    DecodedF = jsx:decode(ResponseF, [return_maps]),
+    ?assertEqual(false, maps:get(<<"value">>, DecodedF)).
