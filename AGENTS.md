@@ -1160,7 +1160,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
 | **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
 | **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |
-| **BT-286** | Compilable Standard Library (ADR 0007) | 10 issues | ~0% | Urgent |
+| **BT-286** | Compilable Standard Library (ADR 0007) | 12 issues | ~85% | Urgent |
 
 #### Epic Completed
 
@@ -1489,8 +1489,8 @@ runtime/
 │   │       ├── logging_counter.bt
 │   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
 │   │       └── README.md
-│   └── beamtalk_stdlib/    # Compiled stdlib (ADR 0007, placeholder)
-│       └── src/            # Will contain compiled .bt stdlib modules
+│   └── beamtalk_stdlib/    # Compiled stdlib (ADR 0007)
+│       └── ebin/           # Compiled .beam files (Actor, Block, Integer, etc.)
 
 tests/
 └── e2e/
