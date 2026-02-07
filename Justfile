@@ -158,6 +158,14 @@ test-one TEST:
     @echo "🧪 Running test: {{TEST}}"
     cargo test --all-targets {{TEST}}
 
+# Run fuzz testing on the parser for a configurable duration (default: 60 seconds)
+fuzz DURATION="60":
+    @echo "🔀 Fuzzing parser for {{DURATION}} seconds..."
+    @echo "   Corpus: fuzz/corpus/parse_arbitrary/ (32 seed files)"
+    @echo "   Target: parse_arbitrary (lexer + parser crash safety)"
+    cargo +nightly fuzz run parse_arbitrary -- -max_total_time={{DURATION}}
+    @echo "✅ Fuzzing completed without crashes!"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Coverage
 # ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,21 @@
+[package]
+name = "beamtalk-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.beamtalk-core]
+path = "../crates/beamtalk-core"
+
+[[bin]]
+name = "parse_arbitrary"
+path = "fuzz_targets/parse_arbitrary.rs"
+test = false
+doc = false
+bench = false
