@@ -11,7 +11,9 @@
 
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, MethodKind, Module};
+use crate::ast::{
+    ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
+};
 use std::fmt::Write;
 
 use super::variable_context;
@@ -224,6 +226,16 @@ impl CoreErlangGenerator {
         // Field reads work via CodeGenContext routing to Self parameter
         for (i, expr) in method.body.iter().enumerate() {
             let is_last = i == method.body.len() - 1;
+
+            // Early return (^) — emit value and stop generating further expressions
+            if let Expression::Return { value, .. } = expr {
+                if i > 0 {
+                    self.write_indent()?;
+                }
+                self.generate_expression(value)?;
+                break;
+            }
+
             if is_last {
                 if i > 0 {
                     self.write_indent()?;
