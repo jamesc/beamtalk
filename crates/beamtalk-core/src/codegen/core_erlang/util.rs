@@ -17,9 +17,9 @@ use std::fmt::Write;
 ///
 /// **DDD Context:** Code Generation
 ///
-/// Bundles the Erlang module name with the user-facing class name.
-/// These are independent (stdlib: `bt_stdlib_string` module → `String` class)
-/// but always needed together during code generation.
+/// Holds the user-facing class name (from the AST class definition).
+/// This decouples class identity from the Erlang module name, which may
+/// differ for stdlib classes (e.g., module `bt_stdlib_string` → class `String`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClassIdentity {
     class_name: String,
@@ -107,7 +107,8 @@ impl CoreErlangGenerator {
 
 /// Converts class name (`CamelCase`) to module name (`snake_case`).
 ///
-/// This is the inverse of `class_name` and properly handles multi-word
+/// This is the inverse of the `snake_case` → `CamelCase` derivation used as a
+/// fallback in `class_name()`, and properly handles multi-word
 /// class names like `MyCounterActor` -> `my_counter_actor`.
 ///
 /// Note: Acronyms like `HTTPRouter` become `httprouter` (no underscores within acronyms).

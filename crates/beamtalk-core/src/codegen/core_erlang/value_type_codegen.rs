@@ -61,6 +61,11 @@ impl CoreErlangGenerator {
             .first()
             .ok_or_else(|| CodeGenError::Internal("Value type module has no class".to_string()))?;
 
+        // Set class identity early — needed by all code paths including the
+        // Beamtalk special case below, so that class_name() returns the AST
+        // class name rather than deriving from the module name.
+        self.class_identity = Some(ClassIdentity::new(&class.name.name));
+
         // BT-220: Special case for Beamtalk global class
         // The Beamtalk class provides system reflection via class methods, not instances
         if class.name.name.as_str() == "Beamtalk" {
@@ -107,8 +112,6 @@ impl CoreErlangGenerator {
         )?;
         writeln!(self.output, "  attributes []")?;
         writeln!(self.output)?;
-
-        self.class_identity = Some(ClassIdentity::new(&class.name.name));
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
