@@ -334,6 +334,7 @@ impl Parser {
     /// - Right paren (`)`) - expression end
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
+    /// - Newline (when inside method body) - implicit statement separator (BT-360)
     pub(super) fn synchronize(&mut self) {
         self.advance();
 
@@ -352,6 +353,12 @@ impl Parser {
 
             // New statement may be starting
             if matches!(self.current_kind(), TokenKind::Caret) {
+                return;
+            }
+
+            // BT-368: In method bodies, newlines act as implicit statement separators (BT-360)
+            // so we can recover at newline boundaries
+            if self.in_method_body && self.current_token().has_leading_newline() {
                 return;
             }
 
@@ -760,6 +767,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_top_level_error_recovery_unchanged() {
+        // BT-368: Top-level parsing should NOT treat newlines as recovery points
+        // (only periods are statement separators at module level)
+        let source = "x := @\ny := 3";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+
+        // Should have error diagnostic
+        assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
+
+        // At module level, newlines don't separate statements without periods
+        // so after the error, parsing stops (synchronize doesn't stop at newlines at top level)
+        // The module should have parsed the error expression
+        assert!(
+            !module.expressions.is_empty(),
+            "Module should have at least the error expression"
+        );
+    }
+
+    #[test]
     fn parse_cascade() {
         let module = parse_ok("Transcript show: 'Hello'; cr; show: 'World'");
         assert_eq!(module.expressions.len(), 1);
@@ -919,6 +946,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_error_recovery_with_newlines() {
+        // BT-368: Blocks should continue parsing after errors (implicit newline separation)
+        let source = "[\n  x := 1\n  y := @\n  z := 3\n]";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+
+        // Should have one diagnostic for the error
+        assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
+
+        // Should still parse the block with all three statements
+        assert_eq!(module.expressions.len(), 1, "Should parse the block");
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(
+                    block.body.len(),
+                    3,
+                    "Block should have 3 statements (including error)"
+                );
+
+                // First statement should be valid
+                assert!(!block.body[0].is_error(), "First statement should be valid");
+
+                // Second statement is assignment with error value
+                assert!(
+                    matches!(&block.body[1], Expression::Assignment { value, .. } if value.is_error()),
+                    "Second statement should be assignment with error value"
+                );
+
+                // Third statement should be parsed after error
+                assert!(
+                    !block.body[2].is_error(),
+                    "Third statement should be valid (blocks don't break on errors)"
+                );
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[test]
     fn parse_method_body_newline_separated() {
         // BT-360: method bodies parse multiple newline-separated statements
         let module = parse_ok(
@@ -943,6 +1009,90 @@ mod tests {
             method.body.len(),
             3,
             "Method should have 3 period-separated statements"
+        );
+    }
+
+    #[test]
+    fn parse_method_body_error_recovery_with_newlines() {
+        // BT-368: Parser should recover at newline boundaries after errors in method bodies
+        let source = "Object subclass: Test\n\n  methodOne =>\n    x := 1\n    y := @\n    z := 3";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+
+        // Should have one diagnostic for the error
+        assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
+        assert!(
+            diagnostics[0].message.contains("Unexpected token"),
+            "Expected error about unexpected token"
+        );
+
+        // Should still parse the class and method
+        assert_eq!(module.classes.len(), 1, "Should parse the class");
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1, "Should parse the method");
+
+        // Method should have 3 statements: x := 1, y := @ (error), z := 3
+        let method = &class.methods[0];
+        assert_eq!(
+            method.body.len(),
+            3,
+            "Method should have 3 statements (including error)"
+        );
+
+        // First statement should be valid
+        assert!(
+            !method.body[0].is_error(),
+            "First statement should be valid"
+        );
+
+        // Second statement should be an error assignment
+        assert!(
+            matches!(&method.body[1], Expression::Assignment { value, .. } if value.is_error()),
+            "Second statement should be assignment with error value"
+        );
+
+        // Third statement should be parsed after recovery
+        assert!(
+            !method.body[2].is_error(),
+            "Third statement should be valid after recovery"
+        );
+    }
+
+    #[test]
+    fn parse_method_body_error_recovery_multiple_methods() {
+        // BT-368: Parser should not skip following methods after error recovery
+        let source = "Object subclass: Test\n\n  methodOne =>\n    x := @\n\n  methodTwo =>\n    y := 42";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+
+        // Should have one diagnostic for the error
+        assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
+
+        // Should parse both methods
+        assert_eq!(module.classes.len(), 1, "Should parse the class");
+        let class = &module.classes[0];
+        assert_eq!(
+            class.methods.len(),
+            2,
+            "Should parse both methods despite error in first method"
+        );
+
+        // First method should have error statement
+        assert_eq!(
+            class.methods[0].body.len(),
+            1,
+            "First method should have 1 statement"
+        );
+
+        // Second method should be valid
+        assert_eq!(
+            class.methods[1].body.len(),
+            1,
+            "Second method should have 1 statement"
+        );
+        assert!(
+            !class.methods[1].body[0].is_error(),
+            "Second method statement should be valid"
         );
     }
 
