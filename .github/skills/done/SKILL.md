@@ -83,7 +83,7 @@ When activated, execute this workflow to complete work and push:
 
 11. **Update Linear state**: Mark the Linear issue as "In Review".
 
-12. **Wait for Copilot code review**: If a repository ruleset is configured to automatically request Copilot code review, poll for it after PR creation/update:
+12. **Wait for Copilot code review** (first review only): If a repository ruleset is configured to automatically request Copilot code review, poll for it after **initial PR creation only**. If the PR already existed (step 9), skip polling — Copilot typically only reviews once and subsequent pushes don't trigger a new review.
     
     ```
     Poll: check for Copilot review every 60 seconds, up to 10 attempts (10 minutes max)
@@ -99,7 +99,13 @@ When activated, execute this workflow to complete work and push:
     
     **Important:** Only gate on verified bot identity (`user.login == "copilot-pull-request-reviewer[bot]"`). Never match on review body content alone, as that can be spoofed by arbitrary reviewers.
     
-    **If Copilot review arrives with comments:**
+    **If Copilot review already exists** (PR was pre-existing):
+    - Check if there are unresolved review threads from the existing review
+    - If all threads are resolved, report: "Copilot review already completed ✅"
+    - If unresolved threads exist, execute `/resolve-pr` workflow inline
+    - Do NOT poll for a new review
+    
+    **If Copilot review arrives with comments** (new PR):
     - Inform the user: "Copilot review received with N comments. Resolving..."
     - Execute the `/resolve-pr` workflow inline (steps 2-11 from resolve-pr skill):
       - Fetch and analyze all unresolved review threads
