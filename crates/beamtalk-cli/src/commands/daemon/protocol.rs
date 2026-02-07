@@ -225,6 +225,10 @@ struct CompileResult {
     core_erlang: Option<String>,
     diagnostics: Vec<DiagnosticInfo>,
     classes: Vec<ClassInfo>,
+    /// The module name used for code generation, derived from the class name
+    /// in the AST when available, otherwise from the file stem.
+    /// The REPL uses this for `code:load_binary` to match the generated code.
+    module_name: Option<String>,
     /// Pre-formatted diagnostic messages using miette
     formatted_diagnostics: Vec<String>,
 }
@@ -305,16 +309,23 @@ fn handle_compile(
     let has_errors = !diagnostics.is_empty();
 
     // Generate Core Erlang if no errors
-    let (core_erlang, class_names) = if has_errors {
-        (None, vec![])
+    let (core_erlang, class_names, module_name) = if has_errors {
+        (None, vec![], None)
     } else {
         // Parse and generate
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
         let tokens = lex_with_eof(&source);
         let (module, _) = parse(tokens);
 
-        // Derive module name from file path
-        let module_name = file_path.file_stem().unwrap_or("module").to_string();
+        // Derive module name from class name in AST (the class definition is
+        // the source of truth). :load is for loading class definitions; fall
+        // back to file stem only for legacy non-class files.
+        let classes = extract_class_names(&module);
+        let module_name = if let Some(first_class) = module.classes.first() {
+            beamtalk_core::erlang::to_module_name(&first_class.name.name)
+        } else {
+            file_path.file_stem().unwrap_or("module").to_string()
+        };
 
         let core = beamtalk_core::erlang::generate_with_name_and_source(
             &module,
@@ -322,8 +333,7 @@ fn handle_compile(
             Some(&source),
         )
         .ok();
-        let classes = extract_class_names(&module);
-        (core, classes)
+        (core, classes, Some(module_name))
     };
 
     let result = CompileResult {
@@ -332,6 +342,7 @@ fn handle_compile(
         core_erlang,
         diagnostics,
         classes: class_names,
+        module_name,
         formatted_diagnostics,
     };
 
@@ -923,6 +934,38 @@ mod tests {
         assert!(response.error.is_some());
         let error = response.error.unwrap();
         assert_eq!(error.code, INVALID_PARAMS);
+    }
+
+    #[test]
+    fn handle_compile_returns_module_name_from_class() {
+        let mut service = SimpleLanguageService::new();
+        let params = serde_json::json!({
+            "path": "Counter.bt",
+            "source": "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1"
+        });
+
+        let response = handle_compile(params, Some(serde_json::json!(1)), &mut service);
+
+        assert!(response.error.is_none());
+        let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(result.success);
+        assert_eq!(result.module_name, Some("counter".to_string()));
+    }
+
+    #[test]
+    fn handle_compile_returns_module_name_from_file_stem_without_class() {
+        let mut service = SimpleLanguageService::new();
+        let params = serde_json::json!({
+            "path": "test.bt",
+            "source": "x := 42"
+        });
+
+        let response = handle_compile(params, Some(serde_json::json!(1)), &mut service);
+
+        assert!(response.error.is_none());
+        let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(result.success);
+        assert_eq!(result.module_name, Some("test".to_string()));
     }
 
     // ========================================================================

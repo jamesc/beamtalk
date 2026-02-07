@@ -5,7 +5,7 @@
 # Compile standard library .bt files and copy to runtime ebin/
 # Called by rebar3 pre-compile hook
 #
-# This script compiles Beamtalk standard library files (currently just beamtalk.bt)
+# This script compiles Beamtalk standard library files (currently just Beamtalk.bt)
 # into BEAM bytecode and places them in the runtime's ebin directories so they're
 # automatically available when the BEAM VM starts.
 #
@@ -54,7 +54,7 @@ mkdir -p lib/build
 
 # List of stdlib files to compile
 STDLIB_FILES=(
-    "lib/beamtalk.bt"
+    "lib/Beamtalk.bt"
 )
 
 # Compile each file

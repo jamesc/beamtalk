@@ -201,10 +201,10 @@ Type :help for available commands, :exit to quit.
 14
 
 > :load examples/hello.bt
-Loaded
+Loaded Hello
 
-> :bindings
-message = "Hello, Beamtalk!"
+> Hello new
+{__class__: Hello}
 ```
 
 ### Load Files

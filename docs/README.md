@@ -84,7 +84,7 @@ For implementation details, see [internal/](internal/) documentation.
 
 Simple programs demonstrating language features:
 
-- [hello.bt](../examples/hello.bt) — Basic expressions and string literals
+- [hello.bt](../examples/hello.bt) — Simple class with a greeting method
 - [counter.bt](../examples/counter.bt) — Assignment and arithmetic
 
 Use the REPL to load examples:
