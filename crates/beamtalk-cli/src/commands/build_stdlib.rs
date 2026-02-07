@@ -190,7 +190,9 @@ fn is_up_to_date(source: &Utf8Path, beam: &Utf8Path) -> bool {
 
 /// Extract the module name from a `.bt` file path.
 ///
-/// Uses the file stem (e.g., `Integer.bt` → `Integer`).
+/// Converts the file stem to a prefixed, lowercase module name to avoid
+/// shadowing Erlang built-in modules on case-insensitive filesystems.
+/// E.g., `String.bt` → `bt_stdlib_string`, `SequenceableCollection.bt` → `bt_stdlib_sequenceable_collection`.
 fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     let stem = path
         .file_stem()
@@ -204,7 +206,8 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
         );
     }
 
-    Ok(stem.to_string())
+    let snake = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+    Ok(format!("bt_stdlib_{snake}"))
 }
 
 /// Compile a single stdlib `.bt` file to Core Erlang.
@@ -307,13 +310,22 @@ mod tests {
     #[test]
     fn test_module_name_from_path() {
         let path = Utf8PathBuf::from("lib/Integer.bt");
-        assert_eq!(module_name_from_path(&path).unwrap(), "Integer");
+        assert_eq!(module_name_from_path(&path).unwrap(), "bt_stdlib_integer");
     }
 
     #[test]
     fn test_module_name_from_path_lowercase() {
         let path = Utf8PathBuf::from("lib/beamtalk.bt");
-        assert_eq!(module_name_from_path(&path).unwrap(), "beamtalk");
+        assert_eq!(module_name_from_path(&path).unwrap(), "bt_stdlib_beamtalk");
+    }
+
+    #[test]
+    fn test_module_name_from_path_multi_word() {
+        let path = Utf8PathBuf::from("lib/ProtoObject.bt");
+        assert_eq!(
+            module_name_from_path(&path).unwrap(),
+            "bt_stdlib_proto_object"
+        );
     }
 
     #[test]
@@ -397,8 +409,8 @@ mod tests {
         fs::write(&file_a, "// alpha").unwrap();
         fs::write(&file_b, "// beta").unwrap();
 
-        // Make Alpha.beam newer than Alpha.bt
-        let beam_a = ebin_dir.join("Alpha.beam");
+        // Make bt_stdlib_alpha.beam newer than Alpha.bt
+        let beam_a = ebin_dir.join("bt_stdlib_alpha.beam");
         fs::write(&beam_a, "fake").unwrap();
         set_mtime(&file_a, 1000);
         set_mtime(&Utf8PathBuf::from(beam_a.as_str()), 2000);
@@ -429,8 +441,8 @@ mod tests {
 
         let content = fs::read_to_string(app_file).unwrap();
         assert!(content.contains("beamtalk_stdlib"));
-        assert!(content.contains("'Integer'"));
-        assert!(content.contains("'String'"));
+        assert!(content.contains("'bt_stdlib_integer'"));
+        assert!(content.contains("'bt_stdlib_string'"));
     }
 
     #[test]
