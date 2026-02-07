@@ -255,6 +255,8 @@ fn handle_compile(
     id: Option<serde_json::Value>,
     service: &mut SimpleLanguageService,
 ) -> JsonRpcResponse {
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
     let params: CompileParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
@@ -284,7 +286,6 @@ fn handle_compile(
     let mut core_diagnostics = service.diagnostics(&file_path);
 
     // Parse module for additional validation
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
     let tokens = lex_with_eof(&source);
     let (module, _) = parse(tokens);
 
@@ -821,14 +822,22 @@ mod tests {
         assert!(response.error.is_none());
         let result: CompileExpressionResult =
             serde_json::from_value(response.result.unwrap()).unwrap();
-        assert!(!result.success, "Expected REPL expression with primitive to fail");
+        assert!(
+            !result.success,
+            "Expected REPL expression with primitive to fail"
+        );
         assert!(!result.diagnostics.is_empty(), "Expected diagnostic errors");
-        
+
         // Should contain primitive validation error
         let has_primitive_error = result.diagnostics.iter().any(|d| {
-            d.message.contains("Primitives can only be declared in the standard library")
+            d.message
+                .contains("Primitives can only be declared in the standard library")
         });
-        assert!(has_primitive_error, "Expected primitive validation error, got: {:#?}", result.diagnostics);
+        assert!(
+            has_primitive_error,
+            "Expected primitive validation error, got: {:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -1023,14 +1032,22 @@ mod tests {
 
         assert!(response.error.is_none());
         let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
-        assert!(!result.success, "Expected compilation to fail with primitive error");
+        assert!(
+            !result.success,
+            "Expected compilation to fail with primitive error"
+        );
         assert!(!result.diagnostics.is_empty(), "Expected diagnostic errors");
-        
+
         // Should contain primitive validation error
         let has_primitive_error = result.diagnostics.iter().any(|d| {
-            d.message.contains("Primitives can only be declared in the standard library")
+            d.message
+                .contains("Primitives can only be declared in the standard library")
         });
-        assert!(has_primitive_error, "Expected primitive validation error, got: {:#?}", result.diagnostics);
+        assert!(
+            has_primitive_error,
+            "Expected primitive validation error, got: {:#?}",
+            result.diagnostics
+        );
     }
 
     // ========================================================================
