@@ -84,7 +84,7 @@ No other core runtime modules reference REPL or workspace modules. The dependenc
 
 - Must remain a rebar3 umbrella project (existing build infrastructure).
 - `beamtalk_stdlib` app must be unchanged (compiled `.bt` output, no hand-written Erlang).
-- Actor registration is required for REPL workspace tracking but not for batch compilation or production use.
+- Actor registration is required for any context managing live actors (REPL workspace tracking, hot reload safety, lifecycle cleanup). Batch compilation (`beamtalk build`) does not spawn actors and needs no registration. Production use (`beamtalk run`) would need its own registration for hot reload safety.
 - Future workspace management (ADR 0004) will significantly expand the REPL/workspace layer.
 
 ## Decision
