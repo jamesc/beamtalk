@@ -280,7 +280,10 @@ impl DaemonManager {
     /// and not start its own processes. This is useful for development but means
     /// the test won't manage the lifecycle. If the external REPL fails or stops
     /// mid-test, errors may be confusing. For CI, always start with a clean state.
-    #[expect(clippy::too_many_lines, reason = "startup orchestrates daemon + BEAM + cover setup")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "startup orchestrates daemon + BEAM + cover setup"
+    )]
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
