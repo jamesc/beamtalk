@@ -33,7 +33,7 @@ session_connect_updates_activity_test() ->
         timer:sleep(1100),
         
         %% Simulate session connection by calling update_activity
-        %% (This is what beamtalk_repl_server does on line 103)
+        %% (This is what beamtalk_repl_server does when a session is created)
         ok = beamtalk_workspace_meta:update_activity(),
         
         %% Verify activity time was updated
@@ -61,7 +61,7 @@ actor_spawn_updates_activity_test() ->
         timer:sleep(1100),
         
         %% Simulate actor spawn by calling update_activity
-        %% (This is what beamtalk_actor:spawn_with_registry does on line 193)
+        %% (This is what beamtalk_actor:spawn_with_registry does after registration)
         ok = beamtalk_workspace_meta:update_activity(),
         
         %% Verify activity time was updated
@@ -89,7 +89,7 @@ code_reload_updates_activity_test() ->
         timer:sleep(1100),
         
         %% Simulate code reload by calling update_activity
-        %% (This is what beamtalk_repl_eval:do_load does on line 165)
+        %% (This is what beamtalk_repl_eval:do_load does after module load)
         ok = beamtalk_workspace_meta:update_activity(),
         
         %% Verify activity time was updated
