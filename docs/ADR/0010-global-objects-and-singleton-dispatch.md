@@ -46,14 +46,14 @@ Both are registered as classes in `beamtalk_stdlib.erl` with class methods but n
 
 ## Decision
 
-Adopt a **well-known instance** model: globals are singleton actor instances of named classes, registered in the runtime and accessible by name.
+Adopt a **workspace-injected bindings** model: well-known objects (`Transcript`, `Beamtalk`) are singleton actor instances provided by the workspace as pre-bound variables — not language-level globals. This is an interim step toward Newspeak-style capability-based modules.
 
 ### Design
 
-| Smalltalk | Beamtalk | Class | Instance |
-|-----------|----------|-------|----------|
-| `Smalltalk` (SystemDictionary) | `Beamtalk` | `SystemDictionary` | Singleton actor |
-| `Transcript` (TranscriptStream) | `Transcript` | `TranscriptStream` | Singleton actor |
+| Smalltalk | Beamtalk (interim) | Beamtalk (long-term) |
+|-----------|-------------------|---------------------|
+| `Transcript` — global in SystemDictionary | Variable bound by workspace | Lexically scoped via nested classes |
+| `Smalltalk` — global in SystemDictionary | Variable bound by workspace | Lexically scoped via nested classes |
 
 **User-facing syntax is unchanged:**
 ```beamtalk
@@ -63,7 +63,7 @@ Beamtalk allClasses
 Beamtalk classNamed: #Counter
 ```
 
-**But now these are real objects:**
+**But now these are real objects, not bare Erlang modules:**
 ```beamtalk
 Transcript class                // => TranscriptStream
 Transcript respondsTo: #show:   // => true
@@ -74,54 +74,262 @@ Beamtalk class                  // => SystemDictionary
 
 ### Runtime Model
 
-Each well-known instance is a **registered actor process** (like any other actor, but with a well-known name):
+Each well-known object is a **singleton actor** owned by the workspace. The workspace injects them as pre-bound variables into the evaluation environment:
 
 ```erlang
-%% At bootstrap/stdlib init:
-%% 1. Register the TranscriptStream class
-%% 2. Spawn a singleton instance
-%% 3. Register the pid under the atom 'Transcript'
-{ok, Pid} = transcript_stream:spawn(),
-register('Transcript', Pid)
+%% Workspace startup:
+%% 1. Spawn singleton actors
+{ok, TranscriptPid} = transcript_stream:spawn(),
+{ok, BeamtalkPid} = system_dictionary:spawn(),
+
+%% 2. Inject as workspace bindings (available to REPL and :load'd code)
+WorkspaceBindings = #{
+    'Transcript' => TranscriptPid,
+    'Beamtalk'   => BeamtalkPid
+}.
 ```
 
-Message dispatch uses the standard actor path:
+This is NOT a global registry — it's the workspace's environment. Code outside a workspace (e.g., `beamtalk build` without a workspace) does not have these bindings. This is deliberate: `Transcript` is a workspace service, not a language primitive.
+
+### Long-Term Direction: Newspeak-Style Capabilities
+
+The interim model (workspace-injected variables) is a stepping stone to Newspeak's capability-based module system, where the workspace IS the platform and inner classes access it through lexical scoping:
+
+```beamtalk
+// Long-term: workspace/platform passed at entry point, lexically scoped
+Object subclass: MyApp
+  start: workspace =>
+    workspace transcript show: 'Starting'
+    
+    // Inner classes access workspace through enclosing scope — no globals
+    Object subclass: MyServer
+      handleRequest: req =>
+        workspace transcript show: 'Got: ', req path
+```
+
+**Prerequisites for long-term model:**
+- Nested class scoping (classes accessing enclosing class scope)
+- Module system with explicit dependency declaration
+
+Until then, workspace-injected bindings provide the same UX with minimal ceremony.
+
+### Sync vs Async Dispatch
+
+In Pharo, all message sends (including `Transcript show:`) are **synchronous** — the caller blocks until the method completes. Pharo's `ThreadSafeTranscript` achieves thread safety via internal locking, not async messaging.
+
+On BEAM, actors use **async sends** (`gen_server:cast`) by default — the caller gets a Future back and doesn't wait. This creates a tension for well-known instances:
+
+| Method | Needs return value? | Natural fit |
+|--------|-------------------|-------------|
+| `Transcript show: 'Hello'` | No (I/O side effect) | Async (`cast`) |
+| `Transcript cr` | No | Async (`cast`) |
+| `Beamtalk allClasses` | Yes (returns list) | Sync (`call`) |
+| `Beamtalk classNamed: #Counter` | Yes (returns class) | Sync (`call`) |
+| `Transcript class` | Yes (returns `TranscriptStream`) | Sync (`call`) |
+
+**Decision: Use standard actor dispatch — async by default, `await` when needed.**
+
+Well-known instances are actors, so they follow the same rules as any actor:
+
+```beamtalk
+// Async (fire-and-forget) — returns a Future, but usually ignored
+Transcript show: 'Hello'
+
+// Sync (needs the value) — caller awaits the Future
+classes := Beamtalk allClasses     // implicit await on assignment
+Transcript class                    // implicit await (result used)
+```
+
+This means workspace binding dispatch is uniform — always async via `gen_server:cast` + Future. The caller decides whether to await. No special sync/async annotation needed on methods.
+
 ```erlang
-%% Transcript show: 'Hello' compiles to:
-%%   async message to registered process 'Transcript'
-gen_server:cast(Transcript, {message, 'show:', [<<"Hello">>]})
+%% Codegen dispatch for workspace-bound names:
+dispatch_binding(Pid, Selector, Args) ->
+    Future = beamtalk_future:new(),
+    gen_server:cast(Pid, {Selector, Args, Future}),
+    Future.
+
+%% Class method sends remain direct calls (no binding lookup):
+%% Counter spawn  →  call 'counter':'spawn'()
 ```
 
-This means:
+### Transcript as Shared Workspace Log
+
+**Context:** In modern Smalltalk (Pharo), Transcript is a dev-time convenience — production apps use proper logging frameworks (Beacon, OTP `logger`). Beamtalk already uses OTP `logger` for structured runtime logging. Transcript's role is:
+
+| Use case | Tool |
+|----------|------|
+| Learning / tutorials | `Transcript show:` |
+| Quick REPL debugging | `Transcript show:` |
+| Production logging | OTP `logger` (structured, leveled) |
+
+**Design: Transcript is a shared log actor, separate from the REPL — following Pharo's model.**
+
+In Pharo, Transcript is a **separate window** from the Playground (REPL). You write code in the Playground, output appears in the Transcript window. They are distinct UI surfaces. Beamtalk follows the same separation:
+
+- **REPL** — shows eval results only (`=> 4`, `=> nil`)
+- **Transcript** — separate output channel for `Transcript show:` output from any source
+
+```
+┌──────────────────┐  ┌──────────────────┐
+│ REPL             │  │ Transcript       │
+│                  │  │                  │
+│ > 2 + 2          │  │ Hello            │
+│ => 4             │  │ Got request /foo │
+│ > Transcript     │  │ tick             │
+│     show: 'Hi'   │  │ Hi               │
+│ => nil           │  │                  │
+└──────────────────┘  └──────────────────┘
+```
+
+**Why separate?**
+
+1. **Library/app code** — An actor doing `Transcript show: 'Got request'` should work regardless of whether a REPL is attached. There's no "caller's REPL" to route to.
+2. **Shared workspace** — Multiple REPL sessions share the same workspace (ADR 0004). Transcript output from any source is relevant to all viewers.
+3. **No confusion** — Newcomers see `=> nil` in the REPL and Transcript output elsewhere. No interleaved output, no "where did that come from?" surprises.
+4. **Simplicity** — No group_leader tricks, no caller context in messages. Just a log sink with subscribers.
+
+**Transcript is a pub/sub actor:**
+
+```
+                    ┌─────────────────────┐
+  REPL eval    ──→  │                     │ ──→ `beamtalk transcript` (CLI viewer)
+  MyHttpServer ──→  │  Transcript Actor   │ ──→ REPL-2 (opted in via :transcript on)
+  background   ──→  │  (shared log sink)  │ ──→ IDE Transcript panel (future)
+                    └─────────────────────┘
+```
+
+```erlang
+%% Transcript actor state
+-record(transcript_state, {
+    buffer = queue:new() :: queue:queue(binary()),  %% ring buffer of recent output
+    max_buffer = 1000 :: pos_integer(),
+    subscribers = [] :: [pid()]                     %% viewers watching
+}).
+
+handle_cast({'show:', [Value], Future}, State) ->
+    Text = to_string(Value),
+    %% Push to all subscribers
+    [Sub ! {transcript_output, Text} || Sub <- State#transcript_state.subscribers],
+    %% Append to buffer (for late-joining viewers or inspection)
+    NewBuffer = buffer_append(State#transcript_state.buffer, Text, State#transcript_state.max_buffer),
+    beamtalk_future:resolve(Future, nil),
+    {noreply, State#transcript_state{buffer = NewBuffer}};
+
+handle_cast({'subscribe', [], CallerPid, Future}, State) ->
+    %% CallerPid derived from message sender context
+    monitor(process, CallerPid),
+    beamtalk_future:resolve(Future, nil),
+    {noreply, State#transcript_state{subscribers = [CallerPid | State#transcript_state.subscribers]}};
+
+handle_cast({'unsubscribe', [], CallerPid, Future}, State) ->
+    beamtalk_future:resolve(Future, nil),
+    {noreply, State#transcript_state{
+        subscribers = lists:delete(CallerPid, State#transcript_state.subscribers)}}.
+```
+
+**Accessing Transcript output:**
+
+```bash
+# Separate CLI viewer (like `tail -f` on the workspace log)
+beamtalk transcript
+```
+
+```beamtalk
+// In the REPL — just send messages to the object:
+Transcript subscribe              // subscribe this session — output streams in
+Transcript unsubscribe            // unsubscribe — REPL goes quiet again
+Transcript recent                 // returns buffer contents (last N entries)
+Transcript clear                  // clear the buffer
+```
+
+No special REPL commands needed — Transcript is a real object, so subscription is just message sends. This follows the principle that behavior lives on objects, not in REPL magic.
+
+**REPLs do NOT subscribe by default.** The REPL is for eval results. Transcript is a separate concern — you subscribe when you want it, like opening Pharo's Transcript window.
+
+**When no subscribers exist** (batch compile, headless app):
+- Output goes to the ring buffer only
+- Optionally forwarded to OTP `logger:info/2` for persistence
+- No output is lost — can be inspected via `Transcript recent` (returns buffer contents)
+
+
+### Cascade Semantics
+
+Cascades send multiple messages to the **same receiver**, returning the result of the **last** message. Since `Transcript` is a real actor (bound via workspace), cascades work naturally:
+
+```beamtalk
+Transcript show: 'Hello'; cr; show: 'World'
+```
+
+Compiles to (conceptually):
+```erlang
+%% 1. Resolve Transcript from workspace bindings — it's a pid
+Pid = lookup_binding('Transcript'),
+
+%% 2. Send all messages to same pid (async, discard intermediate Futures)
+gen_server:cast(Pid, {'show:', [<<"Hello">>], _F1}),
+gen_server:cast(Pid, {'cr', [], _F2}),
+
+%% 3. Last message — return its Future
+Future3 = beamtalk_future:new(),
+gen_server:cast(Pid, {'show:', [<<"World">>], Future3}),
+Future3
+```
+
+Because `gen_server` processes messages sequentially from its mailbox, the three messages execute in order — `show: 'Hello'`, then `cr`, then `show: 'World'` — even though the sends are async. This gives us **ordered execution without blocking the caller**.
+
+Message dispatch uses the standard actor path. This means:
 - ✅ Full dispatch through `beamtalk_dispatch:lookup/5`
 - ✅ `doesNotUnderstand:` produces `#beamtalk_error{}`
 - ✅ Inherits Object methods (`class`, `respondsTo:`, `describe`, `inspect`)
 - ✅ Extension methods work
 - ✅ Module naming follows `beamtalk_*` convention (`beamtalk_transcript_stream.erl`)
-- ✅ Cascades work (`Transcript show: 'Hello'; cr; show: 'World'`)
+- ✅ Cascades work — ordered execution guaranteed by gen_server mailbox
 
 ### Codegen Change
 
-The codegen currently special-cases `ClassReference` receivers. For well-known instances, it should instead generate actor message sends to the registered name:
+The codegen currently special-cases `ClassReference` receivers, generating direct Erlang function calls. This ADR changes the codegen to check workspace bindings first.
+
+#### How It Works
+
+When the compiler encounters an uppercase identifier as a receiver, it generates code that:
+
+1. **Checks workspace bindings** — Is this name bound to a workspace-injected object?
+2. **Falls back to class method** — If not a binding, treat as a class-level method call (existing behavior)
 
 ```erlang
-%% Current (class-level direct call):
-call 'transcript':'show:'(<<"Hello">>)
+%% Current (all ClassReference → direct function call):
+call 'transcript':'show:'(<<"Hello">>)    %% Transcript show: 'Hello'
+call 'counter':'spawn'()                   %% Counter spawn
 
-%% Proposed (actor message send to registered name):
-%% Same as any other actor message, but receiver is the atom 'Transcript'
-call 'beamtalk_actor':'sync_send'('Transcript', 'show:', [<<"Hello">>])
+%% Proposed (check workspace bindings first):
+%% Transcript — found in workspace bindings → actor send
+let Pid = lookup_binding('Transcript') in
+gen_server:cast(Pid, {'show:', [<<"Hello">>], Future})
+
+%% Counter — not in workspace bindings → class method call (unchanged)
+call 'counter':'spawn'()
 ```
 
-The codegen needs a way to distinguish class method sends (`Counter spawn`) from well-known instance sends (`Transcript show:`). Options:
+#### Binding Resolution
 
-**Option A: Runtime-only** — All `ClassReference` sends first check if the name is a registered process. If so, send a message. If not, treat as class method call. This is the simplest but adds a runtime check on every class-level send.
+The workspace provides bindings via `persistent_term` (internal implementation detail):
 
-**Option B: Annotation in stdlib** — The compiler knows which names are well-known instances (from stdlib definitions or a pragma). Codegen emits actor sends for those names and direct calls for others.
+```erlang
+%% Workspace startup — populate bindings
+persistent_term:put({beamtalk_binding, 'Transcript'}, TranscriptPid).
+persistent_term:put({beamtalk_binding, 'Beamtalk'}, BeamtalkPid).
 
-**Option C: Syntax distinction** — Well-known instances are lowercase (like variables) and bound at module load time. This would change `Transcript` to `transcript` which conflicts with the "uppercase = class" convention.
+%% Codegen lookup — ~13ns, O(1), lock-free
+lookup_binding(Name) ->
+    persistent_term:get({beamtalk_binding, Name}, undefined).
+```
 
-**Recommended: Option A** for simplicity. The registered process check (`whereis/1`) is O(1) and the cost is negligible. This also supports user-defined globals without compiler changes.
+**Key difference from the global registry approach:** Only workspace-injected names are in the binding table. Classes (`Counter`, `Point`, `Array`) are NOT — they continue to use direct module function calls. This means:
+
+- **Zero overhead** on class method sends (`Counter spawn`, `Point new`) — no lookup at all
+- **~13ns overhead** on workspace binding sends (`Transcript show:`, `Beamtalk allClasses`) — negligible
+- **No workspace = no bindings** — `beamtalk build` without a workspace produces a clear "unbound variable" error for `Transcript`
 
 ### Class Definitions
 
@@ -130,7 +338,10 @@ The codegen needs a way to distinguish class method sends (`Counter spawn`) from
 Object subclass: TranscriptStream
   show: value => @primitive 'show:'
   cr => @primitive 'cr'
-  // Future: could add log:, clear, etc.
+  subscribe => @primitive 'subscribe'
+  unsubscribe => @primitive 'unsubscribe'
+  recent => @primitive 'recent'
+  clear => @primitive 'clear'
 
 // lib/SystemDictionary.bt  (renamed from lib/Beamtalk.bt)
 Object subclass: SystemDictionary
@@ -140,25 +351,65 @@ Object subclass: SystemDictionary
   version => @primitive 'version'
 ```
 
-Well-known instances are registered during bootstrap:
+### Workspace Binding Names
+
+Following Pharo's model, `Transcript` and `Beamtalk` are **not class names** — they are binding names for singleton instances. The classes are `TranscriptStream` and `SystemDictionary` respectively.
+
+```beamtalk
+Transcript class              // => TranscriptStream  (not Transcript)
+Beamtalk class                // => SystemDictionary   (not Beamtalk)
+
+TranscriptStream              // => the class object itself
+SystemDictionary              // => the class object itself
+```
+
+This is exactly how Pharo works: `Smalltalk class` returns `SystemDictionary`, not `Smalltalk`. The name `Beamtalk` is an alias for the singleton instance, not a class.
+
+In the workspace, bindings and classes coexist in separate namespaces:
+
+| Name | Namespace | Value |
+|------|-----------|-------|
+| `'Transcript'` | workspace binding | pid of the TranscriptStream singleton |
+| `'Beamtalk'` | workspace binding | pid of the SystemDictionary singleton |
+| `'TranscriptStream'` | class | class process |
+| `'SystemDictionary'` | class | class process |
+| `'Counter'` | class | class process |
+
+### Workspace Startup
+
+The workspace spawns and injects well-known objects during initialization:
+
 ```erlang
-%% In beamtalk_stdlib.erl or beamtalk_bootstrap.erl:
-register_well_known_instances() ->
-    %% Spawn singleton actors and register with well-known names
+%% In beamtalk_workspace.erl:
+init_workspace_bindings() ->
+    %% 1. Spawn singleton actors
     {ok, TranscriptPid} = transcript_stream:spawn(),
-    register('Transcript', TranscriptPid),
-    
     {ok, BeamtalkPid} = system_dictionary:spawn(),
+    
+    %% 2. Inject as workspace bindings (persistent_term for fast codegen lookup)
+    persistent_term:put({beamtalk_binding, 'Transcript'}, TranscriptPid),
+    persistent_term:put({beamtalk_binding, 'Beamtalk'}, BeamtalkPid),
+    
+    %% 3. Register as named processes (for supervision and observer)
+    register('Transcript', TranscriptPid),
     register('Beamtalk', BeamtalkPid).
 ```
+
+**Ordering constraint:** Classes must be registered before their instances can be spawned. Bootstrap sequence:
+1. Register core classes (Object, Integer, String, etc.)
+2. Register TranscriptStream and SystemDictionary classes
+3. Workspace starts → spawns and binds singleton instances
 
 ## Prior Art
 
 ### Smalltalk (Squeak/Pharo)
 - `Smalltalk` is an instance of `SystemDictionary` — a real object with state
 - `Transcript` is an instance of `ThreadSafeTranscript` (Pharo) — backed by a stream
-- Globals are stored in the system dictionary, accessible by name
+- **Both are entries in the same global dictionary** (`Smalltalk globals`), alongside classes
+- The compiler generates identical bytecode for `Transcript show:` and `Counter new` — global lookup then message send
+- No distinction between "class name" and "global variable" at the language level — they are both keys in the global dictionary
 - Both respond to all Object protocol (`class`, `respondsTo:`, `inspect`, etc.)
+- `Smalltalk class` returns `SystemDictionary`, not `Smalltalk` — the name is an alias, not a class
 
 ### Newspeak
 - **No globals at all** — everything accessed through the module hierarchy
@@ -188,15 +439,42 @@ register_well_known_instances() ->
 
 ## Steelman Analysis
 
-### "Keep class-level methods (current approach)"
-The current approach is simpler: no processes, no supervision, no message passing overhead. For stateless utilities like `Transcript show:`, a direct function call is faster than an actor message. The `undef` error issue could be fixed by adding error handling in the codegen without changing the dispatch model.
+### 1. Performance Purist: "You're adding overhead to workspace binding dispatch"
 
-**Counter:** The performance difference is negligible (one `gen_server:cast` vs one function call), and the consistency benefit of having globals be real objects far outweighs the simplicity of the current hack. The `undef` fix would be yet another special case in already-complex codegen.
+Workspace binding dispatch adds a `persistent_term:get/1` (~13ns) lookup before sending — and then an actor message send (~1-5μs) where the old `transcript.erl` was a direct function call (~10ns). That's a 100x slowdown for `Transcript show:`. And the codegen now has a branch: "is this a workspace binding? If so, lookup + actor send. Otherwise, direct call." Two dispatch paths means two sets of bugs.
 
-### "Newspeak-style: no globals at all"
-Beamtalk's principles say "no global namespace." The purist approach is to pass `Transcript` and `Beamtalk` as module parameters, making dependencies explicit.
+**Counter:** The 13ns lookup is unmeasurable against actual work. `Transcript show:` is a dev debugging tool, not a hot loop — nobody profiles `println`. Class sends (`Counter spawn`, `Point new`) have ZERO overhead — they skip the binding check entirely and use direct module calls as before. The two-path codegen is simple: one `persistent_term:get/2` with a default fallback. The hot path (class sends) is unchanged.
 
-**Counter:** While philosophically appealing, requiring every module to declare `Transcript` as a dependency creates ceremony that hurts learnability. Beamtalk is "Smalltalk-like, not Smalltalk-compatible" — we can have well-known instances as a pragmatic convenience while still keeping the Newspeak ideal as a future migration path.
+### 2. BEAM Purist: "This isn't idiomatic Erlang"
+
+Erlang solves "global named service" with `register/2` and `whereis/1`. You're layering `persistent_term` bindings, a workspace supervisor, and a pub/sub system on top. OTP already has `logger` for logging, `pg` for process groups, and `sys.config` for configuration. This is reinventing standard OTP infrastructure behind a Smalltalk-flavored API.
+
+**Counter:** Workspace injection IS standard OTP — `persistent_term` for configuration, `gen_server` for actors, supervisors for crash recovery. The pub/sub for Transcript is ~20 lines of standard `gen_server`. And `logger` serves a different purpose: structured production logging vs. dev-time visible output. They coexist. The workspace model aligns with OTP's application environment pattern.
+
+### 3. Simplicity Advocate: "This is a lot of machinery for two bindings"
+
+The entire ADR — workspace injection, `persistent_term` bindings, supervision tree, pub/sub, bootstrap ordering, crash recovery — exists to make `Transcript show: 'Hello'` and `Beamtalk allClasses` "real objects." That's two bindings. The current 50-line `transcript.erl` works. You're proposing workspace-owned actors with supervision, Transcript pub/sub, a separate viewer CLI, and codegen changes. YAGNI — when you need a third binding, build the infrastructure then.
+
+**Counter:** The machinery IS minimal — workspace spawns two actors, stores two `persistent_term` entries, one supervisor. That's it. No registry module, no framework. The pub/sub on Transcript is ~20 lines of `gen_server`. And the codegen change is a single `persistent_term:get/2` fallback — 5 lines of Rust. The real value is making these first-class objects with proper `doesNotUnderstand:`, `class`, and `respondsTo:` — something bare module functions can't provide.
+
+### 4. Smalltalk Purist: "Pharo's Transcript is synchronous and simple"
+
+In Pharo, `Transcript show: 'Hello'` is a synchronous method call on a shared instance — write to the stream, done. Beamtalk's version involves: async cast to an actor, Future allocation, pub/sub dispatch to subscribers, ring buffer management, and asynchronous delivery to REPL sessions. The ordering guarantee comes from gen_server mailbox semantics, not from the language itself. A newcomer reading `Transcript show: 'Hello'` has no idea this machinery exists, and when output appears asynchronously between prompts instead of inline, it will confuse them.
+
+**Counter:** Pharo is single-image, single-threaded UI. Beamtalk runs on BEAM — concurrent, distributed, multi-session. The async model is the honest one: output from a background actor genuinely IS asynchronous. Hiding that behind a synchronous facade would be misleading on BEAM. And the REPL can present Transcript output cleanly — Pharo's own Transcript window doesn't update until the UI thread yields, so Pharo users already experience "delayed" Transcript output in practice.
+
+### 5. Capability/Security Advocate: "Workspace bindings are still globals in disguise"
+
+`docs/beamtalk-principles.md` says "Newspeak-style: no global namespace, all access through message chains." Workspace bindings are better than a true global registry, but `persistent_term` IS globally readable — any code on the node can call `persistent_term:get({beamtalk_workspace, 'Transcript'})` to bypass the workspace abstraction. A compromised module can write to Transcript (information leak) or call `Beamtalk allClasses` (reconnaissance). And code compiled outside a workspace context — what happens when it references `Transcript`?
+
+**Counter:** This is explicitly an *interim* step. The ADR documents the long-term Newspeak direction: workspace-as-platform with lexical scoping, where capabilities are explicitly passed. The interim uses `persistent_term` because it's the simplest OTP mechanism, not because it's the security model. Code outside a workspace gets a compile error for unresolved `Transcript` — that's the whole point of workspace-scoped bindings. And in practice, BEAM applications already have globally accessible process registrations. The workspace model is strictly *more* contained than Erlang's default.
+
+### 6. Newcomer/DX Advocate: "Where did my output go?"
+
+A newcomer types `Transcript show: 'Hello'` in their REPL and sees `=> nil`. Where's "Hello"? It went to the Transcript channel, which they haven't subscribed to. In Python, `print('Hello')` shows output immediately. Beamtalk requires knowing that Transcript is a separate output channel and that you need to subscribe or open a viewer. That's a steeper learning curve for the most basic debugging tool.
+
+**Counter:** The mental model is clear and consistent: Transcript is a shared log, like a separate window in Pharo's IDE. The REPL tutorial can explain this in one line: "Type `Transcript subscribe` to see output here, or run `beamtalk transcript` in another terminal." And since Transcript is a real object, the newcomer learns the object model by interacting with it — `Transcript subscribe`, `Transcript recent`, `Transcript class`. Every interaction reinforces "everything is a message send." The alternative — inline output that sometimes interleaves with unrelated background actor output — is more confusing, not less.
+
 
 ## Alternatives Considered
 
@@ -217,7 +495,7 @@ Object subclass: MyApp platform: platform
     platform transcript show: 'Hello'
 ```
 
-**Rejected for now:** Too much ceremony for the current state of the language. Could be added later as an optional pattern for dependency injection / testing.
+**Deferred (long-term direction):** Requires nested class scoping (not yet implemented). The workspace-injection model is designed to evolve toward this when the prerequisite language features are in place. See "Long-Term Direction" section above.
 
 ### Alternative C: Value Type Singletons (Not Actors)
 Make globals value types (maps) rather than actors:
@@ -231,41 +509,88 @@ Transcript = #{'__class__' => 'TranscriptStream'}
 ## Consequences
 
 ### Positive
-- Globals become first-class objects — `class`, `respondsTo:`, `inspect`, `describe` all work
-- Consistent dispatch — all messages go through `beamtalk_dispatch`, producing `#beamtalk_error{}` on failure
+- Well-known objects become first-class — `class`, `respondsTo:`, `inspect`, `describe` all work
+- Consistent dispatch — messages go through `beamtalk_dispatch`, producing `#beamtalk_error{}` on failure
 - Cascades work — `Transcript show: 'Hello'; cr; show: 'World'`
 - Module naming is consistent — `beamtalk_transcript_stream.erl`, not `transcript.erl`
 - Extensible — users can add methods to TranscriptStream via extensions
-- Observable — globals are named processes visible in `observer`
-- Supervisable — globals can be restarted if they crash
+- Observable — singletons are named processes visible in `observer`
+- Supervisable — singletons can be restarted if they crash
+- No language-level globals — workspace bindings, not a global namespace
+- Zero overhead on class sends — only workspace bindings use `persistent_term` lookup; `Counter spawn` etc. unchanged
+- Clear path to Newspeak — workspace bindings evolve to lexical scoping when nested classes are implemented
 
 ### Negative
-- Slightly more complex bootstrap — must spawn and register singleton processes
-- Actor message overhead — `gen_server:cast` vs direct function call (negligible in practice)
+- Slightly more complex workspace startup — must spawn and register singleton processes
+- Actor message overhead for Transcript — `gen_server:cast` vs direct function call (negligible for dev tool)
 - More moving parts — processes can crash, need supervision
-- Codegen change required — class-level sends need runtime check for registered names
+- `persistent_term` write cost — updating bindings triggers global GC, but this only happens at workspace startup
+- Newcomer confusion — `Transcript show:` returns `nil` in REPL, output goes to separate channel
 
 ### Neutral
 - `lib/Beamtalk.bt` renamed to `lib/SystemDictionary.bt`
 - Transcript module renamed from `transcript.erl` to `beamtalk_transcript_stream.erl`
-- Class registry in `beamtalk_stdlib.erl` updated
+- Workspace bindings use `persistent_term` internally — implementation detail, not public API
 
 ## Implementation
 
-### Phase 1: ADR Acceptance and Design
-- Accept this ADR
-- Define the well-known instance registry API
+### OTP Application Placement (ADR 0009)
 
-### Phase 2: Runtime Infrastructure
-- Create `TranscriptStream` class with actor dispatch
-- Create `SystemDictionary` class with actor dispatch
-- Add well-known instance registration to bootstrap
-- Supervisor tree for global processes
+ADR 0009 splits the runtime into `beamtalk_runtime` (core language) and `beamtalk_workspace` (interactive development).
+
+| Component | OTP App | Rationale |
+|-----------|---------|-----------|
+| `SystemDictionary` (Beamtalk) | `beamtalk_runtime` | Introspection of classes is a core language feature |
+| `TranscriptStream` (Transcript) | `beamtalk_workspace` | I/O is a workspace service |
+| Workspace bindings (`persistent_term`) | `beamtalk_workspace` | Populated at workspace startup |
+
+This means:
+- **Batch compile** (`beamtalk build`): No workspace bindings exist. Code referencing `Transcript` gets a clear "unbound variable" error. Classes (`Counter`, `Point`) work normally via direct module calls.
+- **REPL/workspace**: Workspace spawns singletons and injects bindings at startup. `Transcript` and `Beamtalk` are available immediately.
+- **One workspace per node** (ADR 0004): Simple `register/2` is sufficient — no scoping needed.
+
+### Supervision Strategy
+
+Singleton actors are **permanent workers** under their owning supervisor:
+
+```
+beamtalk_runtime_sup (one_for_one)            [beamtalk_runtime app]
+├── beamtalk_bootstrap
+├── beamtalk_stdlib
+├── beamtalk_object_instances
+└── beamtalk_system_dictionary                 ← Beamtalk singleton
+
+beamtalk_workspace_sup (one_for_one)          [beamtalk_workspace app]
+├── beamtalk_workspace_meta
+├── beamtalk_transcript_stream                 ← Transcript singleton
+├── beamtalk_repl_server
+├── beamtalk_actor_sup
+└── ...
+```
+
+**Crash recovery:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Transcript crashes | Supervisor restarts. New process self-registers, updates `persistent_term` binding |
+| Beamtalk (SystemDictionary) crashes | Supervisor restarts. Class metadata reconstructed from `beamtalk_object_class` processes |
+
+Restarted processes update their own `persistent_term` binding in `init/1` — no external monitoring needed.
+
+### Phase 1: Singleton Actor Classes
+- Create `TranscriptStream` class with pub/sub actor dispatch (`lib/TranscriptStream.bt`)
+- Create `SystemDictionary` class with actor dispatch (`lib/SystemDictionary.bt`)
+- Runtime modules: `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
+
+### Phase 2: Workspace Binding Injection
+- Workspace startup spawns singletons and populates `persistent_term` bindings
+- Add supervision for singleton actors under appropriate supervisor
 
 ### Phase 3: Codegen Update
-- Modify `ClassReference` dispatch to check for registered names
-- Generate actor sends for well-known instances
-- Keep direct calls for class methods (`Counter spawn`, `Point new`)
+- `ClassReference` dispatch checks `persistent_term` workspace bindings first
+- If bound → actor message send (existing actor codegen path)
+- If not bound → direct module function call (existing class method codegen path)
+- Class method calls (`Counter spawn`, `Point new`) are completely unchanged
 
 ### Phase 4: Migration
 - Rename `lib/Beamtalk.bt` → `lib/SystemDictionary.bt`
@@ -274,21 +599,49 @@ Transcript = #{'__class__' => 'TranscriptStream'}
 - Deprecate old module names
 
 ### Affected Components
-- **Codegen:** `dispatch_codegen.rs` — ClassReference dispatch logic
-- **Runtime:** `beamtalk_bootstrap.erl`, `beamtalk_stdlib.erl` — registration
-- **Runtime:** New `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
+- **Codegen:** `dispatch_codegen.rs` — `ClassReference` checks workspace bindings first
+- **Workspace:** Startup code spawns singletons, injects `persistent_term` bindings
+- **Runtime (new):** `beamtalk_transcript_stream.erl`, `beamtalk_system_dictionary.erl`
 - **Stdlib:** `lib/TranscriptStream.bt`, `lib/SystemDictionary.bt`
-- **Tests:** E2E and unit tests for globals
+- **Tests:** E2E and unit tests for workspace bindings and singletons
 
 ## Migration Path
 
-Existing code using `Transcript show:` and `Beamtalk allClasses` continues to work unchanged. The syntax is identical; only the dispatch path changes internally.
+Existing code using `Transcript show:` and `Beamtalk allClasses` continues to work unchanged in a workspace context. The syntax is identical; only the dispatch path changes internally.
+
+Outside a workspace (`beamtalk build`), references to `Transcript` produce a clear compile-time error: "Transcript is a workspace binding, not available in batch compilation." This is a deliberate design choice — Transcript is a dev tool, not a production dependency.
 
 The current `transcript.erl` module (from BT-328) serves as the initial implementation and will be refactored into `beamtalk_transcript_stream.erl` with actor dispatch.
 
+## Future Considerations
+
+### Repl as a First-Class Object
+
+A `Repl` workspace binding representing the current REPL session would allow:
+
+```beamtalk
+Transcript subscribe: Repl   // explicit subscriber (no implicit CallerPid)
+Repl history                  // session history as messages, not :history command
+Repl bindings                 // inspect current variable bindings
+```
+
+This aligns with the principle that behavior lives on objects, not REPL commands. Unlike `Transcript` and `Beamtalk` (workspace singletons), `Repl` would be **per-session** — each REPL connection gets its own binding. The codegen is unchanged (`persistent_term` lookup), but the binding is set per-eval-context rather than at workspace startup.
+
+### Workspace / Beamtalk Consolidation
+
+If the language evolves toward Newspeak-style capabilities (the long-term direction in this ADR), the `Beamtalk` object (SystemDictionary) and the Workspace concept may merge. In Newspeak, the platform IS the entry point — there's no separate "system dictionary" and "workspace." The workspace provides all capabilities: class lookup, Transcript, Repl, and any other services.
+
+This suggests a future where:
+- `Beamtalk` (SystemDictionary) is absorbed into the Workspace object
+- `Workspace` becomes the single platform entry point passed to top-level classes
+- `Transcript` and `Repl` are accessed as `workspace transcript`, `workspace repl`
+- The interim `persistent_term` bindings are replaced by lexical scoping from the Workspace parameter
+
+This consolidation depends on nested class scoping — the same prerequisite as the Newspeak migration. When that's implemented, a follow-up ADR should address the Workspace/Beamtalk unification.
+
 ## References
-- Related issues: BT-328 (Transcript implementation), BT-329 (Towers of Hanoi — needs Transcript)
-- Related ADRs: ADR 0005 (BEAM Object Model), ADR 0006 (Unified Method Dispatch), ADR 0007 (Compilable Stdlib)
+- Related issues: BT-353 (this ADR), BT-328 (Transcript implementation), BT-329 (Towers of Hanoi — needs Transcript)
+- Related ADRs: ADR 0005 (BEAM Object Model), ADR 0006 (Unified Method Dispatch), ADR 0007 (Compilable Stdlib), ADR 0009 (OTP Application Structure)
 - Design principles: `docs/beamtalk-principles.md` — "Newspeak-style: no global namespace"
 - Smalltalk: `SystemDictionary`, `TranscriptStream` in Squeak/Pharo
 - Newspeak: Module-based capability system (no globals)
