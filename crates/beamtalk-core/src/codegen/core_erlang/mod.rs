@@ -76,7 +76,8 @@
 //!
 //! - [`expressions`] - Expression code generation (literals, identifiers, maps, cascades)
 //! - [`gen_server`] - OTP `gen_server` scaffolding (spawn, init, callbacks)
-//! - [`builtins`] - Built-in type operations (blocks, dictionaries, booleans, arithmetic)
+//! - [`intrinsics`] - Compiler intrinsics (block evaluation, `ProtoObject`, `Object`)
+//! - [`operators`] - Binary operator compilation (arithmetic, comparison, string concat)
 //! - [`block_analysis`] - Block mutation analysis for control flow
 //! - [`util`] - Utility functions (indentation, name conversions)
 //!
@@ -88,12 +89,13 @@
 mod actor_codegen;
 mod beamtalk_module;
 mod block_analysis;
-mod builtins;
 mod control_flow;
 mod dispatch_codegen;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;
+mod intrinsics;
+mod operators;
 pub mod primitive_bindings;
 mod repl_codegen;
 pub mod selector_mangler;
@@ -365,7 +367,8 @@ enum CodeGenContext {
 /// - [`dispatch_codegen`] - Message sending and dispatch
 /// - [`expressions`] - Expression code generation
 /// - [`gen_server`] - OTP `gen_server` scaffolding
-/// - [`builtins`] - Built-in type operations
+/// - [`intrinsics`] - Compiler intrinsics (block, `ProtoObject`, `Object`, list iteration)
+/// - [`operators`] - Binary operator code generation
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
     module_name: String,
@@ -387,10 +390,10 @@ pub(super) struct CoreErlangGenerator {
     context: CodeGenContext,
     /// BT-101: Original source text for extracting method source.
     source_text: Option<String>,
-    /// BT-295: Primitive binding table from compiled stdlib (ADR 0007 Phase 3).
-    /// Currently used by `generate_primitive()` for method body compilation.
-    /// Call-site dispatch is disabled pending static type information (PR #260).
-    #[allow(dead_code)] // Kept for future call-site dispatch with static types
+    /// BT-295: Primitive binding table from compiled stdlib (ADR 0007).
+    /// Used by `generate_primitive()` for method body compilation via static methods.
+    /// The field is stored for future call-site optimization with static typing.
+    #[allow(dead_code)]
     primitive_bindings: PrimitiveBindingTable,
     /// Identity of the class currently being compiled (if any).
     /// Set from the AST class definition at the start of module generation.
@@ -2443,12 +2446,13 @@ end
     }
 
     // ========================================================================
-    // Dictionary Method Code Generation Tests
+    // Dictionary Method Code Generation Tests (BT-296: now uses runtime dispatch)
     // ========================================================================
 
     #[test]
     fn test_dictionary_at_on_identifier() {
-        // person at: #name -> maps:get('name', Person)
+        // BT-296: Dictionary methods now go through runtime dispatch
+        // person at: #name -> beamtalk_primitive:send(person, 'at:', ['name'])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2465,20 +2469,17 @@ end
             .unwrap();
         let output = &generator.output;
 
+        // BT-223: Runtime dispatch checks actor vs primitive
         assert!(
-            output.contains("call 'maps':'get'('name', Person)"),
-            "Should generate maps:get call. Got: {output}"
-        );
-        // Should NOT create a future (synchronous operation)
-        assert!(
-            !output.contains("beamtalk_future"),
-            "Dictionary methods should be synchronous. Got: {output}"
+            output.contains("beamtalk_primitive") && output.contains("'at:'"),
+            "Should generate runtime dispatch for at:. Got: {output}"
         );
     }
 
     #[test]
     fn test_dictionary_at_put_on_identifier() {
-        // person at: #age put: 31 -> maps:put('age', 31, Person)
+        // BT-296: Dictionary methods now go through runtime dispatch
+        // person at: #age put: 31 -> beamtalk_primitive:send(person, 'at:put:', ['age', 31])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2499,14 +2500,15 @@ end
         let output = &generator.output;
 
         assert!(
-            output.contains("call 'maps':'put'('age', 31, Person)"),
-            "Should generate maps:put call. Got: {output}"
+            output.contains("beamtalk_primitive") && output.contains("'at:put:'"),
+            "Should generate runtime dispatch for at:put:. Got: {output}"
         );
     }
 
     #[test]
     fn test_dictionary_size_on_identifier() {
-        // person size -> maps:size(Person)
+        // BT-296: Dictionary methods now go through runtime dispatch
+        // person size -> beamtalk_primitive:send(person, 'size', [])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2520,8 +2522,8 @@ end
         let output = &generator.output;
 
         assert!(
-            output.contains("call 'maps':'size'(Person)"),
-            "Should generate maps:size call. Got: {output}"
+            output.contains("beamtalk_primitive") && output.contains("'size'"),
+            "Should generate runtime dispatch for size. Got: {output}"
         );
     }
 
@@ -3429,9 +3431,8 @@ end
         //   let _Val1 = 1 in let StateAcc1 = ... in  in let _Val2 = 2 in let StateAcc2 = ... in
         //                                         ^^^^^^^ double " in " - INVALID!
 
-        // This test documents the issue. The fix will be in control_flow.rs:1175-1177
-        // by following the pattern from generate_list_do_body_with_threading (lines 123-148)
-        // which only writes " in " for non-assignment expressions when necessary.
+        // This test documents the issue. The fix will be in control_flow.rs
+        // by ensuring only non-assignment expressions write " in " when necessary.
     }
 
     #[test]

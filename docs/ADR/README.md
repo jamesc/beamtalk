@@ -35,6 +35,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Accepted | 2026-02-05 |
 | [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Accepted | 2026-02-06 |
 | [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Proposed | 2026-02-06 |
+| [0009](0009-otp-application-structure.md) | OTP Application Structure — Split Workspace from Runtime | Proposed | 2026-02-07 |
 | [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Proposed | 2026-02-07 |
 
 ## Creating New ADRs

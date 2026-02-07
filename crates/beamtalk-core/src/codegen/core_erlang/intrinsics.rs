@@ -1,34 +1,51 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Block, list, proto-object, and object method code generation.
+//! Compiler intrinsics for language-level constructs.
 //!
 //! **DDD Context:** Compilation — Code Generation
+//!
+//! These are message patterns that the compiler must generate inline code for,
+//! regardless of receiver type. They represent language-level semantics, not
+//! type-specific dispatch:
+//!
+//! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
+//! - **`ProtoObject`**: `class` → Type introspection via pattern matching
+//! - **Object**: `isNil`, `notNil`, `respondsTo:` → Protocol methods
+//!
+//! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
+//! at runtime), these intrinsics generate efficient inline code because they are
+//! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::super::{CoreErlangGenerator, Result};
+use super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
-    /// Tries to generate code for Block evaluation messages.
+    /// Tries to generate code for Block evaluation and loop intrinsics.
     ///
-    /// Block evaluation messages are synchronous operations that execute blocks.
+    /// These are structural intrinsics that the compiler generates inline code for.
     /// This function:
     ///
-    /// - Returns `Ok(Some(()))` if the message was a Block method and code was generated
-    /// - Returns `Ok(None)` if the message is NOT a Block method (caller should continue)
+    /// - Returns `Ok(Some(()))` if the message was an intrinsic and code was generated
+    /// - Returns `Ok(None)` if the message is NOT an intrinsic (caller should continue)
     /// - Returns `Err(...)` on error
     ///
-    /// # Block Methods
+    /// # Block Evaluation
     ///
     /// - `value` (0 args) → evaluate block with no arguments
     /// - `value:` (1 arg) → evaluate block with one argument
     /// - `value:value:` (2 args) → evaluate block with two arguments  
     /// - `value:value:value:` (3 args) → evaluate block with three arguments
+    ///
+    /// # Loop Constructs
+    ///
     /// - `repeat` (0 args) → infinite loop
     /// - `whileTrue:` (1 arg) → loop while condition block returns true
     /// - `whileFalse:` (1 arg) → loop while condition block returns false
     /// - `timesRepeat:` (1 arg) → repeat body N times
+    /// - `to:do:` (2 args) → range iteration from start to end
+    /// - `to:by:do:` (3 args) → range iteration with custom step
     pub(in crate::codegen::core_erlang) fn try_generate_block_message(
         &mut self,
         receiver: &Expression,
@@ -77,6 +94,23 @@ impl CoreErlangGenerator {
                         Ok(Some(()))
                     }
 
+                    // `to:do:` - range iteration (structural intrinsic from Integer)
+                    "to:do:" if arguments.len() == 2 => {
+                        self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+
+                    // `to:by:do:` - range iteration with step (structural intrinsic from Integer)
+                    "to:by:do:" if arguments.len() == 3 => {
+                        self.generate_to_by_do(
+                            receiver,
+                            &arguments[0],
+                            &arguments[1],
+                            &arguments[2],
+                        )?;
+                        Ok(Some(()))
+                    }
+
                     // Not a block evaluation message
                     _ => Ok(None),
                 }
@@ -89,8 +123,8 @@ impl CoreErlangGenerator {
 
     /// Tries to generate code for List/Array methods.
     ///
-    /// List methods are synchronous operations that generate direct Erlang list calls.
-    /// This function:
+    /// List methods are structural intrinsics that require inline code generation
+    /// for proper state threading when used inside actor methods with field mutations.
     ///
     /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
@@ -98,10 +132,6 @@ impl CoreErlangGenerator {
     ///
     /// # List Methods
     ///
-    /// - `first` (0 args) → `hd(List)`
-    /// - `rest` (0 args) → `tl(List)`
-    /// - `size` (0 args) → `length(List)`
-    /// - `isEmpty` (0 args) → `List =:= []`
     /// - `do:` (1 arg block) → iterate over elements with side effects
     /// - `collect:` (1 arg block) → map to new list
     /// - `select:` (1 arg block) → filter elements
@@ -114,64 +144,27 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<()>> {
         match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "first" if arguments.is_empty() => {
-                    // call 'erlang':'hd'(Receiver)
-                    write!(self.output, "call 'erlang':'hd'(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, ")")?;
-                    Ok(Some(()))
-                }
-                "rest" if arguments.is_empty() => {
-                    // call 'erlang':'tl'(Receiver)
-                    write!(self.output, "call 'erlang':'tl'(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, ")")?;
-                    Ok(Some(()))
-                }
-                "size" if arguments.is_empty() => {
-                    // call 'erlang':'length'(Receiver)
-                    write!(self.output, "call 'erlang':'length'(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, ")")?;
-                    Ok(Some(()))
-                }
-                "isEmpty" if arguments.is_empty() => {
-                    // call 'erlang':'=:='(Receiver, [])
-                    write!(self.output, "call 'erlang':'=:='(")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, ", [])")?;
-                    Ok(Some(()))
-                }
-                _ => Ok(None),
-            },
-
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
                 match selector_name.as_str() {
                     "do:" if arguments.len() == 1 => {
-                        // list do: [:item | body]
                         self.generate_list_do(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
                     "collect:" if arguments.len() == 1 => {
-                        // list collect: [:item | transform]
                         self.generate_list_collect(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
                     "select:" if arguments.len() == 1 => {
-                        // list select: [:item | predicate]
                         self.generate_list_select(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
                     "reject:" if arguments.len() == 1 => {
-                        // list reject: [:item | predicate]
                         self.generate_list_reject(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
                     "inject:into:" if arguments.len() == 2 => {
-                        // list inject: 0 into: [:acc :item | acc + item]
                         self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
                         Ok(Some(()))
                     }
@@ -179,7 +172,7 @@ impl CoreErlangGenerator {
                 }
             }
 
-            MessageSelector::Binary(_) => Ok(None),
+            _ => Ok(None),
         }
     }
 

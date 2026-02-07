@@ -76,7 +76,8 @@ do_init() ->
         register_nil_class(),
         register_block_class(),
         register_tuple_class(),
-        register_beamtalk_class()
+        register_beamtalk_class(),
+        register_transcript_class()
     ],
     %% Log any failures but don't crash
     lists:foreach(fun
@@ -283,6 +284,25 @@ register_beamtalk_class() ->
         instance_variables => []
     },
     register_class('Beamtalk', ClassInfo).
+
+%%% ============================================================================
+%%% Transcript Class (Standard I/O)
+%%% ============================================================================
+
+-spec register_transcript_class() -> {ok, atom()} | {error, atom(), term()}.
+register_transcript_class() ->
+    ClassInfo = #{
+        name => 'Transcript',
+        module => transcript,
+        superclass => 'Object',
+        instance_methods => #{},
+        class_methods => #{
+            'show:' => #{arity => 1},
+            cr => #{arity => 0}
+        },
+        instance_variables => []
+    },
+    register_class('Transcript', ClassInfo).
 
 %%% ============================================================================
 %%% Helper Functions
