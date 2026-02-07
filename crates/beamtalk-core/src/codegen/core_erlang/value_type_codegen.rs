@@ -10,7 +10,7 @@
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, MethodDefinition, Module};
+use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, Module};
 use std::fmt::Write;
 
 use super::variable_context;
@@ -66,8 +66,25 @@ impl CoreErlangGenerator {
             return self.generate_beamtalk_module(class);
         }
 
+        // Check if the class explicitly defines new/new: methods
+        // (e.g., Object.bt defines `new => @primitive basicNew`)
+        // If so, skip auto-generating constructors to avoid duplicate definitions
+        let has_explicit_new = class
+            .methods
+            .iter()
+            .any(|m| matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new"));
+        let has_explicit_new_with = class.methods.iter().any(|m| {
+            matches!(&m.selector, MessageSelector::Keyword(parts) if parts.first().is_some_and(|p| p.keyword == "new:"))
+        });
+
         // Collect method exports
-        let mut exports = vec!["'new'/0".to_string(), "'new'/1".to_string()];
+        let mut exports = Vec::new();
+        if !has_explicit_new {
+            exports.push("'new'/0".to_string());
+        }
+        if !has_explicit_new_with {
+            exports.push("'new'/1".to_string());
+        }
 
         // Add instance method exports (each takes Self as first parameter)
         for method in &class.methods {
@@ -88,14 +105,19 @@ impl CoreErlangGenerator {
         writeln!(self.output, "  attributes []")?;
         writeln!(self.output)?;
 
-        // Generate new/0 - creates instance with default field values
         self.current_class_name = Some(class.name.name.to_string());
-        self.generate_value_type_new(class)?;
-        writeln!(self.output)?;
+
+        // Generate new/0 - creates instance with default field values
+        if !has_explicit_new {
+            self.generate_value_type_new(class)?;
+            writeln!(self.output)?;
+        }
 
         // Generate new/1 - creates instance with initialization arguments
-        self.generate_value_type_new_with_args()?;
-        writeln!(self.output)?;
+        if !has_explicit_new_with {
+            self.generate_value_type_new_with_args()?;
+            writeln!(self.output)?;
+        }
 
         // Generate instance methods as pure functions
         for method in &class.methods {
