@@ -24,22 +24,23 @@ Point new
 // ACCESSING FIELDS
 // ===========================================================================
 
-// @load tests/e2e/fixtures/point.bt
-// p := Point new: #{x => 5, y => 10}
-// p.x
-// // => 5
+// Access fields via instance methods (BT-354)
+p := Point new
+// => _
 
-// p.y
-// // => 10
+p getX
+// => 0
+
+p getY
+// => 0
 
 // ===========================================================================
 // METHOD CALLS
 // ===========================================================================
 
-// @load tests/e2e/fixtures/point.bt
-// p := Point new: #{x => 3, y => 4}
-// p describe
-// // => 'Point(3, 4)'
+// Inherited Object base methods work on value types (BT-354)
+p class
+// => Point
 
 // ===========================================================================
 // IMMUTABILITY
