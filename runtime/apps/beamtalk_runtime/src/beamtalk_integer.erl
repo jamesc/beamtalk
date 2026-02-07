@@ -117,6 +117,11 @@ is_builtin('perform:withArgs:') -> true;
 is_builtin('asString') -> true;
 is_builtin('abs') -> true;
 is_builtin('negated') -> true;
+is_builtin('isZero') -> true;
+is_builtin('isPositive') -> true;
+is_builtin('isNegative') -> true;
+is_builtin('isEven') -> true;
+is_builtin('isOdd') -> true;
 is_builtin('instVarNames') -> true;
 is_builtin('instVarAt') -> true;
 is_builtin('instVarAt:put:') -> true;
@@ -138,7 +143,7 @@ builtin_dispatch('/', [Y], X) when is_number(Y), Y =/= 0 -> {ok, X / Y};
 
 %% Comparison operations
 builtin_dispatch('=', [Y], X) when is_number(Y) -> {ok, X =:= Y};
-builtin_dispatch('=', [Y], X) -> {ok, false};  % Non-numeric comparison always false
+builtin_dispatch('=', [_Y], _X) -> {ok, false};  % Non-numeric comparison always false
 builtin_dispatch('<', [Y], X) when is_number(Y) -> {ok, X < Y};
 builtin_dispatch('>', [Y], X) when is_number(Y) -> {ok, X > Y};
 builtin_dispatch('<=', [Y], X) when is_number(Y) -> {ok, X =< Y};
@@ -170,6 +175,11 @@ builtin_dispatch('asString', [], X) -> {ok, integer_to_binary(X)};
 %% Numeric operations
 builtin_dispatch('abs', [], X) -> {ok, abs(X)};
 builtin_dispatch('negated', [], X) -> {ok, -X};
+builtin_dispatch('isZero', [], X) -> {ok, X =:= 0};
+builtin_dispatch('isPositive', [], X) -> {ok, X > 0};
+builtin_dispatch('isNegative', [], X) -> {ok, X < 0};
+builtin_dispatch('isEven', [], X) -> {ok, X rem 2 =:= 0};
+builtin_dispatch('isOdd', [], X) -> {ok, X rem 2 =/= 0};
 
 %% Instance variable reflection (BT-164)
 %% Primitives are immutable and have no instance variables

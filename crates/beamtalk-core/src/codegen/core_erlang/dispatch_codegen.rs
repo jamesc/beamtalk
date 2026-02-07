@@ -7,35 +7,30 @@
 //! In Smalltalk and Beamtalk, message sending is THE fundamental operation, not
 //! method calls or function invocation.
 //!
-//! # Message Send Protocol
+//! # Message Send Protocol (ADR 0007 Phase 4)
 //!
-//! By default, messages are **asynchronous** and return futures:
+//! Messages are dispatched through the following strategy:
 //!
-//! ```erlang
-//! let Receiver = <receiver expression> in
-//! let Pid = call 'erlang':'element'(4, Receiver) in  % Extract pid from object
-//! let Future = call 'beamtalk_future':'new'() in
-//! let _ = call 'gen_server':'cast'(Pid, {Selector, Args, Future}) in
-//! Future
-//! ```
+//! 1. **Compiler intrinsics**: Language-level constructs that the compiler must
+//!    generate inline code for (binary operators, block evaluation, spawn/await,
+//!    class/nil testing). These are structural requirements, not type-specific dispatch.
 //!
-//! # Special Cases
+//! 2. **Runtime dispatch**: All other messages go through the BT-223 runtime check:
+//!    - **Actors** (`beamtalk_object` records): Async via `gen_server:cast` with futures
+//!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
-//! Several message patterns are compiled to **synchronous** operations:
+//! The primitive binding table from `lib/*.bt` (ADR 0007) drives stdlib method
+//! compilation, while call-site dispatch uses runtime type checking since we
+//! don't have static type information.
+//!
+//! # Special Cases (Compiler Intrinsics)
 //!
 //! - **Binary operators**: `+`, `-`, `*`, `/` → Direct Erlang arithmetic
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Direct function calls
-//! - **Built-in types**: String, Dictionary, Boolean, Integer, List operations
+//! - **ProtoObject/Object**: `class`, `isNil`, `respondsTo:` → Pattern matching
 //! - **Spawn messages**: `Class spawn`, `Class spawnWith: args` → `gen_server:start_link`
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
-//!
-//! # Domain Concepts
-//!
-//! - **Receiver**: The target object receiving the message
-//! - **Selector**: The message name (unary, binary, or keyword)
-//! - **Arguments**: Parameters for keyword messages
-//! - **Future**: Asynchronous result container
 
 use super::{CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
 use crate::ast::{Expression, MessageSelector};
@@ -46,25 +41,23 @@ impl CoreErlangGenerator {
     ///
     /// This is the **main entry point** for message compilation. It dispatches
     /// to specialized handlers for different message patterns, and falls back
-    /// to the async protocol for user-defined messages.
+    /// to runtime dispatch via `beamtalk_primitive:send/3` for primitives or
+    /// async actor messaging for actor receivers.
     ///
-    /// # Message Dispatch Strategy
+    /// # Message Dispatch Strategy (ADR 0007 Phase 4)
     ///
     /// 1. **Super sends** → `generate_super_send`
-    /// 2. **Binary operators** → `generate_binary_op` (synchronous)
+    /// 2. **Binary operators** → `generate_binary_op` (synchronous Erlang ops)
     /// 3. **`ProtoObject` messages** → `try_generate_protoobject_message` (synchronous)
-    /// 4. **Block messages** → `try_generate_block_message` (synchronous)
-    /// 5. **String messages** → `try_generate_string_message` (synchronous)
-    /// 6. **Dictionary messages** → `try_generate_dictionary_message` (synchronous)
-    /// 7. **Boolean messages** → `try_generate_boolean_message` (synchronous)
-    /// 8. **Integer messages** → `try_generate_integer_message` (synchronous)
-    /// 9. **List messages** → `try_generate_list_message` (synchronous)
-    /// 10. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
-    /// 11. **Await messages** → Blocking future resolution
-    /// 12. **Default** → Async actor message with future
+    /// 4. **Object messages** → `try_generate_object_message` (synchronous)
+    /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
+    /// 6. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
+    /// 7. **Await messages** → Blocking future resolution
+    /// 8. **Class-level messages** → Direct function calls
+    /// 9. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
     #[expect(
         clippy::too_many_lines,
-        reason = "BT-223: Runtime dispatch for primitives adds necessary complexity"
+        reason = "BT-223: Runtime dispatch check adds necessary complexity"
     )]
     pub(super) fn generate_message_send(
         &mut self,
@@ -114,32 +107,9 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
-        // Special case: String methods - synchronous Erlang string operations
-        // Check BEFORE Dictionary because both use at: but string handles literal strings
-        if let Some(result) = self.try_generate_string_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: Dictionary/Map methods - direct calls to Erlang maps module
-        // These are synchronous operations, not async actor messages
-        if let Some(result) = self.try_generate_dictionary_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: Boolean methods - synchronous case expressions
-        // ifTrue:ifFalse:, and:, or:, not generate direct Erlang case expressions
-        if let Some(result) = self.try_generate_boolean_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: Integer methods - synchronous Erlang operations
-        // negated, abs, isZero, isEven, isOdd generate direct arithmetic/comparison
-        if let Some(result) = self.try_generate_integer_message(receiver, selector, arguments)? {
-            return Ok(result);
-        }
-
-        // Special case: List/Array methods - synchronous Erlang list operations
-        // do:, collect:, select:, inject:into: generate direct iteration
+        // Special case: List iteration messages (do:, collect:, select:, reject:, inject:into:)
+        // These are structural intrinsics that require inline code generation for proper
+        // state threading when used inside actor methods with field mutations.
         if let Some(result) = self.try_generate_list_message(receiver, selector, arguments)? {
             return Ok(result);
         }
@@ -207,14 +177,10 @@ impl CoreErlangGenerator {
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
-        // BT-295 / ADR 0007 Phase 3: Pragma-driven dispatch is disabled at call sites
-        // until we have static type information. Without knowing the receiver's type,
-        // routing directly to a specific primitive module (e.g., beamtalk_string:dispatch/3)
-        // is unsafe — those modules assume a specific representation and will crash on
-        // wrong-typed receivers. The binding table infrastructure is kept for:
-        // 1. generate_primitive() — stdlib method body compilation (knows class context)
-        // 2. Future phases with static typing can re-enable call-site optimization
-        // See PR #260 review discussion for rationale.
+        // BT-296 / ADR 0007 Phase 4: Type-specific dispatch tables removed.
+        // All non-intrinsic messages go through runtime dispatch:
+        // - Actors: async via gen_server:cast with futures
+        // - Primitives: sync via beamtalk_primitive:send/3
 
         // BT-223: Runtime dispatch - check if receiver is actor or primitive
         //
@@ -380,8 +346,8 @@ impl CoreErlangGenerator {
     /// information such as `control_flow_has_mutations()`) rather than assuming that
     /// the return value is always the updated state.
     ///
-    /// Note: `inject:into:` is NOT included because it returns an accumulated value,
-    /// not the state. It has special handling for state extraction.
+    /// Note: `inject:into:` is included because it may appear inside actor methods
+    /// with field mutations, requiring inline compilation for proper state threading.
     pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
         match expr {
             Expression::MessageSend {
@@ -392,7 +358,15 @@ impl CoreErlangGenerator {
                 let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 matches!(
                     selector.as_str(),
-                    "do:" | "whileTrue:" | "whileFalse:" | "to:do:" | "to:by:do:"
+                    "whileTrue:"
+                        | "whileFalse:"
+                        | "to:do:"
+                        | "to:by:do:"
+                        | "do:"
+                        | "collect:"
+                        | "select:"
+                        | "reject:"
+                        | "inject:into:"
                 )
             }
             Expression::MessageSend {

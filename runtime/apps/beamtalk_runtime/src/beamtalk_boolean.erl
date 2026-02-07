@@ -117,12 +117,12 @@ builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
 builtin_dispatch('ifTrue:', [Block], true) when is_function(Block, 0) ->
     {ok, Block()};
 builtin_dispatch('ifTrue:', [_Block], false) ->
-    {ok, nil};
+    {ok, false};
 
 builtin_dispatch('ifFalse:', [Block], false) when is_function(Block, 0) ->
     {ok, Block()};
 builtin_dispatch('ifFalse:', [_Block], true) ->
-    {ok, nil};
+    {ok, true};
 
 builtin_dispatch('ifTrue:ifFalse:', [TrueBlock, _FalseBlock], true) when is_function(TrueBlock, 0) ->
     {ok, TrueBlock()};
