@@ -143,9 +143,11 @@ send(X, Selector, Args) when is_map(X) ->
             beamtalk_compiled_method:dispatch(Selector, Args, X);
         _ ->
             %% Generic map dispatch (Dictionary)
-            Class = class_of(X),
-            error({not_implemented, {Class, Selector, Args}})
+            beamtalk_map:dispatch(Selector, Args, X)
     end;
+send(X, Selector, Args) when is_list(X) ->
+    %% List/Array dispatch
+    beamtalk_list:dispatch(Selector, Args, X);
 send(X, Selector, Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -196,8 +198,10 @@ responds_to(X, Selector) when is_map(X) ->
     case maps:find('__class__', X) of
         {ok, 'CompiledMethod'} ->
             beamtalk_compiled_method:has_method(Selector);
-        _ -> false
+        _ -> beamtalk_map:has_method(Selector)
     end;
+responds_to(X, Selector) when is_list(X) ->
+    beamtalk_list:has_method(Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.

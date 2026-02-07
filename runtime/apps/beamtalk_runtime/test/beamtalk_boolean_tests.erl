@@ -30,11 +30,11 @@ class_test() ->
 
 if_true_test() ->
     ?assertEqual(42, beamtalk_boolean:dispatch('ifTrue:', [fun() -> 42 end], true)),
-    ?assertEqual(nil, beamtalk_boolean:dispatch('ifTrue:', [fun() -> 42 end], false)).
+    ?assertEqual(false, beamtalk_boolean:dispatch('ifTrue:', [fun() -> 42 end], false)).
 
 if_false_test() ->
     ?assertEqual(42, beamtalk_boolean:dispatch('ifFalse:', [fun() -> 42 end], false)),
-    ?assertEqual(nil, beamtalk_boolean:dispatch('ifFalse:', [fun() -> 42 end], true)).
+    ?assertEqual(true, beamtalk_boolean:dispatch('ifFalse:', [fun() -> 42 end], true)).
 
 if_true_if_false_test() ->
     ?assertEqual(yes, beamtalk_boolean:dispatch('ifTrue:ifFalse:', 

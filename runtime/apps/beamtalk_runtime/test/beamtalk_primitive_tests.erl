@@ -214,8 +214,8 @@ responds_to_float_test_() ->
      end}.
 
 responds_to_other_primitives_test() ->
-    %% Lists not yet implemented
-    ?assertEqual(false, beamtalk_primitive:responds_to([], 'size')).
+    %% Lists support size via beamtalk_list dispatch
+    ?assertEqual(true, beamtalk_primitive:responds_to([], 'size')).
 
 %%% ============================================================================
 %%% Edge cases and special values

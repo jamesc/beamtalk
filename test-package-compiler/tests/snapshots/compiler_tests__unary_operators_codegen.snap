@@ -103,7 +103,7 @@ module 'unary_operators' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_cal
         <'blockUnary'> when 'true' ->
             case Args of
                 <[_x1]> when 'true' ->
-                    let _Result = call 'erlang':'-'(0, _x1) in {'reply', _Result, State}
+                    let _Result = let _Receiver2 = _x1 in case case call 'erlang':'is_tuple'(_Receiver2) of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(_Receiver2), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, _Receiver2), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of <'true'> when 'true' -> let _Pid3 = call 'erlang':'element'(4, _Receiver2) in let _Future4 = call 'beamtalk_future':'new'() in let _ = call 'gen_server':'cast'(_Pid3, {'negated', [], _Future4}) in _Future4 <'false'> when 'true' -> call 'beamtalk_primitive':'send'(_Receiver2, 'negated', []) end in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
