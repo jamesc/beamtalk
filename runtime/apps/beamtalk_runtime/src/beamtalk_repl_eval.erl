@@ -724,7 +724,7 @@ stop_io_capture({CapturePid, OldGL}) ->
     group_leader(OldGL, self()),
     case is_process_alive(CapturePid) of
         true ->
-            CapturePid ! {get_captured, self()},
+            CapturePid ! {get_captured, self(), OldGL},
             receive
                 {captured_output, Output} -> Output
             after ?IO_CAPTURE_TIMEOUT ->
@@ -738,6 +738,8 @@ stop_io_capture({CapturePid, OldGL}) ->
 %% @doc IO server loop that captures put_chars output.
 %% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
 %% (the latter is used by io:format).
+%% After capture stops, proxies IO to the original group_leader so that
+%% processes spawned during eval still have a working IO path.
 -spec io_capture_loop(binary()) -> ok.
 io_capture_loop(Buffer) ->
     receive
@@ -745,27 +747,40 @@ io_capture_loop(Buffer) ->
             {Reply, NewBuffer} = handle_io_request(Request, Buffer),
             From ! {io_reply, ReplyAs, Reply},
             io_capture_loop(NewBuffer);
-        {get_captured, Pid} ->
+        {get_captured, Pid, OldGL} ->
             Pid ! {captured_output, Buffer},
-            ok
+            io_passthrough_loop(OldGL)
+    end.
+
+%% @doc After capture, forward all IO to the original group_leader.
+%% Keeps this process alive so spawned children don't get a dead group_leader.
+-spec io_passthrough_loop(pid()) -> no_return().
+io_passthrough_loop(OldGL) ->
+    receive
+        {io_request, From, ReplyAs, Request} ->
+            OldGL ! {io_request, From, ReplyAs, Request},
+            io_passthrough_loop(OldGL)
     end.
 
 %% @doc Handle a single IO protocol request.
+%% Always replies ok for output requests to avoid changing program behavior.
 -spec handle_io_request(term(), binary()) -> {term(), binary()}.
-handle_io_request({put_chars, _Encoding, Chars}, Buffer) ->
-    try iolist_to_binary(Chars) of
-        Bin -> {ok, <<Buffer/binary, Bin/binary>>}
+handle_io_request({put_chars, Encoding, Chars}, Buffer) ->
+    try unicode:characters_to_binary(Chars, Encoding, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
     catch
         _:_ -> {ok, Buffer}
     end;
-handle_io_request({put_chars, _Encoding, Mod, Func, Args}, Buffer) ->
-    try iolist_to_binary(apply(Mod, Func, Args)) of
-        Bin -> {ok, <<Buffer/binary, Bin/binary>>}
+handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
+    try unicode:characters_to_binary(apply(Mod, Func, Args), Encoding, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
     catch
-        _:_ -> {{error, format_failed}, Buffer}
+        _:_ -> {ok, Buffer}
     end;
 handle_io_request(_Other, Buffer) ->
-    {{error, enotsup}, Buffer}.
+    {ok, Buffer}.
 
 %% @doc Inject captured output into an eval result tuple.
 -spec inject_output(tuple(), binary()) -> tuple().

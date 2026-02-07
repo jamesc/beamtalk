@@ -569,6 +569,7 @@ pub fn run(
                         if let Some(ref output) = response.output {
                             if !output.is_empty() {
                                 print!("{output}");
+                                let _ = std::io::Write::flush(&mut std::io::stdout());
                             }
                         }
                         if response.is_error() {
