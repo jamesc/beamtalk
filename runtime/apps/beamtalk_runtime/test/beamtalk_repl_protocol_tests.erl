@@ -234,7 +234,7 @@ encode_modules_legacy_format_test() ->
 
 encode_result_with_output_new_format_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-010">>, <<"alice">>, false),
-    Result = beamtalk_repl_protocol:encode_result(42, <<"Hello\n">>, Msg, fun identity/1),
+    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<"Hello\n">>),
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertEqual(<<"msg-010">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
@@ -243,7 +243,7 @@ encode_result_with_output_new_format_test() ->
 
 encode_result_with_empty_output_omitted_test() ->
     Msg = make_msg(<<"eval">>, <<"msg-011">>, undefined, false),
-    Result = beamtalk_repl_protocol:encode_result(42, <<>>, Msg, fun identity/1),
+    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<>>),
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     %% Empty output should NOT appear in response
@@ -251,11 +251,28 @@ encode_result_with_empty_output_omitted_test() ->
 
 encode_result_with_output_legacy_format_test() ->
     Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_result(<<"ok">>, <<"World">>, Msg, fun identity/1),
+    Result = beamtalk_repl_protocol:encode_result(<<"ok">>, Msg, fun identity/1, <<"World">>),
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual(<<"World">>, maps:get(<<"output">>, Decoded)).
+
+encode_error_with_output_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-012">>, <<"alice">>, false),
+    Result = beamtalk_repl_protocol:encode_error(
+        some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<"Captured\n">>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-012">>, maps:get(<<"id">>, Decoded)),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertEqual(<<"Captured\n">>, maps:get(<<"output">>, Decoded)),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+encode_error_with_empty_output_omitted_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-013">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_error(
+        some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<>>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"output">>, Decoded)).
 
 %%% Roundtrip tests
 
