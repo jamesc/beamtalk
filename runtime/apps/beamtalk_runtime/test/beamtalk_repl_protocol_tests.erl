@@ -230,6 +230,33 @@ encode_modules_legacy_format_test() ->
     ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual([], maps:get(<<"modules">>, Decoded)).
 
+%%% Encode tests (with output field)
+
+encode_result_with_output_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-010">>, <<"alice">>, false),
+    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<"Hello\n">>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-010">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual(42, maps:get(<<"value">>, Decoded)),
+    ?assertEqual(<<"Hello\n">>, maps:get(<<"output">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_result_with_empty_output_omitted_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-011">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<>>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(42, maps:get(<<"value">>, Decoded)),
+    %% Empty output should NOT appear in response
+    ?assertEqual(error, maps:find(<<"output">>, Decoded)).
+
+encode_result_with_output_legacy_format_test() ->
+    Msg = make_msg(<<"eval">>, undefined, undefined, true),
+    Result = beamtalk_repl_protocol:encode_result(<<"ok">>, Msg, fun identity/1, <<"World">>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
+    ?assertEqual(<<"World">>, maps:get(<<"output">>, Decoded)).
+
 %%% Roundtrip tests
 
 roundtrip_new_format_test() ->

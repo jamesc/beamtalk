@@ -772,6 +772,14 @@ handle_io_request({put_chars, Encoding, Chars}, Buffer) ->
     catch
         _:_ -> {ok, Buffer}
     end;
+handle_io_request({put_chars, Chars}, Buffer) ->
+    %% Legacy IO protocol form without encoding
+    try unicode:characters_to_binary(Chars, latin1, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
+    catch
+        _:_ -> {ok, Buffer}
+    end;
 handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
     try unicode:characters_to_binary(apply(Mod, Func, Args), Encoding, utf8) of
         Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};

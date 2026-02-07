@@ -90,12 +90,12 @@ struct ReplResponse {
     status: Option<Vec<String>>,
     /// Result value (both formats)
     value: Option<serde_json::Value>,
+    /// Captured stdout from evaluation (BT-355)
+    output: Option<String>,
     /// Legacy: error message
     message: Option<String>,
     /// New protocol: error message
     error: Option<String>,
-    /// Captured stdout from evaluation (BT-355)
-    output: Option<String>,
     /// Bindings map (both formats)
     bindings: Option<serde_json::Value>,
     /// Loaded classes (both formats)
@@ -569,6 +569,9 @@ pub fn run(
                         if let Some(ref output) = response.output {
                             if !output.is_empty() {
                                 print!("{output}");
+                                if !output.ends_with('\n') {
+                                    println!();
+                                }
                                 let _ = std::io::Write::flush(&mut std::io::stdout());
                             }
                         }
