@@ -85,3 +85,15 @@ File readAll: 'empty.txt'
 // Empty file exists
 File exists: 'empty.txt'
 // => true
+
+// ===========================================================================
+// SECURITY: PATH VALIDATION
+// ===========================================================================
+
+// Absolute paths should be rejected (but exists: returns false instead of error)
+File exists: '/etc/passwd'
+// => false
+
+// Directory traversal attempts should be rejected
+File exists: '../passwords.txt'
+// => false

@@ -90,7 +90,12 @@
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Use relative paths within the project">>),
+            Hint = case Reason of
+                absolute_path -> <<"Use relative paths only">>;
+                directory_traversal -> <<"Use relative paths within the project">>;
+                _ -> <<"Use relative paths within the project">>
+            end,
+            Error3 = beamtalk_error:with_hint(Error2, Hint),
             error(Error3)
     end;
 'readAll:'(_) ->
@@ -137,7 +142,12 @@
             Error0 = beamtalk_error:new(invalid_path, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Use relative paths within the project">>),
+            Hint = case Reason of
+                absolute_path -> <<"Use relative paths only">>;
+                directory_traversal -> <<"Use relative paths within the project">>;
+                _ -> <<"Use relative paths within the project">>
+            end,
+            Error3 = beamtalk_error:with_hint(Error2, Hint),
             error(Error3)
     end;
 'writeAll:contents:'(Path, _) when is_binary(Path) ->
@@ -165,22 +175,36 @@ has_method(_) -> false.
 %% @private
 %% @doc Validate and normalize a file path for security.
 %%
-%% Basic security checks:
+%% Security checks:
+%% - Reject absolute paths (must be relative)
 %% - Reject paths with ".." (directory traversal)
 %% - Convert to string for file operations
-%% - Allow relative paths (interpreted relative to CWD)
+%%
+%% Note: This does not protect against symbolic links, which is
+%% acceptable for a development language. Production systems should
+%% use additional OS-level protections.
 %%
 %% Returns {ok, ValidPath} or {error, Reason}.
 -spec validate_path(binary()) -> {ok, string()} | {error, term()}.
 validate_path(Path) when is_binary(Path) ->
     PathStr = binary_to_list(Path),
-    %% Check for directory traversal attempts
-    case string:find(PathStr, "..") of
-        nomatch ->
-            %% Path is safe
-            {ok, PathStr};
+    %% Check for absolute paths (Unix or Windows style)
+    case PathStr of
+        [$/ | _] ->
+            {error, absolute_path};
+        [$\\ | _] ->
+            {error, absolute_path};
+        [Drive, $: | _] when Drive >= $A, Drive =< $Z; Drive >= $a, Drive =< $z ->
+            {error, absolute_path};
         _ ->
-            {error, directory_traversal}
+            %% Check for directory traversal attempts
+            case string:find(PathStr, "..") of
+                nomatch ->
+                    %% Path is safe
+                    {ok, PathStr};
+                _ ->
+                    {error, directory_traversal}
+            end
     end;
 validate_path(_) ->
     {error, invalid_type}.
