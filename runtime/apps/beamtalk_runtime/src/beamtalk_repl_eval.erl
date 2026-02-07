@@ -23,7 +23,8 @@
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
--export([derive_module_name/1, extract_assignment/1, format_formatted_diagnostics/1,
+-export([extract_assignment/1,
+         format_formatted_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1]).
@@ -131,11 +132,10 @@ handle_load(Path, State) ->
                     {error, {read_error, Reason}, State};
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
-                    %% Derive module name from path
-                    ModuleName = derive_module_name(Path),
-                    %% Compile via daemon
-                    case compile_file_via_daemon(Source, ModuleName, State) of
-                        {ok, Binary, ClassNames} ->
+                    %% Compile via daemon — module name is derived from the
+                    %% class name in the AST by the daemon, not the filename.
+                    case compile_file_via_daemon(Source, Path, State) of
+                        {ok, Binary, ClassNames, ModuleName} ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
                                 {module, ModuleName} ->
@@ -450,36 +450,12 @@ extract_assignment(Expression) ->
             none
     end.
 
-%% Derive module name from file path.
-%% Example: "examples/counter.bt" -> counter
-%%
-%% ## Module Name Collision Warning
-%% User-loaded modules use the file basename directly as the module name.
-%% This could theoretically collide with system modules if a user loads a file
-%% named after a built-in module (e.g., `beamtalk_repl.bt`). However:
-%% - Runtime modules consistently use `beamtalk_*` prefix
-%% - Eval modules use `beamtalk_repl_eval_N` pattern
-%% - Users are unlikely to name files with `beamtalk_` prefix
-%%
-%% If this becomes a problem in practice, we could add a prefix (e.g., `user_`)
-%% or check against a blocklist of system module names.
-%% See: https://linear.app/beamtalk/issue/BT-88 (TODO: create follow-up issue)
-%%
-%% ## Path Security Note
-%% The file path is accepted as-is without validation. In a trusted REPL
-%% environment this is acceptable, but be aware that relative paths like
-%% `../../sensitive/file.bt` would be processed. The REPL is intended for
-%% local development use where the user has filesystem access anyway.
--spec derive_module_name(string()) -> atom().
-derive_module_name(Path) ->
-    %% Get base filename without extension
-    Basename = filename:basename(Path, ".bt"),
-    list_to_atom(Basename).
-
 %% Compile a file via the daemon and extract class metadata.
--spec compile_file_via_daemon(string(), atom(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [string()]} | {error, term()}.
-compile_file_via_daemon(Source, ModuleName, State) ->
+%% The daemon derives the module name from the class definition in the AST
+%% and returns it in the response, so we no longer derive from the filename.
+-spec compile_file_via_daemon(string(), string(), beamtalk_repl_state:state()) ->
+    {ok, binary(), [string()], atom()} | {error, term()}.
+compile_file_via_daemon(Source, Path, State) ->
     SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
     case connect_to_daemon(SocketPath) of
         {ok, Socket} ->
@@ -491,7 +467,7 @@ compile_file_via_daemon(Source, ModuleName, State) ->
                     <<"id">> => RequestId,
                     <<"method">> => <<"compile">>,
                     <<"params">> => #{
-                        <<"path">> => list_to_binary(atom_to_list(ModuleName) ++ ".bt"),
+                        <<"path">> => list_to_binary(Path),
                         <<"source">> => list_to_binary(Source)
                     }
                 }),
@@ -500,7 +476,7 @@ compile_file_via_daemon(Source, ModuleName, State) ->
                 
                 case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
                     {ok, ResponseLine} ->
-                        parse_file_compile_response(ResponseLine, ModuleName);
+                        parse_file_compile_response(ResponseLine);
                     {error, Reason} ->
                         {error, {recv_error, Reason}}
                 end
@@ -512,9 +488,9 @@ compile_file_via_daemon(Source, ModuleName, State) ->
     end.
 
 %% Parse compile response and extract bytecode + class metadata.
--spec parse_file_compile_response(binary(), atom()) ->
-    {ok, binary(), [string()]} | {error, term()}.
-parse_file_compile_response(ResponseLine, ModuleName) ->
+-spec parse_file_compile_response(binary()) ->
+    {ok, binary(), [string()], atom()} | {error, term()}.
+parse_file_compile_response(ResponseLine) ->
     try
         Response = jsx:decode(ResponseLine, [return_maps]),
         case maps:get(<<"error">>, Response, undefined) of
@@ -523,7 +499,7 @@ parse_file_compile_response(ResponseLine, ModuleName) ->
                     undefined ->
                         {error, {daemon_error, <<"Invalid JSON-RPC response">>}};
                     Result ->
-                        parse_file_compile_result(Result, ModuleName)
+                        parse_file_compile_result(Result)
                 end;
             ErrorObj ->
                 Msg = maps:get(<<"message">>, ErrorObj, <<"Unknown error">>),
@@ -540,24 +516,30 @@ parse_file_compile_response(ResponseLine, ModuleName) ->
             {error, {daemon_error, <<"Invalid JSON in response">>}}
     end.
 
-%% Parse file compile result and extract bytecode + class names.
--spec parse_file_compile_result(map(), atom()) ->
-    {ok, binary(), [string()]} | {error, term()}.
-parse_file_compile_result(Result, ModuleName) ->
+%% Parse file compile result and extract bytecode + class names + module name.
+-spec parse_file_compile_result(map()) ->
+    {ok, binary(), [string()], atom()} | {error, term()}.
+parse_file_compile_result(Result) ->
     case maps:get(<<"success">>, Result, false) of
         true ->
             case maps:get(<<"core_erlang">>, Result, undefined) of
                 undefined ->
                     {error, {daemon_error, <<"No core_erlang in response">>}};
                 CoreErlang ->
-                    %% Compile Core Erlang to BEAM
-                    case compile_core_erlang(CoreErlang, ModuleName) of
-                        {ok, Binary} ->
-                            %% Extract class names from result metadata
-                            ClassNames = extract_class_names(Result),
-                            {ok, Binary, ClassNames};
-                        {error, Reason} ->
-                            {error, Reason}
+                    %% Get module name from daemon response (derived from class name)
+                    case maps:get(<<"module_name">>, Result, undefined) of
+                        undefined ->
+                            {error, {daemon_error, <<"No module_name in response">>}};
+                        ModuleNameBin ->
+                            ModuleName = list_to_atom(binary_to_list(ModuleNameBin)),
+                            %% Compile Core Erlang to BEAM
+                            case compile_core_erlang(CoreErlang, ModuleName) of
+                                {ok, Binary} ->
+                                    ClassNames = extract_class_names(Result),
+                                    {ok, Binary, ClassNames, ModuleName};
+                                {error, Reason} ->
+                                    {error, Reason}
+                            end
                     end
             end;
         false ->

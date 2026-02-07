@@ -13,22 +13,6 @@
 %% Tests
 %%====================================================================
 
-%%% Module name derivation tests
-
-derive_module_name_basic_test() ->
-    ?assertEqual(counter, beamtalk_repl_eval:derive_module_name("counter.bt")).
-
-derive_module_name_with_path_test() ->
-    ?assertEqual(counter, beamtalk_repl_eval:derive_module_name("examples/counter.bt")),
-    ?assertEqual(point, beamtalk_repl_eval:derive_module_name("lib/core/point.bt")).
-
-derive_module_name_complex_path_test() ->
-    ?assertEqual(my_class, beamtalk_repl_eval:derive_module_name("/absolute/path/to/my_class.bt")).
-
-derive_module_name_no_extension_test() ->
-    %% basename/2 with ".bt" works on files without extension too
-    ?assertEqual(filename, beamtalk_repl_eval:derive_module_name("filename")).
-
 %%% Assignment extraction tests
 
 extract_assignment_valid_test() ->

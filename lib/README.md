@@ -240,7 +240,7 @@ value := counter getValue
 // counter := Counter new  // ⚠️  Not yet implemented
 ```
 
-### Beamtalk (`beamtalk.bt`)
+### Beamtalk (`Beamtalk.bt`)
 
 Global class for system-wide reflection and introspection. The Beamtalk class provides Smalltalk-style access to the class registry and global namespace.
 

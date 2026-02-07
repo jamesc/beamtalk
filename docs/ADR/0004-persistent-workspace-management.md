@@ -262,7 +262,7 @@ The design distinguishes between two levels:
 
 `Beamtalk` is a global object (like `Smalltalk` in Smalltalk) available in every session.
 
-**Current implementation** (see `lib/beamtalk.bt`):
+**Current implementation** (see `lib/Beamtalk.bt`):
 - `Beamtalk allClasses` — List all registered classes
 - `Beamtalk classNamed:` — Get class by name
 - `Beamtalk globals` — Access global namespace
