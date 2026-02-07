@@ -631,3 +631,18 @@ Newspeak eliminates all imports by passing the platform at the entry point and u
 - Design principles: `docs/beamtalk-principles.md` — "Newspeak-style: no global namespace"
 - Smalltalk: `SystemDictionary`, `TranscriptStream` in Squeak/Pharo
 - Newspeak: Module-based capability system (no globals)
+
+## Implementation Tracking
+
+**Epic:** BT-370 — Workspace-Injected Bindings for Global Objects (ADR 0010)
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 | BT-371 | TranscriptStream actor with pub/sub | M | — |
+| 1 | BT-372 | SystemDictionary actor | M | — |
+| 2 | BT-373 | Workspace binding injection | M | BT-371, BT-372 |
+| 3 | BT-374 | Codegen workspace binding dispatch | M | BT-373 |
+| 4 | BT-375 | Stdlib class definitions | S | BT-371, BT-372 |
+| 4 | BT-376 | E2E tests and migration | M | BT-374, BT-375 |
+| 4 | BT-377 | Transcript CLI viewer | S | BT-373 |
