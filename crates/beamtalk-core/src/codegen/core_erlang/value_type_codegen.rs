@@ -11,7 +11,9 @@
 
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, MethodKind, Module};
+use crate::ast::{
+    ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
+};
 use std::fmt::Write;
 
 use super::variable_context;
@@ -241,12 +243,29 @@ impl CoreErlangGenerator {
         // Currently, field assignments are rejected at codegen (see generate_field_assignment)
         // Field reads work via CodeGenContext routing to Self parameter
         for (i, expr) in method.body.iter().enumerate() {
-            if i > 0 {
-                self.write_indent()?;
+            let is_last = i == method.body.len() - 1;
+
+            // Early return (^) — emit value and stop generating further expressions
+            if let Expression::Return { value, .. } = expr {
+                if i > 0 {
+                    self.write_indent()?;
+                }
+                self.generate_expression(value)?;
+                break;
             }
-            self.generate_expression(expr)?;
-            if i < method.body.len() - 1 {
-                writeln!(self.output)?;
+
+            if is_last {
+                if i > 0 {
+                    self.write_indent()?;
+                }
+                self.generate_expression(expr)?;
+            } else {
+                // Non-last expressions: wrap in let to sequence side effects
+                let tmp_var = self.fresh_temp_var("seq");
+                self.write_indent()?;
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                writeln!(self.output, " in")?;
             }
         }
 

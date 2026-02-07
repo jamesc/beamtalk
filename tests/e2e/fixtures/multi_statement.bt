@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for testing multi-statement method bodies (BT-360)
+// Methods with newline-separated statements (no period required)
+
+Object subclass: MultiStatement
+
+  sideEffectThenReturn =>
+    Transcript show: 'side effect'
+    42
+
+  twoSideEffects =>
+    Transcript show: 'first'
+    Transcript show: 'second'
+    99

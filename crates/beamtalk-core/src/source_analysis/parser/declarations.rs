@@ -412,7 +412,7 @@ impl Parser {
 
     /// Parses a method body (expressions until the next method or end of class).
     ///
-    /// The body consists of expressions separated by periods.
+    /// Statements are separated by periods or newlines (BT-360).
     pub(super) fn parse_method_body(&mut self) -> Vec<Expression> {
         let mut body = Vec::new();
 
@@ -433,9 +433,9 @@ impl Parser {
                 break;
             }
 
-            // Period terminates the expression - check if we should continue
+            // Period or newline separates statements
             if self.match_token(&TokenKind::Period) {
-                // Check if next token starts a new method/state/class
+                // Explicit period — check if next token starts a new method/state/class
                 if self.is_at_end()
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
@@ -444,8 +444,11 @@ impl Parser {
                     break;
                 }
                 // Otherwise continue parsing more expressions
+            } else if !self.is_at_end() && self.current_token().has_leading_newline() {
+                // Newline acts as implicit statement separator (BT-360)
+                // Continue parsing — the while-loop guard handles method/class boundaries
             } else {
-                // No period - this was the last expression in the body
+                // No period and no newline — end of body
                 break;
             }
         }
