@@ -10,7 +10,7 @@
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, Module};
+use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
 use super::variable_context;
@@ -69,13 +69,15 @@ impl CoreErlangGenerator {
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
-        let has_explicit_new = class
+        // Only check Primary methods — advice (before/after/around) shouldn't suppress auto-generation
+        let has_explicit_new = class.methods.iter().any(|m| {
+            m.kind == MethodKind::Primary
+                && matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new")
+        });
+        let has_explicit_new_with = class
             .methods
             .iter()
-            .any(|m| matches!(&m.selector, MessageSelector::Unary(name) if name.as_str() == "new"));
-        let has_explicit_new_with = class.methods.iter().any(|m| {
-            matches!(&m.selector, MessageSelector::Keyword(parts) if parts.first().is_some_and(|p| p.keyword == "new:"))
-        });
+            .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:");
 
         // Collect method exports
         let mut exports = Vec::new();

@@ -1489,8 +1489,9 @@ runtime/
 │   │       ├── logging_counter.bt
 │   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
 │   │       └── README.md
-│   └── beamtalk_stdlib/    # Compiled stdlib (ADR 0007)
-│       └── ebin/           # Compiled .beam files (Actor, Block, Integer, etc.)
+│   └── beamtalk_stdlib/    # Standard library OTP application (ADR 0007)
+│       ├── src/            # Application metadata (beamtalk_stdlib.app.src)
+│       └── ebin/           # Generated .beam files (Actor, Block, Integer, etc.) created by build-stdlib
 
 tests/
 └── e2e/
