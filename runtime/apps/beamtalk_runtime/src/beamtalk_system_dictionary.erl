@@ -156,13 +156,13 @@ handle_call(Request, _From, State) ->
 %% cast messages. Log a warning if we receive one.
 -spec handle_cast(term(), #system_dict_state{}) -> {noreply, #system_dict_state{}}.
 handle_cast(Msg, State) ->
-    logger:warning("SystemDictionary received unexpected cast: ~p", [Msg]),
+    logger:warning("SystemDictionary received unexpected cast", #{message => Msg}),
     {noreply, State}.
 
 %% @doc Handle info messages.
 -spec handle_info(term(), #system_dict_state{}) -> {noreply, #system_dict_state{}}.
 handle_info(Info, State) ->
-    logger:debug("SystemDictionary received info: ~p", [Info]),
+    logger:debug("SystemDictionary received info", #{info => Info}),
     {noreply, State}.
 
 %% @doc Handle process termination.
