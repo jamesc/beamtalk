@@ -530,14 +530,21 @@ impl Parser {
             self.expect(&TokenKind::Pipe, "Expected '|' after block parameters");
         }
 
-        // Parse block body
+        // Parse block body — statements separated by periods or newlines (BT-360)
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let expr = self.parse_expression();
             body.push(expr);
 
-            // Optional statement separator
-            if !self.match_token(&TokenKind::Period) {
+            // Period or newline separates statements
+            if self.match_token(&TokenKind::Period) {
+                // Explicit period — continue
+            } else if !self.is_at_end()
+                && !self.check(&TokenKind::RightBracket)
+                && self.current_token().has_leading_newline()
+            {
+                // Newline acts as implicit separator (BT-360)
+            } else {
                 break;
             }
         }

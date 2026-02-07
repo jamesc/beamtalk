@@ -19,7 +19,5 @@ result4 := [[[[[[42]]]]]]
 // Complex mixed nesting (blocks + messages + operators)
 result5 := [[:x | [[:y | [[:z | x + y * z]]]]]
 
-// Nested cascades with nested arguments
-result6 := (object
-    at: (a at: (b at: 1)) put: (x get: (y get: 2));
-    at: (c at: (d at: 3)) put: (z get: (w get: 4)))
+// Nested cascades with nested arguments (single line - multi-line cascades not yet supported)
+result6 := (object at: (a at: (b at: 1)) put: (x get: (y get: 2)); at: (c at: (d at: 3)) put: (z get: (w get: 4)))

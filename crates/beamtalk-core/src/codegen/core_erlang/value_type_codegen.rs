@@ -223,12 +223,19 @@ impl CoreErlangGenerator {
         // Currently, field assignments are rejected at codegen (see generate_field_assignment)
         // Field reads work via CodeGenContext routing to Self parameter
         for (i, expr) in method.body.iter().enumerate() {
-            if i > 0 {
+            let is_last = i == method.body.len() - 1;
+            if is_last {
+                if i > 0 {
+                    self.write_indent()?;
+                }
+                self.generate_expression(expr)?;
+            } else {
+                // Non-last expressions: wrap in let to sequence side effects
+                let tmp_var = self.fresh_temp_var("seq");
                 self.write_indent()?;
-            }
-            self.generate_expression(expr)?;
-            if i < method.body.len() - 1 {
-                writeln!(self.output)?;
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                writeln!(self.output, " in")?;
             }
         }
 

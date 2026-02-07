@@ -308,35 +308,79 @@ Module {
                                 end: 385,
                             },
                         },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "inner",
+                                    span: Span {
+                                        start: 390,
+                                        end: 395,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "value:",
+                                        span: Span {
+                                            start: 396,
+                                            end: 402,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "x",
+                                        span: Span {
+                                            start: 403,
+                                            end: 404,
+                                        },
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 390,
+                                end: 404,
+                            },
+                        },
                     ],
                     span: Span {
                         start: 353,
-                        end: 354,
+                        end: 406,
                     },
                 },
             ),
             span: Span {
                 start: 334,
-                end: 354,
+                end: 406,
             },
         },
         MessageSend {
             receiver: Identifier(
                 Identifier {
-                    name: "inner",
+                    name: "processor",
                     span: Span {
-                        start: 390,
-                        end: 395,
+                        start: 447,
+                        end: 456,
                     },
                 },
             ),
             selector: Keyword(
                 [
                     KeywordPart {
-                        keyword: "value:",
+                        keyword: "forEach:",
                         span: Span {
-                            start: 396,
-                            end: 402,
+                            start: 457,
+                            end: 465,
+                        },
+                    },
+                    KeywordPart {
+                        keyword: "with:",
+                        span: Span {
+                            start: 472,
+                            end: 477,
                         },
                     },
                 ],
@@ -344,37 +388,135 @@ Module {
             arguments: [
                 Identifier(
                     Identifier {
-                        name: "x",
+                        name: "items",
                         span: Span {
-                            start: 403,
-                            end: 404,
+                            start: 466,
+                            end: 471,
+                        },
+                    },
+                ),
+                Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "item",
+                                span: Span {
+                                    start: 480,
+                                    end: 484,
+                                },
+                            },
+                        ],
+                        body: [
+                            Assignment {
+                                target: Identifier(
+                                    Identifier {
+                                        name: "mapper",
+                                        span: Span {
+                                            start: 491,
+                                            end: 497,
+                                        },
+                                    },
+                                ),
+                                value: Block(
+                                    Block {
+                                        parameters: [
+                                            BlockParameter {
+                                                name: "val",
+                                                span: Span {
+                                                    start: 503,
+                                                    end: 506,
+                                                },
+                                            },
+                                        ],
+                                        body: [
+                                            MessageSend {
+                                                receiver: Identifier(
+                                                    Identifier {
+                                                        name: "val",
+                                                        span: Span {
+                                                            start: 509,
+                                                            end: 512,
+                                                        },
+                                                    },
+                                                ),
+                                                selector: Binary(
+                                                    "+",
+                                                ),
+                                                arguments: [
+                                                    Literal(
+                                                        Integer(
+                                                            1,
+                                                        ),
+                                                        Span {
+                                                            start: 515,
+                                                            end: 516,
+                                                        },
+                                                    ),
+                                                ],
+                                                span: Span {
+                                                    start: 509,
+                                                    end: 516,
+                                                },
+                                            },
+                                        ],
+                                        span: Span {
+                                            start: 501,
+                                            end: 517,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 491,
+                                    end: 517,
+                                },
+                            },
+                            MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "mapper",
+                                        span: Span {
+                                            start: 522,
+                                            end: 528,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "value:",
+                                            span: Span {
+                                                start: 529,
+                                                end: 535,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "item",
+                                            span: Span {
+                                                start: 536,
+                                                end: 540,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 522,
+                                    end: 540,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 478,
+                            end: 542,
                         },
                     },
                 ),
             ],
             span: Span {
-                start: 390,
-                end: 404,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 405,
-                end: 406,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 516,
-                end: 517,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 541,
+                start: 447,
                 end: 542,
             },
         },
@@ -426,9 +568,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 390, end: 395 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 405, end: 406 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 516, end: 517 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 541, end: 542 }, hint: None }
