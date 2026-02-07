@@ -264,13 +264,14 @@ value_type_responds_to(Class, Selector) ->
 %% class names — the module atom must already exist if the module is loaded.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
-    try list_to_existing_atom(camel_to_snake(atom_to_list(Class)))
+    SnakeCase = camel_to_snake(atom_to_list(Class)),
+    try list_to_existing_atom(SnakeCase)
     catch error:badarg ->
         %% Module atom doesn't exist — cannot be a loaded module.
         %% Return a non-existent atom safely; callers use code:ensure_loaded
         %% and function_exported which will return false, triggering proper
         %% does_not_understand error handling.
-        list_to_atom(camel_to_snake(atom_to_list(Class)))
+        list_to_atom(SnakeCase)
     end.
 
 %% @private CamelCase string to snake_case string conversion.
