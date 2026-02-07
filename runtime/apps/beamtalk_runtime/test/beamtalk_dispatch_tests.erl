@@ -338,12 +338,13 @@ test_extension_error_propagation() ->
     },
     Self = make_ref(),
 
-    %% Extension error should propagate
-    ?assertError(extension_test_crash,
-        beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter')),
-
-    %% Clean up
-    catch ets:delete(beamtalk_extensions, {'Counter', crashExt}).
+    try
+        %% Extension error should propagate
+        ?assertError(extension_test_crash,
+            beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'))
+    after
+        catch ets:delete(beamtalk_extensions, {'Counter', crashExt})
+    end.
 
 %% Test responds_to finds extension methods
 test_responds_to_extension_method() ->
@@ -353,7 +354,8 @@ test_responds_to_extension_method() ->
     TestFun = fun(_Args, _State) -> ok end,
     ok = beamtalk_extensions:register('Counter', extTestMethod, TestFun, test_owner),
 
-    ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter')),
-
-    %% Clean up
-    catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod}).
+    try
+        ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
+    after
+        catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
+    end.

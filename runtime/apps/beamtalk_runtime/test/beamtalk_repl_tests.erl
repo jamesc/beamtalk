@@ -422,72 +422,86 @@ format_error_generic_test() ->
 
 handle_info_client_request_clear_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    %% Send clear_bindings via handle_info client_request path
-    Request = <<"{\"type\": \"clear\"}">>,
-    Pid ! {client_request, Request, self()},
-    receive
-        {response, Response} ->
-            Decoded = jsx:decode(Response, [return_maps]),
-            ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded))
-    after 5000 ->
-        ?assert(false)
-    end,
-    beamtalk_repl:stop(Pid).
+    try
+        Request = <<"{\"type\": \"clear\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
 
 handle_info_client_request_bindings_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    Request = <<"{\"type\": \"bindings\"}">>,
-    Pid ! {client_request, Request, self()},
-    receive
-        {response, Response} ->
-            Decoded = jsx:decode(Response, [return_maps]),
-            ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)),
-            ?assert(maps:is_key(<<"bindings">>, Decoded))
-    after 5000 ->
-        ?assert(false)
-    end,
-    beamtalk_repl:stop(Pid).
+    try
+        Request = <<"{\"type\": \"bindings\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)),
+                ?assert(maps:is_key(<<"bindings">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
 
 handle_info_client_request_actors_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    Request = <<"{\"type\": \"actors\"}">>,
-    Pid ! {client_request, Request, self()},
-    receive
-        {response, Response} ->
-            Decoded = jsx:decode(Response, [return_maps]),
-            ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded))
-    after 5000 ->
-        ?assert(false)
-    end,
-    beamtalk_repl:stop(Pid).
+    try
+        Request = <<"{\"type\": \"actors\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
 
 handle_info_client_request_modules_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    Request = <<"{\"type\": \"modules\"}">>,
-    Pid ! {client_request, Request, self()},
-    receive
-        {response, Response} ->
-            Decoded = jsx:decode(Response, [return_maps]),
-            ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded))
-    after 5000 ->
-        ?assert(false)
-    end,
-    beamtalk_repl:stop(Pid).
+    try
+        Request = <<"{\"type\": \"modules\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
 
 handle_info_client_request_parse_error_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
-    %% Send request with unknown type
-    Request = <<"{\"type\": \"eval\"}">>,
-    Pid ! {client_request, Request, self()},
-    receive
-        {response, Response} ->
-            Decoded = jsx:decode(Response, [return_maps]),
-            %% Missing expression field triggers unknown_type error
-            ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded))
-    after 5000 ->
-        ?assert(false)
-    end,
-    beamtalk_repl:stop(Pid).
+    try
+        %% Send request with unknown type
+        Request = <<"{\"type\": \"eval\"}">>,
+        Pid ! {client_request, Request, self()},
+        receive
+            {response, Response} ->
+                Decoded = jsx:decode(Response, [return_maps]),
+                %% Missing expression field triggers unknown_type error
+                ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded))
+        after 5000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_repl:stop(Pid)
+    end.
 
 handle_info_unknown_message_test() ->
     {ok, Pid} = beamtalk_repl:start_link(0, #{}),
