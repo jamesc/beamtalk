@@ -54,6 +54,9 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Default idle timeout in seconds (4 hours)
+const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
+
 /// Workspace metadata stored in ~/.beamtalk/workspaces/{id}/metadata.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceMetadata {
@@ -334,7 +337,7 @@ pub fn start_detached_node(
         std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(3600 * 4) // Default: 4 hours
+            .unwrap_or(DEFAULT_IDLE_TIMEOUT_SECONDS)
     });
 
     // Build the eval command to start workspace supervisor and keep running
