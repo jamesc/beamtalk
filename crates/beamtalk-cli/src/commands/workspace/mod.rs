@@ -318,6 +318,7 @@ pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
     runtime_beam_dir: &Path,
+    repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
     stdlib_beam_dir: &Path,
 ) -> Result<NodeInfo> {
@@ -334,6 +335,7 @@ pub fn start_detached_node(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_repl), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
@@ -358,6 +360,8 @@ pub fn start_detached_node(
         cookie,
         "-pa".to_string(),
         runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        repl_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),

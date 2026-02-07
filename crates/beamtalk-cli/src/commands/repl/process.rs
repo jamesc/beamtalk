@@ -35,6 +35,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     // Build runtime first
     let build_lib_dir = runtime_dir.join("_build/default/lib");
     let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
+    let repl_beam_dir = build_lib_dir.join("beamtalk_repl/ebin");
     let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
     // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
     let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");
@@ -75,14 +76,14 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         format!(
             "application:set_env(beamtalk_runtime, repl_port, {port}), \
              application:set_env(beamtalk_runtime, node_name, '{name}'), \
-             {{ok, _}} = beamtalk_repl:start_link(), \
+             {{ok, _}} = application:ensure_all_started(beamtalk_repl), \
              io:format(\"REPL backend started on port {port} (node: {name})~n\"), \
              receive stop -> ok end."
         )
     } else {
         format!(
             "application:set_env(beamtalk_runtime, repl_port, {port}), \
-             {{ok, _}} = beamtalk_repl:start_link(), \
+             {{ok, _}} = application:ensure_all_started(beamtalk_repl), \
              io:format(\"REPL backend started on port {port}~n\"), \
              receive stop -> ok end."
         )
@@ -94,6 +95,8 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         "-noshell".to_string(),
         "-pa".to_string(),
         runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        repl_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
