@@ -218,6 +218,18 @@ responds_to_other_primitives_test() ->
     ?assertEqual(true, beamtalk_primitive:responds_to([], 'size')).
 
 %%% ============================================================================
+%%% List and Map dispatch routing (BT-296)
+%%% ============================================================================
+
+send_list_size_test() ->
+    ?assertEqual(0, beamtalk_primitive:send([], 'size', [])),
+    ?assertEqual(3, beamtalk_primitive:send([1, 2, 3], 'size', [])).
+
+send_map_size_test() ->
+    ?assertEqual(0, beamtalk_primitive:send(#{}, 'size', [])),
+    ?assertEqual(2, beamtalk_primitive:send(#{a => 1, b => 2}, 'size', [])).
+
+%%% ============================================================================
 %%% Edge cases and special values
 %%% ============================================================================
 
