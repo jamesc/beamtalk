@@ -1,7 +1,7 @@
 # ADR 0009: OTP Application Structure — Split Workspace from Runtime
 
 ## Status
-Proposed (2026-02-07)
+Accepted (2026-02-07)
 
 ## Context
 
@@ -457,6 +457,23 @@ This is an internal restructuring — no user-facing changes. All module names r
 1. **Rust CLI changes:** Update `-eval` commands to use `application:ensure_all_started(beamtalk_workspace)` instead of directly calling `beamtalk_repl:start_link()`. Add `-pa` flag for `beamtalk_workspace/ebin`. Affected files: `crates/beamtalk-cli/src/commands/repl/process.rs`, `crates/beamtalk-cli/src/commands/workspace/mod.rs`.
 2. **Header includes:** Update `beamtalk_repl_eval.erl` and `beamtalk_repl_server.erl` to use `-include_lib("beamtalk_runtime/include/beamtalk.hrl")` instead of `-include("beamtalk.hrl")`.
 3. **rebar.config:** Add `beamtalk_workspace` app configuration, update Dialyzer exclude list.
+
+## Implementation Tracking
+
+**Epic:** [BT-378](https://linear.app/beamtalk/issue/BT-378)
+**Status:** Planned
+
+| Phase | Issue | Title | Size |
+|-------|-------|-------|------|
+| 1 | BT-383 | Create beamtalk_workspace OTP app skeleton | S |
+| 2 | BT-379 | Decouple actor registration from REPL with optional callback | M |
+| 3a | BT-382 | Move REPL/workspace modules to beamtalk_workspace app | M |
+| 3b | BT-380 | Move REPL/workspace test files to beamtalk_workspace | S |
+| 4 | BT-381 | Update Rust CLI startup for workspace app split | M |
+| 5 | BT-384 | Verify OTP split and update documentation | S |
+
+**Dependency chain:** BT-383 → BT-379 → BT-382 → BT-380 → BT-381 → BT-384
+**Start with:** BT-383 (no dependencies)
 
 ## References
 
