@@ -64,6 +64,12 @@ jobs:
       - name: Build Rust
         run: just build-rust
 
+      - name: Build Erlang runtime
+        run: just build-erlang
+
+      - name: Build standard library
+        run: just build-stdlib
+
       - name: Clippy
         run: just clippy
 
@@ -187,6 +193,12 @@ jobs:
         run: |
           # Generate Cobertura format (for CodeCoverageSummary action)
           cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobertura.xml
+
+      - name: Build Erlang runtime
+        run: just build-erlang
+
+      - name: Build standard library
+        run: just build-stdlib
 
       - name: Generate Erlang runtime coverage
         run: just coverage-runtime

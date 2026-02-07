@@ -46,6 +46,11 @@
 
 -include("beamtalk.hrl").
 
+%% Compiled stdlib modules (beamtalk_integer, beamtalk_string, etc.) are
+%% generated from Core Erlang, not .erl source. Dialyzer can't resolve them
+%% if stdlib hasn't been built yet.
+-dialyzer({nowarn_function, [send/3, responds_to/2]}).
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================

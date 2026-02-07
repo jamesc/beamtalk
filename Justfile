@@ -28,9 +28,8 @@ clean-all: clean clean-erlang
 # Build Tasks
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Build all targets (Rust + Erlang)
-# TODO: Chain build-stdlib once lib/*.bt files use @primitive syntax (BT-290)
-build: build-rust build-erlang
+# Build all targets (Rust + Erlang + stdlib)
+build: build-rust build-erlang build-stdlib
 
 # Build Rust workspace
 build-rust:
