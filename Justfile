@@ -202,6 +202,49 @@ coverage-runtime:
     echo "  📁 HTML report: runtime/_build/test/cover/index.html"
     echo "  📁 XML report:  runtime/_build/test/covertool/beamtalk_runtime.covertool.xml"
 
+# Collect E2E test coverage (runs E2E tests with Erlang cover instrumentation)
+coverage-e2e: _clean-daemon-state
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Running E2E tests with Erlang cover instrumentation..."
+    echo "   (This is slower than normal E2E due to cover overhead)"
+    E2E_COVER=1 cargo test --test e2e -- --ignored
+    if [ -f runtime/_build/test/cover/e2e.coverdata ]; then
+        SIZE=$(wc -c < runtime/_build/test/cover/e2e.coverdata)
+        echo "  📁 Coverdata: runtime/_build/test/cover/e2e.coverdata (${SIZE} bytes)"
+    else
+        echo "⚠️  No E2E coverdata produced"
+        exit 1
+    fi
+
+# Generate combined Erlang coverage (eunit + E2E)
+# Runs eunit with --cover, then E2E with cover, then merges both into one report.
+coverage-combined: coverage-runtime coverage-e2e
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd runtime
+    echo "📊 Merging eunit + E2E coverage data..."
+    # rebar3 cover imports all .coverdata files in _build/test/cover/
+    rebar3 cover --verbose
+    rebar3 covertool generate
+    echo "✅ Combined coverage report generated"
+    echo "  📁 HTML report: runtime/_build/test/cover/index.html"
+    echo "  📁 XML report:  runtime/_build/test/covertool/beamtalk_runtime.covertool.xml"
+
+# Show Erlang coverage report from existing coverdata (no re-run)
+coverage-report:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd runtime
+    if ! ls _build/test/cover/*.coverdata >/dev/null 2>&1; then
+        echo "❌ No coverdata found. Run 'just coverage-runtime' or 'just coverage-e2e' first."
+        exit 1
+    fi
+    echo "📊 Coverage report from existing data:"
+    ls _build/test/cover/*.coverdata | sed 's|^|  📁 |'
+    echo ""
+    rebar3 cover --verbose
+
 # Open Rust coverage report in browser
 coverage-open:
     #!/usr/bin/env bash

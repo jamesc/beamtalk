@@ -46,6 +46,7 @@ The Beamtalk REPL uses a JSON-based message protocol over TCP for communication 
 | `session` | string | Echoed from request (if provided) |
 | `status` | string[] | Status flags: `["done"]` for final message |
 | `value` | any | Result value (for eval, clear, kill) |
+| `output` | string | Captured stdout from evaluation (omitted if empty). Present when the evaluated expression writes to stdout (e.g., `Transcript show:`) |
 | `error` | string | Error message (when status includes `"error"`) |
 | *result fields* | varies | Operation-specific fields (see below) |
 
@@ -76,6 +77,13 @@ Evaluate a Beamtalk expression in the current session.
 ```json
 {"id": "msg-001", "value": 3, "status": ["done"]}
 ```
+
+**Response (with stdout output):**
+```json
+{"id": "msg-001", "value": "nil", "output": "Hello, world!\n", "status": ["done"]}
+```
+
+The `output` field contains any text written to stdout during evaluation (e.g., via `Transcript show:`). It is omitted when empty.
 
 **Response (error):**
 ```json
@@ -347,9 +355,11 @@ The protocol is implemented in:
 
 | File | Description |
 |------|-------------|
-| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
 | `runtime/apps/beamtalk_runtime/src/beamtalk_repl_server.erl` | TCP server and request dispatch |
-| `crates/beamtalk-cli/src/commands/repl.rs` | Rust CLI client |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
+| `runtime/apps/beamtalk_runtime/src/beamtalk_repl_shell.erl` | Session state bridge |
+| `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
 
 ## References
 

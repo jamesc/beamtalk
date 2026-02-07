@@ -43,26 +43,22 @@ Execute a **refactoring epic** on a single branch, implementing all child issues
 
 6. **Execute issues sequentially**: For each child issue (in dependency order):
 
-   **a. Start the issue:**
+   **a. Pick up the issue** (invoke the `pick-issue` skill with the issue ID):
    ```
-   Update Linear: BT-YYY → In Progress
+   /pick-issue BT-YYY
    ```
-
-   **b. Understand the issue:**
-   - Read acceptance criteria carefully
-   - Identify files to modify
-   - Review the safety principles:
+   This loads the issue context, sets it to In Progress, reads acceptance criteria, and identifies files to modify. Review the safety principles:
      - Behavioral preservation (structure changes, not behavior)
      - Refactor under test (tests exist or add them first)
      - Incremental delivery (code works after this commit)
 
-   **c. Implement the refactoring:**
+   **b. Implement the refactoring:**
    - Make the changes specified in the acceptance criteria
    - Follow all AGENTS.md guidelines (DDD, error handling, logging, license headers)
    - Keep changes minimal and focused on the issue scope
    - If the issue requires adding tests first, do that in a separate commit
 
-   **d. Verify CI passes:**
+   **c. Verify CI passes:**
    ```bash
    just ci
    ```
@@ -72,6 +68,12 @@ Execute a **refactoring epic** on a single branch, implementing all child issues
    - Re-run `just ci` until it passes
    - If stuck after 3 attempts, STOP and ask the user for help
    - Do NOT move to the next issue with broken CI
+
+   **d. Review the changes** (invoke the `review-code` skill):
+   ```
+   /review-code
+   ```
+   This runs a multi-pass code review against main. Fix any issues found before committing. Re-run `just ci` if changes were made.
 
    **e. Commit with issue ID:**
    ```bash
@@ -87,11 +89,12 @@ Execute a **refactoring epic** on a single branch, implementing all child issues
 
    **g. Create or update the PR:**
    
-   *After the FIRST issue:* Create the PR immediately:
+   *After the FIRST issue:* Create the PR immediately (**no auto-merge** — human review required):
    ```bash
    git push -u origin HEAD
    gh pr create --title "Refactor: <epic title> BT-XXX" --body "<PR body>"
    ```
+   Do NOT use `--auto-merge` or enable auto-merge. Refactoring PRs must be reviewed by a human.
    
    *After subsequent issues:* Push to update the existing PR:
    ```bash
