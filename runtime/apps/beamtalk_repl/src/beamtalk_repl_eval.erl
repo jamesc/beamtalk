@@ -16,7 +16,7 @@
 
 -module(beamtalk_repl_eval).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/file.hrl").
 
 -export([do_eval/2, handle_load/2]).

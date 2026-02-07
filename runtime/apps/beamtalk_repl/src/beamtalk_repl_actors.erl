@@ -30,7 +30,8 @@
 
 %% Public API
 -export([start_link/0, start_link/1, register_actor/4, unregister_actor/2, 
-         list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2]).
+         list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2,
+         on_actor_spawned/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -67,6 +68,15 @@ start_link(registered) ->
 -spec register_actor(pid(), pid(), atom(), atom()) -> ok.
 register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     gen_server:call(RegistryPid, {register, ActorPid, ClassName, ModuleName}).
+
+%% @doc Actor spawn callback for beamtalk_runtime integration.
+%% This is registered via application:set_env by beamtalk_repl_app:start/2.
+%% Wraps register_actor and workspace_meta registration in a single callback.
+-spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok.
+on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
+    ok = register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
+    beamtalk_workspace_meta:register_actor(ActorPid),
+    ok.
 
 %% @doc Unregister an actor from the registry.
 -spec unregister_actor(pid(), pid()) -> ok.

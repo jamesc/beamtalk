@@ -179,15 +179,20 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
     
     case gen_server:start_link(Module, ArgsWithRegistry, []) of
         {ok, Pid} ->
-            %% Register with REPL registry
+            %% Determine class name for callbacks
             Class = case ClassName of
                 undefined -> Module; % Use module name as fallback
                 _ -> ClassName
             end,
-            ok = beamtalk_repl_actors:register_actor(RegistryPid, Pid, Class, Module),
             
-            %% Also register with workspace metadata for tracking
-            beamtalk_workspace_meta:register_actor(Pid),
+            %% Notify registered callback (if any) - supports optional REPL/workspace tracking
+            %% The beamtalk_repl app registers this callback on startup
+            case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+                {ok, CallbackMod} ->
+                    CallbackMod:on_actor_spawned(RegistryPid, Pid, Class, Module);
+                undefined ->
+                    ok
+            end,
             
             {ok, Pid};
         {error, Reason} ->
