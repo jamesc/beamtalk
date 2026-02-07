@@ -58,7 +58,13 @@ teardown(_) ->
          beamtalk_class_PgMembershipTestClass, beamtalk_class_DuplicateTestClass,
          beamtalk_class_TestClassA, beamtalk_class_TestClassB,
          beamtalk_class_Counter, beamtalk_class_ProtoObject, beamtalk_class_LoggingCounter,
-         beamtalk_class_CounterNoMethods]
+         beamtalk_class_CounterNoMethods,
+         beamtalk_class_RootTestClass, beamtalk_class_TestParentClass,
+         beamtalk_class_TestChildClass, beamtalk_class_TestArityParent,
+         beamtalk_class_AsyncTestClass, beamtalk_class_AsyncSuperTest,
+         beamtalk_class_AsyncNameTest, beamtalk_class_AsyncModTest,
+         beamtalk_class_AsyncUnkTest, beamtalk_class_AsyncIgnoreTest,
+         beamtalk_class_InfoTestClass, beamtalk_class_TermTestClass]
     ),
     ok.
 
