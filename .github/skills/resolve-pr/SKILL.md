@@ -76,9 +76,15 @@ When activated, execute this workflow to systematically address all PR review co
    - Brief description of the change
    - Links to any Linear issues created for follow-up work
 
-11. **Report summary**: Provide a summary table of all comments and how they were resolved.
+11. **Resolve review threads**: After replying, resolve each addressed review thread using the GraphQL API:
+    ```bash
+    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread_node_id>"}) { thread { isResolved } } }'
+    ```
+    The thread node ID (e.g., `PRRT_kwDO...`) is available from the `get_review_comments` response in step 2. Only resolve threads where the fix has been committed and pushed.
 
-12. **Auto-chain to done**: If all review comments have been successfully resolved (no failures, no pending issues), automatically activate the `done` skill:
+12. **Report summary**: Provide a summary table of all comments and how they were resolved.
+
+13. **Auto-chain to done**: If all review comments have been successfully resolved (no failures, no pending issues), automatically activate the `done` skill:
     - Inform the user that all PR comments have been addressed
     - Activate the `done` skill without waiting for user confirmation
     
