@@ -46,14 +46,14 @@ Both are registered as classes in `beamtalk_stdlib.erl` with class methods but n
 
 ## Decision
 
-Adopt a **workspace-injected bindings** model: well-known objects (`Transcript`, `Beamtalk`) are singleton actor instances provided by the workspace as pre-bound variables — not language-level globals. This is an interim step toward Newspeak-style capability-based modules.
+Adopt a **workspace-injected bindings** model: well-known objects (`Transcript`, `Beamtalk`) are singleton actor instances provided by the workspace as pre-bound variables — not language-level globals. This is a stepping stone toward explicit module-level imports.
 
 ### Design
 
-| Smalltalk | Beamtalk (interim) | Beamtalk (long-term) |
-|-----------|-------------------|---------------------|
-| `Transcript` — global in SystemDictionary | Variable bound by workspace | Lexically scoped via nested classes |
-| `Smalltalk` — global in SystemDictionary | Variable bound by workspace | Lexically scoped via nested classes |
+| Smalltalk | Beamtalk (Phase 1: interim) | Beamtalk (Phase 2: modules) |
+|-----------|---------------------------|----------------------------|
+| `Transcript` — global in SystemDictionary | Variable bound by workspace | Declared via module `import:` |
+| `Smalltalk` — global in SystemDictionary | Variable bound by workspace | Declared via module `import:` |
 
 **User-facing syntax is unchanged:**
 ```beamtalk
@@ -91,27 +91,29 @@ WorkspaceBindings = #{
 
 This is NOT a global registry — it's the workspace's environment. Code outside a workspace (e.g., `beamtalk build` without a workspace) does not have these bindings. This is deliberate: `Transcript` is a workspace service, not a language primitive.
 
-### Long-Term Direction: Newspeak-Style Capabilities
+### Evolution: Module-Level Imports
 
-The interim model (workspace-injected variables) is a stepping stone to Newspeak's capability-based module system, where the workspace IS the platform and inner classes access it through lexical scoping:
+The interim model (workspace-injected variables via `persistent_term`) is a stepping stone to **explicit module-level imports**, where classes declare their workspace dependencies:
 
 ```beamtalk
-// Long-term: workspace/platform passed at entry point, lexically scoped
+// Phase 2: module declares dependencies, workspace resolves at load time
 Object subclass: MyApp
-  start: workspace =>
-    workspace transcript show: 'Starting'
-    
-    // Inner classes access workspace through enclosing scope — no globals
-    Object subclass: MyServer
-      handleRequest: req =>
-        workspace transcript show: 'Got: ', req path
+  import: Transcript, Beamtalk
+
+  run =>
+    Transcript show: 'Starting'   // resolved from imports, not persistent_term
+    Beamtalk classNamed: #Counter
 ```
 
-**Prerequisites for long-term model:**
-- Nested class scoping (classes accessing enclosing class scope)
-- Module system with explicit dependency declaration
+**Benefits over interim model:**
+- **Explicit dependencies** — the compiler knows what a module needs
+- **Mockable** — tests can substitute imports (e.g., a silent Transcript)
+- **Verifiable** — compiler errors for unresolved imports, not runtime failures
+- **No `persistent_term`** — workspace resolves imports at load time, binds into module scope
 
-Until then, workspace-injected bindings provide the same UX with minimal ceremony.
+**Prerequisites:** Import syntax, workspace-aware module loader.
+
+**Full Newspeak-style lexical scoping** (nested classes accessing enclosing scope) is a possible future evolution but is not planned. A separate ADR should evaluate whether it's warranted given the module import model.
 
 ### Sync vs Async Dispatch
 
@@ -155,13 +157,13 @@ dispatch_binding(Pid, Selector, Args) ->
 
 ### Transcript as Shared Workspace Log
 
-**Context:** In modern Smalltalk (Pharo), Transcript is a dev-time convenience — production apps use proper logging frameworks (Beacon, OTP `logger`). Beamtalk already uses OTP `logger` for structured runtime logging. Transcript's role is:
+**Context:** In Pharo, Transcript is a dev-time convenience — production Pharo apps use proper logging frameworks (e.g., Beacon). On BEAM, Beamtalk already uses OTP `logger` for structured runtime logging. Transcript's role in Beamtalk is therefore limited to interactive development:
 
 | Use case | Tool |
 |----------|------|
-| Learning / tutorials | `Transcript show:` |
-| Quick REPL debugging | `Transcript show:` |
-| Production logging | OTP `logger` (structured, leveled) |
+| Learning / tutorials | `Transcript show:` (Beamtalk) |
+| Quick REPL debugging | `Transcript show:` (Beamtalk) |
+| Production logging | OTP `logger` (Erlang — structured, leveled) |
 
 **Design: Transcript is a shared log actor, separate from the REPL — following Pharo's model.**
 
@@ -467,7 +469,7 @@ In Pharo, `Transcript show: 'Hello'` is a synchronous method call on a shared in
 
 `docs/beamtalk-principles.md` says "Newspeak-style: no global namespace, all access through message chains." Workspace bindings are better than a true global registry, but `persistent_term` IS globally readable — any code on the node can call `persistent_term:get({beamtalk_workspace, 'Transcript'})` to bypass the workspace abstraction. A compromised module can write to Transcript (information leak) or call `Beamtalk allClasses` (reconnaissance). And code compiled outside a workspace context — what happens when it references `Transcript`?
 
-**Counter:** This is explicitly an *interim* step. The ADR documents the long-term Newspeak direction: workspace-as-platform with lexical scoping, where capabilities are explicitly passed. The interim uses `persistent_term` because it's the simplest OTP mechanism, not because it's the security model. Code outside a workspace gets a compile error for unresolved `Transcript` — that's the whole point of workspace-scoped bindings. And in practice, BEAM applications already have globally accessible process registrations. The workspace model is strictly *more* contained than Erlang's default.
+**Counter:** This is explicitly an *interim* step. The ADR documents the evolution to module-level imports, where dependencies are declared explicitly and resolved by the workspace at load time — making them mockable and verifiable. The interim uses `persistent_term` because it's the simplest OTP mechanism, not because it's the security model. Code outside a workspace gets a compile error for unresolved `Transcript` — that's the whole point of workspace-scoped bindings. And in practice, BEAM applications already have globally accessible process registrations. The workspace model is strictly *more* contained than Erlang's default.
 
 ### 6. Newcomer/DX Advocate: "Where did my output go?"
 
@@ -488,14 +490,14 @@ try transcript:'show:'(Value) catch error:undef -> ... end
 **Rejected:** This is a band-aid. Globals still wouldn't be real objects, cascades still wouldn't work, and every new global would need a custom module with a naming collision risk.
 
 ### Alternative B: Newspeak Pure Module Parameters
-Pass globals explicitly to every module:
+Pass globals explicitly to every module via lexical scoping:
 ```beamtalk
 Object subclass: MyApp platform: platform
   run =>
     platform transcript show: 'Hello'
 ```
 
-**Deferred (long-term direction):** Requires nested class scoping (not yet implemented). The workspace-injection model is designed to evolve toward this when the prerequisite language features are in place. See "Long-Term Direction" section above.
+**Not planned:** Requires nested class scoping — a major compiler effort. The module-level `import:` model (see "Evolution" section) provides explicit dependencies and mockability without the full Newspeak machinery. A separate ADR can evaluate full lexical scoping if the module import model proves insufficient.
 
 ### Alternative C: Value Type Singletons (Not Actors)
 Make globals value types (maps) rather than actors:
@@ -518,7 +520,7 @@ Transcript = #{'__class__' => 'TranscriptStream'}
 - Supervisable — singletons can be restarted if they crash
 - No language-level globals — workspace bindings, not a global namespace
 - Zero overhead on class sends — only workspace bindings use `persistent_term` lookup; `Counter spawn` etc. unchanged
-- Clear path to Newspeak — workspace bindings evolve to lexical scoping when nested classes are implemented
+- Clear evolution path — workspace bindings → module-level `import:` declarations (no globals needed)
 
 ### Negative
 - Slightly more complex workspace startup — must spawn and register singleton processes
@@ -629,15 +631,27 @@ This aligns with the principle that behavior lives on objects, not REPL commands
 
 ### Workspace / Beamtalk Consolidation
 
-If the language evolves toward Newspeak-style capabilities (the long-term direction in this ADR), the `Beamtalk` object (SystemDictionary) and the Workspace concept may merge. In Newspeak, the platform IS the entry point — there's no separate "system dictionary" and "workspace." The workspace provides all capabilities: class lookup, Transcript, Repl, and any other services.
+As module-level imports mature, the `Beamtalk` object (SystemDictionary) and the Workspace concept may merge. The workspace already provides the bindings — it's a small step for it to also provide class lookup directly:
+
+```beamtalk
+Object subclass: MyApp
+  import: Transcript, Beamtalk    // today: two separate objects
+
+// future: workspace IS the system dictionary
+Object subclass: MyApp
+  import: Workspace               // provides transcript, classNamed:, etc.
+```
 
 This suggests a future where:
 - `Beamtalk` (SystemDictionary) is absorbed into the Workspace object
-- `Workspace` becomes the single platform entry point passed to top-level classes
+- `Workspace` becomes the single import for platform services
 - `Transcript` and `Repl` are accessed as `workspace transcript`, `workspace repl`
-- The interim `persistent_term` bindings are replaced by lexical scoping from the Workspace parameter
 
-This consolidation depends on nested class scoping — the same prerequisite as the Newspeak migration. When that's implemented, a follow-up ADR should address the Workspace/Beamtalk unification.
+A follow-up ADR should evaluate this consolidation when the module import system is in place.
+
+### Full Newspeak Lexical Scoping
+
+Newspeak eliminates all imports by passing the platform at the entry point and using nested class lexical scoping for inner access. This is a significantly larger compiler effort (nested class scoping) and may not be warranted given the module import model. A separate discussion/ADR can evaluate this if module imports prove insufficient for capability isolation or testing.
 
 ## References
 - Related issues: BT-353 (this ADR), BT-328 (Transcript implementation), BT-329 (Towers of Hanoi — needs Transcript)
