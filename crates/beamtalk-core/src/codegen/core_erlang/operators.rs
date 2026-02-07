@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use std::fmt::Write;
 
