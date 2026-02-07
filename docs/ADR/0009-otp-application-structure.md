@@ -182,7 +182,7 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
 ```
 
 ```erlang
-%% In beamtalk_repl_app:start/2 — register the callback on startup
+%% In beamtalk_workspace_app:start/2 — register the callback on startup
 application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors).
 ```
 
@@ -388,7 +388,7 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 ### Negative
 
-- **Migration effort.** Need to create new app boilerplate (`beamtalk_repl_app.erl`, `beamtalk_repl_sup.erl`, `.app.src`), move 12 modules, update rebar.config, update all test paths.
+- **Migration effort.** Need to create new app boilerplate (`beamtalk_workspace_app.erl`, `beamtalk_workspace_app_sup.erl`, `.app.src`), move 13 modules, update rebar.config, update all test paths.
 - **Slightly more complex build.** Three apps to configure in rebar.config, Dialyzer, CI.
 - **Actor supervisor migration.** `beamtalk_actor_sup` moves to `beamtalk_workspace` (workspace-scoped). A future non-REPL use case (e.g., `beamtalk run server.bt`) would start its own `beamtalk_actor_sup` instance under a production supervisor — the module is reusable, only its supervision placement is workspace-scoped for now.
 
@@ -410,7 +410,7 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 ### Phase 2: Decouple Actor Registration
 
 1. Replace direct calls in `beamtalk_actor.erl` with optional callback via `application:get_env`
-2. Register callback in `beamtalk_repl_app:start/2`
+2. Register callback in `beamtalk_workspace_app:start/2`
 3. Verify actors still register correctly when REPL is loaded
 4. Verify actors spawn without error when REPL is not loaded
 
