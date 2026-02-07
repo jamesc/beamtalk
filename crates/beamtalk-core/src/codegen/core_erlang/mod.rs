@@ -1144,6 +1144,13 @@ mod tests {
     }
 
     #[test]
+    fn test_class_name_from_ast_overrides_module_name() {
+        let mut generator = CoreErlangGenerator::new("bt_stdlib_string");
+        generator.current_class_name = Some("String".to_string());
+        assert_eq!(generator.to_class_name(), "String");
+    }
+
+    #[test]
     fn test_class_name_to_module_name() {
         // Single word
         assert_eq!(util::to_module_name("Counter"), "counter");

@@ -12,7 +12,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/0 = fun () ->
     case call 'gen_server':'start_link'('class_definition', ~{}~, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'ClassDefinition', 'class_definition', Pid}
+            {'beamtalk_object', 'Counter', 'class_definition', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -21,7 +21,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 'spawn'/1 = fun (InitArgs) ->
     case call 'gen_server':'start_link'('class_definition', InitArgs, []) of
         <{'ok', Pid}> when 'true' ->
-            {'beamtalk_object', 'ClassDefinition', 'class_definition', Pid}
+            {'beamtalk_object', 'Counter', 'class_definition', Pid}
         <{'error', Reason}> when 'true' ->
             call 'erlang':'error'({'spawn_failed', Reason})
     end
@@ -41,7 +41,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 'init'/1 = fun (InitArgs) ->
     let DefaultState = ~{
-        '__class__' => 'ClassDefinition',
+        '__class__' => 'Counter',
         '__class_mod__' => 'class_definition',
         '__methods__' => call 'class_definition':'method_table'()
         , 'value' => 0
@@ -106,7 +106,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
             let _ReturnValue = call 'maps':'get'('value', State) in {'reply', _ReturnValue, State}
         <OtherSelector> when 'true' ->
             %% ADR 0006: Try hierarchy walk before DNU
-            case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'ClassDefinition') of
+            case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'Counter') of
                 <{'reply', InheritedResult, InheritedState}> when 'true' ->
                     {'reply', InheritedResult, InheritedState}
                 <{'error', _DispatchError}> when 'true' ->

@@ -61,7 +61,12 @@ impl CoreErlangGenerator {
     /// - `"my_class"` → `"MyClass"`
     /// - `"http_router"` → `"HttpRouter"`
     pub(super) fn to_class_name(&self) -> String {
-        // Convert snake_case to CamelCase
+        // Use AST-derived class name when available (e.g., stdlib modules where
+        // module_name differs from class name: bt_stdlib_string → String)
+        if let Some(ref name) = self.current_class_name {
+            return name.clone();
+        }
+        // Fall back to deriving from module name (snake_case → CamelCase)
         self.module_name
             .split('_')
             .map(|s| {
