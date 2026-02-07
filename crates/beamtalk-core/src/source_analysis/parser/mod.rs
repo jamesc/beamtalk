@@ -887,6 +887,66 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_newline_separated_statements() {
+        // BT-360: newlines act as implicit statement separators
+        let module = parse_ok("[\n  Transcript show: 'a'\n  Transcript show: 'b'\n  42\n]");
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(
+                    block.body.len(),
+                    3,
+                    "Block should have 3 newline-separated statements"
+                );
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[test]
+    fn parse_block_mixed_period_and_newline_separators() {
+        // BT-360: periods and newlines can be mixed
+        let module = parse_ok("[\n  1 + 2.\n  3 + 4\n  5\n]");
+        match &module.expressions[0] {
+            Expression::Block(block) => {
+                assert_eq!(
+                    block.body.len(),
+                    3,
+                    "Block should have 3 statements (mixed separators)"
+                );
+            }
+            _ => panic!("Expected block"),
+        }
+    }
+
+    #[test]
+    fn parse_method_body_newline_separated() {
+        // BT-360: method bodies parse multiple newline-separated statements
+        let module = parse_ok(
+            "Object subclass: Chatty\n\n  greet =>\n    Transcript show: 'Hello'\n    Transcript show: 'World'\n    42",
+        );
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "greet");
+        assert_eq!(
+            method.body.len(),
+            3,
+            "Method should have 3 newline-separated statements"
+        );
+    }
+
+    #[test]
+    fn parse_method_body_period_still_works() {
+        // BT-360: explicit periods still work (backward compat)
+        let module = parse_ok("Object subclass: Test\n\n  go =>\n    1 + 2.\n    3 + 4.\n    5");
+        let method = &module.classes[0].methods[0];
+        assert_eq!(
+            method.body.len(),
+            3,
+            "Method should have 3 period-separated statements"
+        );
+    }
+
+    #[test]
     fn parse_empty_map() {
         let module = parse_ok("#{}");
         assert_eq!(module.expressions.len(), 1);

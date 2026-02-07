@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for multi-statement method bodies (BT-360)
+// Verifies newline-separated statements in methods and blocks
+
+// @load tests/e2e/fixtures/multi_statement.bt
+
+// ===========================================================================
+// MULTI-STATEMENT METHOD BODIES
+// ===========================================================================
+
+// Method with side effect then return value
+MultiStatement new sideEffectThenReturn
+// => 42
+
+// Method with multiple side effects then return
+MultiStatement new twoSideEffects
+// => 99
+
+// ===========================================================================
+// MULTI-STATEMENT BLOCKS
+// ===========================================================================
+
+// Block with period-separated expressions (backward compat)
+[1 + 1. 2 + 2. 3 + 3] value
+// => 6
