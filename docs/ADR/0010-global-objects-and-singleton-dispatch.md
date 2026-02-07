@@ -196,39 +196,12 @@ In Pharo, Transcript is a **separate window** from the Playground (REPL). You wr
 ```
                     ┌─────────────────────┐
   REPL eval    ──→  │                     │ ──→ `beamtalk transcript` (CLI viewer)
-  MyHttpServer ──→  │  Transcript Actor   │ ──→ REPL-2 (opted in via :transcript on)
+  MyHttpServer ──→  │  Transcript Actor   │ ──→ REPL-2 (opted in via subscribe)
   background   ──→  │  (shared log sink)  │ ──→ IDE Transcript panel (future)
                     └─────────────────────┘
 ```
 
-```erlang
-%% Transcript actor state
--record(transcript_state, {
-    buffer = queue:new() :: queue:queue(binary()),  %% ring buffer of recent output
-    max_buffer = 1000 :: pos_integer(),
-    subscribers = [] :: [pid()]                     %% viewers watching
-}).
-
-handle_cast({'show:', [Value], Future}, State) ->
-    Text = to_string(Value),
-    %% Push to all subscribers
-    [Sub ! {transcript_output, Text} || Sub <- State#transcript_state.subscribers],
-    %% Append to buffer (for late-joining viewers or inspection)
-    NewBuffer = buffer_append(State#transcript_state.buffer, Text, State#transcript_state.max_buffer),
-    beamtalk_future:resolve(Future, nil),
-    {noreply, State#transcript_state{buffer = NewBuffer}};
-
-handle_cast({'subscribe', [], CallerPid, Future}, State) ->
-    %% CallerPid derived from message sender context
-    monitor(process, CallerPid),
-    beamtalk_future:resolve(Future, nil),
-    {noreply, State#transcript_state{subscribers = [CallerPid | State#transcript_state.subscribers]}};
-
-handle_cast({'unsubscribe', [], CallerPid, Future}, State) ->
-    beamtalk_future:resolve(Future, nil),
-    {noreply, State#transcript_state{
-        subscribers = lists:delete(CallerPid, State#transcript_state.subscribers)}}.
-```
+The actor maintains a ring buffer of recent output and a list of subscriber pids. Subscribers receive `{transcript_output, Text}` messages. Dead subscribers are cleaned up via process monitors.
 
 **Accessing Transcript output:**
 
