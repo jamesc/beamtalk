@@ -227,7 +227,6 @@ No special REPL commands needed — Transcript is a real object, so subscription
 - Optionally forwarded to OTP `logger:info/2` for persistence
 - No output is lost — can be inspected via `Transcript recent` (returns buffer contents)
 
-
 ### Cascade Semantics
 
 Cascades send multiple messages to the **same receiver**, returning the result of the **last** message. Since `Transcript` is a real actor (bound via workspace), cascades work naturally:
@@ -440,7 +439,7 @@ In Pharo, `Transcript show: 'Hello'` is a synchronous method call on a shared in
 
 ### 5. Capability/Security Advocate: "Workspace bindings are still globals in disguise"
 
-`docs/beamtalk-principles.md` says "Newspeak-style: no global namespace, all access through message chains." Workspace bindings are better than a true global registry, but `persistent_term` IS globally readable — any code on the node can call `persistent_term:get({beamtalk_workspace, 'Transcript'})` to bypass the workspace abstraction. A compromised module can write to Transcript (information leak) or call `Beamtalk allClasses` (reconnaissance). And code compiled outside a workspace context — what happens when it references `Transcript`?
+`docs/beamtalk-principles.md` says "Newspeak-style: no global namespace, all access through message chains." Workspace bindings are better than a true global registry, but `persistent_term` IS globally readable — any code on the node can call `persistent_term:get({beamtalk_binding, 'Transcript'})` to bypass the workspace abstraction. A compromised module can write to Transcript (information leak) or call `Beamtalk allClasses` (reconnaissance). And code compiled outside a workspace context — what happens when it references `Transcript`?
 
 **Counter:** This is explicitly an *interim* step. The ADR documents the evolution to module-level imports, where dependencies are declared explicitly and resolved by the workspace at load time — making them mockable and verifiable. The interim uses `persistent_term` because it's the simplest OTP mechanism, not because it's the security model. Code outside a workspace gets a compile error for unresolved `Transcript` — that's the whole point of workspace-scoped bindings. And in practice, BEAM applications already have globally accessible process registrations. The workspace model is strictly *more* contained than Erlang's default.
 
