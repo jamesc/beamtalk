@@ -327,7 +327,7 @@ Conceptually familiar — Pharo separates the VM (runtime) from development tool
 This is idiomatic OTP design. They would expect this separation. "Why was it ever one app?" would be the natural question.
 
 ### Production Operator
-Can deploy `beamtalk_runtime` + `beamtalk_stdlib` without REPL code in production releases. Smaller attack surface, fewer processes, cleaner supervision tree.
+Can deploy `beamtalk_runtime` + `beamtalk_stdlib` without REPL code for batch compilation. For production services (`beamtalk run`), the workspace app is still needed for actor supervision and hot reload, but the REPL TCP server and shell sessions could be disabled via configuration. A future refinement could split the workspace app further into workspace-core (actors, hot reload) and workspace-repl (TCP server, shell, eval) — but that's premature until `beamtalk run` is implemented (ADR 0004).
 
 ### Tooling Developer
 Clearer boundaries make it easier to understand which modules to modify. LSP work touches neither app; REPL protocol work is isolated to `beamtalk_workspace`.
@@ -381,7 +381,7 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 - **Clean dependency direction.** Core runtime has zero compile-time dependency on workspace/REPL code. Dependencies flow strictly downward: `beamtalk_workspace` → `beamtalk_runtime` → `beamtalk_stdlib`.
 - **Independent testing.** Runtime unit tests don't need REPL infrastructure. REPL tests can mock or substitute runtime components.
-- **Production deployments.** Can build releases with just `beamtalk_runtime` + `beamtalk_stdlib` — no REPL TCP server, no workspace management, no idle monitoring.
+- **Production deployments.** Batch compilation (`beamtalk build`) can run with just `beamtalk_runtime` + `beamtalk_stdlib`. Production services will need `beamtalk_workspace` for actor lifecycle, but the REPL server can be conditionally disabled. Full REPL-free production is a future refinement when `beamtalk run` is implemented.
 - **Clearer ownership.** ADR 0004 workspace features go in `beamtalk_workspace`. New primitive types go in `beamtalk_runtime`. No ambiguity.
 - **Aligns with DDD.** Matches the bounded contexts in `docs/beamtalk-ddd-model.md`: "REPL Context" vs "Actor System Context" / "Object System Context".
 - **Future-proof.** When workspace management (ADR 0004) or debugging tools grow, they naturally live in `beamtalk_workspace` or become new apps — without touching `beamtalk_runtime`.
