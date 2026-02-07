@@ -57,7 +57,14 @@ dispatch_test_() ->
           {"super returns error at root", fun test_super_at_root/0},
           {"lookup checks extensions before class methods", fun test_extension_priority/0},
           {"dispatch errors are always 2-tuples", fun test_error_tuple_shape/0},
-          {"super finds inherited reflection method", fun test_super_finds_inherited/0}
+          {"super finds inherited reflection method", fun test_super_finds_inherited/0},
+          {"responds_to existing method", fun test_responds_to_existing_method/0},
+          {"responds_to missing method", fun test_responds_to_missing_method/0},
+          {"responds_to nonexistent class", fun test_responds_to_nonexistent_class/0},
+          {"responds_to inherited method", fun test_responds_to_inherited_method/0},
+          {"invoke_with_combinations delegates", fun test_invoke_with_combinations_delegates/0},
+          {"extension error propagation", fun test_extension_error_propagation/0},
+          {"responds_to extension method", fun test_responds_to_extension_method/0}
          ]
      end
     }.
@@ -275,3 +282,80 @@ ensure_counter_loaded() ->
             ok
     end.
 
+%%% ============================================================================
+%%% BT-344: Additional Test Cases
+%%% ============================================================================
+
+%% Test responds_to for a method that exists
+test_responds_to_existing_method() ->
+    ok = ensure_counter_loaded(),
+    ?assert(beamtalk_dispatch:responds_to(increment, 'Counter')).
+
+%% Test responds_to for a method that doesn't exist
+test_responds_to_missing_method() ->
+    ok = ensure_counter_loaded(),
+    ?assertNot(beamtalk_dispatch:responds_to(totallyFakeMethod, 'Counter')).
+
+%% Test responds_to for nonexistent class
+test_responds_to_nonexistent_class() ->
+    ?assertNot(beamtalk_dispatch:responds_to(anything, 'ClassThatDoesNotExist')).
+
+%% Test responds_to walks hierarchy (Counter inherits from Actor which inherits from Object)
+test_responds_to_inherited_method() ->
+    ok = ensure_counter_loaded(),
+    %% 'class' is defined in Object (inherited through Actor -> Counter)
+    ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
+
+%% Test invoke_with_combinations delegates to lookup (placeholder implementation)
+test_invoke_with_combinations_delegates() ->
+    ok = ensure_counter_loaded(),
+
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+
+    %% invoke_with_combinations should behave same as lookup (TODO: combinations not implemented)
+    Result = beamtalk_dispatch:invoke_with_combinations(increment, [], Self, State, 'Counter'),
+    ?assertMatch({reply, _Result, _NewState}, Result).
+
+%% Test extension method error propagation
+test_extension_error_propagation() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    %% Register an extension that throws
+    CrashFun = fun(_Args, _State) ->
+        error(extension_test_crash)
+    end,
+
+    ok = beamtalk_extensions:register('Counter', crashExt, CrashFun, test_owner),
+
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+
+    try
+        %% Extension error should propagate
+        ?assertError(extension_test_crash,
+            beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'))
+    after
+        catch ets:delete(beamtalk_extensions, {'Counter', crashExt})
+    end.
+
+%% Test responds_to finds extension methods
+test_responds_to_extension_method() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    TestFun = fun(_Args, _State) -> ok end,
+    ok = beamtalk_extensions:register('Counter', extTestMethod, TestFun, test_owner),
+
+    try
+        ?assert(beamtalk_dispatch:responds_to(extTestMethod, 'Counter'))
+    after
+        catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
+    end.
