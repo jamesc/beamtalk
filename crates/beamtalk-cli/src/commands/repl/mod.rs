@@ -94,6 +94,8 @@ struct ReplResponse {
     message: Option<String>,
     /// New protocol: error message
     error: Option<String>,
+    /// Captured stdout from evaluation (BT-355)
+    output: Option<String>,
     /// Bindings map (both formats)
     bindings: Option<serde_json::Value>,
     /// Loaded classes (both formats)
@@ -563,6 +565,12 @@ pub fn run(
                 // Evaluate expression
                 match client.eval(line) {
                     Ok(response) => {
+                        // Print captured stdout before value/error (BT-355)
+                        if let Some(ref output) = response.output {
+                            if !output.is_empty() {
+                                print!("{output}");
+                            }
+                        }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
                                 eprintln!("Error: {msg}");

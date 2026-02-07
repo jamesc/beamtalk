@@ -74,7 +74,7 @@ do_eval_increments_counter_test() ->
     
     %% Since we don't have a daemon running, this will fail compilation
     %% But it should still increment the counter
-    {error, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     NewCounter = beamtalk_repl_state:get_eval_counter(NewState),
     
     ?assertEqual(InitialCounter + 1, NewCounter).
@@ -83,10 +83,10 @@ do_eval_no_daemon_error_test() ->
     %% Without a running daemon, should get daemon_unavailable error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
-    ?assertMatch({error, {compile_error, _}, _}, Result),
+    ?assertMatch({error, {compile_error, _}, _, _}, Result),
     
     %% Error message should mention daemon (case-insensitive)
-    {error, {compile_error, Msg}, _} = Result,
+    {error, {compile_error, Msg}, _, _} = Result,
     LowerMsg = string:lowercase(Msg),
     ?assert(binary:match(LowerMsg, <<"daemon">>) =/= nomatch).
 
@@ -171,7 +171,7 @@ do_eval_load_binary_error_test() ->
     %% This is hard to trigger in practice without mocking, but we can
     %% verify the error path exists by testing with daemon unavailable
     State = beamtalk_repl_state:new(undefined, 0),
-    {error, {compile_error, _}, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, {compile_error, _}, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
@@ -182,7 +182,7 @@ do_eval_preserves_bindings_on_error_test() ->
     StateWithBindings = beamtalk_repl_state:set_bindings(InitialBindings, State),
     
     %% Eval will fail (no daemon), but bindings should be preserved
-    {error, _, NewState} = beamtalk_repl_eval:do_eval("z := 999", StateWithBindings),
+    {error, _, _, NewState} = beamtalk_repl_eval:do_eval("z := 999", StateWithBindings),
     FinalBindings = beamtalk_repl_state:get_bindings(NewState),
     
     %% Original bindings should still be there
@@ -433,4 +433,51 @@ parse_file_compile_result_failure_test() ->
     },
     ?assertMatch({error, {compile_error, _}},
                  beamtalk_repl_eval:parse_file_compile_result(Result)).
+
+%%% IO Capture tests (BT-355)
+
+io_capture_basic_put_chars_test() ->
+    %% Test direct put_chars capture
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    io:put_chars("hello"),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<"hello">>, Output).
+
+io_capture_io_format_test() ->
+    %% Test io:format which uses {put_chars, Enc, Mod, Func, Args}
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    io:format("value: ~p~n", [42]),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<"value: 42\n">>, Output).
+
+io_capture_empty_test() ->
+    %% No output produces empty binary
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<>>, Output).
+
+io_capture_multiple_writes_test() ->
+    %% Multiple writes are concatenated
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    io:format("a"),
+    io:format("b"),
+    io:format("c"),
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<"abc">>, Output).
+
+io_capture_restores_group_leader_test() ->
+    %% Verify group_leader is restored after capture
+    OrigGL = group_leader(),
+    {CapturePid, OldGL} = beamtalk_repl_eval:start_io_capture(),
+    ?assertNotEqual(OrigGL, group_leader()),
+    _Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(OrigGL, group_leader()).
+
+io_capture_dead_process_test() ->
+    %% If capture process died, stop_io_capture returns <<>>
+    OldGL = group_leader(),
+    CapturePid = spawn(fun() -> ok end),
+    timer:sleep(50),  %% Let it die
+    Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
+    ?assertEqual(<<>>, Output).
 

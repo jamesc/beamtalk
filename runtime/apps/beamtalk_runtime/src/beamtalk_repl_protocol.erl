@@ -19,7 +19,8 @@
 
 -module(beamtalk_repl_protocol).
 
--export([decode/1, encode_result/3, encode_error/3, encode_status/3,
+-export([decode/1, encode_result/3, encode_result/4, encode_error/3, encode_error/4,
+         encode_status/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/3,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1]).
@@ -88,25 +89,39 @@ get_params(#protocol_msg{params = Params}) -> Params.
 %% @doc Encode a successful result response.
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_result(Value, Msg, TermToJson) ->
+    encode_result(Value, Msg, TermToJson, <<>>).
+
+%% @doc Encode a successful result response with captured stdout.
+-spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary()) -> binary().
+encode_result(Value, Msg, TermToJson, Output) ->
     JsonValue = TermToJson(Value),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue});
+            Base = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
+            jsx:encode(maybe_add_output(Base, Output));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]})
+            Full = Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]},
+            jsx:encode(maybe_add_output(Full, Output))
     end.
 
 %% @doc Encode an error response.
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary())) -> binary().
 encode_error(Reason, Msg, FormatError) ->
+    encode_error(Reason, Msg, FormatError, <<>>).
+
+%% @doc Encode an error response with captured stdout.
+-spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary()) -> binary().
+encode_error(Reason, Msg, FormatError, Output) ->
     Message = FormatError(Reason),
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message});
+            Base = #{<<"type">> => <<"error">>, <<"message">> => Message},
+            jsx:encode(maybe_add_output(Base, Output));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]})
+            Full = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
+            jsx:encode(maybe_add_output(Full, Output))
     end.
 
 %% @doc Encode a status-only response (e.g., for clear, close).
@@ -319,3 +334,9 @@ to_binary(Name) when is_list(Name) ->
     list_to_binary(Name);
 to_binary(Name) ->
     list_to_binary(io_lib:format("~p", [Name])).
+
+%% @private Add output field to response map only when non-empty.
+-spec maybe_add_output(map(), binary()) -> map().
+maybe_add_output(Map, <<>>) -> Map;
+maybe_add_output(Map, Output) when is_binary(Output) ->
+    Map#{<<"output">> => Output}.

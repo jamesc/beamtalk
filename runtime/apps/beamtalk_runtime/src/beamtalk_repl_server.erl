@@ -267,12 +267,12 @@ handle_op(<<"eval">>, Params, Msg, SessionPid) ->
                 empty_expression, Msg, fun format_error_message/1);
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
-                {ok, Result} ->
+                {ok, Result, Output} ->
                     beamtalk_repl_protocol:encode_result(
-                        Result, Msg, fun term_to_json/1);
-                {error, ErrorReason} ->
+                        Result, Msg, fun term_to_json/1, Output);
+                {error, ErrorReason, Output} ->
                     beamtalk_repl_protocol:encode_error(
-                        ErrorReason, Msg, fun format_error_message/1)
+                        ErrorReason, Msg, fun format_error_message/1, Output)
             end
     end;
 

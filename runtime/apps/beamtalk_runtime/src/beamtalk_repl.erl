@@ -200,9 +200,9 @@ find_first_existing([Path | Rest]) ->
 %% @private
 handle_call({eval, Expression}, _From, State) ->
     case beamtalk_repl_eval:do_eval(Expression, State) of
-        {ok, Result, NewState} ->
+        {ok, Result, _Output, NewState} ->
             {reply, {ok, Result}, NewState};
-        {error, Reason, NewState} ->
+        {error, Reason, _Output, NewState} ->
             {reply, {error, Reason}, NewState}
     end;
 
@@ -261,10 +261,10 @@ handle_info({client_request, Request, ClientPid}, State) ->
         {eval, Expression} ->
             try
                 case beamtalk_repl_eval:do_eval(Expression, State) of
-                    {ok, Result, NewState} ->
+                    {ok, Result, _Output, NewState} ->
                         ClientPid ! {response, beamtalk_repl_server:format_response(Result)},
                         {noreply, NewState};
-                    {error, ErrorReason, NewState} ->
+                    {error, ErrorReason, _Output, NewState} ->
                         ClientPid ! {response, beamtalk_repl_server:format_error(ErrorReason)},
                         {noreply, NewState}
                 end
