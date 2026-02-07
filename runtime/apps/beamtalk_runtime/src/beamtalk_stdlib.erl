@@ -12,11 +12,14 @@
 %%% |-------|-----------|-----------------|
 %%% | Integer | Object | beamtalk_integer |
 %%% | String | Object | beamtalk_string |
-%%% | Boolean | Object | beamtalk_boolean |
+%%% | True | Object | beamtalk_true |
+%%% | False | Object | beamtalk_false |
+%%% | Float | Object | beamtalk_float |
 %%% | UndefinedObject | Object | beamtalk_nil |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
 %%% | Beamtalk | Object | beamtalk_stdlib |
+%%% | Transcript | Object | transcript |
 %%%
 %%% ## Usage
 %%%
@@ -72,11 +75,13 @@ do_init() ->
     Results = [
         register_integer_class(),
         register_string_class(),
-        register_boolean_class(),
+        register_true_class(),
+        register_false_class(),
         register_nil_class(),
         register_block_class(),
         register_tuple_class(),
         register_beamtalk_class(),
+        register_float_class(),
         register_transcript_class()
     ],
     %% Log any failures but don't crash
@@ -164,14 +169,14 @@ register_string_class() ->
     register_class('String', ClassInfo).
 
 %%% ============================================================================
-%%% Boolean Class
+%%% True Class
 %%% ============================================================================
 
--spec register_boolean_class() -> {ok, atom()} | {error, atom(), term()}.
-register_boolean_class() ->
+-spec register_true_class() -> {ok, atom()} | {error, atom(), term()}.
+register_true_class() ->
     ClassInfo = #{
-        name => 'Boolean',
-        module => beamtalk_boolean,
+        name => 'True',
+        module => beamtalk_true,
         superclass => 'Object',
         instance_methods => #{
             class => #{arity => 0},
@@ -182,12 +187,38 @@ register_boolean_class() ->
             'not' => #{arity => 0},
             'and:' => #{arity => 1},
             'or:' => #{arity => 1},
-            asString => #{arity => 0}
+            describe => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []
     },
-    register_class('Boolean', ClassInfo).
+    register_class('True', ClassInfo).
+
+%%% ============================================================================
+%%% False Class
+%%% ============================================================================
+
+-spec register_false_class() -> {ok, atom()} | {error, atom(), term()}.
+register_false_class() ->
+    ClassInfo = #{
+        name => 'False',
+        module => beamtalk_false,
+        superclass => 'Object',
+        instance_methods => #{
+            class => #{arity => 0},
+            'respondsTo:' => #{arity => 1},
+            'ifTrue:' => #{arity => 1},
+            'ifFalse:' => #{arity => 1},
+            'ifTrue:ifFalse:' => #{arity => 2},
+            'not' => #{arity => 0},
+            'and:' => #{arity => 1},
+            'or:' => #{arity => 1},
+            describe => #{arity => 0}
+        },
+        class_methods => #{},
+        instance_variables => []
+    },
+    register_class('False', ClassInfo).
 
 %%% ============================================================================
 %%% UndefinedObject (Nil) Class
@@ -284,6 +315,38 @@ register_beamtalk_class() ->
         instance_variables => []
     },
     register_class('Beamtalk', ClassInfo).
+
+%%% ============================================================================
+%%% Float Class (BT-340)
+%%% ============================================================================
+
+-spec register_float_class() -> {ok, atom()} | {error, atom(), term()}.
+register_float_class() ->
+    ClassInfo = #{
+        name => 'Float',
+        module => beamtalk_float,
+        superclass => 'Object',
+        instance_methods => #{
+            '+' => #{arity => 1},
+            '-' => #{arity => 1},
+            '*' => #{arity => 1},
+            '/' => #{arity => 1},
+            '=' => #{arity => 1},
+            '~=' => #{arity => 1},
+            '<' => #{arity => 1},
+            '>' => #{arity => 1},
+            '<=' => #{arity => 1},
+            '>=' => #{arity => 1},
+            class => #{arity => 0},
+            'respondsTo:' => #{arity => 1},
+            asString => #{arity => 0},
+            abs => #{arity => 0},
+            negated => #{arity => 0}
+        },
+        class_methods => #{},
+        instance_variables => []
+    },
+    register_class('Float', ClassInfo).
 
 %%% ============================================================================
 %%% Transcript Class (Standard I/O)

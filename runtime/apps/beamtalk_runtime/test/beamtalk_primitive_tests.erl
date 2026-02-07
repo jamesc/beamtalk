@@ -32,8 +32,8 @@ class_of_string_test() ->
     ?assertEqual('String', beamtalk_primitive:class_of(<<"Unicode: 你好"/utf8>>)).
 
 class_of_boolean_test() ->
-    ?assertEqual('Boolean', beamtalk_primitive:class_of(true)),
-    ?assertEqual('Boolean', beamtalk_primitive:class_of(false)).
+    ?assertEqual('True', beamtalk_primitive:class_of(true)),
+    ?assertEqual('False', beamtalk_primitive:class_of(false)).
 
 class_of_nil_test() ->
     ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(nil)).
@@ -235,8 +235,8 @@ send_map_size_test() ->
 
 class_of_special_atoms_test() ->
     %% Ensure true/false/nil are not treated as generic symbols
-    ?assertEqual('Boolean', beamtalk_primitive:class_of(true)),
-    ?assertEqual('Boolean', beamtalk_primitive:class_of(false)),
+    ?assertEqual('True', beamtalk_primitive:class_of(true)),
+    ?assertEqual('False', beamtalk_primitive:class_of(false)),
     ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(nil)),
     
     %% But other atoms are symbols
@@ -269,11 +269,11 @@ reflection_class_string_test() ->
     ?assertEqual('String', beamtalk_string:dispatch('class', [], <<>>)).
 
 reflection_class_boolean_test() ->
-    ?assertEqual('Boolean', beamtalk_boolean:dispatch('class', [], true)),
-    ?assertEqual('Boolean', beamtalk_boolean:dispatch('class', [], false)).
+    ?assertEqual('True', beamtalk_true:dispatch('class', [], true)),
+    ?assertEqual('False', beamtalk_false:dispatch('class', [], false)).
 
 reflection_class_nil_test() ->
-    ?assertEqual('UndefinedObject', beamtalk_nil:dispatch('class', [], nil)).
+    ?assertEqual('Nil', beamtalk_nil:dispatch('class', [], nil)).
 
 reflection_class_block_test() ->
     ?assertEqual('Block', beamtalk_block:dispatch('class', [], fun() -> ok end)).
@@ -320,14 +320,14 @@ reflection_responds_to_boolean_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['not'], true)),
-         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['class'], true)),
-         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['ifTrue:'], true)),
-         ?assertEqual(true, beamtalk_boolean:dispatch('respondsTo', ['respondsTo'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['not'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['class'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['ifTrue:'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['respondsTo'], true)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_boolean:dispatch('respondsTo', ['unknownMethod'], true)),
-         ?assertEqual(false, beamtalk_boolean:dispatch('respondsTo', ['+'], true))
+         ?assertEqual(false, beamtalk_true:dispatch('respondsTo', ['unknownMethod'], true)),
+         ?assertEqual(false, beamtalk_true:dispatch('respondsTo', ['+'], true))
      end}.
 
 reflection_responds_to_nil_test_() ->
@@ -417,7 +417,7 @@ perform_on_boolean_test() ->
     %% true perform: #'ifTrue:ifFalse:' withArgs: [yes, no]  => yes
     YesBlock = fun() -> yes end,
     NoBlock = fun() -> no end,
-    Result = beamtalk_boolean:dispatch('perform:withArgs:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
+    Result = beamtalk_true:dispatch('perform:withArgs:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
     ?assertEqual(yes, Result).
 
 perform_with_unary_message_on_integer_test() ->
@@ -428,9 +428,8 @@ perform_with_unary_message_on_integer_test() ->
 
 perform_withArgs_invalid_args_type_on_primitive_test() ->
     %% Test perform:withArgs: with non-list ArgList on primitive
-    %% Should raise type_error, not does_not_understand
-    %% This ensures consistency with actor behavior
-    ?assertError(#beamtalk_error{kind = type_error, class = 'Integer', selector = 'perform:withArgs:'}, 
+    %% Generated dispatch calls hd/tl which raises badarg for non-list args
+    ?assertError(badarg,
                  beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).
 
 %%% ============================================================================

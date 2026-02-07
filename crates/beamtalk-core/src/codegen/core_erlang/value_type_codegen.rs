@@ -72,6 +72,9 @@ impl CoreErlangGenerator {
             return self.generate_beamtalk_module(class);
         }
 
+        // BT-340: Detect primitive types (native Erlang values, not map-backed)
+        let is_primitive = Self::is_primitive_type(&class.name.name);
+
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
@@ -103,6 +106,13 @@ impl CoreErlangGenerator {
             exports.push(format!("'{mangled}'/{arity}"));
         }
 
+        // BT-340: Primitive types export dispatch/3 and has_method/1
+        // for runtime dispatch via beamtalk_primitive:send/3
+        if is_primitive {
+            exports.push("'dispatch'/3".to_string());
+            exports.push("'has_method'/1".to_string());
+        }
+
         // Module header
         writeln!(
             self.output,
@@ -128,6 +138,14 @@ impl CoreErlangGenerator {
         // Generate instance methods as pure functions
         for method in &class.methods {
             self.generate_value_type_method(method, class)?;
+            writeln!(self.output)?;
+        }
+
+        // BT-340: Generate dispatch/3 and has_method/1 for primitive types
+        if is_primitive {
+            self.generate_primitive_dispatch(class)?;
+            writeln!(self.output)?;
+            self.generate_primitive_has_method(class)?;
             writeln!(self.output)?;
         }
 
@@ -233,6 +251,313 @@ impl CoreErlangGenerator {
         }
 
         self.pop_scope();
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Returns true if the class is a primitive type (native Erlang value).
+    ///
+    /// Primitive types need `dispatch/3` and `has_method/1` for runtime
+    /// dispatch via `beamtalk_primitive:send/3`.
+    ///
+    /// NOTE: Must stay in sync with `build_stdlib::is_primitive_type()`.
+    fn is_primitive_type(class_name: &str) -> bool {
+        matches!(
+            class_name,
+            "Integer" | "Float" | "String" | "True" | "False" | "Nil" | "Block"
+        )
+    }
+
+    /// Encode a string as a Core Erlang binary literal.
+    /// Core Erlang uses `#{#<charcode>(8,1,'integer',['unsigned'|['big']]),..}#`
+    fn core_erlang_binary(s: &str) -> String {
+        if s.is_empty() {
+            return "#{}#".to_string();
+        }
+        let segments: Vec<String> = s
+            .chars()
+            .map(|ch| format!("#<{}>(8,1,'integer',['unsigned'|['big']])", ch as u32))
+            .collect();
+        format!("#{{{}}}#", segments.join(","))
+    }
+
+    /// Generates the `dispatch/3` function for a primitive type.
+    ///
+    /// This routes selectors to individual method functions, provides reflection
+    /// methods (class, respondsTo:, instVarNames, instVarAt:, instVarAt:put:,
+    /// perform:, perform:withArgs:), checks the extension registry for unknown
+    /// selectors, and raises structured `#beamtalk_error{}` for `does_not_understand`.
+    #[allow(clippy::too_many_lines)]
+    fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let mod_name = self.module_name.clone();
+
+        writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, Self) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Selector of")?;
+
+        // Reflection methods (inherited from Object for all primitives)
+        self.indent += 1;
+
+        // class
+        self.write_indent()?;
+        writeln!(self.output, "<'class'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'{class_name}'")?;
+        self.indent -= 1;
+
+        // respondsTo:
+        self.write_indent()?;
+        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <RtSelector> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call '{mod_name}':'has_method'(RtSelector)")?;
+        self.indent -= 1;
+
+        // asString — generate default for classes that don't define it
+        let has_as_string = class
+            .methods
+            .iter()
+            .any(|m| m.selector.name() == "asString");
+        if !has_as_string {
+            let default_str = match class_name.as_str() {
+                "True" => "true",
+                "False" => "false",
+                "Nil" => "nil",
+                "Block" => "a Block",
+                _ => "",
+            };
+            if !default_str.is_empty() {
+                self.write_indent()?;
+                writeln!(self.output, "<'asString'> when 'true' ->")?;
+                self.indent += 1;
+                self.write_indent()?;
+                let binary = Self::core_erlang_binary(default_str);
+                writeln!(self.output, "{binary}")?;
+                self.indent -= 1;
+            }
+        }
+
+        // instVarNames — primitives have no instance variables
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "[]")?;
+        self.indent -= 1;
+
+        // instVarAt: — always returns nil for primitives
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'nil'")?;
+        self.indent -= 1;
+
+        // instVarAt:put: — error: primitives are immutable
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <ImmErr0> = call 'beamtalk_error':'new'('immutable_primitive', '{class_name}') in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in"
+        )?;
+        self.write_indent()?;
+        let immutable_hint = Self::core_erlang_binary(&format!(
+            "{class_name}s are immutable. Use assignment (x := newValue) instead."
+        ));
+        writeln!(
+            self.output,
+            "let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(ImmErr2)")?;
+        self.indent -= 1;
+
+        // perform: — recursive dispatch
+        self.write_indent()?;
+        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PerfSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PerfSel, [], Self)"
+        )?;
+        self.indent -= 1;
+
+        // perform:withArgs: — recursive dispatch with args
+        self.write_indent()?;
+        writeln!(self.output, "<'perform:withArgs:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PwaSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)"
+        )?;
+        self.indent -= 1;
+
+        // Route each class-defined method to its individual function
+        for method in &class.methods {
+            let mangled = method.selector.to_erlang_atom();
+            let arity = method.parameters.len() + 1; // +1 for Self
+            self.write_indent()?;
+            writeln!(self.output, "<'{mangled}'> when 'true' ->")?;
+            self.indent += 1;
+            self.write_indent()?;
+
+            // Build argument list: Self, then each arg from Args list
+            if method.parameters.is_empty() {
+                writeln!(self.output, "call '{mod_name}':'{mangled}'(Self)")?;
+            } else {
+                // Extract args from Args list: hd(Args), hd(tl(Args)), ...
+                for (i, _param) in method.parameters.iter().enumerate() {
+                    let arg_var = format!("DispArg{i}");
+                    let mut access = "Args".to_string();
+                    for _ in 0..i {
+                        access = format!("call 'erlang':'tl'({access})");
+                    }
+                    writeln!(
+                        self.output,
+                        "let <{arg_var}> = call 'erlang':'hd'({access}) in"
+                    )?;
+                    self.write_indent()?;
+                }
+                write!(self.output, "call '{mod_name}':'{mangled}'(Self")?;
+                for i in 0..method.parameters.len() {
+                    write!(self.output, ", DispArg{i}")?;
+                }
+                writeln!(self.output, ")")?;
+            }
+
+            let _ = arity;
+            self.indent -= 1;
+        }
+
+        // Default case: does_not_understand with extension fallback
+        self.write_indent()?;
+        writeln!(self.output, "<_Other> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "apply ExtFun(Args, Self)")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'not_found'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', '{class_name}') in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in"
+        )?;
+        self.write_indent()?;
+        let dnu_hint =
+            Self::core_erlang_binary("Check spelling or use 'respondsTo:' to verify method exists");
+        writeln!(
+            self.output,
+            "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(DnuErr2)")?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Close the outer case (selector dispatch)
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `has_method/1` function for a primitive type.
+    ///
+    /// Returns `true` for all known selectors (class-defined + reflection).
+    fn generate_primitive_has_method(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+
+        writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        // Build list of all known selectors
+        let mut selectors: Vec<String> = vec![
+            // Reflection methods
+            "'class'".to_string(),
+            "'respondsTo'".to_string(),
+            "'instVarNames'".to_string(),
+            "'instVarAt'".to_string(),
+            "'instVarAt:put:'".to_string(),
+            "'perform'".to_string(),
+            "'perform:withArgs:'".to_string(),
+        ];
+
+        // Add class-defined methods
+        for method in &class.methods {
+            let mangled = method.selector.to_erlang_atom();
+            selectors.push(format!("'{mangled}'"));
+        }
+
+        // Check lists:member first, then extension registry if false
+        writeln!(
+            self.output,
+            "case call 'lists':'member'(Selector, [{}]) of",
+            selectors.join(", ")
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<'false'> when 'true' -> call 'beamtalk_extensions':'has'('{class_name}', Selector)"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+
         self.indent -= 1;
         writeln!(self.output)?;
 

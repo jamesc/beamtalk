@@ -21,6 +21,7 @@ Object subclass: String
 
   // Length and access
   length => @primitive 'length'
+  size => self length
   at: index => @primitive 'at:'
 
   // Case transformation
