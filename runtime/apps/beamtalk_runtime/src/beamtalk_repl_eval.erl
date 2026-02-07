@@ -27,7 +27,7 @@
          format_formatted_diagnostics/1,
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
-         strip_internal_bindings/1]).
+         strip_internal_bindings/1, parse_file_compile_result/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).

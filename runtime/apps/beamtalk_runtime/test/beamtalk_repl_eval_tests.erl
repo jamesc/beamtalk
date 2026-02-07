@@ -397,3 +397,40 @@ do_eval_rejected_future_becomes_error_test() ->
     %% TODO BT-240: Add proper unit test with mocked maybe_await_future
     ok.
 
+%%% parse_file_compile_result tests
+
+parse_file_compile_result_extracts_module_name_test() ->
+    %% Simulate a daemon response with module_name, core_erlang, and classes.
+    %% We use a minimal Core Erlang module that compile:forms can handle.
+    CoreErlang = <<"module 'counter' ['__info__'/0]\n  attributes []\n'__info__'/0 = fun () -> 'ok'\nend">>,
+    Result = #{
+        <<"success">> => true,
+        <<"core_erlang">> => CoreErlang,
+        <<"module_name">> => <<"counter">>,
+        <<"classes">> => []
+    },
+    case beamtalk_repl_eval:parse_file_compile_result(Result) of
+        {ok, Binary, _ClassNames, ModuleName} ->
+            ?assertEqual(counter, ModuleName),
+            ?assert(is_binary(Binary));
+        {error, Reason} ->
+            error({unexpected_error, Reason})
+    end.
+
+parse_file_compile_result_missing_module_name_test() ->
+    Result = #{
+        <<"success">> => true,
+        <<"core_erlang">> => <<"module 'test' [] attributes [] end">>,
+        <<"classes">> => []
+    },
+    ?assertMatch({error, {daemon_error, <<"No module_name in response">>}},
+                 beamtalk_repl_eval:parse_file_compile_result(Result)).
+
+parse_file_compile_result_failure_test() ->
+    Result = #{
+        <<"success">> => false,
+        <<"formatted_diagnostics">> => [<<"Error at line 1">>]
+    },
+    ?assertMatch({error, {compile_error, _}},
+                 beamtalk_repl_eval:parse_file_compile_result(Result)).
+
