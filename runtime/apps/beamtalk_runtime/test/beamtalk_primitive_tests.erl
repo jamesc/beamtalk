@@ -432,3 +432,126 @@ perform_withArgs_invalid_args_type_on_primitive_test() ->
     %% This ensures consistency with actor behavior
     ?assertError(#beamtalk_error{kind = type_error, class = 'Integer', selector = 'perform:withArgs:'}, 
                  beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).
+
+%%% ============================================================================
+%%% Value Type Dispatch Tests (BT-354)
+%%% ============================================================================
+
+%% --- class_name_to_module/1 tests ---
+
+class_name_to_module_simple_test() ->
+    ?assertEqual(point, beamtalk_primitive:class_name_to_module('Point')).
+
+class_name_to_module_multi_word_test() ->
+    ?assertEqual(my_counter, beamtalk_primitive:class_name_to_module('MyCounter')).
+
+class_name_to_module_three_words_test() ->
+    ?assertEqual(my_counter_actor, beamtalk_primitive:class_name_to_module('MyCounterActor')).
+
+class_name_to_module_single_char_test() ->
+    ?assertEqual(x, beamtalk_primitive:class_name_to_module('X')).
+
+class_name_to_module_acronym_test() ->
+    %% Consecutive capitals are not separated (matches Rust to_module_name)
+    ?assertEqual(httprouter, beamtalk_primitive:class_name_to_module('HTTPRouter')).
+
+%% --- Value type send/3 routing ---
+
+value_type_send_routes_to_class_module_test() ->
+    %% Create a mock value type module dynamically
+    MockModule = create_mock_value_type_module(mock_vt, 'MockVT', [
+        {'getX', x}
+    ]),
+    Self = #{'__class__' => 'MockVT', x => 42},
+    try
+        Result = beamtalk_primitive:send(Self, 'getX', []),
+        ?assertEqual(42, Result)
+    after
+        code:purge(MockModule),
+        code:delete(MockModule)
+    end.
+
+value_type_send_falls_back_to_object_class_test() ->
+    %% Value type instances support inherited 'class' method
+    Self = #{'__class__' => 'MockVTEmpty'},
+    create_mock_value_type_module(mock_vtempty, 'MockVTEmpty', []),
+    try
+        Result = beamtalk_primitive:send(Self, class, []),
+        ?assertEqual('MockVTEmpty', Result)
+    after
+        code:purge(mock_vtempty),
+        code:delete(mock_vtempty)
+    end.
+
+value_type_send_does_not_understand_test() ->
+    %% Unknown method raises does_not_understand
+    Self = #{'__class__' => 'MockVTErr'},
+    create_mock_value_type_module(mock_vterr, 'MockVTErr', []),
+    try
+        ?assertError(#beamtalk_error{kind = does_not_understand, class = 'MockVTErr',
+                                      selector = 'nonexistent'},
+                     beamtalk_primitive:send(Self, 'nonexistent', []))
+    after
+        code:purge(mock_vterr),
+        code:delete(mock_vterr)
+    end.
+
+plain_map_still_routes_to_dictionary_test() ->
+    %% Plain maps without __class__ still route to beamtalk_map
+    Self = #{a => 1, b => 2},
+    Result = beamtalk_primitive:send(Self, 'size', []),
+    ?assertEqual(2, Result).
+
+%% --- Value type responds_to/2 ---
+
+value_type_responds_to_class_method_test() ->
+    %% Value type instances respond to class module methods
+    %% Class 'MockVtRt' maps to module 'mock_vt_rt' via class_name_to_module
+    create_mock_value_type_module(mock_vt_rt, 'MockVtRt', [
+        {'getX', x}
+    ]),
+    Self = #{'__class__' => 'MockVtRt', x => 0},
+    try
+        ?assert(beamtalk_primitive:responds_to(Self, 'getX')),
+        ?assertNot(beamtalk_primitive:responds_to(Self, 'nonexistent'))
+    after
+        code:purge(mock_vt_rt),
+        code:delete(mock_vt_rt)
+    end.
+
+value_type_responds_to_object_methods_test() ->
+    %% Value type instances respond to inherited Object methods
+    Self = #{'__class__' => 'MockVTObj'},
+    create_mock_value_type_module(mock_vtobj, 'MockVTObj', []),
+    try
+        ?assert(beamtalk_primitive:responds_to(Self, class)),
+        ?assert(beamtalk_primitive:responds_to(Self, 'printString'))
+    after
+        code:purge(mock_vtobj),
+        code:delete(mock_vtobj)
+    end.
+
+%%% ============================================================================
+%%% Test Helpers
+%%% ============================================================================
+
+%% @doc Create a mock value type module with field accessor methods.
+%% FieldMethods: [{MethodName, FieldAtom}] - generates MethodName(Self) -> maps:get(Field, Self)
+%% Pass [] for a module with no instance methods.
+create_mock_value_type_module(ModuleName, _ClassName, FieldMethods) ->
+    ModuleForm = {attribute, 1, module, ModuleName},
+    ExportForm = {attribute, 1, export, [{Name, 1} || {Name, _} <- FieldMethods]},
+    FunForms = [maps_get_form(Name, Field) || {Name, Field} <- FieldMethods],
+    AllForms = [ModuleForm, ExportForm | FunForms],
+    {ok, ModuleName, Binary} = compile:forms(AllForms),
+    code:load_binary(ModuleName, atom_to_list(ModuleName) ++ ".erl", Binary),
+    ModuleName.
+
+maps_get_form(Name, Field) ->
+    {function, 1, Name, 1,
+     [{clause, 1,
+       [{var, 1, 'Self'}],
+       [],
+       [{call, 1,
+         {remote, 1, {atom, 1, maps}, {atom, 1, get}},
+         [{atom, 1, Field}, {var, 1, 'Self'}]}]}]}.

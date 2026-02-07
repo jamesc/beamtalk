@@ -28,20 +28,22 @@
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1, parse_file_compile_result/1,
-         capture_io/1]).
+         start_io_capture/0, stop_io_capture/1, io_capture_loop/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
 -define(DAEMON_CONNECT_TIMEOUT, 5000).
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
+-define(IO_CAPTURE_TIMEOUT, 5000).
 
 %%% Public API
 
 %% @doc Evaluate a Beamtalk expression.
 %% This is the core of the REPL - compile, load, and execute.
 %% If the result is a Future PID, automatically awaits it before returning.
+%% Returns captured stdout as a binary (empty when no output was produced).
 -spec do_eval(string(), beamtalk_repl_state:state()) -> 
-    {ok, term(), binary(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+    {ok, term(), binary(), beamtalk_repl_state:state()} | {error, term(), binary(), beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
     %% Generate unique module name for this evaluation
     Counter = beamtalk_repl_state:get_eval_counter(State),
@@ -59,19 +61,15 @@ do_eval(Expression, State) ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    %% Execute the eval function, passing registry PID in bindings
-                    %% eval/1 returns {Result, UpdatedBindings} to support mutation threading
-                    try
+                    %% Capture stdout during evaluation
+                    CaptureRef = start_io_capture(),
+                    EvalResult = try
                         %% Add registry PID to bindings so generated code can access it
                         BindingsWithRegistry = case RegistryPid of
                             undefined -> Bindings;
                             _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
                         end,
-                        %% Capture stdout (io:put_chars) during evaluation
-                        {CapturedOutput, {RawResult, UpdatedBindings}} =
-                            capture_io(fun() ->
-                                apply(ModuleName, eval, [BindingsWithRegistry])
-                            end),
+                        {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
                         %% Strip internal keys before persisting bindings
                         CleanBindings = strip_internal_bindings(UpdatedBindings),
                         %% Auto-await futures for synchronous REPL experience
@@ -90,11 +88,11 @@ do_eval(Expression, State) ->
                                         %% Assignment: merge updated bindings with new assignment
                                         NewBindings = maps:put(VarName, Result, CleanBindings),
                                         FinalState = beamtalk_repl_state:set_bindings(NewBindings, NewState),
-                                        {ok, Result, CapturedOutput, FinalState};
+                                        {ok, Result, FinalState};
                                     none ->
                                         %% No assignment: use updated bindings from mutations
                                         FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                                        {ok, Result, CapturedOutput, FinalState}
+                                        {ok, Result, FinalState}
                                 end
                         end
                     catch
@@ -114,12 +112,15 @@ do_eval(Expression, State) ->
                                 %% Module still has actors, keep it loaded
                                 ok
                         end
-                    end;
+                    end,
+                    %% Retrieve captured output (always, even on error)
+                    Output = stop_io_capture(CaptureRef),
+                    inject_output(EvalResult, Output);
                 {error, Reason} ->
-                    {error, {load_error, Reason}, NewState}
+                    {error, {load_error, Reason}, <<>>, NewState}
             end;
         {error, Reason} ->
-            {error, {compile_error, Reason}, NewState}
+            {error, {compile_error, Reason}, <<>>, NewState}
     end.
 
 %% @doc Load a Beamtalk file and register its classes.
@@ -702,61 +703,99 @@ should_purge_module(ModuleName, RegistryPid) ->
 strip_internal_bindings(Bindings) ->
     maps:remove(?INTERNAL_REGISTRY_KEY, Bindings).
 
-%%% ============================================================================
-%%% I/O Capture
-%%% ============================================================================
+%%% IO Capture (BT-355)
+%%% Captures stdout during eval by temporarily replacing the group_leader
+%%% with a custom IO server process.
 
-%% @doc Capture stdout output during execution of a function.
-%%
-%% Redirects the group leader to an I/O capture process, runs the function,
-%% and returns {CapturedOutput, FunctionResult}. This allows the REPL to
-%% see output from Transcript show: and other io:put_chars calls.
--spec capture_io(fun(() -> T)) -> {binary(), T} when T :: term().
-capture_io(Fun) ->
+%% @doc Start capturing IO output for the current process.
+%% Returns an opaque reference to pass to stop_io_capture/1.
+-spec start_io_capture() -> {pid(), pid()}.
+start_io_capture() ->
     OldGL = group_leader(),
-    CaptureProc = spawn_link(fun() -> io_capture_loop([]) end),
-    group_leader(CaptureProc, self()),
-    try
-        Result = Fun(),
-        Output = get_captured_output(CaptureProc),
-        {Output, Result}
+    CapturePid = spawn(fun() -> io_capture_loop(<<>>) end),
+    group_leader(CapturePid, self()),
+    {CapturePid, OldGL}.
+
+%% @doc Stop capturing IO and return all captured output as a binary.
+%% Restores the original group_leader. Returns <<>> on timeout or if
+%% the capture process has already exited.
+-spec stop_io_capture({pid(), pid()}) -> binary().
+stop_io_capture({CapturePid, OldGL}) ->
+    group_leader(OldGL, self()),
+    case is_process_alive(CapturePid) of
+        true ->
+            CapturePid ! {get_captured, self(), OldGL},
+            receive
+                {captured_output, Output} -> Output
+            after ?IO_CAPTURE_TIMEOUT ->
+                logger:warning("IO capture output retrieval timed out", #{}),
+                <<>>
+            end;
+        false ->
+            <<>>
+    end.
+
+%% @doc IO server loop that captures put_chars output.
+%% Handles both {put_chars, Enc, Chars} and {put_chars, Enc, Mod, Func, Args}
+%% (the latter is used by io:format).
+%% After capture stops, proxies IO to the original group_leader so that
+%% processes spawned during eval still have a working IO path.
+-spec io_capture_loop(binary()) -> ok.
+io_capture_loop(Buffer) ->
+    receive
+        {io_request, From, ReplyAs, Request} ->
+            {Reply, NewBuffer} = handle_io_request(Request, Buffer),
+            From ! {io_reply, ReplyAs, Reply},
+            io_capture_loop(NewBuffer);
+        {get_captured, Pid, OldGL} ->
+            Pid ! {captured_output, Buffer},
+            io_passthrough_loop(OldGL)
+    end.
+
+%% @doc After capture, forward all IO to the original group_leader.
+%% Keeps this process alive so spawned children don't get a dead group_leader.
+%% Exits after 60 seconds of inactivity to avoid leaking processes.
+-spec io_passthrough_loop(pid()) -> ok.
+io_passthrough_loop(OldGL) ->
+    receive
+        {io_request, From, ReplyAs, Request} ->
+            OldGL ! {io_request, From, ReplyAs, Request},
+            io_passthrough_loop(OldGL)
+    after 60000 ->
+        ok
+    end.
+
+%% @doc Handle a single IO protocol request.
+%% Always replies ok for output requests to avoid changing program behavior.
+-spec handle_io_request(term(), binary()) -> {term(), binary()}.
+handle_io_request({put_chars, Encoding, Chars}, Buffer) ->
+    try unicode:characters_to_binary(Chars, Encoding, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
     catch
-        Class:Reason:Stack ->
-            %% Restore group leader before re-raising
-            group_leader(OldGL, self()),
-            CaptureProc ! stop,
-            erlang:raise(Class, Reason, Stack)
-    after
-        group_leader(OldGL, self()),
-        CaptureProc ! stop
-    end.
+        _:_ -> {ok, Buffer}
+    end;
+handle_io_request({put_chars, Chars}, Buffer) ->
+    %% Legacy IO protocol form without encoding
+    try unicode:characters_to_binary(Chars, latin1, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
+    catch
+        _:_ -> {ok, Buffer}
+    end;
+handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
+    try unicode:characters_to_binary(apply(Mod, Func, Args), Encoding, utf8) of
+        Bin when is_binary(Bin) -> {ok, <<Buffer/binary, Bin/binary>>};
+        _ -> {ok, Buffer}
+    catch
+        _:_ -> {ok, Buffer}
+    end;
+handle_io_request(_Other, Buffer) ->
+    {{error, enotsup}, Buffer}.
 
-%% @private
-%% I/O server process that accumulates put_chars output.
-io_capture_loop(Acc) ->
-    receive
-        {io_request, From, ReplyAs, {put_chars, _Encoding, Chars}} ->
-            From ! {io_reply, ReplyAs, ok},
-            io_capture_loop([Acc, Chars]);
-        {io_request, From, ReplyAs, {put_chars, Chars}} ->
-            From ! {io_reply, ReplyAs, ok},
-            io_capture_loop([Acc, Chars]);
-        {io_request, From, ReplyAs, _Other} ->
-            %% Handle other io requests (e.g., get_geometry) gracefully
-            From ! {io_reply, ReplyAs, {error, enotsup}},
-            io_capture_loop(Acc);
-        {get_captured, From} ->
-            From ! {captured_output, iolist_to_binary(Acc)},
-            io_capture_loop(Acc);
-        stop ->
-            ok
-    end.
-
-%% @private
-get_captured_output(Pid) ->
-    Pid ! {get_captured, self()},
-    receive
-        {captured_output, Data} -> Data
-    after 1000 ->
-        <<>>
-    end.
+%% @doc Inject captured output into an eval result tuple.
+-spec inject_output(tuple(), binary()) -> tuple().
+inject_output({ok, Result, State}, Output) ->
+    {ok, Result, Output, State};
+inject_output({error, Reason, State}, Output) ->
+    {error, Reason, Output, State}.
