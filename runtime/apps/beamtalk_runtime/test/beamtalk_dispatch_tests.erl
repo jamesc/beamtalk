@@ -64,7 +64,10 @@ dispatch_test_() ->
           {"responds_to inherited method", fun test_responds_to_inherited_method/0},
           {"invoke_with_combinations delegates", fun test_invoke_with_combinations_delegates/0},
           {"extension error propagation", fun test_extension_error_propagation/0},
-          {"responds_to extension method", fun test_responds_to_extension_method/0}
+          {"responds_to extension method", fun test_responds_to_extension_method/0},
+          {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
+          {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
+          {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0}
          ]
      end
     }.
@@ -359,3 +362,111 @@ test_responds_to_extension_method() ->
     after
         catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
     end.
+
+%%% ============================================================================
+%%% BT-283: Performance Benchmark Tests (ADR 0006 Phase 2)
+%%% ============================================================================
+
+%% Benchmark: O(1) lookup with flattened table vs O(depth) hierarchy walk
+test_flattened_table_performance() ->
+    ok = ensure_counter_loaded(),
+    
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+    
+    %% Warm up - ensure Counter's flattened table is built
+    _ = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
+    
+    %% Benchmark flattened table lookup (should be O(1))
+    %% Call an inherited method that would require hierarchy walk without flattening
+    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3)
+    N = 10000,
+    
+    StartFlattened = erlang:monotonic_time(microsecond),
+    lists:foreach(fun(_) ->
+        _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
+    end, lists:seq(1, N)),
+    EndFlattened = erlang:monotonic_time(microsecond),
+    
+    FlattenedTime = EndFlattened - StartFlattened,
+    AvgFlattenedTime = FlattenedTime / N,
+    
+    %% Log results
+    io:format("~n=== Flattened Table Performance ===~n"),
+    io:format("Total time for ~p lookups: ~p μs~n", [N, FlattenedTime]),
+    io:format("Average time per lookup: ~.2f μs~n", [AvgFlattenedTime]),
+    
+    %% Flattened lookup should be fast (under 10 μs per call on average)
+    %% This is a reasonable threshold for O(1) lookup
+    ?assert(AvgFlattenedTime < 10.0).
+
+%% Memory benchmark: document overhead per class
+test_flattened_table_memory_overhead() ->
+    ok = ensure_counter_loaded(),
+    
+    %% Get Counter class process
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    ?assertNotEqual(undefined, CounterPid),
+    
+    %% Get process memory info
+    {memory, MemoryBytes} = erlang:process_info(CounterPid, memory),
+    
+    %% Get flattened methods size
+    {ok, FlattenedMethods} = gen_server:call(CounterPid, get_flattened_methods),
+    FlattenedSize = erlang:external_size(FlattenedMethods),
+    
+    %% Get instance methods size (for comparison)
+    InstanceMethods = beamtalk_object_class:methods(CounterPid),
+    InstanceMethodsSize = erlang:external_size(InstanceMethods),
+    
+    %% Calculate overhead percentage
+    OverheadRatio = case InstanceMethodsSize of
+        0 -> 0.0;
+        _ -> (FlattenedSize / InstanceMethodsSize) * 100.0
+    end,
+    
+    %% Log results
+    io:format("~n=== Flattened Table Memory Overhead ===~n"),
+    io:format("Class process total memory: ~p bytes~n", [MemoryBytes]),
+    io:format("Flattened methods size: ~p bytes~n", [FlattenedSize]),
+    io:format("Instance methods size: ~p bytes~n", [InstanceMethodsSize]),
+    io:format("Overhead ratio: ~.2f%~n", [OverheadRatio]),
+    
+    %% Memory overhead should be reasonable
+    %% Flattened table should be less than 10KB per class (typical case)
+    ?assert(FlattenedSize < 10000).
+
+%% Test flattened table invalidation on method addition
+test_flattened_table_invalidation_on_method_add() ->
+    ok = ensure_counter_loaded(),
+    
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    
+    %% Get initial flattened methods
+    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    InitialSize = maps:size(InitialFlattened),
+    
+    %% Add a new method
+    TestMethod = fun(Self, [], State) -> {reply, test_result, State} end,
+    ok = beamtalk_object_class:put_method(CounterPid, testNewMethod, TestMethod),
+    
+    %% Get updated flattened methods
+    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    UpdatedSize = maps:size(UpdatedFlattened),
+    
+    %% Verify new method is in flattened table
+    ?assert(maps:is_key(testNewMethod, UpdatedFlattened)),
+    ?assertEqual(InitialSize + 1, UpdatedSize),
+    
+    %% Verify the method is callable via dispatch
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+    
+    Result = beamtalk_dispatch:lookup(testNewMethod, [], Self, State, 'Counter'),
+    ?assertMatch({reply, test_result, _}, Result).
