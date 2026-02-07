@@ -42,7 +42,7 @@
 %%% See: docs/internal/design-self-as-object.md Section 3.3
 
 -module(beamtalk_primitive).
--export([class_of/1, send/3, responds_to/2]).
+-export([class_of/1, send/3, responds_to/2, class_name_to_module/1]).
 
 -include("beamtalk.hrl").
 
@@ -137,12 +137,15 @@ send(X, Selector, Args) when is_tuple(X) ->
 send(X, Selector, Args) when is_float(X) ->
     beamtalk_float:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_map(X) ->
-    %% Check for tagged maps (e.g., CompiledMethod)
+    %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
     case maps:find('__class__', X) of
         {ok, 'CompiledMethod'} ->
             beamtalk_compiled_method:dispatch(Selector, Args, X);
+        {ok, Class} when is_atom(Class) ->
+            %% Value type instance - route to class module (BT-354)
+            value_type_send(X, Class, Selector, Args);
         _ ->
-            %% Generic map dispatch (Dictionary)
+            %% Plain map (Dictionary)
             beamtalk_map:dispatch(Selector, Args, X)
     end;
 send(X, Selector, Args) when is_list(X) ->
@@ -198,6 +201,9 @@ responds_to(X, Selector) when is_map(X) ->
     case maps:find('__class__', X) of
         {ok, 'CompiledMethod'} ->
             beamtalk_compiled_method:has_method(Selector);
+        {ok, Class} when is_atom(Class) ->
+            %% Value type instance - check class module exports (BT-354)
+            value_type_responds_to(Class, Selector);
         _ -> beamtalk_map:has_method(Selector)
     end;
 responds_to(X, Selector) when is_list(X) ->
@@ -205,3 +211,81 @@ responds_to(X, Selector) when is_list(X) ->
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
+
+%%% ============================================================================
+%%% Internal: Value Type Dispatch (BT-354)
+%%% ============================================================================
+
+%% @doc Send a message to a value type instance.
+%%
+%% Value type modules generate pure functions (e.g., point:getX/1(Self)).
+%% Falls back to beamtalk_object base methods for inherited protocol.
+-spec value_type_send(map(), atom(), atom(), list()) -> term().
+value_type_send(Self, Class, Selector, Args) ->
+    Module = class_name_to_module(Class),
+    Arity = length(Args) + 1,  % +1 for Self parameter
+    code:ensure_loaded(Module),
+    case erlang:function_exported(Module, Selector, Arity) of
+        true ->
+            erlang:apply(Module, Selector, [Self | Args]);
+        false ->
+            %% Fall back to Object base methods (class, printString, etc.)
+            case beamtalk_object:has_method(Selector) of
+                true ->
+                    case beamtalk_object:dispatch(Selector, Args, Self, Self) of
+                        {reply, Result, _State} -> Result;
+                        {error, Error, _State} -> error(Error)
+                    end;
+                false ->
+                    Error0 = beamtalk_error:new(does_not_understand, Class),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    error(Error1)
+            end
+    end.
+
+%% @doc Check if a value type responds to a selector.
+-spec value_type_responds_to(atom(), atom()) -> boolean().
+value_type_responds_to(Class, Selector) ->
+    Module = class_name_to_module(Class),
+    code:ensure_loaded(Module),
+    Exports = case erlang:function_exported(Module, module_info, 1) of
+        true -> Module:module_info(exports);
+        false -> []
+    end,
+    lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
+        orelse beamtalk_object:has_method(Selector).
+
+%% @doc Convert a CamelCase class name atom to a snake_case module name atom.
+%%
+%% Matches the Rust `to_module_name` function in codegen/core_erlang/util.rs.
+%% Examples: 'Point' → 'point', 'MyCounter' → 'my_counter'
+%%
+%% Uses list_to_existing_atom/1 to avoid atom table exhaustion from untrusted
+%% class names — the module atom must already exist if the module is loaded.
+-spec class_name_to_module(atom()) -> atom().
+class_name_to_module(Class) when is_atom(Class) ->
+    SnakeCase = camel_to_snake(atom_to_list(Class)),
+    try list_to_existing_atom(SnakeCase)
+    catch error:badarg ->
+        %% Module atom doesn't exist — cannot be a loaded module.
+        %% Return a non-existent atom safely; callers use code:ensure_loaded
+        %% and function_exported which will return false, triggering proper
+        %% does_not_understand error handling.
+        list_to_atom(SnakeCase)
+    end.
+
+%% @private CamelCase string to snake_case string conversion.
+-spec camel_to_snake(string()) -> string().
+camel_to_snake(Str) ->
+    camel_to_snake(Str, false, []).
+
+camel_to_snake([], _PrevWasLower, Acc) ->
+    lists:reverse(Acc);
+camel_to_snake([H|T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
+    Lower = H + 32,
+    case PrevWasLower of
+        true -> camel_to_snake(T, false, [Lower, $_ | Acc]);
+        false -> camel_to_snake(T, false, [Lower | Acc])
+    end;
+camel_to_snake([H|T], _PrevWasLower, Acc) ->
+    camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).

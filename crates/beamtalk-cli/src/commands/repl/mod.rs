@@ -90,7 +90,7 @@ struct ReplResponse {
     status: Option<Vec<String>>,
     /// Result value (both formats)
     value: Option<serde_json::Value>,
-    /// Captured stdout output from evaluation (e.g., Transcript show:)
+    /// Captured stdout from evaluation (BT-355)
     output: Option<String>,
     /// Legacy: error message
     message: Option<String>,
@@ -565,24 +565,22 @@ pub fn run(
                 // Evaluate expression
                 match client.eval(line) {
                     Ok(response) => {
+                        // Print captured stdout before value/error (BT-355)
+                        if let Some(ref output) = response.output {
+                            if !output.is_empty() {
+                                print!("{output}");
+                                if !output.ends_with('\n') {
+                                    println!();
+                                }
+                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                            }
+                        }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
                                 eprintln!("Error: {msg}");
                             }
-                        } else {
-                            // Print captured stdout (e.g., from Transcript show:)
-                            if let Some(ref output) = response.output {
-                                if !output.is_empty() {
-                                    print!("{output}");
-                                    // Ensure output ends with newline before printing value
-                                    if !output.ends_with('\n') {
-                                        println!();
-                                    }
-                                }
-                            }
-                            if let Some(value) = response.value {
-                                println!("{}", format_value(&value));
-                            }
+                        } else if let Some(value) = response.value {
+                            println!("{}", format_value(&value));
                         }
                     }
                     Err(e) => {
