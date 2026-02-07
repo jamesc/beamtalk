@@ -266,22 +266,22 @@ The codegen currently special-cases `ClassReference` receivers, generating direc
 
 #### How It Works
 
-When the compiler encounters an uppercase identifier as a receiver, it generates code that:
+When the compiler encounters an uppercase identifier as a receiver, it checks a **compile-time known set** of workspace binding names (`Transcript`, `Beamtalk`). This is a static decision, not a runtime check:
 
-1. **Checks workspace bindings** — Is this name bound to a workspace-injected object?
-2. **Falls back to class method** — If not a binding, treat as a class-level method call (existing behavior)
+1. **Name is a known workspace binding** → generate `persistent_term` lookup + actor send
+2. **Name is anything else** → generate direct module function call (existing behavior, unchanged)
 
 ```erlang
 %% Current (all ClassReference → direct function call):
 call 'transcript':'show:'(<<"Hello">>)    %% Transcript show: 'Hello'
 call 'counter':'spawn'()                   %% Counter spawn
 
-%% Proposed (check workspace bindings first):
-%% Transcript — found in workspace bindings → actor send
-let Pid = lookup_binding('Transcript') in
+%% Proposed (compiler knows Transcript is a workspace binding):
+%% Transcript → persistent_term lookup + actor send
+let Pid = call 'persistent_term':'get'({beamtalk_binding, 'Transcript'}) in
 gen_server:cast(Pid, {'show:', [<<"Hello">>], Future})
 
-%% Counter — not in workspace bindings → class method call (unchanged)
+%% Counter → not a workspace binding, direct call (UNCHANGED, no lookup)
 call 'counter':'spawn'()
 ```
 
@@ -299,11 +299,11 @@ lookup_binding(Name) ->
     persistent_term:get({beamtalk_binding, Name}, undefined).
 ```
 
-**Key difference from the global registry approach:** Only workspace-injected names are in the binding table. Classes (`Counter`, `Point`, `Array`) are NOT — they continue to use direct module function calls. This means:
+**Key difference from the global registry approach:** The compiler statically knows which names are workspace bindings. Classes (`Counter`, `Point`, `Array`) are NOT — they generate direct module function calls with no lookup. This means:
 
-- **Zero overhead** on class method sends (`Counter spawn`, `Point new`) — no lookup at all
-- **~13ns overhead** on workspace binding sends (`Transcript show:`, `Beamtalk allClasses`) — negligible
-- **No workspace = no bindings** — `beamtalk build` without a workspace produces a clear "unbound variable" error for `Transcript`
+- **Zero overhead** on class method sends (`Counter spawn`, `Point new`) — the compiler generates the same direct call as today, no `persistent_term` lookup
+- **~13ns overhead** on workspace binding sends (`Transcript show:`, `Beamtalk allClasses`) — one `persistent_term:get/1` call
+- **No workspace = compile error** — in batch mode (`beamtalk build`), the compiler recognizes `Transcript` as a workspace binding name but has no workspace context, producing a clear error: "Transcript is a workspace binding, not available in batch compilation"
 
 ### Class Definitions (Future — not yet in `lib/`)
 
@@ -519,7 +519,7 @@ ADR 0009 splits the runtime into `beamtalk_runtime` (core language) and `beamtal
 | Workspace bindings (`persistent_term`) | `beamtalk_workspace` | Populated at workspace startup |
 
 This means:
-- **Batch compile** (`beamtalk build`): No workspace bindings exist. Code referencing `Transcript` gets a clear "unbound variable" error. Classes (`Counter`, `Point`) work normally via direct module calls.
+- **Batch compile** (`beamtalk build`): The compiler recognizes workspace binding names but rejects them with a clear compile-time error — "Transcript is a workspace binding, not available in batch compilation." Classes (`Counter`, `Point`) compile normally via direct module calls.
 - **REPL/workspace**: Workspace spawns singletons and injects bindings at startup. `Transcript` and `Beamtalk` are available immediately.
 - **One workspace per node** (ADR 0004): Simple `register/2` is sufficient — no scoping needed.
 
