@@ -29,7 +29,7 @@ Both are registered as classes in `beamtalk_stdlib.erl` with class methods but n
    - No `doesNotUnderstand:` — unknown methods produce raw Erlang `undef` errors instead of `#beamtalk_error{}`
    - No hierarchy walking — can't inherit Object methods like `respondsTo:`, `class`, `describe`
    - No extension methods — can't add methods to Transcript at runtime
-   - No method combinations (before/after)
+   - Would bypass method combinations (before/after) once implemented
 
 2. **Module naming collision** — Transcript's module must be named `transcript` (matching `to_module_name("Transcript")`) rather than `beamtalk_transcript`, breaking the `beamtalk_*` naming convention. Any global whose class name collides with an Erlang stdlib module would shadow it.
 
@@ -79,8 +79,8 @@ Each well-known object is a **singleton actor** owned by the workspace. The work
 ```erlang
 %% Workspace startup:
 %% 1. Spawn singleton actors
-{ok, TranscriptPid} = transcript_stream:spawn(),
-{ok, BeamtalkPid} = system_dictionary:spawn(),
+{ok, TranscriptPid} = beamtalk_transcript_stream:spawn(),
+{ok, BeamtalkPid} = beamtalk_system_dictionary:spawn(),
 
 %% 2. Inject as workspace bindings (available to REPL and :load'd code)
 WorkspaceBindings = #{
@@ -383,8 +383,8 @@ The workspace spawns and injects well-known objects during initialization:
 %% In beamtalk_workspace.erl:
 init_workspace_bindings() ->
     %% 1. Spawn singleton actors
-    {ok, TranscriptPid} = transcript_stream:spawn(),
-    {ok, BeamtalkPid} = system_dictionary:spawn(),
+    {ok, TranscriptPid} = beamtalk_transcript_stream:spawn(),
+    {ok, BeamtalkPid} = beamtalk_system_dictionary:spawn(),
     
     %% 2. Inject as workspace bindings (persistent_term for fast codegen lookup)
     persistent_term:put({beamtalk_binding, 'Transcript'}, TranscriptPid),
