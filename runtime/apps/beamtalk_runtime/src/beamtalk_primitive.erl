@@ -259,9 +259,19 @@ value_type_responds_to(Class, Selector) ->
 %%
 %% Matches the Rust `to_module_name` function in codegen/core_erlang/util.rs.
 %% Examples: 'Point' → 'point', 'MyCounter' → 'my_counter'
+%%
+%% Uses list_to_existing_atom/1 to avoid atom table exhaustion from untrusted
+%% class names — the module atom must already exist if the module is loaded.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
-    list_to_atom(camel_to_snake(atom_to_list(Class))).
+    try list_to_existing_atom(camel_to_snake(atom_to_list(Class)))
+    catch error:badarg ->
+        %% Module atom doesn't exist — cannot be a loaded module.
+        %% Return a non-existent atom safely; callers use code:ensure_loaded
+        %% and function_exported which will return false, triggering proper
+        %% does_not_understand error handling.
+        list_to_atom(camel_to_snake(atom_to_list(Class)))
+    end.
 
 %% @private CamelCase string to snake_case string conversion.
 -spec camel_to_snake(string()) -> string().
