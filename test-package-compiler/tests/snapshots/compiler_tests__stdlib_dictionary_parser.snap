@@ -782,138 +782,195 @@ Module {
                                     end: 800,
                                 },
                             },
+                            MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 803,
+                                            end: 813,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 803,
+                                        end: 813,
+                                    },
+                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 814,
+                                                end: 819,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "v",
+                                            span: Span {
+                                                start: 820,
+                                                end: 821,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 803,
+                                    end: 821,
+                                },
+                            },
                         ],
                         span: Span {
                             start: 771,
-                            end: 772,
+                            end: 823,
                         },
                     },
                 ),
             ],
             span: Span {
                 start: 747,
-                end: 772,
-            },
-        },
-        MessageSend {
-            receiver: ClassReference {
-                name: Identifier {
-                    name: "Transcript",
-                    span: Span {
-                        start: 803,
-                        end: 813,
-                    },
-                },
-                span: Span {
-                    start: 803,
-                    end: 813,
-                },
-            },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "show:",
-                        span: Span {
-                            start: 814,
-                            end: 819,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Identifier(
-                    Identifier {
-                        name: "v",
-                        span: Span {
-                            start: 820,
-                            end: 821,
-                        },
-                    },
-                ),
-            ],
-            span: Span {
-                start: 803,
-                end: 821,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 822,
                 end: 823,
             },
         },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found }",
-                span: Span {
-                    start: 884,
-                    end: 885,
-                },
-            },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "collect:",
-                        span: Span {
-                            start: 886,
-                            end: 894,
-                        },
+        Assignment {
+            target: Identifier(
+                Identifier {
+                    name: "doubled",
+                    span: Span {
+                        start: 853,
+                        end: 860,
                     },
-                ],
+                },
             ),
-            arguments: [
-                Block(
-                    Block {
-                        parameters: [
-                            BlockParameter {
-                                name: "v",
-                                span: Span {
-                                    start: 897,
-                                    end: 898,
+            value: MessageSend {
+                receiver: MapLiteral {
+                    pairs: [
+                        MapPair {
+                            key: Literal(
+                                Symbol(
+                                    "x",
+                                ),
+                                Span {
+                                    start: 866,
+                                    end: 868,
                                 },
+                            ),
+                            value: Literal(
+                                Integer(
+                                    10,
+                                ),
+                                Span {
+                                    start: 872,
+                                    end: 874,
+                                },
+                            ),
+                            span: Span {
+                                start: 866,
+                                end: 874,
                             },
-                        ],
-                        body: [
-                            MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "v",
-                                        span: Span {
-                                            start: 901,
-                                            end: 902,
-                                        },
+                        },
+                        MapPair {
+                            key: Literal(
+                                Symbol(
+                                    "y",
+                                ),
+                                Span {
+                                    start: 876,
+                                    end: 878,
+                                },
+                            ),
+                            value: Literal(
+                                Integer(
+                                    20,
+                                ),
+                                Span {
+                                    start: 882,
+                                    end: 884,
+                                },
+                            ),
+                            span: Span {
+                                start: 876,
+                                end: 884,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        start: 864,
+                        end: 885,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "collect:",
+                            span: Span {
+                                start: 886,
+                                end: 894,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "v",
+                                    span: Span {
+                                        start: 897,
+                                        end: 898,
                                     },
-                                ),
-                                selector: Binary(
-                                    "*",
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            2,
-                                        ),
-                                        Span {
-                                            start: 905,
-                                            end: 906,
+                                },
+                            ],
+                            body: [
+                                MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "v",
+                                            span: Span {
+                                                start: 901,
+                                                end: 902,
+                                            },
                                         },
                                     ),
-                                ],
-                                span: Span {
-                                    start: 901,
-                                    end: 906,
+                                    selector: Binary(
+                                        "*",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                2,
+                                            ),
+                                            Span {
+                                                start: 905,
+                                                end: 906,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 901,
+                                        end: 906,
+                                    },
                                 },
+                            ],
+                            span: Span {
+                                start: 895,
+                                end: 907,
                             },
-                        ],
-                        span: Span {
-                            start: 895,
-                            end: 907,
                         },
-                    },
-                ),
-            ],
+                    ),
+                ],
+                span: Span {
+                    start: 864,
+                    end: 907,
+                },
+            },
             span: Span {
-                start: 884,
+                start: 853,
                 end: 907,
             },
         },
@@ -1151,8 +1208,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 803, end: 813 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 822, end: 823 }, hint: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 884, end: 885 }, hint: None }

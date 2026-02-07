@@ -106,7 +106,7 @@ module 'nested_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
         <'blockWithNested'> when 'true' ->
             case Args of
                 <[_x2]> when 'true' ->
-                    let _Result = fun (_y3) -> call 'erlang':'*'(_y3, 2) in {'reply', _Result, State}
+                    let Inner = fun (_y3) -> call 'erlang':'*'(_y3, 2) in let _Result = let _Fun4 = Inner in apply _Fun4 (_x2) in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
