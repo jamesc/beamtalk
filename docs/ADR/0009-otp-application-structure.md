@@ -9,24 +9,24 @@ Proposed (2026-02-07)
 
 The beamtalk Erlang runtime is currently structured as two OTP applications:
 
-- **`beamtalk_runtime`** — A monolithic 35-module application containing everything: primitive type implementations, object system, dispatch, bootstrap, actors, futures, hot reload, REPL server, REPL evaluation, workspace management, session supervision, and idle monitoring.
+- **`beamtalk_runtime`** — A monolithic 36-module application containing everything: primitive type implementations, object system, dispatch, bootstrap, actors, futures, hot reload, REPL server, REPL evaluation, workspace management, session supervision, and idle monitoring.
 - **`beamtalk_stdlib`** — Compiled `.bt` → `.beam` files (no hand-written Erlang).
 
 This monolithic structure creates several problems:
 
-1. **Coupling:** `beamtalk_actor.erl` (core runtime) directly calls `beamtalk_repl_actors:register_actor/3` and `beamtalk_workspace_meta:register_actor/1`. Core runtime code depends on REPL code.
+1. **Coupling:** `beamtalk_actor.erl` (core runtime) directly calls `beamtalk_repl_actors:register_actor/4` and `beamtalk_workspace_meta:register_actor/1`. Core runtime code depends on REPL code.
 
 2. **Deployment inflexibility:** `beamtalk build` (batch compilation) loads the entire REPL infrastructure even though it doesn't need it. Future production deployments would include REPL code unnecessarily.
 
 3. **Test isolation:** Runtime unit tests require REPL infrastructure to be running, making tests slower and more fragile.
 
-4. **Unclear boundaries:** The 35 modules span at least 4 distinct concerns (primitives, object system, REPL, workspace management) with no structural separation.
+4. **Unclear boundaries:** The 36 modules span at least 4 distinct concerns (primitives, object system, REPL, workspace management) with no structural separation.
 
 ### Current State
 
 ```
 runtime/apps/
-├── beamtalk_runtime/     # 35 modules — everything
+├── beamtalk_runtime/     # 36 modules — everything
 │   └── src/
 │       ├── beamtalk_integer.erl          # Primitive
 │       ├── beamtalk_string.erl           # Primitive
@@ -93,7 +93,7 @@ Split `beamtalk_runtime` into two OTP applications, creating a 3-app umbrella:
 
 ```
 runtime/apps/
-├── beamtalk_runtime/     # Core language runtime (22 modules)
+├── beamtalk_runtime/     # Core language runtime (23 modules)
 │   └── src/
 │       ├── beamtalk_integer.erl          # Primitive types
 │       ├── beamtalk_string.erl
@@ -162,20 +162,39 @@ The one coupling point (`beamtalk_actor.erl` → `beamtalk_repl_actors`) is reso
 ```erlang
 %% In beamtalk_actor.erl — use application env for optional callback
 spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
-    {ok, Pid} = gen_server:start_link(Module, InitState, []),
-    %% Notify registered callback (if any)
-    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
-        {ok, CallbackMod} ->
-            CallbackMod:on_actor_spawned(RegistryPid, Pid, ClassName, Module);
-        undefined ->
-            ok
-    end,
-    {ok, Pid}.
+    InitState = #{
+        '__registry_pid__' => RegistryPid,
+        '__class__' => ClassName
+    },
+    case gen_server:start_link(Module, maps:merge(InitState, Args), []) of
+        {ok, Pid} ->
+            %% Notify registered callback (if any)
+            case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+                {ok, CallbackMod} ->
+                    CallbackMod:on_actor_spawned(RegistryPid, Pid, ClassName, Module);
+                undefined ->
+                    ok
+            end,
+            {ok, Pid};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 ```
 
 ```erlang
 %% In beamtalk_repl_app:start/2 — register the callback on startup
 application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors).
+```
+
+The `beamtalk_repl_actors` module must export `on_actor_spawned/4`, which wraps the existing `register_actor/4` and `beamtalk_workspace_meta:register_actor/1` calls:
+
+```erlang
+%% In beamtalk_repl_actors.erl — new callback function
+-spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok.
+on_actor_spawned(RegistryPid, Pid, ClassName, Module) ->
+    register_actor(RegistryPid, Pid, ClassName, Module),
+    beamtalk_workspace_meta:register_actor(Pid),
+    ok.
 ```
 
 This pattern:
@@ -321,7 +340,7 @@ Clearer boundaries make it easier to understand which modules to modify. LSP wor
 |--------|----------------------------------|
 | 🧑‍💻 **Newcomer** | "Simpler mental model — one app, one thing to understand. No confusion about which app a module belongs to." |
 | 🎩 **Smalltalk purist** | "In Smalltalk, the image IS the IDE — there's no separation between runtime and tools. The REPL is integral to the language." |
-| ⚙️ **BEAM veteran** | "35 modules in one app is small by Erlang standards. RabbitMQ's rabbit app has 200+ modules. Don't split prematurely." |
+| ⚙️ **BEAM veteran** | "36 modules in one app is small by Erlang standards. RabbitMQ's rabbit app has 200+ modules. Don't split prematurely." |
 | 🏭 **Operator** | "One app means one thing to configure, monitor, and restart. No inter-app dependency issues." |
 | 🎨 **Language designer** | "Beamtalk is interactive-first — the REPL isn't optional tooling, it's core to the language experience. Separating it sends the wrong message." |
 
@@ -346,7 +365,7 @@ Clearer boundaries make it easier to understand which modules to modify. LSP wor
 
 ### Keep Monolithic (Status Quo)
 
-Rejected because the coupling is a real problem today. `beamtalk_actor.erl` cannot be tested without REPL infrastructure. Production deployments include unnecessary REPL code. The 35-module monolith will only grow as ADR 0004 workspace features are implemented.
+Rejected because the coupling is a real problem today. `beamtalk_actor.erl` cannot be tested without REPL infrastructure. Production deployments include unnecessary REPL code. The 36-module monolith will only grow as ADR 0004 workspace features are implemented.
 
 ### 4-App Split (Separate Actors)
 
