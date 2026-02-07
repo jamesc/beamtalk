@@ -1,4 +1,4 @@
-# ADR 0009: OTP Application Structure — Split REPL from Runtime
+# ADR 0009: OTP Application Structure — Split Workspace from Runtime
 
 ## Status
 Proposed (2026-02-07)
@@ -119,7 +119,7 @@ runtime/apps/
 │       ├── beamtalk_runtime_app.erl      # OTP plumbing
 │       └── beamtalk_runtime_sup.erl
 │
-├── beamtalk_repl/        # Interactive development (13 moved + 2 new) — NEW
+├── beamtalk_workspace/    # Workspace & interactive development (13 moved + 2 new) — NEW
 │   └── src/
 │       ├── beamtalk_repl.erl             # REPL main
 │       ├── beamtalk_repl_eval.erl        # Expression evaluation
@@ -129,13 +129,13 @@ runtime/apps/
 │       ├── beamtalk_repl_actors.erl      # Actor registry
 │       ├── beamtalk_repl_modules.erl     # Module tracking
 │       ├── beamtalk_repl_protocol.erl    # JSON-RPC protocol
-│       ├── beamtalk_workspace_sup.erl    # Workspace supervisor
+│       ├── beamtalk_workspace_sup.erl    # Workspace supervisor (root)
 │       ├── beamtalk_workspace_meta.erl   # Workspace metadata
 │       ├── beamtalk_session_sup.erl      # Session supervisor
 │       ├── beamtalk_idle_monitor.erl     # Idle timeout
 │       ├── beamtalk_actor_sup.erl        # Actor supervision (workspace-scoped)
-│       ├── beamtalk_repl_app.erl         # OTP app callback (new)
-│       └── beamtalk_repl_sup.erl         # Root supervisor (new)
+│       ├── beamtalk_workspace_app.erl    # OTP app callback (new)
+│       └── beamtalk_workspace_app_sup.erl # App-level supervisor (new)
 │
 └── beamtalk_stdlib/      # Compiled .bt → .beam (unchanged)
     └── ebin/
@@ -144,7 +144,7 @@ runtime/apps/
 ### Dependency Graph
 
 ```
-beamtalk_repl
+beamtalk_workspace
     ↓ depends on
 beamtalk_runtime
     ↓ depends on
@@ -153,7 +153,7 @@ beamtalk_stdlib
 kernel, stdlib
 ```
 
-Dependencies flow strictly downward. `beamtalk_runtime` never imports `beamtalk_repl`.
+Dependencies flow strictly downward. `beamtalk_runtime` never imports `beamtalk_workspace`.
 
 ### Decoupling the Actor Registration
 
@@ -214,10 +214,10 @@ beamtalk_runtime_sup (one_for_one)
 └── beamtalk_object_instances (worker)
 ```
 
-**beamtalk_repl** (extracted from current workspace tree):
+**beamtalk_workspace** (extracted from current workspace tree):
 
 ```
-beamtalk_repl_sup (one_for_one)
+beamtalk_workspace_app_sup (one_for_one)
 └── [per-workspace children started dynamically]
     └── beamtalk_workspace_sup (one_for_one)
         ├── beamtalk_workspace_meta (worker)
@@ -228,9 +228,9 @@ beamtalk_repl_sup (one_for_one)
         └── beamtalk_session_sup (simple_one_for_one)
 ```
 
-Note: `beamtalk_actor_sup` moves to `beamtalk_repl` because it supervises user-spawned actors within a workspace context. The core `beamtalk_actor.erl` module (actor gen_server implementation) stays in runtime.
+Note: `beamtalk_actor_sup` moves to `beamtalk_workspace` because it supervises user-spawned actors within a workspace context. The core `beamtalk_actor.erl` module (actor gen_server implementation) stays in runtime.
 
-When a non-REPL use case needs actor supervision (e.g., `beamtalk run server.bt` from ADR 0004), it will start its own `beamtalk_actor_sup` under a production supervisor — the module is reusable, only its supervision placement is workspace-scoped for now. This is a natural extension point: a future `beamtalk_server` app could supervise actors without the REPL layer.
+When a non-REPL use case needs actor supervision (e.g., `beamtalk run server.bt` from ADR 0004), it will start its own `beamtalk_actor_sup` under a production supervisor — the module is reusable, only its supervision placement is workspace-scoped for now. This is a natural extension point: a future `beamtalk_server` app could supervise actors without the workspace layer.
 
 ### Rust CLI Startup
 
@@ -243,10 +243,10 @@ After the split, the `-eval` startup must change to:
 {ok, _} = beamtalk_repl:start_link(), ...
 
 %% After split (REPL mode):
-ok = application:ensure_all_started(beamtalk_repl), ...
+ok = application:ensure_all_started(beamtalk_workspace), ...
 ```
 
-This ensures both `beamtalk_runtime` and `beamtalk_repl` start in correct dependency order via their `.app.src` declarations. The Rust CLI must also add `-pa` for the new `beamtalk_repl/ebin` directory.
+This ensures both `beamtalk_runtime` and `beamtalk_workspace` start in correct dependency order via their `.app.src` declarations. The Rust CLI must also add `-pa` for the new `beamtalk_workspace/ebin` directory.
 
 For batch compilation (`beamtalk build`), only `beamtalk_runtime` needs to start — no REPL infrastructure.
 
@@ -256,7 +256,7 @@ For batch compilation (`beamtalk build`), only `beamtalk_runtime` needs to start
 
 ### Test Organization
 
-14 REPL/workspace test files move to `beamtalk_repl/test/`:
+14 REPL/workspace test files move to `beamtalk_workspace/test/`:
 
 | Test File | Tests |
 |-----------|-------|
@@ -277,7 +277,7 @@ For batch compilation (`beamtalk build`), only `beamtalk_runtime` needs to start
 
 ### Test Fixtures
 
-The existing `test_fixtures/compile.sh` compiles `counter.bt` and `logging_counter.bt` for runtime tests (codegen simulation, super keyword). These fixtures stay with `beamtalk_runtime` — they test core actor behavior, not REPL features. If REPL tests need compiled fixtures in the future, `beamtalk_repl` can add its own `test_fixtures/` with a similar compile hook.
+The existing `test_fixtures/compile.sh` compiles `counter.bt` and `logging_counter.bt` for runtime tests (codegen simulation, super keyword). These fixtures stay with `beamtalk_runtime` — they test core actor behavior, not REPL features. If workspace tests need compiled fixtures in the future, `beamtalk_workspace` can add its own `test_fixtures/` with a similar compile hook.
 
 ```erlang
 %% beamtalk_runtime.app.src
@@ -289,10 +289,10 @@ The existing `test_fixtures/compile.sh` compiles `counter.bt` and `logging_count
 ```
 
 ```erlang
-%% beamtalk_repl.app.src
-{application, beamtalk_repl, [
-    {description, "Beamtalk interactive development environment"},
-    {mod, {beamtalk_repl_app, []}},
+%% beamtalk_workspace.app.src
+{application, beamtalk_workspace, [
+    {description, "Beamtalk workspace and interactive development environment"},
+    {mod, {beamtalk_workspace_app, []}},
     {applications, [kernel, stdlib, beamtalk_runtime]}
 ]}.
 ```
@@ -330,7 +330,7 @@ This is idiomatic OTP design. They would expect this separation. "Why was it eve
 Can deploy `beamtalk_runtime` + `beamtalk_stdlib` without REPL code in production releases. Smaller attack surface, fewer processes, cleaner supervision tree.
 
 ### Tooling Developer
-Clearer boundaries make it easier to understand which modules to modify. LSP work touches neither app; REPL protocol work is isolated to `beamtalk_repl`.
+Clearer boundaries make it easier to understand which modules to modify. LSP work touches neither app; REPL protocol work is isolated to `beamtalk_workspace`.
 
 ## Steelman Analysis
 
@@ -379,18 +379,18 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 ### Positive
 
-- **Clean dependency direction.** Core runtime has zero compile-time dependency on REPL code. Dependencies flow strictly downward: `beamtalk_repl` → `beamtalk_runtime` → `beamtalk_stdlib`.
+- **Clean dependency direction.** Core runtime has zero compile-time dependency on workspace/REPL code. Dependencies flow strictly downward: `beamtalk_workspace` → `beamtalk_runtime` → `beamtalk_stdlib`.
 - **Independent testing.** Runtime unit tests don't need REPL infrastructure. REPL tests can mock or substitute runtime components.
 - **Production deployments.** Can build releases with just `beamtalk_runtime` + `beamtalk_stdlib` — no REPL TCP server, no workspace management, no idle monitoring.
-- **Clearer ownership.** ADR 0004 workspace features go in `beamtalk_repl`. New primitive types go in `beamtalk_runtime`. No ambiguity.
+- **Clearer ownership.** ADR 0004 workspace features go in `beamtalk_workspace`. New primitive types go in `beamtalk_runtime`. No ambiguity.
 - **Aligns with DDD.** Matches the bounded contexts in `docs/beamtalk-ddd-model.md`: "REPL Context" vs "Actor System Context" / "Object System Context".
-- **Future-proof.** When workspace management (ADR 0004) or debugging tools grow, they naturally live in `beamtalk_repl` or become new apps — without touching `beamtalk_runtime`.
+- **Future-proof.** When workspace management (ADR 0004) or debugging tools grow, they naturally live in `beamtalk_workspace` or become new apps — without touching `beamtalk_runtime`.
 
 ### Negative
 
 - **Migration effort.** Need to create new app boilerplate (`beamtalk_repl_app.erl`, `beamtalk_repl_sup.erl`, `.app.src`), move 12 modules, update rebar.config, update all test paths.
 - **Slightly more complex build.** Three apps to configure in rebar.config, Dialyzer, CI.
-- **Actor supervisor migration.** `beamtalk_actor_sup` moves to `beamtalk_repl` (workspace-scoped). A future non-REPL use case (e.g., `beamtalk run server.bt`) would start its own `beamtalk_actor_sup` instance under a production supervisor — the module is reusable, only its supervision placement is workspace-scoped for now.
+- **Actor supervisor migration.** `beamtalk_actor_sup` moves to `beamtalk_workspace` (workspace-scoped). A future non-REPL use case (e.g., `beamtalk run server.bt`) would start its own `beamtalk_actor_sup` instance under a production supervisor — the module is reusable, only its supervision placement is workspace-scoped for now.
 
 ### Neutral
 
@@ -400,12 +400,12 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 ## Implementation
 
-### Phase 1: Create `beamtalk_repl` App Skeleton
+### Phase 1: Create `beamtalk_workspace` App Skeleton
 
-1. Create `runtime/apps/beamtalk_repl/` directory structure
-2. Create `beamtalk_repl.app.src` with dependency on `beamtalk_runtime`
-3. Create `beamtalk_repl_app.erl` (OTP application callback)
-4. Create `beamtalk_repl_sup.erl` (root supervisor)
+1. Create `runtime/apps/beamtalk_workspace/` directory structure
+2. Create `beamtalk_workspace.app.src` with dependency on `beamtalk_runtime`
+3. Create `beamtalk_workspace_app.erl` (OTP application callback)
+4. Create `beamtalk_workspace_app_sup.erl` (app-level supervisor)
 
 ### Phase 2: Decouple Actor Registration
 
@@ -416,19 +416,19 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 ### Phase 3: Move Modules and Tests
 
-1. Move 12 modules from `beamtalk_runtime/src/` to `beamtalk_repl/src/`
-2. Move `beamtalk_actor_sup.erl` to `beamtalk_repl/src/` (workspace-scoped)
-3. Move 14 related test files to `beamtalk_repl/test/`
+1. Move 12 modules from `beamtalk_runtime/src/` to `beamtalk_workspace/src/`
+2. Move `beamtalk_actor_sup.erl` to `beamtalk_workspace/src/` (workspace-scoped)
+3. Move 14 related test files to `beamtalk_workspace/test/`
 4. Test fixtures (`counter.bt`, `logging_counter.bt`) stay in `beamtalk_runtime/test_fixtures/` — they test core actor behavior
 
 ### Phase 4: Update Build Configuration and Rust CLI
 
-1. Update `runtime/rebar.config` — add `beamtalk_repl` to project apps
+1. Update `runtime/rebar.config` — add `beamtalk_workspace` to project apps
 2. Update Dialyzer configuration
 3. Update Justfile commands if needed
 4. Update CI configuration
-5. Update Rust CLI `-eval` commands to use `application:ensure_all_started(beamtalk_repl)` in `crates/beamtalk-cli/src/commands/repl/process.rs` and `workspace/mod.rs`
-6. Add `-pa` flag for `beamtalk_repl/ebin` directory in Rust CLI
+5. Update Rust CLI `-eval` commands to use `application:ensure_all_started(beamtalk_workspace)` in `crates/beamtalk-cli/src/commands/repl/process.rs` and `workspace/mod.rs`
+6. Add `-pa` flag for `beamtalk_workspace/ebin` directory in Rust CLI
 7. Update `-include("beamtalk.hrl")` to `-include_lib("beamtalk_runtime/include/beamtalk.hrl")` in moved modules
 
 ### Phase 5: Verify
@@ -443,8 +443,8 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 | Component | Change |
 |-----------|--------|
 | `runtime/apps/beamtalk_runtime/` | Remove 13 modules (12 REPL + actor_sup), decouple actor registration |
-| `runtime/apps/beamtalk_repl/` | New app with 13 moved modules + 2 new (app, sup) + 14 test files |
-| `runtime/rebar.config` | Add beamtalk_repl app configuration, update Dialyzer |
+| `runtime/apps/beamtalk_workspace/` | New app with 13 moved modules + 2 new (app, sup) + 14 test files |
+| `runtime/rebar.config` | Add beamtalk_workspace app configuration, update Dialyzer |
 | `beamtalk_actor.erl` | Replace direct REPL calls with optional callback |
 | `crates/beamtalk-cli/src/commands/repl/process.rs` | Update `-eval` to use `application:ensure_all_started`, add `-pa` |
 | `crates/beamtalk-cli/src/commands/workspace/mod.rs` | Update `-eval` to use `application:ensure_all_started`, add `-pa` |
@@ -454,9 +454,9 @@ Rejected as premature. Workspace management (ADR 0004) is only ~10% implemented.
 
 This is an internal restructuring — no user-facing changes. All module names remain the same, all APIs remain the same. The migration requires:
 
-1. **Rust CLI changes:** Update `-eval` commands to use `application:ensure_all_started(beamtalk_repl)` instead of directly calling `beamtalk_repl:start_link()`. Add `-pa` flag for `beamtalk_repl/ebin`. Affected files: `crates/beamtalk-cli/src/commands/repl/process.rs`, `crates/beamtalk-cli/src/commands/workspace/mod.rs`.
+1. **Rust CLI changes:** Update `-eval` commands to use `application:ensure_all_started(beamtalk_workspace)` instead of directly calling `beamtalk_repl:start_link()`. Add `-pa` flag for `beamtalk_workspace/ebin`. Affected files: `crates/beamtalk-cli/src/commands/repl/process.rs`, `crates/beamtalk-cli/src/commands/workspace/mod.rs`.
 2. **Header includes:** Update `beamtalk_repl_eval.erl` and `beamtalk_repl_server.erl` to use `-include_lib("beamtalk_runtime/include/beamtalk.hrl")` instead of `-include("beamtalk.hrl")`.
-3. **rebar.config:** Add `beamtalk_repl` app configuration, update Dialyzer exclude list.
+3. **rebar.config:** Add `beamtalk_workspace` app configuration, update Dialyzer exclude list.
 
 ## References
 
