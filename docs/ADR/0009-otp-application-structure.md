@@ -93,7 +93,7 @@ Split `beamtalk_runtime` into two OTP applications, creating a 3-app umbrella:
 
 ```
 runtime/apps/
-├── beamtalk_runtime/     # Core language runtime (23 modules)
+├── beamtalk_runtime/     # Core language runtime (22 modules)
 │   └── src/
 │       ├── beamtalk_integer.erl          # Primitive types
 │       ├── beamtalk_string.erl
@@ -113,14 +113,13 @@ runtime/apps/
 │       ├── beamtalk_bootstrap.erl        # Bootstrap & lifecycle
 │       ├── beamtalk_stdlib.erl
 │       ├── beamtalk_actor.erl
-│       ├── beamtalk_actor_sup.erl
 │       ├── beamtalk_future.erl
 │       ├── beamtalk_hot_reload.erl
 │       ├── beamtalk_error.erl
 │       ├── beamtalk_runtime_app.erl      # OTP plumbing
 │       └── beamtalk_runtime_sup.erl
 │
-├── beamtalk_repl/        # Interactive development (12 modules) — NEW
+├── beamtalk_repl/        # Interactive development (13 moved + 2 new) — NEW
 │   └── src/
 │       ├── beamtalk_repl.erl             # REPL main
 │       ├── beamtalk_repl_eval.erl        # Expression evaluation
@@ -134,6 +133,7 @@ runtime/apps/
 │       ├── beamtalk_workspace_meta.erl   # Workspace metadata
 │       ├── beamtalk_session_sup.erl      # Session supervisor
 │       ├── beamtalk_idle_monitor.erl     # Idle timeout
+│       ├── beamtalk_actor_sup.erl        # Actor supervision (workspace-scoped)
 │       ├── beamtalk_repl_app.erl         # OTP app callback (new)
 │       └── beamtalk_repl_sup.erl         # Root supervisor (new)
 │
