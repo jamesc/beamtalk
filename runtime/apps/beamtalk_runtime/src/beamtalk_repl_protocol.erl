@@ -19,7 +19,7 @@
 
 -module(beamtalk_repl_protocol).
 
--export([decode/1, encode_result/3, encode_error/3, encode_status/3,
+-export([decode/1, encode_result/3, encode_result/4, encode_error/3, encode_status/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/3,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1]).
@@ -88,13 +88,22 @@ get_params(#protocol_msg{params = Params}) -> Params.
 %% @doc Encode a successful result response.
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_result(Value, Msg, TermToJson) ->
+    encode_result(Value, <<>>, Msg, TermToJson).
+
+%% @doc Encode a result response with captured output.
+-spec encode_result(term(), binary(), protocol_msg(), fun((term()) -> term())) -> binary().
+encode_result(Value, Output, Msg, TermToJson) ->
     JsonValue = TermToJson(Value),
+    OutputField = case Output of
+        <<>> -> #{};
+        _ -> #{<<"output">> => Output}
+    end,
     case Msg#protocol_msg.legacy of
         true ->
-            jsx:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue});
+            jsx:encode(maps:merge(#{<<"type">> => <<"result">>, <<"value">> => JsonValue}, OutputField));
         false ->
             Base = base_response(Msg),
-            jsx:encode(Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]})
+            jsx:encode(maps:merge(Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]}, OutputField))
     end.
 
 %% @doc Encode an error response.

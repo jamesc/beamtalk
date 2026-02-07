@@ -434,3 +434,27 @@ parse_file_compile_result_failure_test() ->
     ?assertMatch({error, {compile_error, _}},
                  beamtalk_repl_eval:parse_file_compile_result(Result)).
 
+%%% ============================================================================
+%%% capture_io Tests
+%%% ============================================================================
+
+capture_io_captures_put_chars_test() ->
+    {Output, Result} = beamtalk_repl_eval:capture_io(fun() ->
+        io:put_chars("Hello"),
+        42
+    end),
+    ?assertEqual(42, Result),
+    ?assertEqual(<<"Hello">>, Output).
+
+capture_io_empty_output_test() ->
+    {Output, Result} = beamtalk_repl_eval:capture_io(fun() -> ok end),
+    ?assertEqual(ok, Result),
+    ?assertEqual(<<>>, Output).
+
+capture_io_restores_group_leader_on_error_test() ->
+    OldGL = group_leader(),
+    ?assertError(badarg, beamtalk_repl_eval:capture_io(fun() ->
+        error(badarg)
+    end)),
+    ?assertEqual(OldGL, group_leader()).
+
