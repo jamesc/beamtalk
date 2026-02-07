@@ -257,6 +257,23 @@ encode_result_with_output_legacy_format_test() ->
     ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
     ?assertEqual(<<"World">>, maps:get(<<"output">>, Decoded)).
 
+encode_error_with_output_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-012">>, <<"alice">>, false),
+    Result = beamtalk_repl_protocol:encode_error(
+        some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<"Captured\n">>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"msg-012">>, maps:get(<<"id">>, Decoded)),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertEqual(<<"Captured\n">>, maps:get(<<"output">>, Decoded)),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+encode_error_with_empty_output_omitted_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-013">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_error(
+        some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<>>),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"output">>, Decoded)).
+
 %%% Roundtrip tests
 
 roundtrip_new_format_test() ->

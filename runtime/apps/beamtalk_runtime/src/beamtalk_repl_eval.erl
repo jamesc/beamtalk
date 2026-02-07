@@ -754,12 +754,15 @@ io_capture_loop(Buffer) ->
 
 %% @doc After capture, forward all IO to the original group_leader.
 %% Keeps this process alive so spawned children don't get a dead group_leader.
--spec io_passthrough_loop(pid()) -> no_return().
+%% Exits after 60 seconds of inactivity to avoid leaking processes.
+-spec io_passthrough_loop(pid()) -> ok.
 io_passthrough_loop(OldGL) ->
     receive
         {io_request, From, ReplyAs, Request} ->
             OldGL ! {io_request, From, ReplyAs, Request},
             io_passthrough_loop(OldGL)
+    after 60000 ->
+        ok
     end.
 
 %% @doc Handle a single IO protocol request.
@@ -788,7 +791,7 @@ handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
         _:_ -> {ok, Buffer}
     end;
 handle_io_request(_Other, Buffer) ->
-    {ok, Buffer}.
+    {{error, enotsup}, Buffer}.
 
 %% @doc Inject captured output into an eval result tuple.
 -spec inject_output(tuple(), binary()) -> tuple().
