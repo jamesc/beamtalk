@@ -527,19 +527,19 @@ impl ClassHierarchy {
 
     fn register_nil(&mut self) {
         self.classes.insert(
-            "Nil".into(),
+            "UndefinedObject".into(),
             ClassInfo {
-                name: "Nil".into(),
+                name: "UndefinedObject".into(),
                 superclass: Some("Object".into()),
                 is_sealed: true,
                 is_abstract: false,
                 state: vec![],
                 methods: vec![
-                    builtin_method("isNil", 0, "Nil"),
-                    builtin_method("notNil", 0, "Nil"),
-                    builtin_method("ifNil:", 1, "Nil"),
-                    builtin_method("ifNotNil:", 1, "Nil"),
-                    builtin_method("ifNil:ifNotNil:", 2, "Nil"),
+                    builtin_method("isNil", 0, "UndefinedObject"),
+                    builtin_method("notNil", 0, "UndefinedObject"),
+                    builtin_method("ifNil:", 1, "UndefinedObject"),
+                    builtin_method("ifNotNil:", 1, "UndefinedObject"),
+                    builtin_method("ifNil:ifNotNil:", 2, "UndefinedObject"),
                 ],
             },
         );
@@ -654,7 +654,7 @@ mod tests {
         assert!(h.has_class("Dictionary"));
         assert!(h.has_class("Set"));
         assert!(h.has_class("Block"));
-        assert!(h.has_class("Nil"));
+        assert!(h.has_class("UndefinedObject"));
         assert!(h.has_class("True"));
         assert!(h.has_class("False"));
         assert!(h.has_class("Collection"));

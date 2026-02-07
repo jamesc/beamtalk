@@ -190,7 +190,7 @@ fn is_up_to_date(source: &Utf8Path, beam: &Utf8Path) -> bool {
 
 /// Extract the module name from a `.bt` file path.
 ///
-/// For **primitive types** (Integer, Float, String, True, False, Nil, Block),
+/// For **primitive types** (Integer, Float, String, True, False, `UndefinedObject`, Block),
 /// uses `beamtalk_*` prefix to replace hand-written Erlang dispatch modules
 /// with the compiled stdlib (BT-340).
 ///
@@ -229,7 +229,7 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 fn is_primitive_type(class_name: &str) -> bool {
     matches!(
         class_name,
-        "Integer" | "Float" | "String" | "True" | "False" | "Nil" | "Block"
+        "Integer" | "Float" | "String" | "True" | "False" | "UndefinedObject" | "Block"
     )
 }
 

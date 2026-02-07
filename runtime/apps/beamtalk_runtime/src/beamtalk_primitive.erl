@@ -127,7 +127,7 @@ send(X, Selector, Args) when X =:= false ->
     %% BT-340: False dispatches to compiled beamtalk_false module
     beamtalk_false:dispatch(Selector, Args, X);
 send(nil, Selector, Args) ->
-    beamtalk_nil:dispatch(Selector, Args, nil);
+    beamtalk_undefined_object:dispatch(Selector, Args, nil);
 send(X, Selector, Args) when is_function(X) ->
     beamtalk_block:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_tuple(X) ->
@@ -192,7 +192,7 @@ responds_to(X, Selector) when X =:= true ->
 responds_to(X, Selector) when X =:= false ->
     beamtalk_false:has_method(Selector);
 responds_to(nil, Selector) ->
-    beamtalk_nil:has_method(Selector);
+    beamtalk_undefined_object:has_method(Selector);
 responds_to(X, Selector) when is_function(X) ->
     beamtalk_block:has_method(Selector);
 responds_to(X, Selector) when is_tuple(X) ->

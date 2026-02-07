@@ -1,12 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Nil - The absence of a value
+// UndefinedObject - The absence of a value
 //
-// Singleton representing nil. All methods are pure Beamtalk — no
-// primitives needed.
+// nil is the singleton instance of UndefinedObject (Smalltalk convention).
+// All methods are pure Beamtalk — no primitives needed.
 
-Object subclass: Nil
+Object subclass: UndefinedObject
   isNil => true
   notNil => false
   ifNil: nilBlock => nilBlock value

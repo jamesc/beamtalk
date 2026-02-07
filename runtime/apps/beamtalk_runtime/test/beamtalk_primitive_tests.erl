@@ -273,7 +273,7 @@ reflection_class_boolean_test() ->
     ?assertEqual('False', beamtalk_false:dispatch('class', [], false)).
 
 reflection_class_nil_test() ->
-    ?assertEqual('Nil', beamtalk_nil:dispatch('class', [], nil)).
+    ?assertEqual('UndefinedObject', beamtalk_undefined_object:dispatch('class', [], nil)).
 
 reflection_class_block_test() ->
     ?assertEqual('Block', beamtalk_block:dispatch('class', [], fun() -> ok end)).
@@ -336,14 +336,14 @@ reflection_responds_to_nil_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['isNil'], nil)),
-         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['class'], nil)),
-         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['ifNil:'], nil)),
-         ?assertEqual(true, beamtalk_nil:dispatch('respondsTo', ['respondsTo'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['isNil'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['class'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['ifNil:'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['respondsTo'], nil)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_nil:dispatch('respondsTo', ['unknownMethod'], nil)),
-         ?assertEqual(false, beamtalk_nil:dispatch('respondsTo', ['+'], nil))
+         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo', ['unknownMethod'], nil)),
+         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo', ['+'], nil))
      end}.
 
 reflection_responds_to_block_test_() ->

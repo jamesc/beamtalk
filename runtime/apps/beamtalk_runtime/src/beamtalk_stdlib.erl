@@ -15,7 +15,7 @@
 %%% | True | Object | beamtalk_true |
 %%% | False | Object | beamtalk_false |
 %%% | Float | Object | beamtalk_float |
-%%% | UndefinedObject | Object | beamtalk_nil |
+%%% | UndefinedObject | Object | beamtalk_undefined_object |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
 %%% | Beamtalk | Object | beamtalk_stdlib |
@@ -124,8 +124,22 @@ register_integer_class() ->
             class => #{arity => 0},
             'respondsTo:' => #{arity => 1},
             asString => #{arity => 0},
+            asFloat => #{arity => 0},
             abs => #{arity => 0},
-            negated => #{arity => 0}
+            negated => #{arity => 0},
+            '%' => #{arity => 1},
+            '**' => #{arity => 1},
+            isZero => #{arity => 0},
+            isPositive => #{arity => 0},
+            isNegative => #{arity => 0},
+            isEven => #{arity => 0},
+            isOdd => #{arity => 0},
+            'min:' => #{arity => 1},
+            'max:' => #{arity => 1},
+            'timesRepeat:' => #{arity => 1},
+            'to:do:' => #{arity => 2},
+            'to:by:do:' => #{arity => 3},
+            describe => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []
@@ -187,7 +201,10 @@ register_true_class() ->
             'not' => #{arity => 0},
             'and:' => #{arity => 1},
             'or:' => #{arity => 1},
-            describe => #{arity => 0}
+            describe => #{arity => 0},
+            isTrue => #{arity => 0},
+            isFalse => #{arity => 0},
+            asString => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []
@@ -213,7 +230,10 @@ register_false_class() ->
             'not' => #{arity => 0},
             'and:' => #{arity => 1},
             'or:' => #{arity => 1},
-            describe => #{arity => 0}
+            describe => #{arity => 0},
+            isTrue => #{arity => 0},
+            isFalse => #{arity => 0},
+            asString => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []
@@ -221,22 +241,28 @@ register_false_class() ->
     register_class('False', ClassInfo).
 
 %%% ============================================================================
-%%% UndefinedObject (Nil) Class
+%%% UndefinedObject Class
 %%% ============================================================================
 
 -spec register_nil_class() -> {ok, atom()} | {error, atom(), term()}.
 register_nil_class() ->
     ClassInfo = #{
         name => 'UndefinedObject',
-        module => beamtalk_nil,
+        module => beamtalk_undefined_object,
         superclass => 'Object',
         instance_methods => #{
             class => #{arity => 0},
             'respondsTo:' => #{arity => 1},
             isNil => #{arity => 0},
+            notNil => #{arity => 0},
             'ifNil:' => #{arity => 1},
             'ifNotNil:' => #{arity => 1},
             'ifNil:ifNotNil:' => #{arity => 2},
+            'ifNotNil:ifNil:' => #{arity => 2},
+            copy => #{arity => 0},
+            deepCopy => #{arity => 0},
+            shallowCopy => #{arity => 0},
+            describe => #{arity => 0},
             asString => #{arity => 0}
         },
         class_methods => #{},
@@ -341,7 +367,10 @@ register_float_class() ->
             'respondsTo:' => #{arity => 1},
             asString => #{arity => 0},
             abs => #{arity => 0},
-            negated => #{arity => 0}
+            negated => #{arity => 0},
+            'min:' => #{arity => 1},
+            'max:' => #{arity => 1},
+            describe => #{arity => 0}
         },
         class_methods => #{},
         instance_variables => []

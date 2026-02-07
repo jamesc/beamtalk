@@ -107,15 +107,9 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
         ">" => write_binary_bif(output, ">", params),
         "<=" => write_binary_bif(output, "=<", params),
         ">=" => write_binary_bif(output, ">=", params),
-        // Concatenation
+        // Concatenation — direct iolist concat (binaries are valid iolists)
         "++" => {
-            write!(
-                output,
-                "call 'erlang':'iolist_to_binary'(\
-                 [call 'erlang':'binary_to_list'(Self), \
-                  call 'erlang':'binary_to_list'({p0})])"
-            )
-            .ok()?;
+            write!(output, "call 'erlang':'iolist_to_binary'([Self, {p0}])").ok()?;
             Some(())
         }
         // Length
@@ -224,7 +218,11 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
             Some(())
         }
         "asAtom" => {
-            write!(output, "call 'erlang':'binary_to_atom'(Self, 'utf8')").ok()?;
+            write!(
+                output,
+                "call 'erlang':'binary_to_existing_atom'(Self, 'utf8')"
+            )
+            .ok()?;
             Some(())
         }
         "asList" => {

@@ -266,7 +266,7 @@ impl CoreErlangGenerator {
     fn is_primitive_type(class_name: &str) -> bool {
         matches!(
             class_name,
-            "Integer" | "Float" | "String" | "True" | "False" | "Nil" | "Block"
+            "Integer" | "Float" | "String" | "True" | "False" | "UndefinedObject" | "Block"
         )
     }
 
@@ -310,17 +310,23 @@ impl CoreErlangGenerator {
         writeln!(self.output, "'{class_name}'")?;
         self.indent -= 1;
 
-        // respondsTo:
+        // respondsTo: — validate Args is a non-empty list
         self.write_indent()?;
         writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
         writeln!(
             self.output,
-            "let <RtSelector> = call 'erlang':'hd'(Args) in"
+            "<[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)"
         )?;
         self.write_indent()?;
-        writeln!(self.output, "call '{mod_name}':'has_method'(RtSelector)")?;
+        writeln!(self.output, "<_> when 'true' -> 'false'")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
         self.indent -= 1;
 
         // asString — generate default for classes that don't define it
@@ -332,7 +338,7 @@ impl CoreErlangGenerator {
             let default_str = match class_name.as_str() {
                 "True" => "true",
                 "False" => "false",
-                "Nil" => "nil",
+                "UndefinedObject" => "nil",
                 "Block" => "a Block",
                 _ => "",
             };
@@ -533,6 +539,20 @@ impl CoreErlangGenerator {
             "'perform'".to_string(),
             "'perform:withArgs:'".to_string(),
         ];
+
+        // Include default asString if dispatch/3 generates one
+        let has_explicit_as_string = class
+            .methods
+            .iter()
+            .any(|m| m.selector.name() == "asString");
+        if !has_explicit_as_string
+            && matches!(
+                class_name.as_str(),
+                "True" | "False" | "UndefinedObject" | "Block"
+            )
+        {
+            selectors.push("'asString'".to_string());
+        }
 
         // Add class-defined methods
         for method in &class.methods {
