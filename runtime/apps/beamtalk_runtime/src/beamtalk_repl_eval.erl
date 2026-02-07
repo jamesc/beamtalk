@@ -161,6 +161,9 @@ handle_load(Path, State) ->
                                     %% Register module with workspace metadata
                                     beamtalk_workspace_meta:register_module(ModuleName),
                                     
+                                    %% Mark activity - code hot reloaded
+                                    beamtalk_workspace_meta:update_activity(),
+                                    
                                     {ok, ClassNames, NewState2};
                                 {error, Reason} ->
                                     {error, {load_error, Reason}, State}

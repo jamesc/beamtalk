@@ -189,6 +189,9 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
             %% Also register with workspace metadata for tracking
             beamtalk_workspace_meta:register_actor(Pid),
             
+            %% Mark activity - new actor spawned
+            beamtalk_workspace_meta:update_activity(),
+            
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}

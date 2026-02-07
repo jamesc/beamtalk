@@ -72,6 +72,15 @@ enum Command {
         /// Explicit workspace name (default: auto-detect from current directory)
         #[arg(long)]
         workspace: Option<String>,
+
+        /// Disable auto-cleanup (workspace persists even when idle)
+        #[arg(long)]
+        persistent: bool,
+
+        /// Maximum idle timeout in seconds before auto-cleanup (default: 14400 = 4 hours)
+        /// Can also be set via BEAMTALK_WORKSPACE_TIMEOUT environment variable
+        #[arg(long)]
+        timeout: Option<u64>,
     },
 
     /// Check source files for errors without compiling
@@ -133,7 +142,9 @@ fn main() -> Result<()> {
             node,
             foreground,
             workspace,
-        } => commands::repl::run(port, node, foreground, workspace.as_deref()),
+            persistent,
+            timeout,
+        } => commands::repl::run(port, node, foreground, workspace.as_deref(), persistent, timeout),
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");

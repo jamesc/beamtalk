@@ -99,6 +99,10 @@ acceptor_loop(ListenSocket) ->
             case beamtalk_session_sup:start_session(SessionId) of
                 {ok, SessionPid} ->
                     logger:info("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
+                    
+                    %% Mark activity - new session connected
+                    beamtalk_workspace_meta:update_activity(),
+                    
                     %% Spawn client handler with session pid in session mode
                     %% Monitor session so handler exits if session crashes
                     spawn(fun() ->

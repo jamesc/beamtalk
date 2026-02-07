@@ -192,6 +192,8 @@ pub fn run(
     node_arg: Option<String>,
     foreground: bool,
     workspace_name: Option<&str>,
+    persistent: bool,
+    timeout: Option<u64>,
 ) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
@@ -245,6 +247,8 @@ pub fn run(
             &runtime_beam_dir,
             &jsx_beam_dir,
             &stdlib_beam_dir,
+            !persistent, // auto_cleanup is opposite of persistent flag
+            timeout,
         )?;
 
         if is_new {
