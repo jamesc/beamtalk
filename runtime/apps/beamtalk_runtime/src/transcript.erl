@@ -21,7 +21,6 @@
 %%% Transcript show: 'Hello'
 %%% Transcript cr
 %%% Transcript show: 42
-%%% Transcript show: 'Hello'; cr; show: 'World'
 %%% ```
 %%%
 %%% ## Design
@@ -30,7 +29,7 @@
 %%% - Converts primitive values directly (integers, atoms, etc.)
 %%% - Falls back to `io_lib:format("~p", ...)` for complex types
 %%% - Returns `nil` from all methods (side-effect only)
-%%% - Uses `#beamtalk_error{}` for unknown selectors
+%%% - Unknown selectors are not handled here and will result in `undef`
 
 -module(transcript).
 
@@ -47,7 +46,7 @@
 %%
 %% Converts the argument to a string representation and outputs it.
 %% Returns nil (side-effect only).
--spec 'show:'(term()) -> nil.
+-spec 'show:'(term()) -> 'nil'.
 'show:'(Value) ->
     Str = to_string(Value),
     io:put_chars(Str),
@@ -56,7 +55,7 @@
 %% @doc Print a newline to stdout.
 %%
 %% Returns nil (side-effect only).
--spec cr() -> nil.
+-spec cr() -> 'nil'.
 cr() ->
     io:put_chars("\n"),
     nil.
