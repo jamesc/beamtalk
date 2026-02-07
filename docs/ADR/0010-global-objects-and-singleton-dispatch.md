@@ -333,11 +333,11 @@ lookup_binding(Name) ->
 - **~13ns overhead** on workspace binding sends (`Transcript show:`, `Beamtalk allClasses`) — negligible
 - **No workspace = no bindings** — `beamtalk build` without a workspace produces a clear "unbound variable" error for `Transcript`
 
-### Class Definitions
+### Class Definitions (Future — not yet in `lib/`)
 
 ```beamtalk
-// lib/TranscriptStream.bt
-Object subclass: TranscriptStream
+// lib/TranscriptStream.bt (future)
+Actor subclass: TranscriptStream
   show: value => @primitive 'show:'
   cr => @primitive 'cr'
   subscribe => @primitive 'subscribe'
@@ -345,8 +345,8 @@ Object subclass: TranscriptStream
   recent => @primitive 'recent'
   clear => @primitive 'clear'
 
-// lib/SystemDictionary.bt  (renamed from lib/Beamtalk.bt)
-Object subclass: SystemDictionary
+// lib/SystemDictionary.bt (future — renamed from lib/Beamtalk.bt)
+Actor subclass: SystemDictionary
   allClasses => @primitive 'allClasses'
   classNamed: className => @primitive 'classNamed:'
   globals => @primitive 'globals'
