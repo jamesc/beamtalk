@@ -1,7 +1,7 @@
 # ADR 0009: OTP Application Structure — Split Workspace from Runtime
 
 ## Status
-Accepted (2026-02-07)
+Implemented (2026-02-07)
 
 ## Context
 
