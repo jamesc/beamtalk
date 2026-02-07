@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for File I/O operations
+// Tests basic file reading and writing
+
+// ===========================================================================
+// FILE EXISTENCE CHECKS
+// ===========================================================================
+
+// Check non-existent file
+File exists: 'nonexistent_file.txt'
+// => false
+
+// ===========================================================================
+// FILE WRITING
+// ===========================================================================
+
+// Write a simple string to a file
+File writeAll: 'test_output.txt' contents: 'Hello, Beamtalk!'
+// => nil
+
+// ===========================================================================
+// FILE READING
+// ===========================================================================
+
+// Read back the file we just wrote
+File readAll: 'test_output.txt'
+// => "Hello, Beamtalk!"
+
+// Check that file now exists
+File exists: 'test_output.txt'
+// => true
+
+// ===========================================================================
+// MULTILINE CONTENT
+// ===========================================================================
+
+// Write multiline content
+File writeAll: 'multiline.txt' contents: 'Line 1
+Line 2
+Line 3'
+// => nil
+
+// Read it back
+File readAll: 'multiline.txt'
+// => "Line 1\nLine 2\nLine 3"
+
+// ===========================================================================
+// OVERWRITE EXISTING FILE
+// ===========================================================================
+
+// Overwrite previous content
+File writeAll: 'test_output.txt' contents: 'New content'
+// => nil
+
+// Verify new content
+File readAll: 'test_output.txt'
+// => "New content"
+
+// ===========================================================================
+// UNICODE CONTENT
+// ===========================================================================
+
+// Write Unicode content
+File writeAll: 'unicode.txt' contents: 'Hello 世界 🌍'
+// => nil
+
+// Read Unicode content back
+File readAll: 'unicode.txt'
+// => "Hello 世界 🌍"
+
+// ===========================================================================
+// EMPTY FILE
+// ===========================================================================
+
+// Write empty file
+File writeAll: 'empty.txt' contents: ''
+// => nil
+
+// Read empty file
+File readAll: 'empty.txt'
+// => ""
+
+// Empty file exists
+File exists: 'empty.txt'
+// => true

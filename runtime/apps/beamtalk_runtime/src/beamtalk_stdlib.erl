@@ -82,7 +82,8 @@ do_init() ->
         register_tuple_class(),
         register_beamtalk_class(),
         register_float_class(),
-        register_transcript_class()
+        register_transcript_class(),
+        register_file_class()
     ],
     %% Log any failures but don't crash
     lists:foreach(fun
@@ -395,6 +396,26 @@ register_transcript_class() ->
         instance_variables => []
     },
     register_class('Transcript', ClassInfo).
+
+%%% ============================================================================
+%%% File Class (BT-336)
+%%% ============================================================================
+
+-spec register_file_class() -> {ok, atom()} | {error, atom(), term()}.
+register_file_class() ->
+    ClassInfo = #{
+        name => 'File',
+        module => beamtalk_file,
+        superclass => 'Object',
+        instance_methods => #{},
+        class_methods => #{
+            'exists:' => #{arity => 1},
+            'readAll:' => #{arity => 1},
+            'writeAll:contents:' => #{arity => 2}
+        },
+        instance_variables => []
+    },
+    register_class('File', ClassInfo).
 
 %%% ============================================================================
 %%% Helper Functions
