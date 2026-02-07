@@ -420,6 +420,9 @@ handle_call({spawn, Args}, _From, State) ->
 
 **Semantic fidelity:** 100%. Classes are processes, just like instances. Full introspection available.
 
+> **⚠️ Current limitation: `subclass:` is syntax, not a message send.**
+> In Smalltalk, `Object subclass: #Counter` is a real message sent to the `Object` class, creating a new class at runtime. In Beamtalk, `Object subclass: Counter` is parsed as syntax — the parser recognizes this pattern and produces a `ClassDefinition` AST node compiled to a BEAM module. There is no runtime class creation. This means classes cannot be created dynamically in the REPL. A future metaclass protocol (BT-162) could make `subclass:` a real message via dynamic module generation. See [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md#class-definition-message-send--syntax) for full rationale.
+
 ### 1.3 Methods as Objects
 
 Methods can be inspected, replaced, and wrapped at runtime.
