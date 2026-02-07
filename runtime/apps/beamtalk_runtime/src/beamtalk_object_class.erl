@@ -443,8 +443,9 @@ handle_call({new, Args}, _From, #class_state{
             end
     end;
 
-handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
-    {reply, maps:keys(Methods), State};
+handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
+    %% ADR 0006 Phase 2: Return all methods (local + inherited) from flattened table
+    {reply, maps:keys(Flattened), State};
 
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
     {reply, Super, State};
