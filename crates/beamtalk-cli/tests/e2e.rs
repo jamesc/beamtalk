@@ -47,7 +47,15 @@ use std::time::Duration;
 const REPL_PORT: u16 = 9000;
 
 /// Timeout for REPL operations.
-const TIMEOUT_SECS: u64 = 30;
+/// Cover-instrumented BEAM is slower; `E2E_COVER` bumps this to 120s.
+fn repl_timeout() -> Duration {
+    let secs = if env::var("E2E_COVER").is_ok() {
+        120
+    } else {
+        30
+    };
+    Duration::from_secs(secs)
+}
 
 /// Maximum retries when connecting to REPL backend.
 const MAX_CONNECT_RETRIES: u32 = 20;
@@ -232,6 +240,32 @@ struct DaemonManager {
     beam_process: Option<Child>,
 }
 
+/// Build the `-eval` command for the BEAM node.
+///
+/// When `cover` is true, instruments runtime modules with Erlang cover and
+/// polls for a signal file to trigger graceful shutdown with cover export.
+fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
+    if cover {
+        format!(
+            "cover:start(), \
+             cover:compile_beam_directory(\"{ebin}\"), \
+             {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
+             WaitFun = fun Wait() -> \
+                 case filelib:is_file(\"{signal}\") of \
+                     true -> ok; \
+                     false -> timer:sleep(200), Wait() \
+                 end \
+             end, \
+             WaitFun(), \
+             cover:export(\"{export}\"), \
+             cover:stop(), \
+             init:stop()."
+        )
+    } else {
+        format!("{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end.")
+    }
+}
+
 impl DaemonManager {
     /// Start the daemon and BEAM REPL backend if not already running.
     ///
@@ -302,6 +336,27 @@ impl DaemonManager {
             (Stdio::null(), Stdio::null())
         };
 
+        // When E2E_COVER=1, instrument all runtime modules with Erlang's cover
+        // tool and export coverdata on shutdown via a signal file.
+        let cover_enabled = env::var("E2E_COVER").is_ok();
+        let cover_export_path = runtime.join("_build/test/cover/e2e.coverdata");
+        let cover_signal_path = runtime.join("_build/test/cover/.e2e_stop");
+        if cover_enabled {
+            // Ensure cover directory exists (may not after `just clean`)
+            let _ = fs::create_dir_all(runtime.join("_build/test/cover"));
+            eprintln!(
+                "E2E: Cover mode enabled, will export to {}",
+                cover_export_path.display()
+            );
+        }
+        let _ = fs::remove_file(&cover_signal_path);
+        let eval_cmd = beam_eval_cmd(
+            cover_enabled,
+            ebin_dir.to_str().unwrap_or(""),
+            cover_signal_path.to_str().unwrap_or(""),
+            cover_export_path.to_str().unwrap_or(""),
+        );
+
         let beam_child = Command::new("erl")
             .args([
                 "-noshell",
@@ -312,9 +367,7 @@ impl DaemonManager {
                 "-pa",
                 stdlib_dir.to_str().unwrap_or(""),
                 "-eval",
-                &format!(
-                    "{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end."
-                ),
+                &eval_cmd,
             ])
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
@@ -353,23 +406,46 @@ impl DaemonManager {
     )]
     fn stop(&mut self) {
         if let Some(ref mut child) = self.beam_process {
-            eprintln!("E2E: Stopping BEAM...");
-            // Try graceful shutdown first (SIGTERM)
-            // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
-            // If pid doesn't exist, it returns an error which we ignore.
-            unsafe {
-                libc::kill(child.id() as i32, libc::SIGTERM);
+            if env::var("E2E_COVER").is_ok() {
+                // Signal the BEAM to export cover data and shut down gracefully
+                // by creating the signal file it polls for.
+                let runtime = runtime_dir();
+                let signal = runtime.join("_build/test/cover/.e2e_stop");
+                eprintln!("E2E: Signaling cover export...");
+                let _ = fs::write(&signal, "stop");
+                // Wait up to 30s for BEAM to export and call init:stop()
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                        _ => {
+                            eprintln!("E2E: Cover export timed out, force killing BEAM");
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                    }
+                }
+                let _ = fs::remove_file(&signal);
+                eprintln!("E2E: Cover data exported.");
+            } else {
+                eprintln!("E2E: Stopping BEAM...");
+                // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
+                // If pid doesn't exist, it returns an error which we ignore.
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGTERM);
+                }
+                std::thread::sleep(Duration::from_millis(200));
+                let _ = child.kill();
+                let _ = child.wait();
             }
-            // Give it a moment to shutdown gracefully
-            std::thread::sleep(Duration::from_millis(200));
-            // Force kill if still running
-            let _ = child.kill();
-            let _ = child.wait();
         }
 
         if let Some(ref mut child) = self.daemon_process {
             eprintln!("E2E: Stopping daemon...");
-            // Try graceful shutdown first (SIGTERM)
             // SAFETY: libc::kill with SIGTERM is safe to call on any pid.
             // If pid doesn't exist, it returns an error which we ignore.
             unsafe {
@@ -383,6 +459,8 @@ impl DaemonManager {
 
     #[cfg(not(unix))]
     fn stop(&mut self) {
+        // Cover mode signal-file shutdown is handled by the unix path.
+        // On non-unix, force-kill is the only option.
         if let Some(ref mut child) = self.beam_process {
             eprintln!("E2E: Stopping BEAM...");
             let _ = child.kill();
@@ -413,8 +491,8 @@ impl ReplClient {
     /// Connect to the REPL.
     fn connect() -> Result<Self, std::io::Error> {
         let stream = TcpStream::connect(format!("127.0.0.1:{REPL_PORT}"))?;
-        stream.set_read_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(TIMEOUT_SECS)))?;
+        stream.set_read_timeout(Some(repl_timeout()))?;
+        stream.set_write_timeout(Some(repl_timeout()))?;
 
         let reader = BufReader::new(stream.try_clone()?);
 
