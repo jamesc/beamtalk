@@ -8,9 +8,36 @@
 //! - Variable name generation (fresh variables, temp variables)
 //! - State variable threading (State, State1, State2, ...)
 //! - Name conversions (class names, module names)
+//! - Class identity (DDD Value Object bundling module + class names)
 
 use super::{CoreErlangGenerator, Result};
 use std::fmt::Write;
+
+/// Value Object: A class's compile-time identity.
+///
+/// **DDD Context:** Code Generation
+///
+/// Bundles the Erlang module name with the user-facing class name.
+/// These are independent (stdlib: `bt_stdlib_string` module → `String` class)
+/// but always needed together during code generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ClassIdentity {
+    class_name: String,
+}
+
+impl ClassIdentity {
+    /// Create from an AST class name.
+    pub fn new(class_name: &str) -> Self {
+        Self {
+            class_name: class_name.to_string(),
+        }
+    }
+
+    /// The user-facing class name (CamelCase).
+    pub fn class_name(&self) -> &str {
+        &self.class_name
+    }
+}
 
 impl CoreErlangGenerator {
     /// Writes indentation to the output buffer.
@@ -50,21 +77,19 @@ impl CoreErlangGenerator {
         super::variable_context::VariableContext::to_core_var(name)
     }
 
-    /// Converts a module name to a class name (`snake_case` → CamelCase).
+    /// Returns the class name for the currently compiled class.
     ///
-    /// Module names in Beamtalk follow Erlang conventions (`snake_case` atoms),
-    /// while class names follow Smalltalk conventions (CamelCase).
+    /// Prefers the AST-derived class identity when available (set during class
+    /// compilation). Falls back to deriving from the module name for backward
+    /// compatibility with compilation units that don't set class identity.
     ///
     /// # Examples
     ///
-    /// - `"counter"` → `"Counter"`
-    /// - `"my_class"` → `"MyClass"`
-    /// - `"http_router"` → `"HttpRouter"`
-    pub(super) fn to_class_name(&self) -> String {
-        // Use AST-derived class name when available (e.g., stdlib modules where
-        // module_name differs from class name: bt_stdlib_string → String)
-        if let Some(ref name) = self.current_class_name {
-            return name.clone();
+    /// - Module `"counter"` (no class identity) → `"Counter"`
+    /// - Module `"bt_stdlib_string"` with class identity `"String"` → `"String"`
+    pub(super) fn class_name(&self) -> String {
+        if let Some(ref identity) = self.class_identity {
+            return identity.class_name().to_string();
         }
         // Fall back to deriving from module name (snake_case → CamelCase)
         self.module_name
@@ -82,7 +107,7 @@ impl CoreErlangGenerator {
 
 /// Converts class name (`CamelCase`) to module name (`snake_case`).
 ///
-/// This is the inverse of `to_class_name` and properly handles multi-word
+/// This is the inverse of `class_name` and properly handles multi-word
 /// class names like `MyCounterActor` -> `my_counter_actor`.
 ///
 /// Note: Acronyms like `HTTPRouter` become `httprouter` (no underscores within acronyms).

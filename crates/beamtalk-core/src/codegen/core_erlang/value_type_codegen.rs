@@ -9,6 +9,7 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
+use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, MessageSelector, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
@@ -107,7 +108,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "  attributes []")?;
         writeln!(self.output)?;
 
-        self.current_class_name = Some(class.name.name.to_string());
+        self.class_identity = Some(ClassIdentity::new(&class.name.name));
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
@@ -142,7 +143,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
 
         // Generate map literal with __class__ and fields
-        write!(self.output, "~{{'__class__' => '{}'", self.to_class_name())?;
+        write!(self.output, "~{{'__class__' => '{}'", self.class_name())?;
 
         // Add each field with its default value
         for field in &class.state {
