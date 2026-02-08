@@ -20,7 +20,7 @@
 %%%
 %%% ```erlang
 %%% #{
-%%%   '__class__' => 'MyDynamicClass',
+%%%   '$beamtalk_class' => 'MyDynamicClass',
 %%%   '__methods__' => #{
 %%%     'methodName' => fun(Self, Args, State) -> {reply, Result, NewState} end,
 %%%     ...
@@ -74,7 +74,7 @@
 %%====================================================================
 
 %% @doc Start a dynamic object instance.
-%% InitState should contain '__class__', '__methods__', '__class_pid__', plus instance fields.
+%% InitState should contain '$beamtalk_class', '__methods__', '__class_pid__', plus instance fields.
 -spec start_link(atom(), map()) -> {ok, pid()} | {error, term()}.
 start_link(ClassName, InitState) ->
     gen_server:start_link(?MODULE, {ClassName, InitState}, []).
@@ -172,7 +172,7 @@ dispatch(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = maps:get('$beamtalk_class', State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, Selector),
                     {error, Error}
@@ -192,14 +192,14 @@ dispatch(Selector, Args, Self, State) ->
                                 class => Class,
                                 reason => Reason
                             }),
-                            ClassName = maps:get('__class__', State, unknown),
+                            ClassName = maps:get('$beamtalk_class', State, unknown),
                             Error0 = beamtalk_error:new(type_error, ClassName),
                             Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
                             {error, Error}
                     end;
                 error ->
                     %% No doesNotUnderstand - method not found is an error
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = maps:get('$beamtalk_class', State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),

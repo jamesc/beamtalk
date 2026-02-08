@@ -54,7 +54,7 @@
 -spec counter_module_state(InitArgs :: map()) -> map().
 counter_module_state(InitArgs) ->
     DefaultState = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         '__methods__' => #{
             increment => fun counter_increment/2,
             getValue => fun counter_getValue/2,
@@ -519,11 +519,11 @@ spawn_with_nil_values_override_test() ->
     ?assertEqual(nil, maps:get(value, State)).
 
 spawn_preserves_class_and_methods_test() ->
-    %% Verify __class__ and __methods__ are preserved after merge
+    %% Verify $beamtalk_class and __methods__ are preserved after merge
     InitArgs = #{value => 999},
     State = counter_module_state(InitArgs),
     
-    ?assertEqual('Counter', maps:get('__class__', State)),
+    ?assertEqual('Counter', maps:get('$beamtalk_class', State)),
     ?assert(is_map(maps:get('__methods__', State))),
     
     %% Methods should still be functions
@@ -1118,7 +1118,7 @@ cascade_returns_last_result_test() ->
 -spec rectangle_module_state(InitArgs :: map()) -> map().
 rectangle_module_state(InitArgs) ->
     DefaultState = #{
-        '__class__' => 'Rectangle',
+        '$beamtalk_class' => 'Rectangle',
         '__methods__' => #{
             'width:height:' => fun rectangle_width_height/2,
             area => fun rectangle_area/2
@@ -1155,7 +1155,7 @@ multi_keyword_two_args_test() ->
 -spec box_module_state(InitArgs :: map()) -> map().
 box_module_state(InitArgs) ->
     DefaultState = #{
-        '__class__' => 'Box',
+        '$beamtalk_class' => 'Box',
         '__methods__' => #{
             'width:height:depth:' => fun box_width_height_depth/2,
             volume => fun box_volume/2
@@ -1197,7 +1197,7 @@ multi_keyword_three_args_test() ->
 -spec spawner_module_state(InitArgs :: map()) -> map().
 spawner_module_state(InitArgs) ->
     DefaultState = #{
-        '__class__' => 'Spawner',
+        '$beamtalk_class' => 'Spawner',
         '__methods__' => #{
             spawnCounter => fun spawner_spawn_counter/2,
             lastPid => fun spawner_last_pid/2
@@ -1377,7 +1377,7 @@ actor_crash_simulation_test() ->
 instance_var_shadowing_test() ->
     %% Module with 'value' instance var and method that takes 'value' param
     ModuleState = #{
-        '__class__' => 'ShadowTest',
+        '$beamtalk_class' => 'ShadowTest',
         '__methods__' => #{
             getInstanceValue => fun([], State) -> 
                 {reply, maps:get(value, State), State}
@@ -1409,7 +1409,7 @@ instance_var_shadowing_test() ->
 %% Test: Multiple instance variables
 multiple_instance_vars_test() ->
     ModuleState = #{
-        '__class__' => 'Point',
+        '$beamtalk_class' => 'Point',
         '__methods__' => #{
             'setX:Y:' => fun([X, Y], State) ->
                 NewState = maps:put(x, X, maps:put(y, Y, State)),

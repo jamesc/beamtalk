@@ -261,7 +261,7 @@ add_after(ClassPid, Selector, Fun) ->
 -spec super_dispatch(map(), selector(), list()) -> {reply, term(), map()} | {error, term()}.
 super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state
-    case maps:find('__class__', State) of
+    case maps:find('$beamtalk_class', State) of
         {ok, CurrentClass} ->
             %% Look up the current class process
             case whereis_class(CurrentClass) of
@@ -402,7 +402,7 @@ handle_call({new, Args}, _From, #class_state{
             %% Dynamic class - spawn beamtalk_dynamic_object instance
             %% Build initial state with methods and fields
             InitState = #{
-                '__class__' => ClassName,
+                '$beamtalk_class' => ClassName,
                 '__class_pid__' => self(),
                 '__methods__' => DynamicMethods
             },
@@ -468,7 +468,7 @@ handle_call({method, Selector}, _From, #class_state{
         {ok, MethodInfo} ->
             Src = maps:get(Selector, Source, <<"">>),
             MethodObj = #{
-                '__class__' => 'CompiledMethod',
+                '$beamtalk_class' => 'CompiledMethod',
                 '__selector__' => Selector,
                 '__source__' => Src,
                 '__method_info__' => MethodInfo

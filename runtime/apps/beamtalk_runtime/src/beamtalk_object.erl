@@ -41,7 +41,7 @@
 %%%
 %%% This module is invoked by `beamtalk_dispatch` when walking the hierarchy.
 %%% The dispatch service calls `beamtalk_object:dispatch(Selector, Args, Self, State)`
-%%% where State is the actor's actual state map (containing `__class__`, fields, etc.).
+%%% where State is the actor's actual state map (containing `$beamtalk_class`, fields, etc.).
 %%%
 %%% ## References
 %%%
@@ -58,7 +58,7 @@
 %%% Internal field names (filtered from instVarNames)
 %%% ============================================================================
 
--define(INTERNAL_FIELDS, ['__class__', '__class_mod__', '__methods__', '__registry_pid__']).
+-define(INTERNAL_FIELDS, ['$beamtalk_class', '__class_mod__', '__methods__', '__registry_pid__']).
 
 %%% ============================================================================
 %%% Public API
@@ -74,11 +74,11 @@
 %% --- Reflection methods ---
 
 dispatch(class, [], _Self, State) ->
-    ClassName = maps:get('__class__', State),
+    ClassName = maps:get('$beamtalk_class', State),
     {reply, ClassName, State};
 
 dispatch('respondsTo:', [Selector], _Self, State) when is_atom(Selector) ->
-    ClassName = maps:get('__class__', State),
+    ClassName = maps:get('$beamtalk_class', State),
     Result = beamtalk_dispatch:responds_to(Selector, ClassName),
     {reply, Result, State};
 
@@ -93,7 +93,7 @@ dispatch('instVarAt:', [FieldName], _Self, State) ->
             Value = maps:get(FieldName, State),
             {reply, Value, State};
         false ->
-            Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, 'Object')),
+            Error0 = beamtalk_error:new(does_not_understand, maps:get('$beamtalk_class', State, 'Object')),
             Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:'),
             FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
                           true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
@@ -108,7 +108,7 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
             NewState = maps:put(FieldName, Value, State),
             {reply, Value, NewState};
         false ->
-            Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, 'Object')),
+            Error0 = beamtalk_error:new(does_not_understand, maps:get('$beamtalk_class', State, 'Object')),
             Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
             FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
                           true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
@@ -120,12 +120,12 @@ dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], _Self, State) ->
-    ClassName = maps:get('__class__', State, 'Object'),
+    ClassName = maps:get('$beamtalk_class', State, 'Object'),
     Str = iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
 
 dispatch(inspect, [], _Self, State) ->
-    ClassName = maps:get('__class__', State, 'Object'),
+    ClassName = maps:get('$beamtalk_class', State, 'Object'),
     %% Include user fields in inspection
     AllKeys = maps:keys(State),
     UserFields = [K || K <- AllKeys, not lists:member(K, ?INTERNAL_FIELDS)],
@@ -138,7 +138,7 @@ dispatch(inspect, [], _Self, State) ->
     {reply, Str, State};
 
 dispatch(describe, [], _Self, State) ->
-    ClassName = maps:get('__class__', State, 'Object'),
+    ClassName = maps:get('$beamtalk_class', State, 'Object'),
     Str = iolist_to_binary([<<"an instance of ">>, atom_to_binary(ClassName, utf8)]),
     {reply, Str, State};
 
@@ -160,7 +160,7 @@ dispatch(notNil, [], _Self, State) ->
 %% --- Fallback: method not found ---
 
 dispatch(Selector, _Args, _Self, State) ->
-    ClassName = maps:get('__class__', State, 'Object'),
+    ClassName = maps:get('$beamtalk_class', State, 'Object'),
     Error0 = beamtalk_error:new(does_not_understand, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in Object">>),

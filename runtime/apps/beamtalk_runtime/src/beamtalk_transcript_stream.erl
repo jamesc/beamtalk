@@ -223,7 +223,7 @@ to_string(Value) when is_list(Value) ->
 to_string(#beamtalk_object{class = Class}) ->
     <<"a ", (atom_to_binary(Class, utf8))/binary>>;
 to_string(Value) when is_map(Value) ->
-    case maps:find('__class__', Value) of
+    case maps:find('$beamtalk_class', Value) of
         {ok, Class} when is_atom(Class) ->
             <<"a ", (atom_to_binary(Class, utf8))/binary>>;
         _ -> list_to_binary(io_lib:format("~p", [Value]))

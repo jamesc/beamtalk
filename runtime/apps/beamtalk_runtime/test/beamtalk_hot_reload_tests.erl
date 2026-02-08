@@ -43,7 +43,7 @@ code_change_handles_empty_map_test() ->
 
 code_change_handles_complex_state_test() ->
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         '__methods__' => #{increment => fun() -> ok end},
         value => 42,
         nested => #{deep => #{value => <<"test">>}}

@@ -361,7 +361,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let ClassName = call 'maps':'get'('__class__', State) in"
+            "let ClassName = call 'maps':'get'('$beamtalk_class', State) in"
         )?;
         self.write_indent()?;
         writeln!(

@@ -85,7 +85,7 @@ class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'Array';
 class_of(X) when is_map(X) ->
-    case maps:find('__class__', X) of
+    case maps:find('$beamtalk_class', X) of
         {ok, Class} when is_atom(Class) -> Class;
         _ -> 'Dictionary'
     end;
@@ -147,7 +147,7 @@ send(X, Selector, Args) when is_float(X) ->
     beamtalk_float:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_map(X) ->
     %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
-    case maps:find('__class__', X) of
+    case maps:find('$beamtalk_class', X) of
         {ok, 'CompiledMethod'} ->
             beamtalk_compiled_method:dispatch(Selector, Args, X);
         {ok, Class} when is_atom(Class) ->
@@ -212,7 +212,7 @@ responds_to(X, Selector) when is_tuple(X) ->
 responds_to(X, Selector) when is_float(X) ->
     beamtalk_float:has_method(Selector);
 responds_to(X, Selector) when is_map(X) ->
-    case maps:find('__class__', X) of
+    case maps:find('$beamtalk_class', X) of
         {ok, 'CompiledMethod'} ->
             beamtalk_compiled_method:has_method(Selector);
         {ok, Class} when is_atom(Class) ->

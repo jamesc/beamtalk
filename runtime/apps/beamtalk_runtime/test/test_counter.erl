@@ -22,7 +22,7 @@ start_link(InitialValue) ->
 
 init(InitialValue) ->
     beamtalk_actor:init(#{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         '__class_mod__' => 'counter',
         '__methods__' => #{
             increment => fun ?MODULE:handle_increment/2,
