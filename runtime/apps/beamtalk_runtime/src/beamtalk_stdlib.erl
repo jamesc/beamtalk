@@ -89,9 +89,9 @@ do_init() ->
     %% Log any failures but don't crash
     lists:foreach(fun
         ({ok, ClassName}) -> 
-            logger:debug("Registered primitive class", #{class => ClassName});
+            logger:debug("Registered stdlib class", #{class => ClassName});
         ({error, ClassName, Reason}) -> 
-            logger:warning("Failed to register primitive class", #{class => ClassName, reason => Reason})
+            logger:warning("Failed to register stdlib class", #{class => ClassName, reason => Reason})
     end, Results),
     ok.
 

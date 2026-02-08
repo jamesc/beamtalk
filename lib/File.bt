@@ -4,7 +4,8 @@
 // File - File system operations
 //
 // Provides basic file I/O operations using Erlang's file module.
-// All operations are class methods returning String or error.
+// All operations are class methods: exists: returns Bool, readAll: returns String,
+// writeAll:contents: returns nil on success. Errors use structured beamtalk_error.
 
 Object subclass: File
   // File existence check

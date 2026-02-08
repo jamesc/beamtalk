@@ -8,16 +8,16 @@
 // FILE EXISTENCE CHECKS
 // ===========================================================================
 
-// Check non-existent file
-File exists: 'nonexistent_file.txt'
+// Check non-existent file (unique name to avoid flakiness)
+File exists: '_bt_e2e_nonexistent_xyzzy.txt'
 // => false
 
 // ===========================================================================
 // FILE WRITING
 // ===========================================================================
 
-// Write a simple string to a file
-File writeAll: 'test_output.txt' contents: 'Hello, Beamtalk!'
+// Write a simple string to a file (prefixed to avoid repo pollution)
+File writeAll: '_bt_e2e_test_output.txt' contents: 'Hello, Beamtalk!'
 // => nil
 
 // ===========================================================================
@@ -25,11 +25,11 @@ File writeAll: 'test_output.txt' contents: 'Hello, Beamtalk!'
 // ===========================================================================
 
 // Read back the file we just wrote
-File readAll: 'test_output.txt'
+File readAll: '_bt_e2e_test_output.txt'
 // => Hello, Beamtalk!
 
 // Check that file now exists
-File exists: 'test_output.txt'
+File exists: '_bt_e2e_test_output.txt'
 // => true
 
 // ===========================================================================
@@ -37,11 +37,11 @@ File exists: 'test_output.txt'
 // ===========================================================================
 
 // Overwrite previous content
-File writeAll: 'test_output.txt' contents: 'New content'
+File writeAll: '_bt_e2e_test_output.txt' contents: 'New content'
 // => nil
 
 // Verify new content
-File readAll: 'test_output.txt'
+File readAll: '_bt_e2e_test_output.txt'
 // => New content
 
 // ===========================================================================
@@ -49,11 +49,11 @@ File readAll: 'test_output.txt'
 // ===========================================================================
 
 // Write content with special characters
-File writeAll: 'special.txt' contents: 'Hello, World! @#$%'
+File writeAll: '_bt_e2e_special.txt' contents: 'Hello, World! @#$%'
 // => nil
 
 // Read it back
-File readAll: 'special.txt'
+File readAll: '_bt_e2e_special.txt'
 // => Hello, World! @#$%
 
 // ===========================================================================
@@ -61,15 +61,15 @@ File readAll: 'special.txt'
 // ===========================================================================
 
 // Write empty file
-File writeAll: 'empty.txt' contents: ''
+File writeAll: '_bt_e2e_empty.txt' contents: ''
 // => nil
 
 // Read empty file
-File readAll: 'empty.txt'
+File readAll: '_bt_e2e_empty.txt'
 // =>
 
 // Empty file exists
-File exists: 'empty.txt'
+File exists: '_bt_e2e_empty.txt'
 // => true
 
 // ===========================================================================
