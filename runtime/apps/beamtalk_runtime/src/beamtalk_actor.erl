@@ -316,13 +316,17 @@ actor_dead_error(Selector) ->
 -spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
     %% Validate required keys
-    case {beamtalk_tagged_map:is_tagged(State), maps:is_key('__methods__', State)} of
-        {true, true} ->
-            {ok, State};
-        {false, _} ->
-            {stop, {missing_key, beamtalk_tagged_map:class_key()}};
-        {_, false} ->
-            {stop, {missing_key, '__methods__'}}
+    ClassKey = beamtalk_tagged_map:class_key(),
+    case maps:find(ClassKey, State) of
+        {ok, Class} when is_atom(Class) ->
+            case maps:is_key('__methods__', State) of
+                true -> {ok, State};
+                false -> {stop, {missing_key, '__methods__'}}
+            end;
+        {ok, _NonAtom} ->
+            {stop, {invalid_value, ClassKey}};
+        error ->
+            {stop, {missing_key, ClassKey}}
     end;
 init(_NonMapState) ->
     {stop, {invalid_state, not_a_map}}.

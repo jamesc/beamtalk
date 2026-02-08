@@ -33,6 +33,13 @@ init_without_class_test() ->
     },
     ?assertEqual({stop, {missing_key, '$beamtalk_class'}}, beamtalk_actor:init(State)).
 
+init_with_non_atom_class_test() ->
+    State = #{
+        '$beamtalk_class' => "StringNotAtom",
+        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
+    },
+    ?assertEqual({stop, {invalid_value, '$beamtalk_class'}}, beamtalk_actor:init(State)).
+
 init_without_methods_test() ->
     State = #{
         '$beamtalk_class' => 'TestActor'
