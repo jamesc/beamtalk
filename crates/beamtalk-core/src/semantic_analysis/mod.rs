@@ -339,8 +339,14 @@ fn check_abstract_in_expr(
             arguments,
             span,
         } => {
-            // Check if receiver is an identifier matching an abstract class
-            if let Expression::Identifier(Identifier { name, .. }) = receiver.as_ref() {
+            // Check if receiver is a class reference or identifier matching an abstract class
+            let receiver_name = match receiver.as_ref() {
+                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            };
+
+            if let Some(name) = receiver_name {
                 let selector_name = selector.name();
 
                 if (selector_name == "spawn" || selector_name == "spawnWith:")
@@ -2500,5 +2506,63 @@ mod tests {
             "Cascade messages should trigger symbol validation, got: {:?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn test_abstract_class_instantiation_error() {
+        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind};
+
+        // BT-105: abstract class cannot be instantiated
+        let class = ClassDefinition {
+            name: Identifier::new("Shape", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: true,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("area".into()),
+                parameters: vec![],
+                body: vec![Expression::Literal(Literal::Integer(42), test_span())],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+
+        // Top-level expression: Shape spawn
+        let spawn_expr = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Shape", test_span()),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Unary("spawn".into()),
+            arguments: vec![],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![spawn_expr],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+
+        let abstract_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Cannot instantiate abstract class"))
+            .collect();
+
+        assert_eq!(
+            abstract_errors.len(),
+            1,
+            "Should detect abstract class instantiation, got: {:?}",
+            result.diagnostics
+        );
+        assert!(abstract_errors[0].message.contains("Shape"));
     }
 }

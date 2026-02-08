@@ -1,0 +1,122 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Shape",
+                span: Span {
+                    start: 170,
+                    end: 175,
+                },
+            },
+            superclass: Identifier {
+                name: "Actor",
+                span: Span {
+                    start: 154,
+                    end: 159,
+                },
+            },
+            is_abstract: true,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "area",
+                    ),
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 186,
+                                        end: 190,
+                                    },
+                                },
+                            ),
+                            selector: Unary(
+                                "subclassResponsibility",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 186,
+                                end: 213,
+                            },
+                        },
+                        MessageSend {
+                            receiver: ClassReference {
+                                name: Identifier {
+                                    name: "Shape",
+                                    span: Span {
+                                        start: 215,
+                                        end: 220,
+                                    },
+                                },
+                                span: Span {
+                                    start: 215,
+                                    end: 220,
+                                },
+                            },
+                            selector: Unary(
+                                "spawn",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 215,
+                                end: 226,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 178,
+                        end: 226,
+                    },
+                },
+            ],
+            span: Span {
+                start: 145,
+                end: 226,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 145,
+        end: 226,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 145,
+                end: 153,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 145,
+                end: 153,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test that instantiating an abstract class produces a diagnostic error.",
+            span: Span {
+                start: 145,
+                end: 153,
+            },
+            kind: Line,
+        },
+    ],
+}
