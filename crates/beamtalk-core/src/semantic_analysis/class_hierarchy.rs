@@ -341,11 +341,11 @@ impl ClassHierarchy {
                     builtin_method("ifNil:ifNotNil:", 2, "Object"),
                     builtin_method("inspect", 0, "Object"),
                     builtin_method("describe", 0, "Object"),
-                    builtin_method("respondsTo:", 1, "Object"),
-                    builtin_method("instVarNames", 0, "Object"),
-                    builtin_method("instVarAt:", 1, "Object"),
-                    builtin_method("instVarAt:put:", 2, "Object"),
-                    builtin_method("perform:", 1, "Object"),
+                    builtin_sealed_method("respondsTo:", 1, "Object"),
+                    builtin_sealed_method("instVarNames", 0, "Object"),
+                    builtin_sealed_method("instVarAt:", 1, "Object"),
+                    builtin_sealed_method("instVarAt:put:", 2, "Object"),
+                    builtin_sealed_method("perform:", 1, "Object"),
                     builtin_method("new", 0, "Object"),
                     builtin_method("new:", 1, "Object"),
                 ],
@@ -363,8 +363,10 @@ impl ClassHierarchy {
                 is_abstract: false,
                 state: vec![],
                 methods: vec![
-                    builtin_method("spawn", 0, "Actor"),
-                    builtin_method("spawn:", 1, "Actor"),
+                    builtin_sealed_method("spawn", 0, "Actor"),
+                    builtin_sealed_method("spawn:", 1, "Actor"),
+                    builtin_sealed_method("new", 0, "Actor"),
+                    builtin_sealed_method("new:", 1, "Actor"),
                     builtin_method("describe", 0, "Actor"),
                 ],
             },
@@ -708,6 +710,17 @@ fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> MethodInfo 
         kind: MethodKind::Primary,
         defined_in: defined_in.into(),
         is_sealed: false,
+    }
+}
+
+/// Create a sealed built-in method info.
+fn builtin_sealed_method(selector: &str, arity: usize, defined_in: &str) -> MethodInfo {
+    MethodInfo {
+        selector: selector.into(),
+        arity,
+        kind: MethodKind::Primary,
+        defined_in: defined_in.into(),
+        is_sealed: true,
     }
 }
 
@@ -1121,6 +1134,46 @@ mod tests {
         };
         let (_, diags) = ClassHierarchy::build(&module);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn builtin_sealed_method_override_rejected() {
+        // Object's respondsTo: is sealed in builtins — user class cannot override it
+        let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
+
+        let module = Module {
+            classes: vec![child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`respondsTo:`"));
+        assert!(diags[0].message.contains("`Object`"));
+        assert!(h.has_class("MyObj"));
+    }
+
+    #[test]
+    fn builtin_actor_spawn_override_rejected() {
+        // Actor's spawn is sealed in builtins — subclass cannot override it
+        let child = make_class_with_sealed_method("MyActor", "Actor", "spawn", false);
+
+        let module = Module {
+            classes: vec![child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`spawn`"));
+        assert!(diags[0].message.contains("`Actor`"));
+        assert!(h.has_class("MyActor"));
     }
 
     // --- MRO verification ---
