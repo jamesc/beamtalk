@@ -76,7 +76,8 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
         register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
-        beamtalk_workspace_meta:register_actor(ActorPid)
+        beamtalk_workspace_meta:register_actor(ActorPid),
+        beamtalk_workspace_meta:update_activity()
     catch
         Kind:Reason ->
             logger:warning("REPL actor tracking failed", #{

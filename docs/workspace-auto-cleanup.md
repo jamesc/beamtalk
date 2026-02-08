@@ -86,8 +86,10 @@ beamtalk repl --timeout 60  # 1 minute idle timeout
 # Activity 2: Load code  
 > :load examples/counter.bt
 
-# Wait 65 seconds with no activity
-# → Node should self-terminate
+# Disconnect the REPL session (Ctrl-D), then wait
+# The idle monitor checks every 10 minutes, so the node
+# will self-terminate within ~10 minutes after disconnecting
+# (once idle time > 60s AND no active sessions)
 ```
 
 #### Test Orphan Cleanup
