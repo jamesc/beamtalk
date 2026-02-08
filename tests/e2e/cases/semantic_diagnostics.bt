@@ -19,6 +19,15 @@
 // Subclassing a sealed builtin class is an error
 // @load-error tests/e2e/fixtures/semantic_sealed_error.bt => Cannot subclass sealed class
 
+// Overriding a sealed method from a parent class is an error
+// @load-error tests/e2e/fixtures/semantic_sealed_method.bt => Cannot override sealed method
+
+// Using @primitive outside the standard library is an error
+// @load-error tests/e2e/fixtures/semantic_primitive_error.bt => Primitives can only be declared in the standard library
+
+// Using an unknown intrinsic name with @primitive is an error
+// @load-error tests/e2e/fixtures/semantic_unknown_intrinsic.bt => Unknown intrinsic
+
 // --- Reflection method validators ---
 
 // respondsTo: expects a symbol literal, not a bare identifier
