@@ -6,7 +6,7 @@
 // Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
 // All string operations are grapheme-aware.
 
-Object subclass: String
+sealed Object subclass: String
   // Binary operators first (parser constraint)
   = other => @primitive '='
   ~= other => (self = other) not
