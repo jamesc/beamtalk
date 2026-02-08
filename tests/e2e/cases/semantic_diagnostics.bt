@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for semantic analysis diagnostics
+//
+// Tests that the compiler's semantic analysis produces correct errors
+// for invalid code patterns detected at compile time.
+//
+// NOTE: Some acceptance criteria from BT-400 cannot be tested E2E:
+// - Captured variable mutation (Warning severity — warnings don't block
+//   compilation and are not visible in E2E test output)
+// - Duplicate pattern variable (pattern matching syntax not yet parseable)
+
+// --- Compilation errors in loaded files ---
+
+// Field assignment inside a stored closure is an error
+// @load-error tests/e2e/fixtures/semantic_field_error.bt => cannot assign to field
+
+// Subclassing a sealed builtin class is an error
+// @load-error tests/e2e/fixtures/semantic_sealed_error.bt => Cannot subclass sealed class
+
+// --- Reflection method validators ---
+
+// respondsTo: expects a symbol literal, not a bare identifier
+myVar := 42
+// => 42
+42 respondsTo: myVar
+// => ERROR: expects a symbol literal
+
+// --- Control flow blocks work without errors ---
+
+// Blocks with parameters execute correctly (no semantic errors)
+[:x | x * 2] value: 5
+// => 10
+
+// Nested blocks work without errors
+[:x | [:y | x + y] value: 3] value: 10
+// => 13
+
