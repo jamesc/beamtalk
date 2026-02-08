@@ -220,19 +220,12 @@ responds_to(Selector, ClassName) ->
         {ok, _Fun} ->
             true;
         not_found ->
+            %% ADR 0006 Phase 2: Use flattened table for O(1) check
             case beamtalk_object_class:whereis_class(ClassName) of
                 undefined ->
                     false;
                 ClassPid ->
-                    case beamtalk_object_class:has_method(ClassPid, Selector) of
-                        true ->
-                            true;
-                        false ->
-                            case beamtalk_object_class:superclass(ClassPid) of
-                                none -> false;
-                                SuperclassName -> responds_to(Selector, SuperclassName)
-                            end
-                    end
+                    try_flattened_lookup(ClassPid, Selector) =/= not_found
             end
     end.
 
