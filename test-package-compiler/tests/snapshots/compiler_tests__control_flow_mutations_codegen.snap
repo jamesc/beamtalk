@@ -108,7 +108,11 @@ module 'control_flow_mutations' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
     case Selector of
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-            case call 'beamtalk_extensions':'lookup'('ControlFlowMutations', OtherSelector) of
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('ControlFlowMutations', OtherSelector)
+                of ExtLookupResult -> ExtLookupResult
+                catch <_EType, _EReason, _EStack> -> 'not_found'
+            in
+            case ExtLookup of
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
                     let ExtResult = apply ExtFun(Args, Self) in
                     {'reply', ExtResult, State}

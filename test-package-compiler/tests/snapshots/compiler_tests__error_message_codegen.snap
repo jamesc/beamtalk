@@ -105,7 +105,11 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             let _seq1 = #{#<68>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}# in call 'erlang':'error'({'beamtalk_error', call 'maps':'get'('msg', State)})
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-            case call 'beamtalk_extensions':'lookup'('TestActor', OtherSelector) of
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('TestActor', OtherSelector)
+                of ExtLookupResult -> ExtLookupResult
+                catch <_EType, _EReason, _EStack> -> 'not_found'
+            in
+            case ExtLookup of
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
                     let ExtResult = apply ExtFun(Args, Self) in
                     {'reply', ExtResult, State}

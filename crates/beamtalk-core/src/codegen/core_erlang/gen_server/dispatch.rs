@@ -297,6 +297,7 @@ impl CoreErlangGenerator {
         self.indent += 1;
 
         // BT-229: Check extension registry for this class first (ADR 0005)
+        // Use try/catch to handle missing ETS table during early bootstrap
         self.write_indent()?;
         writeln!(
             self.output,
@@ -305,8 +306,24 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "case call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector) of"
+            "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
         )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "of ExtLookupResult -> ExtLookupResult"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "catch <_EType, _EReason, _EStack> -> 'not_found'"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "in")?;
+        self.write_indent()?;
+        writeln!(self.output, "case ExtLookup of")?;
         self.indent += 1;
 
         // Extension found - invoke it and wrap as gen_server reply

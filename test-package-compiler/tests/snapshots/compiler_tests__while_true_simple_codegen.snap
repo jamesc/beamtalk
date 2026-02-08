@@ -117,7 +117,11 @@ module 'while_true_simple' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
             let Result = let _Fun25 = fun (_x26) -> let Sum = 0 in let Sum = let _temp27 = _x26 in let _temp28 = 5 in let _temp29 = fun (_i30) -> call 'erlang':'+'(Sum, _i30) in letrec 'loop'/1 = fun (I) -> case call 'erlang':'=<'(I, _temp28) of <'true'> when 'true' -> let _ = apply _temp29 (I) in apply 'loop'/1 (call 'erlang':'+'(I, 1)) <'false'> when 'true' -> 'nil' end in apply 'loop'/1 (_temp27) in Sum in apply _Fun25 (1) in let _Result = Result in {'reply', _Result, State}
         <OtherSelector> when 'true' ->
             %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-            case call 'beamtalk_extensions':'lookup'('WhileTrueSimple', OtherSelector) of
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('WhileTrueSimple', OtherSelector)
+                of ExtLookupResult -> ExtLookupResult
+                catch <_EType, _EReason, _EStack> -> 'not_found'
+            in
+            case ExtLookup of
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
                     let ExtResult = apply ExtFun(Args, Self) in
                     {'reply', ExtResult, State}
