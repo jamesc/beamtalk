@@ -2167,9 +2167,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#()");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert!(elements.is_empty());
                 assert!(tail.is_none());
             }
@@ -2182,9 +2180,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(42)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 1);
                 assert!(tail.is_none());
             }
@@ -2197,9 +2193,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(1, 2, 3)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
             }
@@ -2212,9 +2206,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(1, 2, 3,)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
             }
@@ -2227,9 +2219,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(0 | rest)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 1);
                 assert!(tail.is_some());
             }
@@ -2242,9 +2232,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(#(1, 2), #(3, 4))");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 2);
                 assert!(tail.is_none());
                 // Each element should be a list literal
@@ -2260,9 +2248,7 @@ Actor subclass: Rectangle
         let module = parse_ok("#(1, 'hello', #ok)");
         assert_eq!(module.expressions.len(), 1);
         match &module.expressions[0] {
-            Expression::ListLiteral {
-                elements, tail, ..
-            } => {
+            Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
             }

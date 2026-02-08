@@ -180,9 +180,7 @@ fn validate_expr(
                 validate_expr(&pair.value, is_stdlib, options, diagnostics);
             }
         }
-        Expression::ListLiteral {
-            elements, tail, ..
-        } => {
+        Expression::ListLiteral { elements, tail, .. } => {
             for elem in elements {
                 validate_expr(elem, is_stdlib, options, diagnostics);
             }

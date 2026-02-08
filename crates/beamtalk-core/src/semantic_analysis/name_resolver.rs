@@ -239,9 +239,7 @@ impl NameResolver {
                 }
             }
 
-            ListLiteral {
-                elements, tail, ..
-            } => {
+            ListLiteral { elements, tail, .. } => {
                 for elem in elements {
                     self.resolve_expression(elem);
                 }

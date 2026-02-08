@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
     pub(super) fn generate_list_literal(
         &mut self,
         elements: &[Expression],
-        tail: &Option<Box<Expression>>,
+        tail: Option<&Expression>,
     ) -> Result<()> {
         write!(self.output, "[")?;
         for (i, elem) in elements.iter().enumerate() {

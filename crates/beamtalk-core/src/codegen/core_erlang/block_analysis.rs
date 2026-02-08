@@ -214,9 +214,7 @@ fn analyze_expression(
             }
         }
 
-        Expression::ListLiteral {
-            elements, tail, ..
-        } => {
+        Expression::ListLiteral { elements, tail, .. } => {
             for elem in elements {
                 analyze_expression(elem, analysis, ctx);
             }
