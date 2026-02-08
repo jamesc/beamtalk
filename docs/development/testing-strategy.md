@@ -658,9 +658,14 @@ cp my_new_test.bt fuzz/corpus/parse_arbitrary/033_my_new_test.bt
 just fuzz
 ```
 
-**Corpus maintenance:** Periodically remove redundant files with:
+**Keep corpus in sync:** When adding new `.bt` files to `examples/` or `tests/e2e/cases/`, also copy them to `fuzz/corpus/parse_arbitrary/` so the fuzzer can use them as mutation seeds.
+
+**Corpus minimization:** `cargo +nightly fuzz cmin` rewrites the corpus directory in-place. Run it on a **temporary copy** to avoid deleting tracked seed files:
 ```bash
+# Safe minimization (don't run cmin directly on tracked corpus)
+cp -r fuzz/corpus/parse_arbitrary /tmp/corpus-backup
 cargo +nightly fuzz cmin parse_arbitrary
+# Review changes, restore any deleted seeds if needed
 ```
 
 ### Troubleshooting

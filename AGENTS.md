@@ -1590,6 +1590,7 @@ just test-runtime            # Erlang runtime tests only
 just test-all                # All tests (unit + E2E + runtime)
 just clean                   # Clean build artifacts (works with Docker volumes)
 just coverage                # Generate coverage reports
+just fuzz [DURATION]         # Fuzz parser for crash safety (default: 60s, needs nightly)
 ```
 
 **Raw cargo/rebar3 commands** (if needed):
