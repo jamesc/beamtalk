@@ -111,9 +111,14 @@ handle_call(recent, _From, #state{buffer = Buffer} = State) ->
     {reply, queue:to_list(Buffer), State};
 handle_call(clear, _From, State) ->
     {reply, ok, State#state{buffer = queue:new(), buffer_size = 0}};
-handle_call(_Request, _From, State) ->
+handle_call({recent, []}, From, State) ->
+    handle_call(recent, From, State);
+handle_call({clear, []}, From, State) ->
+    handle_call(clear, From, State);
+handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'TranscriptStream'),
-    {reply, {error, Error0}, State}.
+    Error1 = beamtalk_error:with_selector(Error0, Request),
+    {reply, {error, Error1}, State}.
 
 %% @private
 -spec handle_cast(term(), state()) -> {noreply, state()}.

@@ -37,7 +37,6 @@ flush_transcript() ->
 show_writes_to_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', <<"Hello">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"Hello">>], Result),
     gen_server:stop(Pid).
@@ -45,7 +44,6 @@ show_writes_to_buffer_test() ->
 show_converts_integer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', 42}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"42">>], Result),
     gen_server:stop(Pid).
@@ -53,7 +51,6 @@ show_converts_integer_test() ->
 show_converts_atom_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', hello}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"hello">>], Result),
     gen_server:stop(Pid).
@@ -63,7 +60,6 @@ show_converts_atom_test() ->
 cr_writes_newline_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, cr),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"\n">>], Result),
     gen_server:stop(Pid).
@@ -74,7 +70,6 @@ show_then_cr_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', <<"Hello">>}),
     gen_server:cast(Pid, cr),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"Hello">>, <<"\n">>], Result),
     gen_server:stop(Pid).
@@ -84,7 +79,6 @@ show_then_cr_test() ->
 subscribe_unsubscribe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
-    timer:sleep(10),
     %% Should receive output after subscribing
     gen_server:cast(Pid, {'show:', <<"sub">>}),
     receive
@@ -94,12 +88,13 @@ subscribe_unsubscribe_test() ->
     end,
     %% Unsubscribe
     gen_server:cast(Pid, {unsubscribe, self()}),
-    timer:sleep(10),
     %% Should NOT receive output after unsubscribing
     gen_server:cast(Pid, {'show:', <<"after">>}),
+    %% Sync barrier: ensures both unsubscribe and show: are processed
+    _ = gen_server:call(Pid, recent),
     receive
         {transcript_output, <<"after">>} -> ?assert(false)
-    after 100 ->
+    after 0 ->
         ok
     end,
     gen_server:stop(Pid).
@@ -109,7 +104,6 @@ subscribe_unsubscribe_test() ->
 subscriber_receives_output_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
-    timer:sleep(10),
     gen_server:cast(Pid, {'show:', <<"msg1">>}),
     gen_server:cast(Pid, {'show:', <<"msg2">>}),
     receive
@@ -129,17 +123,16 @@ subscriber_receives_output_test() ->
 
 dead_subscriber_auto_removed_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
-    %% Spawn a process, subscribe it, then kill it
     Sub = erlang:spawn(fun() ->
         receive stop -> ok end
     end),
     gen_server:cast(Pid, {subscribe, Sub}),
-    timer:sleep(10),
+    %% Sync barrier: ensure subscribe is processed before killing
+    _ = gen_server:call(Pid, recent),
     exit(Sub, kill),
+    %% Wait for DOWN message to be delivered and processed
     timer:sleep(50),
-    %% show: should not crash even though subscriber is dead
     gen_server:cast(Pid, {'show:', <<"after_death">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"after_death">>], Result),
     gen_server:stop(Pid).
@@ -151,7 +144,6 @@ recent_returns_buffer_test() ->
     gen_server:cast(Pid, {'show:', <<"a">>}),
     gen_server:cast(Pid, {'show:', <<"b">>}),
     gen_server:cast(Pid, {'show:', <<"c">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Result),
     gen_server:stop(Pid).
@@ -167,7 +159,6 @@ recent_empty_buffer_test() ->
 clear_empties_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {'show:', <<"data">>}),
-    timer:sleep(10),
     ok = gen_server:call(Pid, clear),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([], Result),
@@ -183,9 +174,7 @@ buffer_overflow_drops_oldest_test() ->
     gen_server:cast(Pid, {'show:', <<"3">>}),
     gen_server:cast(Pid, {'show:', <<"4">>}),
     gen_server:cast(Pid, {'show:', <<"5">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
-    %% Oldest items (1, 2) dropped, only last 3 remain
     ?assertEqual([<<"3">>, <<"4">>, <<"5">>], Result),
     gen_server:stop(Pid).
 
@@ -195,18 +184,17 @@ duplicate_subscribe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, self()}),
     gen_server:cast(Pid, {subscribe, self()}),
-    timer:sleep(10),
-    %% Should receive exactly one message, not two
     gen_server:cast(Pid, {'show:', <<"once">>}),
     receive
         {transcript_output, <<"once">>} -> ok
     after 500 ->
         ?assert(false)
     end,
-    %% No duplicate
+    %% Sync barrier, then check no duplicate message
+    _ = gen_server:call(Pid, recent),
     receive
         {transcript_output, <<"once">>} -> ?assert(false)
-    after 100 ->
+    after 0 ->
         ok
     end,
     flush_transcript(),
@@ -230,7 +218,6 @@ spawn_test() ->
     {ok, Pid} = beamtalk_transcript_stream:spawn(),
     ?assert(is_pid(Pid)),
     gen_server:cast(Pid, {'show:', <<"spawn_test">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"spawn_test">>], Result),
     gen_server:stop(Pid).
@@ -255,10 +242,24 @@ invalid_max_buffer_negative_test() ->
 subscribe_non_pid_safe_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     gen_server:cast(Pid, {subscribe, not_a_pid}),
-    timer:sleep(10),
-    %% Server should still be alive and functional
     gen_server:cast(Pid, {'show:', <<"ok">>}),
-    timer:sleep(10),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([<<"ok">>], Result),
+    gen_server:stop(Pid).
+
+%% --- tuple-format calls (dispatch compatibility) ---
+
+tuple_format_recent_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    gen_server:cast(Pid, {'show:', <<"data">>}),
+    Result = gen_server:call(Pid, {recent, []}),
+    ?assertEqual([<<"data">>], Result),
+    gen_server:stop(Pid).
+
+tuple_format_clear_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    gen_server:cast(Pid, {'show:', <<"data">>}),
+    ok = gen_server:call(Pid, {clear, []}),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([], Result),
     gen_server:stop(Pid).
