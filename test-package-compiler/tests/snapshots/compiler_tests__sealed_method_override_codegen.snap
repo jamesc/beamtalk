@@ -6,7 +6,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1]
   attributes []
 
 'new'/0 = fun () ->
-    ~{'__class__' => 'Parent'}~
+    ~{'$beamtalk_class' => 'Parent'}~
 
 
 'new'/1 = fun (InitArgs) ->

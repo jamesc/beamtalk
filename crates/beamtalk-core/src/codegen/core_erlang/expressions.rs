@@ -430,7 +430,7 @@ impl CoreErlangGenerator {
                 )?;
                 write!(
                     self.output,
-                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
+                    "let _ = call 'beamtalk_actor':'async_send'({pid_var}, "
                 )?;
 
                 // Selector (using domain service)
@@ -451,7 +451,7 @@ impl CoreErlangGenerator {
                     self.generate_expression(arg)?;
                 }
 
-                write!(self.output, "], {future_var}}}) in {future_var}")?;
+                write!(self.output, "], {future_var}) in {future_var}")?;
 
                 if !is_last {
                     write!(self.output, " in ")?;
@@ -492,7 +492,7 @@ impl CoreErlangGenerator {
                 )?;
                 write!(
                     self.output,
-                    "let _ = call 'gen_server':'cast'({pid_var}, {{"
+                    "let _ = call 'beamtalk_actor':'async_send'({pid_var}, "
                 )?;
 
                 // Selector (using domain service)
@@ -513,7 +513,7 @@ impl CoreErlangGenerator {
                     self.generate_expression(arg)?;
                 }
 
-                write!(self.output, "], {future_var}}}) in {future_var}")?;
+                write!(self.output, "], {future_var}) in {future_var}")?;
 
                 if !is_last {
                     write!(self.output, " in ")?;

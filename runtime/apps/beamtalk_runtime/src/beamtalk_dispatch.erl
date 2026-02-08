@@ -324,7 +324,7 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
                 none ->
                     %% Reached root without finding method
                     logger:debug("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
-                    Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, ClassName)),
+                    Error0 = beamtalk_error:new(does_not_understand, beamtalk_tagged_map:class_of(State, ClassName)),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
                     {error, Error2};
