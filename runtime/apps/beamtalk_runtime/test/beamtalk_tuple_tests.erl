@@ -95,9 +95,9 @@ unwrap_ok_test() ->
     ?assertEqual({a, b}, beamtalk_tuple:dispatch('unwrap', [], {ok, {a, b}})).
 
 unwrap_error_test() ->
-    ?assertError({unwrap_error, not_found},
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
                  beamtalk_tuple:dispatch('unwrap', [], {error, not_found})),
-    ?assertError({unwrap_error, reason},
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
                  beamtalk_tuple:dispatch('unwrap', [], {error, reason})).
 
 unwrap_invalid_pattern_test_() ->
