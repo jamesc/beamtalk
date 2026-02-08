@@ -69,7 +69,8 @@ dispatch_test_() ->
           {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
           {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
           {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
-          {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0}
+          {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0},
+          {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0}
          ]
      end
     }.
@@ -481,3 +482,39 @@ test_subclass_invalidation_on_parent_change() ->
     %% The defining class should be Actor, not Counter
     {ok, DefiningClass, _MethodInfo} = gen_server:call(CounterPid, {lookup_flattened, parentTestMethod}),
     ?assertEqual('Actor', DefiningClass).
+
+%% Test that registering a parent class AFTER a child class still produces
+%% complete flattened tables in the child (out-of-order bootstrap).
+test_out_of_order_registration() ->
+    %% Step 1: Register child class with non-existent parent
+    ChildMethod = fun(_Self, [], State) -> {reply, child_result, State} end,
+    {ok, ChildPid} = beamtalk_object_class:start_link('TestChild', #{
+        superclass => 'TestParent',
+        instance_methods => #{childMethod => #{block => ChildMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    %% Child's flattened table should only have local methods (parent missing)
+    {ok, ChildFlattened1} = gen_server:call(ChildPid, get_flattened_methods),
+    ?assert(maps:is_key(childMethod, ChildFlattened1)),
+    ?assertNot(maps:is_key(parentMethod, ChildFlattened1)),
+
+    %% Step 2: Register parent class — this should trigger child rebuild
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
+    {ok, _ParentPid} = beamtalk_object_class:start_link('TestParent', #{
+        superclass => none,
+        instance_methods => #{parentMethod => #{block => ParentMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    %% Use synchronous barrier to ensure child processed rebuild_flattened
+    _ = beamtalk_object_class:superclass(ChildPid),
+
+    %% Child's flattened table should now include parent's method
+    {ok, ChildFlattened2} = gen_server:call(ChildPid, get_flattened_methods),
+    ?assert(maps:is_key(childMethod, ChildFlattened2)),
+    ?assert(maps:is_key(parentMethod, ChildFlattened2)),
+
+    %% Verify defining class is correct
+    {ok, DefClass, _} = gen_server:call(ChildPid, {lookup_flattened, parentMethod}),
+    ?assertEqual('TestParent', DefClass).

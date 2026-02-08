@@ -384,6 +384,10 @@ init({ClassName, ClassInfo}) ->
         dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
         flattened_methods = FlattenedMethods
     },
+    %% ADR 0006 Phase 2: Notify existing subclasses to rebuild their flattened
+    %% tables. Handles out-of-order registration (e.g., Counter registered
+    %% before Actor) — subclasses that had incomplete tables now pick up our methods.
+    invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
 handle_call({new, Args}, _From, #class_state{
