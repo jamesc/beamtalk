@@ -6,7 +6,7 @@
 // First-class closures that capture their lexical environment.
 // Foundation of control flow and functional programming in Beamtalk.
 
-Object subclass: Block
+sealed Object subclass: Block
   // Evaluation — structural intrinsics
   value => @primitive blockValue
   value: arg => @primitive blockValue1

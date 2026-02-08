@@ -7,6 +7,6 @@
 // system-wide introspection. Analogous to Smalltalk's `Smalltalk` global.
 
 Object subclass: Beamtalk
-  allClasses => @primitive 'allClasses'
-  classNamed: className => @primitive 'classNamed:'
-  globals => @primitive 'globals'
+  sealed allClasses => @primitive 'allClasses'
+  sealed classNamed: className => @primitive 'classNamed:'
+  sealed globals => @primitive 'globals'
