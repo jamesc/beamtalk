@@ -194,17 +194,27 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
         // Check for @load-error directive (must be checked before @load)
         if let Some(rest) = line.strip_prefix("// @load-error") {
             let rest = rest.trim();
-            if let Some((path, expected)) = rest.split_once("=>") {
+            if rest.is_empty() {
+                warnings.push(format!(
+                    "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
+                    i + 1
+                ));
+            } else if let Some((path, expected)) = rest.split_once("=>") {
                 let path = path.trim();
                 let expected = expected.trim();
-                if !path.is_empty() && !expected.is_empty() {
+                if path.is_empty() || expected.is_empty() {
+                    warnings.push(format!(
+                        "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
+                        i + 1
+                    ));
+                } else {
                     load_error_cases.push(LoadErrorCase {
                         path: path.to_string(),
                         expected_error: expected.to_string(),
                         line: i + 1,
                     });
                 }
-            } else if !rest.is_empty() {
+            } else {
                 warnings.push(format!(
                     "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
                     i + 1
@@ -1148,9 +1158,29 @@ Counter spawn
 
     #[test]
     fn test_parse_load_error_malformed_warns() {
-        let content = r"
-// @load-error tests/e2e/fixtures/bad.bt
-";
+        // Missing => separator
+        let content = "// @load-error tests/e2e/fixtures/bad.bt\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty directive
+        let content = "// @load-error\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty path with =>
+        let content = "// @load-error  => some error\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty expected error
+        let content = "// @load-error path.bt =>\n";
         let parsed = parse_test_file(content);
         assert!(parsed.load_error_cases.is_empty());
         assert_eq!(parsed.warnings.len(), 1);
