@@ -15,7 +15,7 @@
 
 test_method() ->
     #{
-        '__class__' => 'CompiledMethod',
+        '$beamtalk_class' => 'CompiledMethod',
         '__selector__' => 'increment',
         '__source__' => <<"increment => self.value := self.value + 1">>,
         '__method_info__' => #{arity => 0, type => unary}
@@ -23,7 +23,7 @@ test_method() ->
 
 test_method_with_args() ->
     #{
-        '__class__' => 'CompiledMethod',
+        '$beamtalk_class' => 'CompiledMethod',
         '__selector__' => 'add:',
         '__source__' => <<"add: x => self.value := self.value + x">>,
         '__method_info__' => #{arity => 1, type => keyword}
@@ -52,7 +52,7 @@ argument_count_one_test() ->
 
 argument_count_missing_arity_defaults_to_zero_test() ->
     Method = #{
-        '__class__' => 'CompiledMethod',
+        '$beamtalk_class' => 'CompiledMethod',
         '__selector__' => 'foo',
         '__source__' => <<"foo => nil">>,
         '__method_info__' => #{}

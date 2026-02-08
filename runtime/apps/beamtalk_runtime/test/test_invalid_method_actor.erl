@@ -18,7 +18,7 @@ start_link() ->
 
 init(_Args) ->
     beamtalk_actor:init(#{
-        '__class__' => 'InvalidMethodActor',
+        '$beamtalk_class' => 'InvalidMethodActor',
         '__class_mod__' => 'test_invalid_method_actor',
         '__methods__' => #{
             notAFunction => "this is a string, not a function",

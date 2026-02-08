@@ -21,7 +21,7 @@ start_link() ->
 
 init(_Args) ->
     beamtalk_actor:init(#{
-        '__class__' => 'MultiArgActor',
+        '$beamtalk_class' => 'MultiArgActor',
         '__class_mod__' => 'multi_arg_actor',
         '__methods__' => #{
             'compute:plus:' => fun ?MODULE:'handle_compute:plus:'/2

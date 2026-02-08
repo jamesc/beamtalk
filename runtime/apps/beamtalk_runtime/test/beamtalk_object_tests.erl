@@ -16,7 +16,7 @@
 %% A typical actor state map (as would be in a Counter gen_server)
 counter_state() ->
     #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         '__class_mod__' => counter,
         '__methods__' => #{'increment' => 0, 'getValue' => 0},
         '__registry_pid__' => self(),
@@ -26,7 +26,7 @@ counter_state() ->
 %% An actor state with multiple fields
 multi_field_state() ->
     #{
-        '__class__' => 'Point',
+        '$beamtalk_class' => 'Point',
         '__class_mod__' => point,
         '__methods__' => #{'x' => 0, 'y' => 0},
         '__registry_pid__' => self(),
@@ -42,7 +42,7 @@ self_ref() -> make_ref().
 
 object_reflection_test_() ->
     {"Object reflection methods", [
-        {"class returns __class__ from state", fun test_class/0},
+        {"class returns $beamtalk_class from state", fun test_class/0},
         {"instVarNames filters internal fields", fun test_inst_var_names/0},
         {"instVarNames with multiple fields", fun test_inst_var_names_multi/0},
         {"instVarAt: reads field value", fun test_inst_var_at/0},

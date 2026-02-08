@@ -16,7 +16,7 @@
 //!
 //! Each Beamtalk module becomes an Erlang module implementing `gen_server`:
 //!
-//! - **Actor State**: A map containing `__class__`, `__methods__`, and actor fields
+//! - **Actor State**: A map containing `$beamtalk_class`, `__methods__`, and actor fields
 //! - **Message Dispatch**: Messages route through `handle_cast` or `handle_call`
 //! - **Hot Code Reload**: The `code_change/3` callback handles state migration
 //!
@@ -36,7 +36,7 @@
 //!
 //! 'init'/1 = fun (_Args) ->
 //!     let InitialState = ~{
-//!       '__class__' => 'Counter',
+//!       '$beamtalk_class' => 'Counter',
 //!       '__methods__' => call 'counter':'method_table'(),
 //!       'value' => 0
 //!     }~

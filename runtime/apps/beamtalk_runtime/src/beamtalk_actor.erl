@@ -33,7 +33,7 @@
 %%% Each actor maintains state in a map:
 %%% ```erlang
 %%% #{
-%%%   '__class__' => 'Counter',
+%%%   '$beamtalk_class' => 'Counter',
 %%%   '__methods__' => #{
 %%%     increment => fun handle_increment/2,
 %%%     getValue => fun handle_getValue/2
@@ -85,7 +85,7 @@
 %%% %% Callbacks delegated to beamtalk_actor
 %%% init(Args) ->
 %%%     beamtalk_actor:init(#{
-%%%         '__class__' => 'Counter',
+%%%         '$beamtalk_class' => 'Counter',
 %%%         '__methods__' => #{
 %%%             increment => fun handle_increment/2,
 %%%             getValue => fun handle_getValue/2
@@ -312,17 +312,21 @@ actor_dead_error(Selector) ->
 %%% gen_server callbacks
 
 %% @doc Initialize actor with state map.
-%% State must be a map containing '__class__' and '__methods__' keys.
+%% State must be a map containing '$beamtalk_class' and '__methods__' keys.
 -spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
     %% Validate required keys
-    case {maps:is_key('__class__', State), maps:is_key('__methods__', State)} of
-        {true, true} ->
-            {ok, State};
-        {false, _} ->
-            {stop, {missing_key, '__class__'}};
-        {_, false} ->
-            {stop, {missing_key, '__methods__'}}
+    ClassKey = beamtalk_tagged_map:class_key(),
+    case maps:find(ClassKey, State) of
+        {ok, Class} when is_atom(Class) ->
+            case maps:is_key('__methods__', State) of
+                true -> {ok, State};
+                false -> {stop, {missing_key, '__methods__'}}
+            end;
+        {ok, _NonAtom} ->
+            {stop, {invalid_value, ClassKey}};
+        error ->
+            {stop, {missing_key, ClassKey}}
     end;
 init(_NonMapState) ->
     {stop, {invalid_state, not_a_map}}.
@@ -403,7 +407,7 @@ terminate(_Reason, _State) ->
 -spec make_self(map()) -> #beamtalk_object{}.
 make_self(State) ->
     #beamtalk_object{
-        class = maps:get('__class__', State),
+        class = beamtalk_tagged_map:class_of(State),
         class_mod = maps:get('__class_mod__', State, undefined),
         pid = self()
     }.
@@ -434,10 +438,7 @@ dispatch(Selector, Args, Self, State) ->
             {reply, Result, State};
         instVarNames when Args =:= [] ->
             %% Return list of instance variable names (excluding internals)
-            AllKeys = maps:keys(State),
-            InstVarNames = [K || K <- AllKeys,
-                            not lists:member(K, ['__class__', '__class_mod__', '__methods__'])],
-            {reply, InstVarNames, State};
+            {reply, beamtalk_tagged_map:user_field_keys(State), State};
         instVarAt when length(Args) =:= 1 ->
             %% Read instance variable by name
             [Name] = Args,
@@ -450,7 +451,7 @@ dispatch(Selector, Args, Self, State) ->
                     NewState = maps:put(Name, Value, State),
                     {reply, Self, NewState};
                 _ ->
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: name and value">>),
@@ -463,7 +464,7 @@ dispatch(Selector, Args, Self, State) ->
                 [TargetSelector] when is_atom(TargetSelector) ->
                     dispatch(TargetSelector, [], Self, State);
                 _ ->
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, perform),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Expected 1 argument: a selector atom">>),
@@ -477,13 +478,13 @@ dispatch(Selector, Args, Self, State) ->
                     when_list(ArgList,
                         fun() -> dispatch(TargetSelector, ArgList, Self, State) end,
                         fun() ->
-                            ClassName = maps:get('__class__', State, unknown),
+                            ClassName = beamtalk_tagged_map:class_of(State, unknown),
                             Error0 = beamtalk_error:new(type_error, ClassName),
                             Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
                             {error, Error, State}
                         end);
                 _ ->
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: a selector atom and an argument list">>),
@@ -513,7 +514,7 @@ dispatch_user_method(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, Selector),
                     {error, Error, State}
@@ -530,14 +531,14 @@ dispatch_user_method(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, Selector),
                     {error, Error, State}
             end;
         {ok, _NotAFunction} ->
             %% Method value is not a function
-            ClassName = maps:get('__class__', State, unknown),
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
             Error0 = beamtalk_error:new(type_error, ClassName),
             Error = beamtalk_error:with_selector(Error0, Selector),
             {error, Error, State};
@@ -568,7 +569,7 @@ handle_dnu(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
                     {error, Error, State}
@@ -585,14 +586,14 @@ handle_dnu(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('__class__', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
                     {error, Error, State}
             end;
         _ ->
             %% No DNU handler - method not found is an error
-            ClassName = maps:get('__class__', State, unknown),
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
             Error0 = beamtalk_error:new(does_not_understand, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),

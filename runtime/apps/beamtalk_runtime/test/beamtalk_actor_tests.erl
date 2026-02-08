@@ -21,7 +21,7 @@
 
 init_with_valid_state_test() ->
     State = #{
-        '__class__' => 'TestActor',
+        '$beamtalk_class' => 'TestActor',
         '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end},
         data => 123
     },
@@ -31,11 +31,18 @@ init_without_class_test() ->
     State = #{
         '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
     },
-    ?assertEqual({stop, {missing_key, '__class__'}}, beamtalk_actor:init(State)).
+    ?assertEqual({stop, {missing_key, '$beamtalk_class'}}, beamtalk_actor:init(State)).
+
+init_with_non_atom_class_test() ->
+    State = #{
+        '$beamtalk_class' => "StringNotAtom",
+        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
+    },
+    ?assertEqual({stop, {invalid_value, '$beamtalk_class'}}, beamtalk_actor:init(State)).
 
 init_without_methods_test() ->
     State = #{
-        '__class__' => 'TestActor'
+        '$beamtalk_class' => 'TestActor'
     },
     ?assertEqual({stop, {missing_key, '__methods__'}}, beamtalk_actor:init(State)).
 
@@ -718,7 +725,7 @@ instVarNames_test() ->
     %% Test instVarNames returns instance variable names
     {ok, Counter} = test_counter:start_link(42),
     
-    %% Get instance variable names (should exclude __class__, __class_mod__, __methods__)
+    %% Get instance variable names (should exclude $beamtalk_class, __class_mod__, __methods__)
     Result = gen_server:call(Counter, {instVarNames, []}),
     
     %% Should return [value] - the only user-defined instance variable

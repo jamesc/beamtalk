@@ -80,7 +80,7 @@ show_float_test() ->
 
 show_map_with_class_test() ->
     Output = capture_output(fun() ->
-        transcript:'show:'(#{'__class__' => 'Counter', value => 0})
+        transcript:'show:'(#{'$beamtalk_class' => 'Counter', value => 0})
     end),
     ?assertEqual(<<"a Counter">>, Output).
 
