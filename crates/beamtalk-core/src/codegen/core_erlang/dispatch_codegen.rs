@@ -16,7 +16,7 @@
 //!    class/nil testing). These are structural requirements, not type-specific dispatch.
 //!
 //! 2. **Runtime dispatch**: All other messages go through the BT-223 runtime check:
-//!    - **Actors** (`beamtalk_object` records): Async via `gen_server:cast` with futures
+//!    - **Actors** (`beamtalk_object` records): Async via `beamtalk_actor:async_send` with futures
 //!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
 //! The primitive binding table from `lib/*.bt` (ADR 0007) drives stdlib method
@@ -193,7 +193,7 @@ impl CoreErlangGenerator {
 
         // BT-296 / ADR 0007 Phase 4: Type-specific dispatch tables removed.
         // All non-intrinsic messages go through runtime dispatch:
-        // - Actors: async via gen_server:cast with futures
+        // - Actors: async via beamtalk_actor:async_send with futures
         // - Primitives: sync via beamtalk_primitive:send/3
 
         // BT-223: Runtime dispatch - check if receiver is actor or primitive
@@ -262,10 +262,10 @@ impl CoreErlangGenerator {
             "let {future_var} = call 'beamtalk_future':'new'() in "
         )?;
 
-        // Send async message via gen_server:cast
+        // Send async message via beamtalk_actor:async_send (handles isAlive, dead actors)
         write!(
             self.output,
-            "let _ = call 'gen_server':'cast'({pid_var}, {{'{selector_atom}', ["
+            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
         )?;
 
         // Generate argument list
@@ -276,7 +276,7 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        write!(self.output, "], {future_var}}}) in {future_var} ")?; // No semicolon!
+        write!(self.output, "], {future_var}) in {future_var} ")?; // No semicolon!
 
         // Case 2: Primitive - use synchronous dispatch
         write!(self.output, "<'false'> when 'true' -> ")?;

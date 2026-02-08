@@ -29,6 +29,7 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "classOf",
     "doesNotUnderstand",
     "dynamicSend",
+    "dynamicSendWithArgs",
     "respondsTo",
     "instVarNames",
     "instVarAt",
