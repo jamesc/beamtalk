@@ -108,3 +108,34 @@ applyBlock := [:block :arg | block value: arg]
 
 applyBlock value: [:x | x + 100] value: 42
 // => 142
+
+// ===========================================================================
+// 4+ KEYWORD MESSAGES ON OBJECTS (BT-327)
+// ===========================================================================
+// Tests that the parser and codegen handle 4+ keyword method dispatch
+// on Actor subclasses (not just block value:value:value:)
+
+// @load tests/e2e/fixtures/multi_keyword.bt
+
+mk := MultiKeyword spawn
+// => _
+
+// 4-keyword method: sum four arguments
+mk add: 1 and: 2 and: 3 and: 4
+// => 10
+
+// 4-keyword method: verify argument order (weighted sum)
+mk first: 1 second: 2 third: 3 fourth: 4
+// => 1234
+
+// Different argument values to confirm ordering
+mk first: 9 second: 0 third: 5 fourth: 7
+// => 9057
+
+// 5-keyword method: sum five arguments
+mk add: 10 and: 20 and: 30 and: 40 and: 50
+// => 150
+
+// Verify state was updated by add:and:and:and:and:
+mk getResult
+// => 150

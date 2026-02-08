@@ -63,7 +63,7 @@ init_registers_all_classes_test() ->
     
     %% After init, should have bootstrap + stdlib classes
     ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(13, length(ClassesAfter)),  % 3 bootstrap + 10 stdlib
+    ?assertEqual(14, length(ClassesAfter)),  % 3 bootstrap + 11 stdlib
     
     %% Verify expected classes are present
     ?assert(lists:member('ProtoObject', ClassesAfter)),
@@ -87,7 +87,7 @@ init_idempotent_test() ->
     
     %% Should still have same number of classes (no duplicates)
     Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(13, length(Classes)).
+    ?assertEqual(14, length(Classes)).
 
 integer_class_registered_test() ->
     ok = beamtalk_stdlib:init(),

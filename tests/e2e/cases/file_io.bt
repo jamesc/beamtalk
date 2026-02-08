@@ -1,0 +1,101 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for File I/O operations
+// Tests basic file reading and writing
+
+// ===========================================================================
+// FILE EXISTENCE CHECKS
+// ===========================================================================
+
+// Check non-existent file (unique name to avoid flakiness)
+File exists: '_bt_e2e_nonexistent_xyzzy.txt'
+// => false
+
+// ===========================================================================
+// FILE WRITING
+// ===========================================================================
+
+// Write a simple string to a file (prefixed to avoid repo pollution)
+File writeAll: '_bt_e2e_test_output.txt' contents: 'Hello, Beamtalk!'
+// => nil
+
+// ===========================================================================
+// FILE READING
+// ===========================================================================
+
+// Read back the file we just wrote
+File readAll: '_bt_e2e_test_output.txt'
+// => Hello, Beamtalk!
+
+// Check that file now exists
+File exists: '_bt_e2e_test_output.txt'
+// => true
+
+// ===========================================================================
+// OVERWRITE EXISTING FILE
+// ===========================================================================
+
+// Overwrite previous content
+File writeAll: '_bt_e2e_test_output.txt' contents: 'New content'
+// => nil
+
+// Verify new content
+File readAll: '_bt_e2e_test_output.txt'
+// => New content
+
+// ===========================================================================
+// SPECIAL CHARACTERS
+// ===========================================================================
+
+// Write content with special characters
+File writeAll: '_bt_e2e_special.txt' contents: 'Hello, World! @#$%'
+// => nil
+
+// Read it back
+File readAll: '_bt_e2e_special.txt'
+// => Hello, World! @#$%
+
+// ===========================================================================
+// EMPTY FILE
+// ===========================================================================
+
+// Write empty file
+File writeAll: '_bt_e2e_empty.txt' contents: ''
+// => nil
+
+// Read empty file
+File readAll: '_bt_e2e_empty.txt'
+// =>
+
+// Empty file exists
+File exists: '_bt_e2e_empty.txt'
+// => true
+
+// ===========================================================================
+// ERROR PATHS
+// ===========================================================================
+
+// Reading a non-existent file should raise file_not_found error
+File readAll: 'does_not_exist_at_all.txt'
+// => ERROR: file_not_found
+
+// Writing with directory traversal should raise invalid_path error
+File writeAll: '../escape.txt' contents: 'bad'
+// => ERROR: invalid_path
+
+// Reading with absolute path should raise invalid_path error
+File readAll: '/etc/passwd'
+// => ERROR: invalid_path
+
+// ===========================================================================
+// SECURITY: PATH VALIDATION
+// ===========================================================================
+
+// Absolute paths should be rejected (but exists: returns false instead of error)
+File exists: '/etc/passwd'
+// => false
+
+// Directory traversal attempts should be rejected
+File exists: '../passwords.txt'
+// => false

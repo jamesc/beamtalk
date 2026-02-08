@@ -248,7 +248,8 @@ struct DaemonManager {
 fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
     if cover {
         format!(
-            "cover:start(), \
+            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+             cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
                  _ -> ok \
@@ -269,7 +270,11 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
              init:stop()."
         )
     } else {
-        format!("{{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), receive stop -> ok end.")
+        format!(
+            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+             {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
+             receive stop -> ok end."
+        )
     }
 }
 
@@ -326,6 +331,7 @@ impl DaemonManager {
         eprintln!("E2E: Starting BEAM REPL backend...");
         let runtime = runtime_dir();
         let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
+        let workspace_dir = runtime.join("_build/default/lib/beamtalk_workspace/ebin");
         let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
         let stdlib_dir = runtime.join("apps/beamtalk_stdlib/ebin");
 
@@ -378,6 +384,10 @@ impl DaemonManager {
                 "-noshell",
                 "-pa",
                 ebin_dir.to_str().expect("ebin path must be UTF-8"),
+                "-pa",
+                workspace_dir
+                    .to_str()
+                    .expect("workspace ebin path must be UTF-8"),
                 "-pa",
                 jsx_dir.to_str().expect("jsx path must be UTF-8"),
                 "-pa",
