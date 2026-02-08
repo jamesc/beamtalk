@@ -1042,8 +1042,7 @@ mod tests {
     #[test]
     fn sealed_method_in_grandparent_enforced() {
         // Grandparent defines sealed method, grandchild tries to override it
-        let grandparent =
-            make_class_with_sealed_method("GrandParent", "Actor", "locked", true);
+        let grandparent = make_class_with_sealed_method("GrandParent", "Actor", "locked", true);
         let parent = make_class_with_sealed_method("Parent", "GrandParent", "doWork", false);
         let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
 
