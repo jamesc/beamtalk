@@ -290,10 +290,41 @@ impl CoreErlangGenerator {
         // instVarAt:, instVarAt:put:) are now inherited from Object via hierarchy
         // walking, no longer generated per-class.
 
-        // Default case: hierarchy walk via beamtalk_dispatch, then DNU fallback (ADR 0006)
+        // Default case: extension check, hierarchy walk, then DNU fallback
         let class_name = self.class_name();
         self.write_indent()?;
         writeln!(self.output, "<OtherSelector> when 'true' ->")?;
+        self.indent += 1;
+
+        // BT-229: Check extension registry for this class first (ADR 0005)
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "%% BT-229/ADR 0005: Check extension registry before hierarchy walk"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector) of"
+        )?;
+        self.indent += 1;
+
+        // Extension found - invoke it and wrap as gen_server reply
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let ExtResult = apply ExtFun(Args, Self) in")?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', ExtResult, State}}")?;
+        self.indent -= 1;
+
+        // Extension not found - try hierarchy walk (ADR 0006)
+        self.write_indent()?;
+        writeln!(self.output, "<'not_found'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "%% ADR 0006: Try hierarchy walk before DNU")?;
@@ -401,6 +432,11 @@ impl CoreErlangGenerator {
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
+        // Close extension not_found branch
+        self.indent -= 2;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        // Close outer case Selector of
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
