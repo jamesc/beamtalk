@@ -1,0 +1,103 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test structural equality semantics (BT-188)
+//
+// Beamtalk uses Erlang's `==` operator, which provides:
+// - Value equality with type coercion for primitives
+// - Structural equality for value types (compares map contents)
+// - Identity comparison for actors (compares pids)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Primitive Type Equality with Coercion
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Numeric coercion: integer and float with same value are equal
+1.0 == 1
+// => true
+
+// Numeric inequality: different values
+1.0 ~= 2
+// => true
+1 ~= 2
+// => true
+
+// String equality
+'hello' == 'hello'
+// => true
+'hello' ~= 'world'
+// => true
+
+// Boolean equality
+true == true
+// => true
+false == false
+// => true
+true ~= false
+// => true
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Strict Equality (no type coercion)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Use `=` for strict equality without coercion
+1.0 = 1.0
+// => true
+1 = 1
+// => true
+
+// Strict inequality: integer and float are NOT strictly equal
+(1.0 = 1) not
+// => false
+(1.0 ~= 1) not
+// => true
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Value Type Equality (Map Contents) - NOT YET IMPLEMENTED
+// ═══════════════════════════════════════════════════════════════════════════
+
+// TODO: Map literals (#{key => value}) not yet implemented
+// When implemented, test:
+// - Two maps with same keys/values are equal
+// - Maps with different values are not equal
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Actor Identity (Process PIDs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Actors are compared by pid - different spawns are not equal
+c1 := Counter spawn
+// => _
+c2 := Counter spawn
+// => _
+
+// Different actor instances are not equal (different pids)
+c1 ~= c2
+// => true
+
+// Same reference is equal to itself
+c1 == c1
+// => true
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Edge Cases
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Empty maps are equal - NOT YET IMPLEMENTED
+// TODO: Map literals not yet supported
+// #{} == #{}
+// // => true
+
+// Zero values with coercion
+0.0 == 0
+// => true
+0 == 0.0
+// => true
+
+// Negative values
+-1.0 == -1
+// => true
+-5 ~= -6
+// => true

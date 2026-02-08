@@ -1,0 +1,90 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for block (closure) operations
+// Each expression is followed by its expected result
+
+// Block with one argument
+[:x | x + 1] value: 5
+// => 6
+
+// Block with two arguments
+[:x :y | x + y] value: 3 value: 4
+// => 7
+
+// Block with no arguments (value message)
+[42] value
+// => 42
+
+// Block with expression body
+[:n | n * n] value: 5
+// => 25
+
+// Nested arithmetic in block
+[:a | a + a * 2] value: 3
+// => 9
+
+// Block returning constant
+[:x | 100] value: 999
+// => 100
+
+// Block with subtraction
+[:a :b | a - b] value: 10 value: 3
+// => 7
+
+// Block with three arguments
+[:x :y :z | x + y + z] value: 1 value: 2 value: 3
+// => 6
+
+// Nested blocks - outer returns inner block that captures x
+[[:x | [:y | x + y]] value: 10] value value: 5
+// => 15
+
+// Higher-order block (makeAdder pattern)
+[[:n | [:x | x + n]] value: 5] value value: 10
+// => 15
+
+// Complex expression in block body
+[:x | x * 2 + 1] value: 5
+// => 11
+
+// ===========================================================================
+// RETURN STATEMENTS (^)
+// ===========================================================================
+
+// Explicit return with ^ (returns from block)
+[:x | ^x + 10] value: 5
+// => 15
+
+// Explicit return of literal
+[^42] value
+// => 42
+
+// Implicit return (last expression) - same behavior
+[:x | x + 10] value: 5
+// => 15
+
+// whileTrue: with false condition (returns immediately)
+[false] whileTrue: [42]
+// => nil
+
+// ===========================================================================
+// CLOSURES - Basic examples (see closures_advanced.bt for comprehensive tests)
+// ===========================================================================
+
+// Simple closure capturing outer variable
+outerVar := 10
+// => 10
+
+[:x | x + outerVar] value: 5
+// => 15
+
+// Nested closure with capture
+makeAdder := [:n | [:x | x + n]]
+// => a Block/1
+
+addFive := makeAdder value: 5
+// => a Block/1
+
+addFive value: 10
+// => 15

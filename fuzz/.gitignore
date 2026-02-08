@@ -1,0 +1,9 @@
+target
+artifacts
+coverage
+
+# Allow initial seed corpus, but ignore fuzzer-generated corpus
+corpus/*
+!corpus/parse_arbitrary/
+corpus/parse_arbitrary/*
+!corpus/parse_arbitrary/*.bt
