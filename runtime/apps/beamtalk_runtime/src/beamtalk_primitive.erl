@@ -85,10 +85,7 @@ class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
 class_of(X) when is_list(X) -> 'Array';
 class_of(X) when is_map(X) ->
-    case maps:find('$beamtalk_class', X) of
-        {ok, Class} when is_atom(Class) -> Class;
-        _ -> 'Dictionary'
-    end;
+    beamtalk_tagged_map:class_of(X, 'Dictionary');
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     element(2, X);  % Extract class field from #beamtalk_object{}
 class_of(X) when is_tuple(X) -> 'Tuple';
@@ -147,15 +144,15 @@ send(X, Selector, Args) when is_float(X) ->
     beamtalk_float:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_map(X) ->
     %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
-    case maps:find('$beamtalk_class', X) of
-        {ok, 'CompiledMethod'} ->
+    case beamtalk_tagged_map:class_of(X) of
+        'CompiledMethod' ->
             beamtalk_compiled_method:dispatch(Selector, Args, X);
-        {ok, Class} when is_atom(Class) ->
-            %% Value type instance - route to class module (BT-354)
-            value_type_send(X, Class, Selector, Args);
-        _ ->
+        undefined ->
             %% Plain map (Dictionary)
-            beamtalk_map:dispatch(Selector, Args, X)
+            beamtalk_map:dispatch(Selector, Args, X);
+        Class ->
+            %% Value type instance - route to class module (BT-354)
+            value_type_send(X, Class, Selector, Args)
     end;
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
@@ -212,13 +209,14 @@ responds_to(X, Selector) when is_tuple(X) ->
 responds_to(X, Selector) when is_float(X) ->
     beamtalk_float:has_method(Selector);
 responds_to(X, Selector) when is_map(X) ->
-    case maps:find('$beamtalk_class', X) of
-        {ok, 'CompiledMethod'} ->
+    case beamtalk_tagged_map:class_of(X) of
+        'CompiledMethod' ->
             beamtalk_compiled_method:has_method(Selector);
-        {ok, Class} when is_atom(Class) ->
+        undefined ->
+            beamtalk_map:has_method(Selector);
+        Class ->
             %% Value type instance - check class module exports (BT-354)
-            value_type_responds_to(Class, Selector);
-        _ -> beamtalk_map:has_method(Selector)
+            value_type_responds_to(Class, Selector)
     end;
 responds_to(X, Selector) when is_list(X) ->
     beamtalk_list:has_method(Selector);

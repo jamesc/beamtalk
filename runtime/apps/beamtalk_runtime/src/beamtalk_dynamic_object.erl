@@ -172,7 +172,7 @@ dispatch(Selector, Args, Self, State) ->
                         class => Class,
                         reason => Reason
                     }),
-                    ClassName = maps:get('$beamtalk_class', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
                     Error = beamtalk_error:with_selector(Error0, Selector),
                     {error, Error}
@@ -192,14 +192,14 @@ dispatch(Selector, Args, Self, State) ->
                                 class => Class,
                                 reason => Reason
                             }),
-                            ClassName = maps:get('$beamtalk_class', State, unknown),
+                            ClassName = beamtalk_tagged_map:class_of(State, unknown),
                             Error0 = beamtalk_error:new(type_error, ClassName),
                             Error = beamtalk_error:with_selector(Error0, 'doesNotUnderstand:args:'),
                             {error, Error}
                     end;
                 error ->
                     %% No doesNotUnderstand - method not found is an error
-                    ClassName = maps:get('$beamtalk_class', State, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
                     Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),

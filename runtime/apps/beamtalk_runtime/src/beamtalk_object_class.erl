@@ -261,8 +261,10 @@ add_after(ClassPid, Selector, Fun) ->
 -spec super_dispatch(map(), selector(), list()) -> {reply, term(), map()} | {error, term()}.
 super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state
-    case maps:find('$beamtalk_class', State) of
-        {ok, CurrentClass} ->
+    case beamtalk_tagged_map:class_of(State) of
+        undefined ->
+            {error, missing_class_field_in_state};
+        CurrentClass ->
             %% Look up the current class process
             case whereis_class(CurrentClass) of
                 undefined ->
@@ -276,9 +278,7 @@ super_dispatch(State, Selector, Args) ->
                             %% Find and invoke in superclass chain
                             find_and_invoke_super_method(Superclass, Selector, Args, State)
                     end
-            end;
-        error ->
-            {error, missing_class_field_in_state}
+            end
     end.
 
 %% @doc Create a dynamic subclass at runtime.
