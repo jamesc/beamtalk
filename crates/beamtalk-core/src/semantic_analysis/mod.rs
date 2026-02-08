@@ -435,15 +435,15 @@ impl Analyser {
             } => {
                 self.analyse_expression(receiver, None);
 
-                // Run method-specific validators
-                let selector_name = selector.name();
-                if let Some(validator) = self.method_validators.get(&selector_name) {
+                // Determine context for block arguments
+                let selector_str = block_context::selector_to_string(selector);
+
+                // Run method-specific validators (reuse selector_str to avoid extra allocation)
+                if let Some(validator) = self.method_validators.get(&selector_str) {
                     let diagnostics = validator.validate(selector, arguments, *span);
                     self.result.diagnostics.extend(diagnostics);
                 }
 
-                // Determine context for block arguments
-                let selector_str = block_context::selector_to_string(selector);
                 for (i, arg) in arguments.iter().enumerate() {
                     let is_control_flow = block_context::is_control_flow_selector(&selector_str, i);
                     let context = if is_control_flow {
@@ -466,6 +466,14 @@ impl Analyser {
                 for msg in messages {
                     // Apply selector-based context detection for cascade messages
                     let selector_str = block_context::selector_to_string(&msg.selector);
+
+                    // Run method-specific validators for cascade messages
+                    if let Some(validator) = self.method_validators.get(&selector_str) {
+                        let diagnostics =
+                            validator.validate(&msg.selector, &msg.arguments, msg.span);
+                        self.result.diagnostics.extend(diagnostics);
+                    }
+
                     for (i, arg) in msg.arguments.iter().enumerate() {
                         let is_control_flow =
                             block_context::is_control_flow_selector(&selector_str, i);
@@ -2222,13 +2230,20 @@ mod tests {
             "Expected 1 symbol literal error, got: {:?}",
             result.diagnostics
         );
-        assert!(symbol_errors[0].message.contains("#increment"));
+        assert!(
+            symbol_errors[0]
+                .message
+                .contains("expects a symbol literal")
+        );
         assert!(
             symbol_errors[0]
                 .message
                 .contains("checks if an object understands a message")
         );
         assert_eq!(symbol_errors[0].span, Span::new(20, 29));
+        // Fix suggestion is in the hint field
+        let hint = symbol_errors[0].hint.as_ref().unwrap();
+        assert!(hint.contains("#increment"));
     }
 
     #[test]
@@ -2265,7 +2280,8 @@ mod tests {
             "Expected 1 symbol literal error, got: {:?}",
             result.diagnostics
         );
-        assert!(symbol_errors[0].message.contains("#Counter"));
+        let hint = symbol_errors[0].hint.as_ref().unwrap();
+        assert!(hint.contains("#Counter"));
         assert!(
             symbol_errors[0]
                 .message
@@ -2333,6 +2349,52 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("expects a symbol literal")),
             "Non-reflection methods should not trigger symbol validation, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_cascade_responds_to_with_identifier_emits_error() {
+        // counter respondsTo: increment; size — cascade should also validate
+        let cascade = Expression::Cascade {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "counter",
+                test_span(),
+            ))),
+            messages: vec![
+                crate::ast::CascadeMessage::new(
+                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                        "respondsTo:",
+                        test_span(),
+                    )]),
+                    vec![Expression::Identifier(Identifier::new(
+                        "increment",
+                        Span::new(20, 29),
+                    ))],
+                    test_span(),
+                ),
+                crate::ast::CascadeMessage::new(
+                    MessageSelector::Unary("size".into()),
+                    vec![],
+                    test_span(),
+                ),
+            ],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![cascade], test_span());
+        let result = analyse_with_known_vars(&module, &["counter"]);
+
+        let symbol_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects a symbol literal"))
+            .collect();
+
+        assert_eq!(
+            symbol_errors.len(),
+            1,
+            "Cascade messages should trigger symbol validation, got: {:?}",
             result.diagnostics
         );
     }

@@ -95,9 +95,7 @@ impl MethodValidator for ReflectionMethodValidator {
                 let message = format!(
                     "{selector_name} expects a symbol literal, not an identifier\n\
                      \n\
-                     = help: Use # to create a symbol: #{}\n\
                      = note: {selector_name} {}",
-                    id.name,
                     method_description(&selector_name),
                 );
                 vec![Diagnostic {
@@ -113,9 +111,7 @@ impl MethodValidator for ReflectionMethodValidator {
                 let message = format!(
                     "{selector_name} expects a symbol literal, not a class reference\n\
                      \n\
-                     = help: Use # to create a symbol: #{}\n\
                      = note: {selector_name} {}",
-                    name.name,
                     method_description(&selector_name),
                 );
                 vec![Diagnostic {
@@ -131,7 +127,6 @@ impl MethodValidator for ReflectionMethodValidator {
                 let message = format!(
                     "{selector_name} expects a symbol literal\n\
                      \n\
-                     = help: Use # to create a symbol, e.g., #methodName\n\
                      = note: {selector_name} {}",
                     method_description(&selector_name),
                 );
@@ -197,13 +192,15 @@ mod tests {
         let diagnostics = validator.validate(&responds_to_selector(), &args, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("expects a symbol literal"));
-        assert!(diagnostics[0].message.contains("#increment"));
         assert!(
             diagnostics[0]
                 .message
                 .contains("checks if an object understands a message")
         );
         assert_eq!(diagnostics[0].span, Span::new(15, 24));
+        // Fix suggestion is in the hint field only (not duplicated in message)
+        let hint = diagnostics[0].hint.as_ref().unwrap();
+        assert!(hint.contains("#increment"));
     }
 
     #[test]
@@ -221,7 +218,8 @@ mod tests {
                 .message
                 .contains("expects a symbol literal, not a class reference")
         );
-        assert!(diagnostics[0].message.contains("#Counter"));
+        let hint = diagnostics[0].hint.as_ref().unwrap();
+        assert!(hint.contains("#Counter"));
     }
 
     #[test]
