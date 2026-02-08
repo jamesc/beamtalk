@@ -730,6 +730,7 @@ mod tests {
         assert!(h.has_class("Object"));
         assert!(h.has_class("Actor"));
         assert!(h.has_class("Integer"));
+        assert!(h.has_class("Float"));
         assert!(h.has_class("String"));
         assert!(h.has_class("Array"));
         assert!(h.has_class("List"));
