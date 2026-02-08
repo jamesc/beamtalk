@@ -50,13 +50,13 @@ impl MethodInfo {
     /// Returns `true` if `self` (a subclass method) can override `ancestor`.
     ///
     /// A primary method cannot override a sealed primary method with the same selector.
-    /// Advice methods are never overrides.
+    /// Advice methods are never overrides. Different selectors are never overrides.
     #[must_use]
     pub fn can_override(&self, ancestor: &MethodInfo) -> bool {
-        if ancestor.is_sealed && self.kind == MethodKind::Primary {
+        if self.selector != ancestor.selector {
             return false;
         }
-        self.selector == ancestor.selector
+        !(ancestor.is_sealed && self.kind == MethodKind::Primary)
     }
 }
 
@@ -334,6 +334,69 @@ mod tests {
 
     fn test_span() -> Span {
         Span::new(0, 0)
+    }
+
+    // --- Value object method tests ---
+
+    #[test]
+    fn method_info_is_advice() {
+        let primary = builtin_method("foo", 0, "Test");
+        assert!(!primary.is_advice());
+
+        let before = MethodInfo {
+            kind: MethodKind::Before,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(before.is_advice());
+
+        let after = MethodInfo {
+            kind: MethodKind::After,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(after.is_advice());
+
+        let around = MethodInfo {
+            kind: MethodKind::Around,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(around.is_advice());
+    }
+
+    #[test]
+    fn method_info_can_override_non_sealed() {
+        let child = builtin_method("describe", 0, "Counter");
+        let ancestor = builtin_method("describe", 0, "Object");
+        assert!(child.can_override(&ancestor));
+    }
+
+    #[test]
+    fn method_info_cannot_override_sealed() {
+        let child = builtin_method("describe", 0, "Counter");
+        let ancestor = MethodInfo {
+            is_sealed: true,
+            ..builtin_method("describe", 0, "Actor")
+        };
+        assert!(!child.can_override(&ancestor));
+    }
+
+    #[test]
+    fn method_info_different_selectors_not_override() {
+        let child = builtin_method("increment", 0, "Counter");
+        let sealed_ancestor = MethodInfo {
+            is_sealed: true,
+            ..builtin_method("describe", 0, "Actor")
+        };
+        // Different selectors → not an override (regardless of sealed status)
+        assert!(!child.can_override(&sealed_ancestor));
+    }
+
+    #[test]
+    fn class_info_can_be_subclassed() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(h.get_class("Actor").unwrap().can_be_subclassed());
+        assert!(h.get_class("Object").unwrap().can_be_subclassed());
+        assert!(!h.get_class("Integer").unwrap().can_be_subclassed());
+        assert!(!h.get_class("String").unwrap().can_be_subclassed());
     }
 
     // --- Hierarchy structure tests ---
