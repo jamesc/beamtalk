@@ -12,6 +12,7 @@
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
 //! - **Object**: `isNil`, `notNil`, `respondsTo:` → Protocol methods
+//! - **Dynamic dispatch**: `perform:`, `perform:withArgs:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
 //! at runtime), these intrinsics generate efficient inline code because they are
