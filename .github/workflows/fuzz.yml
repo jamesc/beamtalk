@@ -1,0 +1,173 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: Nightly Fuzzing
+
+on:
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # Allow manual triggering for testing
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fuzz/target
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fuzz-
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.1
+
+      - name: Run parser fuzzing (10 minutes)
+        id: fuzz
+        continue-on-error: true
+        run: |
+          # Run fuzzing for 600 seconds (10 minutes)
+          # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
+          # -max_total_time=600: Run for exactly 10 minutes
+          cargo +nightly fuzz run parse_arbitrary -- \
+            -rss_limit_mb=4096 \
+            -max_total_time=600 \
+            -print_final_stats=1
+
+      - name: Upload artifacts on failure
+        if: steps.fuzz.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-artifacts-${{ github.run_id }}
+          path: fuzz/artifacts/parse_arbitrary/
+          retention-days: 30
+
+      - name: Check for crashes
+        if: steps.fuzz.outcome == 'failure'
+        run: |
+          # Check if there are any crash artifacts (not OOM)
+          if ls fuzz/artifacts/parse_arbitrary/crash-* 1> /dev/null 2>&1; then
+            echo "❌ CRITICAL: Parser crashed during fuzzing!"
+            echo "Crash artifacts uploaded. Please investigate immediately."
+            exit 1
+          fi
+          
+          # Check for timeouts
+          if ls fuzz/artifacts/parse_arbitrary/timeout-* 1> /dev/null 2>&1; then
+            echo "⚠️ WARNING: Parser timeout detected"
+            echo "This indicates infinite loop or extremely slow parsing."
+          fi
+          
+          # Check for OOM
+          if ls fuzz/artifacts/parse_arbitrary/oom-* 1> /dev/null 2>&1; then
+            echo "⚠️ INFO: Out-of-memory detected on malformed input"
+            echo "This is expected for extremely malformed input."
+            echo "Consider adding resource limits to the parser if this becomes frequent."
+          fi
+
+      - name: Create issue on crash
+        if: steps.fuzz.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Check if crash artifacts exist
+            const artifactsDir = 'fuzz/artifacts/parse_arbitrary/';
+            let crashes = [];
+            
+            try {
+              const files = fs.readdirSync(artifactsDir);
+              crashes = files.filter(f => f.startsWith('crash-'));
+            } catch (e) {
+              console.log('No artifacts directory found');
+              return;
+            }
+            
+            if (crashes.length === 0) {
+              console.log('No crash artifacts found, not creating issue');
+              return;
+            }
+            
+            // Create issue for crashes
+            const title = `🔀 Parser crash found by fuzzer (run ${context.runId})`;
+            const body = `## Parser Crash Detected
+            
+            The nightly fuzzer found ${crashes.length} crash(es) in the parser.
+            
+            **Run:** ${context.runId}
+            **Workflow:** ${context.workflow}
+            **Date:** ${new Date().toISOString()}
+            
+            ### Crash Artifacts
+            
+            ${crashes.map(c => `- \`${c}\``).join('\n')}
+            
+            ### Action Required
+            
+            1. Download the \`fuzz-artifacts-${context.runId}\` artifact from the workflow run
+            2. Reproduce the crash: \`cargo +nightly fuzz run parse_arbitrary <artifact-file>\`
+            3. Fix the crash in the parser
+            4. Re-run fuzzer to verify fix
+            
+            ### References
+            
+            - ADR 0011: Robustness Testing — Layered Fuzzing
+            - Epic: BT-362
+            - Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['Bug', 'parser', 'fuzzing', 'High']
+            });
+
+      - name: Add to job summary
+        if: always()
+        run: |
+          echo "## 🔀 Fuzzing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.fuzz.outcome }}" = "success" ]; then
+            echo "✅ **Success:** No crashes detected in 10-minute fuzz run" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Issues Detected:** See artifacts for details" >> $GITHUB_STEP_SUMMARY
+            
+            # List artifact types found
+            if ls fuzz/artifacts/parse_arbitrary/crash-* 1> /dev/null 2>&1; then
+              echo "- ❌ **Crashes:** Parser panicked on some input" >> $GITHUB_STEP_SUMMARY
+            fi
+            if ls fuzz/artifacts/parse_arbitrary/timeout-* 1> /dev/null 2>&1; then
+              echo "- ⏱️ **Timeouts:** Parser took too long on some input" >> $GITHUB_STEP_SUMMARY
+            fi
+            if ls fuzz/artifacts/parse_arbitrary/oom-* 1> /dev/null 2>&1; then
+              echo "- 💾 **OOM:** Parser used excessive memory on malformed input" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Corpus size:** $(ls -1 fuzz/corpus/parse_arbitrary/ | wc -l) files" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** 10 minutes" >> $GITHUB_STEP_SUMMARY

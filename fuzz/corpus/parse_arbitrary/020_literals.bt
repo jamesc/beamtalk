@@ -1,0 +1,103 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for literal values
+// Tests for integers, strings, and other primitive literals
+
+// ===========================================================================
+// INTEGER LITERALS
+// ===========================================================================
+
+// Basic integer
+42
+// => 42
+
+// Zero
+0
+// => 0
+
+// Negative integer (via subtraction from 0)
+0 - 5
+// => -5
+
+// Large integer
+1000000
+// => 1000000
+
+// ===========================================================================
+// STRING LITERALS
+// ===========================================================================
+
+// Simple string (single-quoted)
+'hello'
+// => hello
+
+// String with spaces
+'hello world'
+// => hello world
+
+// Empty string
+''
+// => 
+
+// String with punctuation
+'Hello, World!'
+// => Hello, World!
+
+// ===========================================================================
+// ADDITIONAL INTEGER LITERALS
+// ===========================================================================
+
+// Single digit
+1
+// => 1
+
+// Multi-digit
+12345
+// => 12345
+
+// Very large number
+999999999
+// => 999999999
+
+// ===========================================================================
+// ADDITIONAL STRING LITERALS
+// ===========================================================================
+
+// String with numbers
+'test123'
+// => test123
+
+// String with special characters
+'a-b_c'
+// => a-b_c
+
+// String with multiple words
+'The quick brown fox'
+// => The quick brown fox
+
+// ===========================================================================
+// FLOAT LITERALS (from division)
+// ===========================================================================
+
+// Division produces float
+10 / 2
+// => 5.0
+
+// Fractional result
+1 / 2
+// => 0.5
+
+// ===========================================================================
+// BOOLEAN LITERALS
+// ===========================================================================
+// Note: See booleans.bt for comprehensive boolean tests
+
+// True literal
+true
+// => true
+
+// False literal
+false
+// => false
+
