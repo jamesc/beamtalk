@@ -481,3 +481,17 @@ io_capture_dead_process_test() ->
     Output = beamtalk_repl_eval:stop_io_capture({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
+%% === is_stdlib_path tests ===
+
+is_stdlib_path_relative_lib_test() ->
+    ?assert(beamtalk_repl_eval:is_stdlib_path("lib/Integer.bt")).
+
+is_stdlib_path_absolute_test() ->
+    ?assert(beamtalk_repl_eval:is_stdlib_path("/workspace/project/lib/Integer.bt")).
+
+is_stdlib_path_non_lib_test() ->
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("src/MyClass.bt")).
+
+is_stdlib_path_non_lib_absolute_test() ->
+    ?assertNot(beamtalk_repl_eval:is_stdlib_path("/workspace/project/src/MyClass.bt")).
+

@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Transcript class
+// Transcript is the standard I/O object for writing to stdout.
+// show: prints a value, cr prints a newline. Both return nil.
+
+// ===========================================================================
+// BASIC OUTPUT
+// ===========================================================================
+
+// show: prints a string and returns nil
+Transcript show: 'Hello'
+// => nil
+
+// cr prints a newline and returns nil
+Transcript cr
+// => nil
+
+// ===========================================================================
+// SHOW: WITH DIFFERENT TYPES
+// ===========================================================================
+
+// show: with an integer
+Transcript show: 42
+// => nil
+
+// show: with a boolean
+Transcript show: true
+// => nil
+
+// show: with nil
+Transcript show: nil
+// => nil
+
+// ===========================================================================
+// CASCADE (SEMICOLON CHAINING)
+// ===========================================================================
+
+// Note: Cascading on class-level methods (Transcript show: 'Hello'; cr)
+// requires metaclass dispatch which is not yet implemented.
+// Use separate statements instead:
+Transcript show: 'Hello'
+// => nil
+Transcript cr
+// => nil
