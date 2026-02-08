@@ -77,6 +77,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
             "application:set_env(beamtalk_runtime, repl_port, {port}), \
              application:set_env(beamtalk_runtime, node_name, '{name}'), \
              {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+             {{ok, _}} = beamtalk_repl:start_link({port}), \
              io:format(\"REPL backend started on port {port} (node: {name})~n\"), \
              receive stop -> ok end."
         )
@@ -84,6 +85,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         format!(
             "application:set_env(beamtalk_runtime, repl_port, {port}), \
              {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+             {{ok, _}} = beamtalk_repl:start_link({port}), \
              io:format(\"REPL backend started on port {port}~n\"), \
              receive stop -> ok end."
         )

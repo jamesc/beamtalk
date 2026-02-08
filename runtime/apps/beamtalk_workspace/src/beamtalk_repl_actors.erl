@@ -70,7 +70,7 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     gen_server:call(RegistryPid, {register, ActorPid, ClassName, ModuleName}).
 
 %% @doc Actor spawn callback for beamtalk_runtime integration.
-%% This is registered via application:set_env by beamtalk_repl_app:start/2.
+%% This is registered via application:set_env by beamtalk_workspace_app:start/2.
 %% Best-effort: catches errors so the runtime spawn path never crashes.
 -spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok.
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
