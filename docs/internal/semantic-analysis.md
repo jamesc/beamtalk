@@ -53,10 +53,10 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
   - Undefined variable detection
   - `self` recognition in method bodies
 
-- **Class hierarchy**: `crates/beamtalk-core/src/semantic_analysis/class_hierarchy.rs`
+- **Class hierarchy**: `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs`
   - Static class hierarchy for built-in + user-defined classes
   - Method resolution and sealed class enforcement
-  - **26 tests**
+  - **36 tests**
 
 - **Primitive validator**: `crates/beamtalk-core/src/semantic_analysis/primitive_validator.rs`
   - Validates primitive constraints on classes
@@ -128,14 +128,17 @@ Without semantic analysis, we cannot:
 
 ```
 crates/beamtalk-core/src/semantic_analysis/
-├── mod.rs                # ✅ Public API, AST traversal, pattern binding extraction
-├── scope.rs              # ✅ Hierarchical scope tracking
-├── block_context.rs      # ✅ Block context classification
-├── name_resolver.rs      # ✅ Name resolution and undefined variable detection
-├── class_hierarchy.rs    # ✅ Static class hierarchy and method resolution
-├── primitive_validator.rs# ✅ Primitive constraint validation
-├── type_checker.rs       # ⏳ Stub for future gradual typing (Phase 3)
-└── error.rs              # ✅ Semantic error types
+├── mod.rs                 # ✅ Public API, AST traversal, pattern binding extraction
+├── scope.rs               # ✅ Hierarchical scope tracking
+├── block_context.rs       # ✅ Block context classification
+├── name_resolver.rs       # ✅ Name resolution and undefined variable detection
+├── class_hierarchy/       # ✅ Static class hierarchy and method resolution
+│   ├── mod.rs             # ✅ Module root
+│   └── builtins.rs        # ✅ Built-in classes and protocols
+├── primitive_validator.rs # ✅ Primitive constraint validation
+├── method_validators.rs   # ✅ Selector-specific argument validation
+├── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
+└── error.rs               # ✅ Semantic error types
 ```
 
 ## Key Types

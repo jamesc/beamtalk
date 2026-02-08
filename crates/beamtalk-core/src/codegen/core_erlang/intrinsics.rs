@@ -429,11 +429,7 @@ impl CoreErlangGenerator {
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
 
-<<<<<<< HEAD
                         // Send async message with empty args
-=======
-                        // Send async message via beamtalk_actor:async_send with empty args
->>>>>>> origin/main
                         write!(
                             self.output,
                             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, {selector_var}, [], {future_var}) in "
