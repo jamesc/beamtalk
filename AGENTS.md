@@ -1478,10 +1478,10 @@ For more details, see [About Agent Skills](https://docs.github.com/en/copilot/co
 
 ```
 runtime/
-├── rebar.config            # Umbrella project config (BT-287)
+├── rebar.config            # Umbrella project config (ADR 0007, 0009)
 ├── apps/
-│   ├── beamtalk_runtime/   # Core runtime OTP application
-│   │   ├── src/            # Runtime source
+│   ├── beamtalk_runtime/   # Core runtime OTP application (ADR 0009)
+│   │   ├── src/            # Runtime source (primitives, object system, actors, futures)
 │   │   ├── include/        # Header files (beamtalk.hrl)
 │   │   ├── test/           # Runtime unit tests (*.erl)
 │   │   ├── config/         # OTP sys.config
@@ -1489,6 +1489,9 @@ runtime/
 │   │       ├── logging_counter.bt
 │   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
 │   │       └── README.md
+│   ├── beamtalk_workspace/  # Workspace and interactive development OTP application (ADR 0009) — NEW
+│   │   ├── src/            # REPL source (repl eval, server, workspace supervision, session management)
+│   │   └── test/           # REPL unit tests (*.erl)
 │   └── beamtalk_stdlib/    # Standard library OTP application (ADR 0007)
 │       ├── src/            # Application metadata (beamtalk_stdlib.app.src)
 │       └── ebin/           # Generated .beam files (Actor, Block, Integer, etc.) created by build-stdlib
@@ -1505,6 +1508,15 @@ examples/
 └── repl-tutorial.md      # Beginner tutorial (BT-239)
 ```
 
+**Dependency direction (ADR 0009):**
+```
+beamtalk_workspace (interactive dev)
+    ↓ depends on
+beamtalk_runtime (core language runtime)
+    ↓ depends on
+beamtalk_stdlib (compiled stdlib)
+```
+
 ### Test Organization - CRITICAL DISTINCTION
 
 ⚠️ **IMPORTANT:** The test suite has multiple layers. Be precise about which tests you're referring to:
@@ -1516,7 +1528,13 @@ examples/
 - Calls `gen_server` protocol directly with raw pids
 - Appropriate for testing low-level runtime behavior
 
-#### 2. Codegen Simulation Tests  
+#### 2. REPL Unit Tests
+**Location:** `runtime/apps/beamtalk_workspace/test/*_tests.erl` (ADR 0009)
+- Tests REPL evaluation, protocol, server, workspace management
+- Includes session supervision and idle monitoring tests
+- Moved from `beamtalk_runtime/test/` in BT-351
+
+#### 3. Codegen Simulation Tests  
 **Location:** `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl`
 - Tests using **real compiled Beamtalk code** from `tests/e2e/fixtures/counter.bt` (unified fixture - BT-239)
 - The `spawn/0` and `spawn/1` tests use `counter:spawn()` from compiled module
@@ -1526,7 +1544,7 @@ examples/
 - Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
-#### 3. Real End-to-End Tests
+#### 4. Real End-to-End Tests
 **Location:** `tests/e2e/cases/*.bt`
 - Actual Beamtalk source files (`.bt` extension)
 - Compiled by the real compiler (lexer → parser → codegen → erlc)
@@ -1534,7 +1552,7 @@ examples/
 - E2E fixtures in `tests/e2e/fixtures/` (including canonical `counter.bt`)
 - **These are the TRUE end-to-end tests**
 
-**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/`.**
+**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/` or `runtime/apps/beamtalk_workspace/test/`.**
 
 #### Test Fixture Organization (BT-239)
 
@@ -1590,6 +1608,7 @@ just test-runtime            # Erlang runtime tests only
 just test-all                # All tests (unit + E2E + runtime)
 just clean                   # Clean build artifacts (works with Docker volumes)
 just coverage                # Generate coverage reports
+just fuzz [DURATION]         # Fuzz parser for crash safety (default: 60s, needs nightly)
 ```
 
 **Raw cargo/rebar3 commands** (if needed):

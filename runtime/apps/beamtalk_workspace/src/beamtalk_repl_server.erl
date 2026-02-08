@@ -9,7 +9,7 @@
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,

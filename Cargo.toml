@@ -4,6 +4,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "test-package-compiler"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

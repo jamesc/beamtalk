@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ===========================================================================
+// SUPER SENDS - Inheritance and Method Dispatch
+// ===========================================================================
+//
+// Tests the 'super' keyword for calling parent class implementations.
+// This is a critical feature for object-oriented programming.
+//
+// Related: BT-95 (beamtalk_object_class:super_dispatch/3), BT-203 (class hierarchy)
+
+// @load tests/e2e/fixtures/counter.bt
+// @load tests/e2e/fixtures/logging_counter.bt
+
+// ===========================================================================
+// @LOAD VERIFICATION - FIXED IN BT-195
+// ===========================================================================
+// BT-195 fixed: @load now works with actor classes that use 'self'
+// The above @load directives successfully compile counter.bt and logging_counter.bt
+// without "Undefined variable: self" errors.
+
+// ===========================================================================
+// SUPER SEND TESTS - DISABLED PENDING BT-211
+// ===========================================================================
+//
+// Super dispatch E2E tests fail with badarg because subclass init doesn't
+// include inherited state fields from parent classes.
+//
+// Root cause (BT-211):
+//   - LoggingCounter extends Counter
+//   - Counter has `state: value = 0`
+//   - LoggingCounter has `state: logCount = 0`
+//   - When LoggingCounter spawns, its state ONLY has logCount, NOT value
+//   - When `super increment` calls Counter's increment, it does maps:get(value, State)
+//   - This fails with badarg because value doesn't exist in state
+//
+// The simulation tests pass because they manually set instance_variables
+// to include both parent and child fields. See:
+//   runtime/test/beamtalk_codegen_simulation_tests.erl line 1553:
+//   instance_variables => [value, logCount]  %% manually includes parent's field
+//
+// Fix required: Codegen needs to include inherited fields in subclass init.
+// See BT-211 for proposed solutions.
+
+// Basic test to verify spawn and class work
+c := Counter spawn
+// => _
+
+c class
+// => Counter
+
+// Counter methods work (no super involved)
+// Auto-await: REPL automatically awaits actor message futures
+c increment
+// => 1
+
+c getValue
+// => 1
+
+// ===========================================================================
+// IMPLEMENTATION NOTES
+// ===========================================================================
+//
+// Super dispatch flow (BT-203):
+// 1. Compiler generates: call 'beamtalk_class':'super_dispatch'(State, Selector, Args)
+// 2. Runtime looks up current class from State.__class__
+// 3. Queries class process for superclass via beamtalk_object_class:superclass/1
+// 4. Walks inheritance chain until method found
+// 5. Invokes method with current instance state
+// 6. Returns {reply, Result, NewState} matching actor protocol
+//
+// Class hierarchy is correctly registered:
+//   Counter -> Actor (superclass)
+//   LoggingCounter -> Counter (superclass)
+//
+// The super_dispatch protocol and class registry work correctly.
+// The remaining issue is inherited state fields (BT-211).
+

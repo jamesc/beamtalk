@@ -430,7 +430,17 @@ impl Parser {
             // If we got an error, try to recover
             if is_error {
                 self.synchronize();
-                break;
+                // BT-368: After synchronization, check if we can continue parsing
+                // If synchronize stopped at a method/class/state boundary, break
+                if self.is_at_end()
+                    || self.is_at_class_definition()
+                    || self.is_at_method_definition()
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                {
+                    break;
+                }
+                // Otherwise, synchronize stopped at a newline or period, so continue parsing
+                continue;
             }
 
             // Period or newline separates statements
