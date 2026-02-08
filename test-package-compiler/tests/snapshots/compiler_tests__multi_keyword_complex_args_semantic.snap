@@ -1,0 +1,16 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (11):
+  - Undefined variable: array
+  - Undefined variable: calculator
+  - Undefined variable: server
+  - Undefined variable: offset
+  - Undefined variable: maxTime
+  - Undefined variable: processor
+  - Undefined variable: factor
+  - Undefined variable: start
+  - Undefined variable: start
+  - Undefined variable: count
+  - Undefined variable: increment

@@ -1,0 +1,8 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (3):
+  - Undefined variable: object
+  - Undefined variable: argument
+  - Undefined variable: another
