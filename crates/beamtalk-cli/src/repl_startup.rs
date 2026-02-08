@@ -1,17 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared REPL BEAM node startup configuration.
+//! Shared REPL BEAM node startup configuration and runtime discovery.
 //!
-//! **DDD Context:** REPL — Startup Configuration
+//! **DDD Context:** REPL — Startup Configuration & Runtime Discovery
 //!
-//! This module provides the canonical eval command and code-path arguments
-//! for starting a BEAM node with the Beamtalk REPL backend.  Both the
-//! production `beamtalk repl` command (`process.rs`) and the E2E test
-//! harness (`tests/e2e.rs`) consume these helpers so that any change to
-//! the startup sequence is automatically reflected in tests.
+//! This module provides the canonical eval command, code-path arguments,
+//! and runtime directory discovery for starting a BEAM node with the
+//! Beamtalk REPL backend.  Both the production `beamtalk repl` command
+//! (`process.rs`) and the E2E test harness (`tests/e2e.rs`) consume
+//! these helpers so that any change to the startup sequence is
+//! automatically reflected in tests.
 
 use std::path::{Path, PathBuf};
+
+use miette::{Result, miette};
 
 /// Directories that must be on the BEAM code path (`-pa`) for the REPL to work.
 #[derive(Debug)]
@@ -113,6 +116,78 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
         );
     }
     args
+}
+
+// ── Runtime Discovery ──────────────────────────────────────────────
+
+/// Find the runtime directory by checking multiple possible locations.
+///
+/// # Errors
+///
+/// Returns an error if no valid runtime directory is found, or if
+/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain `rebar.config`.
+///
+/// Resolution order:
+/// 1. `BEAMTALK_RUNTIME_DIR` environment variable
+/// 2. `CARGO_MANIFEST_DIR/../../runtime` (when running via `cargo run`)
+/// 3. `./runtime` (running from repo root)
+/// 4. Relative to executable (installed location)
+/// 5. Executable's grandparent (target/debug/beamtalk → repo root)
+pub fn find_runtime_dir() -> Result<PathBuf> {
+    // Check explicit env var first
+    if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
+        let path = PathBuf::from(dir);
+        if path.join("rebar.config").exists() {
+            return Ok(path);
+        }
+        return Err(miette!(
+            "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
+        ));
+    }
+
+    // Candidates in order of preference
+    let candidates = [
+        // 1. CARGO_MANIFEST_DIR (when running via cargo run)
+        std::env::var("CARGO_MANIFEST_DIR")
+            .ok()
+            .map(|d| PathBuf::from(d).join("../../runtime")),
+        // 2. Current working directory (running from repo root)
+        Some(PathBuf::from("runtime")),
+        // 3. Relative to executable (installed location)
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk/runtime"))),
+        // 4. Executable's grandparent (target/debug/beamtalk -> repo root)
+        std::env::current_exe().ok().and_then(|exe| {
+            exe.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+                .map(|p| p.join("runtime"))
+        }),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.join("rebar.config").exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(miette!(
+        "Could not find Beamtalk runtime directory.\n\
+        Please run from the repository root or set BEAMTALK_RUNTIME_DIR."
+    ))
+}
+
+/// Check whether a directory contains compiled `.beam` files.
+pub fn has_beam_files(dir: &Path) -> bool {
+    dir.is_dir()
+        && std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+            })
+            .unwrap_or(false)
 }
 
 #[cfg(test)]
