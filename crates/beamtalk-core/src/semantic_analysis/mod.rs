@@ -300,7 +300,91 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     result.diagnostics.extend(analyser.result.diagnostics);
     result.block_info = analyser.result.block_info;
 
+    // Phase 4: Abstract instantiation check (BT-105)
+    check_abstract_instantiation(module, &result.class_hierarchy, &mut result.diagnostics);
+
     result
+}
+
+/// BT-105: Check for attempts to instantiate abstract classes.
+///
+/// Walks all expressions looking for `MessageSend` where the receiver is an
+/// identifier matching an abstract class and the selector is `spawn` or `spawnWith:`.
+fn check_abstract_instantiation(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for expr in &module.expressions {
+        check_abstract_in_expr(expr, hierarchy, diagnostics);
+    }
+    for class in &module.classes {
+        for method in &class.methods {
+            for expr in &method.body {
+                check_abstract_in_expr(expr, hierarchy, diagnostics);
+            }
+        }
+    }
+}
+
+fn check_abstract_in_expr(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            span,
+        } => {
+            // Check if receiver is an identifier matching an abstract class
+            if let Expression::Identifier(Identifier { name, .. }) = receiver.as_ref() {
+                let selector_name = selector.name();
+
+                if (selector_name == "spawn" || selector_name == "spawnWith:")
+                    && hierarchy.is_abstract(name)
+                {
+                    diagnostics.push(Diagnostic::error(
+                        format!(
+                            "Cannot instantiate abstract class `{}`. Subclass it first.",
+                            name
+                        ),
+                        *span,
+                    ));
+                }
+            }
+
+            // Recurse into receiver and arguments
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+            for arg in arguments {
+                check_abstract_in_expr(arg, hierarchy, diagnostics);
+            }
+        }
+        Expression::Block(block) => {
+            for e in &block.body {
+                check_abstract_in_expr(e, hierarchy, diagnostics);
+            }
+        }
+        Expression::Assignment { value, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+        }
+        Expression::Return { value, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    check_abstract_in_expr(arg, hierarchy, diagnostics);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Internal analyser state.
