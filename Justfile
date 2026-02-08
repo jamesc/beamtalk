@@ -208,27 +208,7 @@ coverage-runtime:
     rebar3 cover --verbose
     rebar3 covertool generate
     # Clean up covertool XML: remove empty phantom packages, shorten path-based names
-    python3 -c "
-import xml.etree.ElementTree as ET, sys, os, glob
-for xml_path in glob.glob('_build/test/covertool/*.covertool.xml'):
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    packages = root.find('packages')
-    if packages is None: continue
-    app_name = os.path.basename(xml_path).replace('.covertool.xml', '')
-    to_remove = []
-    for pkg in packages.findall('package'):
-        classes = pkg.find('classes')
-        if classes is None or len(classes) == 0:
-            to_remove.append(pkg)
-        else:
-            # Shorten long path-based names to just the app name
-            pkg.set('name', app_name)
-    for pkg in to_remove:
-        packages.remove(pkg)
-    tree.write(xml_path, xml_declaration=True, encoding='utf-8')
-    print(f'  ✅ Cleaned {os.path.basename(xml_path)}: removed {len(to_remove)} empty package(s)')
-"
+    python3 ../scripts/clean-covertool-xml.py
     echo "  📁 HTML report: runtime/_build/test/cover/index.html"
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
 
@@ -257,23 +237,7 @@ coverage-combined: coverage-runtime coverage-e2e
     # rebar3 cover imports all .coverdata files in _build/test/cover/
     rebar3 cover --verbose
     rebar3 covertool generate
-    # Clean up covertool XML (same as coverage-runtime)
-    python3 -c "
-import xml.etree.ElementTree as ET, os, glob
-for xml_path in glob.glob('_build/test/covertool/*.covertool.xml'):
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    packages = root.find('packages')
-    if packages is None: continue
-    app_name = os.path.basename(xml_path).replace('.covertool.xml', '')
-    to_remove = [pkg for pkg in packages.findall('package') if pkg.find('classes') is None or len(pkg.find('classes')) == 0]
-    for pkg in packages.findall('package'):
-        if pkg not in to_remove:
-            pkg.set('name', app_name)
-    for pkg in to_remove:
-        packages.remove(pkg)
-    tree.write(xml_path, xml_declaration=True, encoding='utf-8')
-"
+    python3 ../scripts/clean-covertool-xml.py
     echo "✅ Combined coverage report generated"
     echo "  📁 HTML report: runtime/_build/test/cover/index.html"
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
