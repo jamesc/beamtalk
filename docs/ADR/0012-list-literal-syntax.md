@@ -1,4 +1,4 @@
-# ADR 0012: List Literal Syntax and the `#` Data Literal System
+# ADR 0012: Collection Literal Syntax and the `#` Data Literal System
 
 ## Status
 Proposed (2026-02-08)
@@ -87,15 +87,70 @@ multi := [x := 1. y := 2. x + y] // Multi-statement block
 | `#'quoted'` | Symbol | atom | ✅ Implemented |
 | `#{k => v}` | Dictionary | map | ✅ Implemented |
 | `#(1, 2, 3)` | List | linked list | **This ADR** |
-| `#[1, 2, 3]` | Tuple | tuple | Future (see below) |
+| `#(1, 2, 3)` | List | linked list | **This ADR** |
+| `{1, 2, 3}` | Array | tuple | **This ADR** |
 
-**The rule is simple:** `#` means data. Bare delimiters mean code.
+**The rule:** `#` means data. Bare delimiters mean code — *except* `{}` which is exclusively for Array (tuple) literals and has no code use.
 
-| Bare (code) | Hash-prefixed (data) |
-|-------------|---------------------|
+| Bare | Hash-prefixed |
+|------|---------------|
 | `(expr)` — grouping | `#(1, 2, 3)` — list literal |
-| `[body]` — block/closure | `#[1, 2, 3]` — tuple literal (future) |
-| `{...}` — reserved | `#{k => v}` — map literal |
+| `[body]` — block/closure | — |
+| `{1, 2, 3}` — array literal | `#{k => v}` — map literal |
+
+### Array Literal Syntax: `{1, 2, 3}`
+
+Arrays (Erlang tuples) use bare braces — matching both Erlang `{A, B, C}` and Smalltalk's `Array` class:
+
+```beamtalk
+// Array literals (Erlang tuples)
+point := {3, 4}
+result := {#ok, 42}
+tagged := {#error, "not found"}
+nested := {1, {2, 3}, 4}
+empty := {}
+
+// Pattern matching — same syntax (already designed)
+{x, y} := point
+{#ok, value} := result
+{#error, reason} := fetchUser: id
+```
+
+**Why bare braces (no `#` prefix)?**
+1. Braces `{}` have no other meaning in Beamtalk — no code construct uses them
+2. Pattern matching already uses `{a, b}` — creation must match destruction
+3. Identical to Erlang `{A, B, C}` — critical for interop (`{#ok, value}` is everywhere)
+4. Arrays are primarily a structural/interop type, not a general-purpose collection
+
+### Naming: "Array", Not "Tuple"
+
+The user-facing class name is **Array**, matching Smalltalk's `Array` (fixed-size, indexed, O(1) access):
+
+| Beamtalk Class | BEAM Type | Literal | Smalltalk Equivalent |
+|---------------|-----------|---------|---------------------|
+| **List** | Erlang list `[...]` | `#(1, 2, 3)` | OrderedCollection |
+| **Array** | Erlang tuple `{...}` | `{1, 2, 3}` | Array |
+| **Dictionary** | Erlang map `#{...}` | `#{k => v}` | Dictionary |
+
+**Cleanup required:** The runtime module `beamtalk_tuple.erl` must be renamed to `beamtalk_array.erl`, and all internal references to `'Tuple'` changed to `'Array'` for consistency. The class hierarchy in `class_hierarchy.rs` already uses `"Array"` (correct) but has wrong methods (list methods like `head`/`tail` instead of array methods).
+
+### Smalltalk Translation
+
+This naming enables a well-defined Smalltalk-to-Beamtalk translator:
+
+| Smalltalk | Beamtalk | Translation |
+|-----------|----------|-------------|
+| `#(1 2 3)` | `{1, 2, 3}` | Array literal → Array literal |
+| `{1. 2. 1+2}` | `{1, 2, 1 + 2}` | Dynamic array → Array literal |
+| `arr at: i` | `arr at: i` | Same |
+| `arr at: i put: v` | `arr := arr at: i put: v` | Add rebind (immutable) |
+| `OrderedCollection with: 1 with: 2` | `#(1, 2)` | OC → List literal |
+| `oc add: x` | `oc := oc prepend: x` | Add rebind (immutable) |
+| `Dictionary new` | `#{}` | Same |
+| `[:x \| x + 1]` | `[:x \| x + 1]` | Identical |
+| `#symbol` | `#symbol` | Identical |
+
+The mutation-to-rebind transformation is the same pattern Beamtalk already uses for field mutations in control flow (state threading in `whileTrue:`, `do:`, etc.).
 
 ### Future Data Literals (Not In This ADR)
 
@@ -103,12 +158,11 @@ This design naturally extends to other literal types. These are **not decided he
 
 | Syntax | Type | BEAM Type | Precedent |
 |--------|------|-----------|-----------|
-| `#[1, 2, 3]` | Tuple | tuple `{1,2,3}` | Brackets = fixed-size, indexed |
 | `#/pattern/` | Regex | compiled regex | Clojure `#""`, Ruby `%r{}` |
 | `#r"raw string"` | Raw string | binary | Python `r""`, Rust `r""` |
 | `#b<<1, 2>>` | Binary | bitstring | Erlang `<<1,2>>` |
 
-These would each require their own ADR when the time comes. The point is that `#(list)` is not an isolated decision — it's the first collection member of a principled system.
+These would each require their own ADR when the time comes.
 
 ### REPL Session
 
@@ -142,6 +196,28 @@ These would each require their own ADR when the time comes. The point is that `#
 
 > obj perform: #add:to: withArgs: #(3, 4)
 7
+
+// Array (tuple) literals
+> {1, 2, 3}
+{1, 2, 3}
+
+> point := {3, 4}
+{3, 4}
+
+> {#ok, 42}
+{#ok, 42}
+
+> {x, y} := point
+{3, 4}
+
+> x
+3
+
+> point at: 1
+3
+
+> point size
+2
 ```
 
 ### Error Examples
@@ -166,15 +242,15 @@ ERROR: Unexpected ',' in block body
 
 ### BEAM Mapping
 
-| Beamtalk | Erlang | BEAM Type |
-|----------|--------|-----------|
-| `#(1, 2, 3)` | `[1, 2, 3]` | Linked list (cons cells) |
-| `#()` | `[]` | Empty list |
-| `#(h \| t)` | `[H \| T]` | Cons cell |
-| `#{a => 1}` | `#{a => 1}` | Map |
-| `#symbol` | `symbol` | Atom |
-
-Lists are Erlang linked lists — O(1) prepend, O(n) append, O(n) random access.
+| Beamtalk | Erlang | BEAM Type | Class |
+|----------|--------|-----------|-------|
+| `#(1, 2, 3)` | `[1, 2, 3]` | Linked list (cons cells) | List |
+| `#()` | `[]` | Empty list | List |
+| `#(h \| t)` | `[H \| T]` | Cons cell | List |
+| `{1, 2, 3}` | `{1, 2, 3}` | Tuple | Array |
+| `{}` | `{}` | Empty tuple | Array |
+| `#{a => 1}` | `#{a => 1}` | Map | Dictionary |
+| `#symbol` | `symbol` | Atom | Symbol |
 
 ## Prior Art
 
@@ -336,9 +412,10 @@ numbers := List with: 1 with: 2 with: 3
 
 ### Neutral
 - `Literal::Array` AST variant and codegen already exist — implementation is wiring up lexer/parser
-- Does not decide tuple literal syntax (`#[1, 2, 3]` is reserved but not committed)
+- `Pattern::Tuple` already exists in AST — array patterns are partially implemented
 - List methods (`head`, `tail`, `prepend:`, `collect:`, etc.) already have codegen support via `list_ops.rs`
 - The `#` prefix convention aligns with Erlang's own `#{map}` and record `#record{field}` syntax
+- `beamtalk_tuple.erl` runtime module must be renamed to `beamtalk_array.erl`
 
 ## Implementation
 
@@ -376,11 +453,37 @@ numbers := List with: 1 with: 2 with: 3
 - Implement `beamtalk_list.erl` runtime dispatch module
 - Wire up `head`, `tail`, `prepend:`, `size`, `at:`, `reversed`, `++`
 
+### Phase 5: Array Literals + Naming Cleanup (M)
+- Add `{expr, expr, ...}` parsing for array (tuple) literals
+- Add `Expression::ArrayLiteral` or extend existing AST
+- Codegen: `{1, 2, 3}` → Erlang tuple `{1, 2, 3}`
+- **Rename `beamtalk_tuple.erl` → `beamtalk_array.erl`** and all internal `'Tuple'` → `'Array'` references
+- Fix `class_hierarchy.rs` `register_array()` — replace list methods (`head`, `tail`) with array methods (`at:`, `size`, `at:put:`)
+- Update `beamtalk_primitive.erl` `class_of/1`: tuples return `'Array'` (currently returns `'Tuple'`)
+- Update `beamtalk_stdlib.erl` class registration
+- E2E tests: `tests/e2e/cases/array_literals.bt`
+
+**Files:**
+- `runtime/apps/beamtalk_runtime/src/beamtalk_tuple.erl` → `beamtalk_array.erl` (rename)
+- `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` — `class_of` and dispatch routing
+- `runtime/apps/beamtalk_runtime/src/beamtalk_stdlib.erl` — Class registration
+- `crates/beamtalk-core/src/semantic_analysis/class_hierarchy.rs` — Fix `register_array()` methods
+- `crates/beamtalk-core/src/source_analysis/parser/expressions.rs` — `parse_array_literal()`
+- `tests/e2e/cases/array_literals.bt` — New E2E test file
+
 ## Migration Path
 
-No migration needed — this is a new feature. The `docs/beamtalk-syntax-rationale.md` syntax table should be updated to show `#(a, b, c)` instead of `[a, b, c]` for lists.
+No migration needed for list literals — this is a new feature.
 
-The `docs/beamtalk-language-features.md` references to `#[1, 2, 3, 4, 5]` in the control flow section should be updated to `#(1, 2, 3, 4, 5)`.
+For the Array rename (`beamtalk_tuple.erl` → `beamtalk_array.erl`):
+- Runtime module renamed, all `'Tuple'` atoms changed to `'Array'`
+- `beamtalk_primitive:class_of/1` returns `'Array'` for tuples (currently `'Tuple'`)
+- `beamtalk_stdlib.erl` registration updated
+- No user-facing migration — the class was already called `Array` in semantic analysis
+
+Documentation updates:
+- `docs/beamtalk-syntax-rationale.md` syntax table: `[a, b, c]` → `#(a, b, c)` for lists, add `{a, b, c}` for arrays
+- `docs/beamtalk-language-features.md`: `#[1, 2, 3, 4, 5]` → `#(1, 2, 3, 4, 5)` in control flow section
 
 ## References
 - BT-72: Implement List literal parsing and codegen
