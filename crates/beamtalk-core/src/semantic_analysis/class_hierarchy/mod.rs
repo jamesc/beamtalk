@@ -18,7 +18,11 @@ use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+mod builtins;
+
 /// Information about a method in the hierarchy.
+///
+/// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodInfo {
     /// Full selector name (e.g., "at:put:", "+", "size").
@@ -33,7 +37,32 @@ pub struct MethodInfo {
     pub is_sealed: bool,
 }
 
+impl MethodInfo {
+    /// Returns `true` if this is a Before, After, or Around advice method.
+    #[must_use]
+    pub fn is_advice(&self) -> bool {
+        matches!(
+            self.kind,
+            MethodKind::Before | MethodKind::After | MethodKind::Around
+        )
+    }
+
+    /// Returns `true` if `self` (a subclass method) can override `ancestor`.
+    ///
+    /// A primary method cannot override a sealed primary method with the same selector.
+    /// Advice methods are never overrides. Different selectors are never overrides.
+    #[must_use]
+    pub fn can_override(&self, ancestor: &MethodInfo) -> bool {
+        if self.selector != ancestor.selector {
+            return false;
+        }
+        !(ancestor.is_sealed && self.kind == MethodKind::Primary)
+    }
+}
+
 /// Information about a class in the hierarchy.
+///
+/// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassInfo {
     /// Class name.
@@ -48,6 +77,14 @@ pub struct ClassInfo {
     pub state: Vec<EcoString>,
     /// Methods defined directly on this class.
     pub methods: Vec<MethodInfo>,
+}
+
+impl ClassInfo {
+    /// Returns `true` if this class can be subclassed.
+    #[must_use]
+    pub fn can_be_subclassed(&self) -> bool {
+        !self.is_sealed
+    }
 }
 
 /// Static class hierarchy built during semantic analysis.
@@ -73,11 +110,9 @@ impl ClassHierarchy {
     /// Create a hierarchy with only built-in classes.
     #[must_use]
     pub fn with_builtins() -> Self {
-        let mut hierarchy = Self {
-            classes: HashMap::new(),
-        };
-        hierarchy.register_builtins();
-        hierarchy
+        Self {
+            classes: builtins::builtin_classes(),
+        }
     }
 
     /// Look up a class by name.
@@ -207,7 +242,7 @@ impl ClassHierarchy {
                 for method in &info.methods {
                     if method.selector.as_str() == selector
                         && method.is_sealed
-                        && method.kind == MethodKind::Primary
+                        && !method.is_advice()
                     {
                         return Some((info.name.clone(), method.clone()));
                     }
@@ -230,7 +265,7 @@ impl ClassHierarchy {
         for class in &module.classes {
             // Check sealed class enforcement
             if let Some(super_info) = self.classes.get(class.superclass.name.as_str()) {
-                if super_info.is_sealed {
+                if !super_info.can_be_subclassed() {
                     diagnostics.push(Diagnostic::error(
                         format!("Cannot subclass sealed class `{}`", class.superclass.name),
                         class.superclass.span,
@@ -240,8 +275,7 @@ impl ClassHierarchy {
                 }
             }
 
-            // Check sealed method override enforcement (primary methods only —
-            // before/after/around methods are not overrides)
+            // Check sealed method override enforcement (advice methods are not overrides)
             for method in &class.methods {
                 if method.kind != MethodKind::Primary {
                     continue;
@@ -283,385 +317,6 @@ impl ClassHierarchy {
 
         diagnostics
     }
-
-    /// Register all built-in classes.
-    fn register_builtins(&mut self) {
-        self.register_proto_object();
-        self.register_object();
-        self.register_actor();
-        self.register_integer();
-        self.register_string();
-        self.register_array();
-        self.register_list();
-        self.register_dictionary();
-        self.register_set();
-        self.register_block();
-        self.register_nil();
-        self.register_true();
-        self.register_false();
-        self.register_collection();
-    }
-
-    fn register_proto_object(&mut self) {
-        self.classes.insert(
-            "ProtoObject".into(),
-            ClassInfo {
-                name: "ProtoObject".into(),
-                superclass: None,
-                is_sealed: false,
-                is_abstract: true,
-                state: vec![],
-                methods: vec![
-                    builtin_method("class", 0, "ProtoObject"),
-                    builtin_method("==", 1, "ProtoObject"),
-                    builtin_method("~=", 1, "ProtoObject"),
-                    builtin_method("doesNotUnderstand:args:", 2, "ProtoObject"),
-                    builtin_method("perform:withArguments:", 2, "ProtoObject"),
-                    builtin_method("error:", 1, "ProtoObject"),
-                ],
-            },
-        );
-    }
-
-    fn register_object(&mut self) {
-        self.classes.insert(
-            "Object".into(),
-            ClassInfo {
-                name: "Object".into(),
-                superclass: Some("ProtoObject".into()),
-                is_sealed: false,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("isNil", 0, "Object"),
-                    builtin_method("notNil", 0, "Object"),
-                    builtin_method("ifNil:", 1, "Object"),
-                    builtin_method("ifNotNil:", 1, "Object"),
-                    builtin_method("ifNil:ifNotNil:", 2, "Object"),
-                    builtin_method("inspect", 0, "Object"),
-                    builtin_method("describe", 0, "Object"),
-                    builtin_method("respondsTo:", 1, "Object"),
-                    builtin_method("instVarNames", 0, "Object"),
-                    builtin_method("instVarAt:", 1, "Object"),
-                    builtin_method("instVarAt:put:", 2, "Object"),
-                    builtin_method("perform:", 1, "Object"),
-                    builtin_method("new", 0, "Object"),
-                    builtin_method("new:", 1, "Object"),
-                ],
-            },
-        );
-    }
-
-    fn register_actor(&mut self) {
-        self.classes.insert(
-            "Actor".into(),
-            ClassInfo {
-                name: "Actor".into(),
-                superclass: Some("Object".into()),
-                is_sealed: false,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("spawn", 0, "Actor"),
-                    builtin_method("spawn:", 1, "Actor"),
-                    builtin_method("describe", 0, "Actor"),
-                ],
-            },
-        );
-    }
-
-    fn register_integer(&mut self) {
-        self.classes.insert(
-            "Integer".into(),
-            ClassInfo {
-                name: "Integer".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("+", 1, "Integer"),
-                    builtin_method("-", 1, "Integer"),
-                    builtin_method("*", 1, "Integer"),
-                    builtin_method("/", 1, "Integer"),
-                    builtin_method("%", 1, "Integer"),
-                    builtin_method("**", 1, "Integer"),
-                    builtin_method("=", 1, "Integer"),
-                    builtin_method("<", 1, "Integer"),
-                    builtin_method("<=", 1, "Integer"),
-                    builtin_method(">", 1, "Integer"),
-                    builtin_method(">=", 1, "Integer"),
-                    builtin_method("negated", 0, "Integer"),
-                    builtin_method("abs", 0, "Integer"),
-                    builtin_method("isZero", 0, "Integer"),
-                    builtin_method("isEven", 0, "Integer"),
-                    builtin_method("isOdd", 0, "Integer"),
-                    builtin_method("isPositive", 0, "Integer"),
-                    builtin_method("isNegative", 0, "Integer"),
-                    builtin_method("min:", 1, "Integer"),
-                    builtin_method("max:", 1, "Integer"),
-                    builtin_method("timesRepeat:", 1, "Integer"),
-                    builtin_method("to:do:", 2, "Integer"),
-                    builtin_method("to:by:do:", 3, "Integer"),
-                    builtin_method("asFloat", 0, "Integer"),
-                    builtin_method("asString", 0, "Integer"),
-                ],
-            },
-        );
-    }
-
-    fn register_string(&mut self) {
-        self.classes.insert(
-            "String".into(),
-            ClassInfo {
-                name: "String".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("length", 0, "String"),
-                    builtin_method("at:", 1, "String"),
-                    builtin_method("++", 1, "String"),
-                    builtin_method(",", 1, "String"),
-                    builtin_method("=", 1, "String"),
-                    builtin_method("<", 1, "String"),
-                    builtin_method(">", 1, "String"),
-                    builtin_method("<=", 1, "String"),
-                    builtin_method(">=", 1, "String"),
-                    builtin_method("uppercase", 0, "String"),
-                    builtin_method("lowercase", 0, "String"),
-                    builtin_method("trim", 0, "String"),
-                    builtin_method("includes:", 1, "String"),
-                    builtin_method("startsWith:", 1, "String"),
-                    builtin_method("endsWith:", 1, "String"),
-                    builtin_method("split:", 1, "String"),
-                    builtin_method("isEmpty", 0, "String"),
-                    builtin_method("isNotEmpty", 0, "String"),
-                    builtin_method("reverse", 0, "String"),
-                    builtin_method("asInteger", 0, "String"),
-                    builtin_method("asFloat", 0, "String"),
-                    builtin_method("asList", 0, "String"),
-                ],
-            },
-        );
-    }
-
-    fn register_array(&mut self) {
-        self.classes.insert(
-            "Array".into(),
-            ClassInfo {
-                name: "Array".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("size", 0, "Array"),
-                    builtin_method("at:", 1, "Array"),
-                    builtin_method("at:put:", 2, "Array"),
-                    builtin_method("++", 1, "Array"),
-                    builtin_method("=", 1, "Array"),
-                    builtin_method("each:", 1, "Array"),
-                    builtin_method("collect:", 1, "Array"),
-                    builtin_method("select:", 1, "Array"),
-                    builtin_method("inject:into:", 2, "Array"),
-                    builtin_method("asList", 0, "Array"),
-                    builtin_method("asSet", 0, "Array"),
-                ],
-            },
-        );
-    }
-
-    fn register_list(&mut self) {
-        self.classes.insert(
-            "List".into(),
-            ClassInfo {
-                name: "List".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("size", 0, "List"),
-                    builtin_method("head", 0, "List"),
-                    builtin_method("tail", 0, "List"),
-                    builtin_method("at:", 1, "List"),
-                    builtin_method("++", 1, "List"),
-                    builtin_method("prepend:", 1, "List"),
-                    builtin_method("=", 1, "List"),
-                    builtin_method("each:", 1, "List"),
-                    builtin_method("collect:", 1, "List"),
-                    builtin_method("select:", 1, "List"),
-                    builtin_method("inject:into:", 2, "List"),
-                    builtin_method("reversed", 0, "List"),
-                    builtin_method("asArray", 0, "List"),
-                    builtin_method("asSet", 0, "List"),
-                ],
-            },
-        );
-    }
-
-    fn register_dictionary(&mut self) {
-        self.classes.insert(
-            "Dictionary".into(),
-            ClassInfo {
-                name: "Dictionary".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("at:", 1, "Dictionary"),
-                    builtin_method("at:put:", 2, "Dictionary"),
-                    builtin_method("size", 0, "Dictionary"),
-                    builtin_method("keys", 0, "Dictionary"),
-                    builtin_method("values", 0, "Dictionary"),
-                    builtin_method("includesKey:", 1, "Dictionary"),
-                    builtin_method("removeKey:", 1, "Dictionary"),
-                    builtin_method("each:", 1, "Dictionary"),
-                    builtin_method("collect:", 1, "Dictionary"),
-                    builtin_method("select:", 1, "Dictionary"),
-                    builtin_method("inject:into:", 2, "Dictionary"),
-                    builtin_method("=", 1, "Dictionary"),
-                    builtin_method("asList", 0, "Dictionary"),
-                ],
-            },
-        );
-    }
-
-    fn register_set(&mut self) {
-        self.classes.insert(
-            "Set".into(),
-            ClassInfo {
-                name: "Set".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("add:", 1, "Set"),
-                    builtin_method("remove:", 1, "Set"),
-                    builtin_method("includes:", 1, "Set"),
-                    builtin_method("size", 0, "Set"),
-                    builtin_method("each:", 1, "Set"),
-                    builtin_method("collect:", 1, "Set"),
-                    builtin_method("select:", 1, "Set"),
-                    builtin_method("=", 1, "Set"),
-                    builtin_method("asList", 0, "Set"),
-                    builtin_method("asArray", 0, "Set"),
-                ],
-            },
-        );
-    }
-
-    fn register_block(&mut self) {
-        self.classes.insert(
-            "Block".into(),
-            ClassInfo {
-                name: "Block".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("value", 0, "Block"),
-                    builtin_method("value:", 1, "Block"),
-                    builtin_method("value:value:", 2, "Block"),
-                    builtin_method("value:value:value:", 3, "Block"),
-                    builtin_method("whileTrue:", 1, "Block"),
-                    builtin_method("whileFalse:", 1, "Block"),
-                    builtin_method("repeat", 0, "Block"),
-                ],
-            },
-        );
-    }
-
-    fn register_nil(&mut self) {
-        self.classes.insert(
-            "UndefinedObject".into(),
-            ClassInfo {
-                name: "UndefinedObject".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("isNil", 0, "UndefinedObject"),
-                    builtin_method("notNil", 0, "UndefinedObject"),
-                    builtin_method("ifNil:", 1, "UndefinedObject"),
-                    builtin_method("ifNotNil:", 1, "UndefinedObject"),
-                    builtin_method("ifNil:ifNotNil:", 2, "UndefinedObject"),
-                ],
-            },
-        );
-    }
-
-    fn register_true(&mut self) {
-        self.classes.insert(
-            "True".into(),
-            ClassInfo {
-                name: "True".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("ifTrue:ifFalse:", 2, "True"),
-                    builtin_method("ifTrue:", 1, "True"),
-                    builtin_method("ifFalse:", 1, "True"),
-                    builtin_method("and:", 1, "True"),
-                    builtin_method("or:", 1, "True"),
-                    builtin_method("not", 0, "True"),
-                ],
-            },
-        );
-    }
-
-    fn register_false(&mut self) {
-        self.classes.insert(
-            "False".into(),
-            ClassInfo {
-                name: "False".into(),
-                superclass: Some("Object".into()),
-                is_sealed: true,
-                is_abstract: false,
-                state: vec![],
-                methods: vec![
-                    builtin_method("ifTrue:ifFalse:", 2, "False"),
-                    builtin_method("ifTrue:", 1, "False"),
-                    builtin_method("ifFalse:", 1, "False"),
-                    builtin_method("and:", 1, "False"),
-                    builtin_method("or:", 1, "False"),
-                    builtin_method("not", 0, "False"),
-                ],
-            },
-        );
-    }
-
-    fn register_collection(&mut self) {
-        self.classes.insert(
-            "Collection".into(),
-            ClassInfo {
-                name: "Collection".into(),
-                superclass: Some("Object".into()),
-                is_sealed: false,
-                is_abstract: true,
-                state: vec![],
-                methods: vec![
-                    builtin_method("size", 0, "Collection"),
-                    builtin_method("isEmpty", 0, "Collection"),
-                    builtin_method("isNotEmpty", 0, "Collection"),
-                    builtin_method("includes:", 1, "Collection"),
-                    builtin_method("each:", 1, "Collection"),
-                    builtin_method("collect:", 1, "Collection"),
-                    builtin_method("select:", 1, "Collection"),
-                    builtin_method("reject:", 1, "Collection"),
-                    builtin_method("inject:into:", 2, "Collection"),
-                ],
-            },
-        );
-    }
 }
 
 impl Default for ClassHierarchy {
@@ -670,25 +325,78 @@ impl Default for ClassHierarchy {
     }
 }
 
-/// Create a built-in method info.
-fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> MethodInfo {
-    MethodInfo {
-        selector: selector.into(),
-        arity,
-        kind: MethodKind::Primary,
-        defined_in: defined_in.into(),
-        is_sealed: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{ClassDefinition, Identifier, MethodDefinition, StateDeclaration};
     use crate::source_analysis::Span;
 
     fn test_span() -> Span {
         Span::new(0, 0)
+    }
+
+    // --- Value object method tests ---
+
+    #[test]
+    fn method_info_is_advice() {
+        let primary = builtin_method("foo", 0, "Test");
+        assert!(!primary.is_advice());
+
+        let before = MethodInfo {
+            kind: MethodKind::Before,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(before.is_advice());
+
+        let after = MethodInfo {
+            kind: MethodKind::After,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(after.is_advice());
+
+        let around = MethodInfo {
+            kind: MethodKind::Around,
+            ..builtin_method("foo", 0, "Test")
+        };
+        assert!(around.is_advice());
+    }
+
+    #[test]
+    fn method_info_can_override_non_sealed() {
+        let child = builtin_method("describe", 0, "Counter");
+        let ancestor = builtin_method("describe", 0, "Object");
+        assert!(child.can_override(&ancestor));
+    }
+
+    #[test]
+    fn method_info_cannot_override_sealed() {
+        let child = builtin_method("describe", 0, "Counter");
+        let ancestor = MethodInfo {
+            is_sealed: true,
+            ..builtin_method("describe", 0, "Actor")
+        };
+        assert!(!child.can_override(&ancestor));
+    }
+
+    #[test]
+    fn method_info_different_selectors_not_override() {
+        let child = builtin_method("increment", 0, "Counter");
+        let sealed_ancestor = MethodInfo {
+            is_sealed: true,
+            ..builtin_method("describe", 0, "Actor")
+        };
+        // Different selectors → not an override (regardless of sealed status)
+        assert!(!child.can_override(&sealed_ancestor));
+    }
+
+    #[test]
+    fn class_info_can_be_subclassed() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(h.get_class("Actor").unwrap().can_be_subclassed());
+        assert!(h.get_class("Object").unwrap().can_be_subclassed());
+        assert!(!h.get_class("Integer").unwrap().can_be_subclassed());
+        assert!(!h.get_class("String").unwrap().can_be_subclassed());
     }
 
     // --- Hierarchy structure tests ---
