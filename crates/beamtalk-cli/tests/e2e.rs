@@ -34,6 +34,7 @@
 //! cargo test --test e2e -- --ignored --nocapture
 //! ```
 
+use beamtalk_cli::repl_startup;
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -138,11 +139,24 @@ struct TestCase {
     line: usize,
 }
 
+/// Expected error from loading a file (from `// @load-error` directives).
+#[derive(Debug)]
+struct LoadErrorCase {
+    /// Path to the file to load.
+    path: String,
+    /// Substring expected in the error message.
+    expected_error: String,
+    /// Line number in the test file.
+    line: usize,
+}
+
 /// Parsed test file with metadata.
 #[derive(Debug)]
 struct ParsedTestFile {
     /// Files to load before running tests (from `// @load` directives).
     load_files: Vec<String>,
+    /// Files expected to fail loading (from `// @load-error` directives).
+    load_error_cases: Vec<LoadErrorCase>,
     /// Test cases to run.
     cases: Vec<TestCase>,
     /// Warnings about expressions without assertions.
@@ -154,6 +168,7 @@ struct ParsedTestFile {
 /// Test format:
 /// ```text
 /// // @load path/to/file.bt
+/// // @load-error path/to/bad.bt => expected error substring
 ///
 /// expression
 /// // => expected_result
@@ -164,16 +179,51 @@ struct ParsedTestFile {
 ///
 /// Directives:
 /// - `// @load <path>` - Load a file before running tests (relative to workspace root)
+/// - `// @load-error <path> => <error>` - Load a file and expect compilation to fail with error containing `<error>`
 /// - `// => _` - Wildcard: run expression but don't check result (useful for spawn, side effects)
 fn parse_test_file(content: &str) -> ParsedTestFile {
     let mut cases = Vec::new();
     let mut load_files = Vec::new();
+    let mut load_error_cases = Vec::new();
     let mut warnings = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
 
     while i < lines.len() {
         let line = lines[i].trim();
+
+        // Check for @load-error directive (must be checked before @load)
+        if let Some(rest) = line.strip_prefix("// @load-error") {
+            let rest = rest.trim();
+            if rest.is_empty() {
+                warnings.push(format!(
+                    "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
+                    i + 1
+                ));
+            } else if let Some((path, expected)) = rest.split_once("=>") {
+                let path = path.trim();
+                let expected = expected.trim();
+                if path.is_empty() || expected.is_empty() {
+                    warnings.push(format!(
+                        "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
+                        i + 1
+                    ));
+                } else {
+                    load_error_cases.push(LoadErrorCase {
+                        path: path.to_string(),
+                        expected_error: expected.to_string(),
+                        line: i + 1,
+                    });
+                }
+            } else {
+                warnings.push(format!(
+                    "Line {}: Malformed @load-error directive (expected `// @load-error path.bt => error substring`): {line}",
+                    i + 1
+                ));
+            }
+            i += 1;
+            continue;
+        }
 
         // Check for @load directive
         if let Some(path) = line.strip_prefix("// @load") {
@@ -229,6 +279,7 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
 
     ParsedTestFile {
         load_files,
+        load_error_cases,
         cases,
         warnings,
     }
@@ -245,10 +296,13 @@ struct DaemonManager {
 ///
 /// When `cover` is true, instruments runtime modules with Erlang cover and
 /// polls for a signal file to trigger graceful shutdown with cover export.
+/// The non-cover path delegates to the shared `repl_startup` module (BT-390)
+/// so the E2E startup matches production exactly.
 fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
     if cover {
+        // Cover mode wraps instrumentation around the shared startup prelude
         format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+            "{}, \
              cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
@@ -267,14 +321,11 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  ExpErr -> io:format(standard_error, \"Cover export failed: ~p~n\", [ExpErr]), halt(1) \
              end, \
              cover:stop(), \
-             init:stop()."
+             init:stop().",
+            repl_startup::startup_prelude(REPL_PORT),
         )
     } else {
-        format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-             {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
-             receive stop -> ok end."
-        )
+        repl_startup::build_eval_cmd(REPL_PORT)
     }
 }
 
@@ -285,10 +336,6 @@ impl DaemonManager {
     /// and not start its own processes. This is useful for development but means
     /// the test won't manage the lifecycle. If the external REPL fails or stops
     /// mid-test, errors may be confusing. For CI, always start with a clean state.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "startup orchestrates daemon + BEAM + cover setup"
-    )]
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
@@ -330,13 +377,10 @@ impl DaemonManager {
         // Start the BEAM node with REPL backend
         eprintln!("E2E: Starting BEAM REPL backend...");
         let runtime = runtime_dir();
-        let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
-        let workspace_dir = runtime.join("_build/default/lib/beamtalk_workspace/ebin");
-        let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
-        let stdlib_dir = runtime.join("apps/beamtalk_stdlib/ebin");
+        let paths = repl_startup::beam_paths(&runtime);
 
         // Build runtime if needed
-        if !ebin_dir.exists() {
+        if !paths.runtime_ebin.exists() {
             eprintln!("E2E: Building runtime...");
             let status = Command::new("rebar3")
                 .arg("compile")
@@ -370,7 +414,10 @@ impl DaemonManager {
         let _ = fs::remove_file(&cover_signal_path);
         let eval_cmd = beam_eval_cmd(
             cover_enabled,
-            ebin_dir.to_str().expect("ebin path must be UTF-8"),
+            paths
+                .runtime_ebin
+                .to_str()
+                .expect("ebin path must be UTF-8"),
             cover_signal_path
                 .to_str()
                 .expect("signal path must be UTF-8"),
@@ -379,22 +426,13 @@ impl DaemonManager {
                 .expect("export path must be UTF-8"),
         );
 
+        let mut pa_args = repl_startup::beam_pa_args(&paths);
+        pa_args.push("-eval".to_string());
+        pa_args.push(eval_cmd);
+
         let beam_child = Command::new("erl")
-            .args([
-                "-noshell",
-                "-pa",
-                ebin_dir.to_str().expect("ebin path must be UTF-8"),
-                "-pa",
-                workspace_dir
-                    .to_str()
-                    .expect("workspace ebin path must be UTF-8"),
-                "-pa",
-                jsx_dir.to_str().expect("jsx path must be UTF-8"),
-                "-pa",
-                stdlib_dir.to_str().expect("stdlib path must be UTF-8"),
-                "-eval",
-                &eval_cmd,
-            ])
+            .arg("-noshell")
+            .args(&pa_args)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
@@ -764,6 +802,35 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         }
     }
 
+    // Test files expected to fail loading (from @load-error directives)
+    for load_error in &test_file.load_error_cases {
+        let full_path = root.join(&load_error.path);
+        let full_path_str = full_path.to_string_lossy();
+        match client.load_file(&full_path_str) {
+            Ok(classes) => {
+                failures.push(format!(
+                    "{file_name}:{}: @load-error `{}` expected error containing `{}`, but load succeeded (classes: {})",
+                    load_error.line, load_error.path, load_error.expected_error, classes.join(", ")
+                ));
+            }
+            Err(e) => {
+                if e.contains(&load_error.expected_error) {
+                    pass_count += 1;
+                    eprintln!(
+                        "E2E: @load-error {} correctly failed with: {}",
+                        load_error.path,
+                        e.chars().take(100).collect::<String>()
+                    );
+                } else {
+                    failures.push(format!(
+                        "{file_name}:{}: @load-error `{}` expected error containing `{}`, got error `{}`",
+                        load_error.line, load_error.path, load_error.expected_error, e
+                    ));
+                }
+            }
+        }
+    }
+
     for case in &test_file.cases {
         match client.eval(&case.expression) {
             Ok(result) => {
@@ -1026,5 +1093,85 @@ expr3
         assert!(parsed.warnings[0].contains("expr1"));
         assert!(parsed.warnings[1].contains("Line 3"));
         assert!(parsed.warnings[1].contains("expr2"));
+    }
+
+    #[test]
+    fn test_parse_load_error_directive() {
+        let content = r"
+// @load-error tests/e2e/fixtures/bad_class.bt => cannot assign to field
+// @load-error tests/e2e/fixtures/sealed.bt => Cannot subclass sealed class
+
+3 + 4
+// => 7
+";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_files.is_empty());
+        assert_eq!(parsed.load_error_cases.len(), 2);
+        assert_eq!(
+            parsed.load_error_cases[0].path,
+            "tests/e2e/fixtures/bad_class.bt"
+        );
+        assert_eq!(
+            parsed.load_error_cases[0].expected_error,
+            "cannot assign to field"
+        );
+        assert_eq!(
+            parsed.load_error_cases[1].path,
+            "tests/e2e/fixtures/sealed.bt"
+        );
+        assert_eq!(
+            parsed.load_error_cases[1].expected_error,
+            "Cannot subclass sealed class"
+        );
+        assert_eq!(parsed.cases.len(), 1);
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_load_error_not_confused_with_load() {
+        let content = r"
+// @load tests/e2e/fixtures/counter.bt
+// @load-error tests/e2e/fixtures/bad.bt => some error
+
+Counter spawn
+// => _
+";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.load_files.len(), 1);
+        assert_eq!(parsed.load_files[0], "tests/e2e/fixtures/counter.bt");
+        assert_eq!(parsed.load_error_cases.len(), 1);
+        assert_eq!(parsed.load_error_cases[0].path, "tests/e2e/fixtures/bad.bt");
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_load_error_malformed_warns() {
+        // Missing => separator
+        let content = "// @load-error tests/e2e/fixtures/bad.bt\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty directive
+        let content = "// @load-error\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty path with =>
+        let content = "// @load-error  => some error\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
+
+        // Empty expected error
+        let content = "// @load-error path.bt =>\n";
+        let parsed = parse_test_file(content);
+        assert!(parsed.load_error_cases.is_empty());
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("Malformed @load-error"));
     }
 }

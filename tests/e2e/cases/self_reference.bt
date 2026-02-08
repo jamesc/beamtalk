@@ -47,6 +47,21 @@ a classInBlock
 // DYNAMIC DISPATCH VIA PERFORM:
 // ===========================================================================
 
-// perform: dispatches zero-arg methods dynamically
+// perform: dispatches zero-arg methods dynamically on actors
 a perform: #getValue
 // => 99
+
+// perform:withArgs: dispatches methods with arguments on actors
+a perform: #setValue: withArgs: #(42)
+// => _
+
+a getValue
+// => 42
+
+// perform: also works on primitives (synchronous dispatch)
+42 perform: #asString
+// => 42
+
+// perform:withArgs: works on primitives
+10 perform: #+ withArgs: #(32)
+// => 42

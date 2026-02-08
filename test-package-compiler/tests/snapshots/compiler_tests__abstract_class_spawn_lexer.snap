@@ -1,0 +1,15 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("abstract"), span: Span { start: 145, end: 153 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test that instantiating an abstract class produces a diagnostic error."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Actor"), span: Span { start: 154, end: 159 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 160, end: 169 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Shape"), span: Span { start: 170, end: 175 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("area"), span: Span { start: 178, end: 182 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 183, end: 185 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 186, end: 190 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("subclassResponsibility"), span: Span { start: 191, end: 213 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Shape"), span: Span { start: 215, end: 220 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("spawn"), span: Span { start: 221, end: 226 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 227, end: 227 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

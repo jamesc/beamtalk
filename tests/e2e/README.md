@@ -62,6 +62,13 @@ End-to-end tests that validate the complete compilation and execution pipeline b
 | `await` | 🔧 | [actors.bt](cases/actors.bt) | Use `// @load` + stateful tests |
 | **Error Handling** | | | |
 | Division by zero | ✅ | [errors.bt](cases/errors.bt) | `1 / 0` → badarith |
+| **Semantic Analysis** | | | |
+| Stored closure field error | ✅ | [semantic_diagnostics.bt](cases/semantic_diagnostics.bt) | `@load-error` on stored closure |
+| Sealed class error | ✅ | [semantic_diagnostics.bt](cases/semantic_diagnostics.bt) | `@load-error` on sealed subclass |
+| Reflection validator | ✅ | [semantic_diagnostics.bt](cases/semantic_diagnostics.bt) | `respondsTo:` with non-symbol |
+| Undefined variable | ✅ | [semantic_scope.bt](cases/semantic_scope.bt) | Compile-time error |
+| Variable scoping | ✅ | [semantic_scope.bt](cases/semantic_scope.bt) | Block params, closures |
+| Self in methods | ✅ | [semantic_scope.bt](cases/semantic_scope.bt) | Actor methods use `self` |
 
 **Legend:**
 - ✅ = Fully tested and working
@@ -87,6 +94,8 @@ tests/e2e/
 │   ├── cascades.bt        # Cascade documentation (syntax examples)
 │   ├── control_flow.bt    # Control flow (block evaluation, variables)
 │   ├── errors.bt          # Error handling tests
+│   ├── semantic_diagnostics.bt # Semantic analysis error tests
+│   ├── semantic_scope.bt  # Variable scope and resolution tests
 │   ├── keyword_messages.bt # Keyword message sends
 │   ├── literals.bt        # Integer and string literals
 │   ├── unary_messages.bt  # Unary message sends
@@ -155,6 +164,18 @@ undefined_variable
 The test passes if the error message *contains* the specified text.
 
 See `tests/e2e/cases/errors.bt` for examples of error test cases.
+
+### Compilation Error Testing (`@load-error`)
+
+To test that a file fails to compile with a specific error, use the `@load-error` directive:
+
+```smalltalk
+// @load-error tests/e2e/fixtures/bad_class.bt => cannot assign to field
+```
+
+The directive attempts to load the file and expects compilation to fail. The test passes if the error message *contains* the specified substring. If the load succeeds, the test fails.
+
+See `tests/e2e/cases/semantic_diagnostics.bt` for examples.
 
 ### Multi-line Expressions
 

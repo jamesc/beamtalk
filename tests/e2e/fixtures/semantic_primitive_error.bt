@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers semantic error: @primitive outside stdlib
+// Primitives can only be declared in the standard library
+
+Object subclass: BadPrimitive
+  badOp => @primitive '+'

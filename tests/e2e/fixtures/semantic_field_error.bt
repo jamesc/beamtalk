@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers semantic error: field assignment in stored closure
+// A stored closure (assigned to variable) cannot modify fields
+
+Actor subclass: BadStoredClosure
+  state: value = 0
+
+  badMethod =>
+    myBlock := [self.value := self.value + 1].
+    myBlock value

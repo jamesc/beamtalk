@@ -37,3 +37,6 @@ ProtoObject subclass: Object
   // Dynamic dispatch — structural intrinsic
   sealed perform: selector => @primitive dynamicSend
   sealed perform: selector withArgs: args => @primitive dynamicSendWithArgs
+
+  // Abstract method marker — raises error if not overridden by subclass
+  subclassResponsibility => @primitive subclassResponsibility

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers semantic error: overriding a sealed method
+// sealed methods in a parent class cannot be overridden by subclasses
+
+Object subclass: SealedParent
+  sealed frozen => 42
+
+SealedParent subclass: SealedChild
+  frozen => 99
