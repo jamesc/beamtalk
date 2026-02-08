@@ -130,7 +130,11 @@ builtin_dispatch('isError', [], _) -> {ok, false};
 %% Unwrapping - extracts value from {ok, Value} or raises error from {error, Reason}
 builtin_dispatch('unwrap', [], {ok, Value}) -> {ok, Value};
 builtin_dispatch('unwrap', [], {error, Reason}) -> 
-    error({unwrap_error, Reason});
+    Error0 = beamtalk_error:new(type_error, 'Tuple'),
+    Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Called unwrap on an error tuple">>),
+    Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
+    error(Error3);
 
 %% Unwrap with default - returns Value from {ok, Value} or Default otherwise
 builtin_dispatch('unwrapOr:', [Default], {ok, Value}) -> {ok, Value};

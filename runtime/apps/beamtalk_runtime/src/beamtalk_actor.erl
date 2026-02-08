@@ -432,7 +432,10 @@ dispatch(Selector, Args, Self, State) ->
                     {reply, Self, NewState};
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, 'instVarAt:put:', length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: name and value">>),
+                    error(Error2)
             end;
         perform ->
             %% Dynamic message send with no arguments
@@ -442,7 +445,10 @@ dispatch(Selector, Args, Self, State) ->
                     dispatch(TargetSelector, [], Self, State);
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, perform, length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, perform),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 1 argument: a selector atom">>),
+                    error(Error2)
             end;
         'perform:withArgs:' ->
             %% Dynamic message send with argument array
@@ -459,7 +465,10 @@ dispatch(Selector, Args, Self, State) ->
                         end);
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, 'perform:withArgs:', length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: a selector atom and an argument list">>),
+                    error(Error2)
             end;
         _ ->
             %% Not a built-in method, check user-defined methods

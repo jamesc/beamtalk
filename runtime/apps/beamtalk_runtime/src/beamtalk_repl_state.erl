@@ -151,10 +151,9 @@ default_daemon_socket_path() ->
 default_daemon_socket_from_home() ->
     case os:getenv("HOME") of
         false ->
-            erlang:error({missing_env_var,
-                         "HOME",
-                         "Beamtalk REPL requires HOME to be set to locate the compiler daemon "
-                         "socket. Either set HOME, BEAMTALK_DAEMON_SOCKET, or pass daemon_socket_path in Options."});
+            Error0 = beamtalk_error:new(internal_error, 'ReplState'),
+            Error1 = beamtalk_error:with_hint(Error0, <<"Beamtalk REPL requires HOME to be set to locate the compiler daemon socket. Either set HOME, BEAMTALK_DAEMON_SOCKET, or pass daemon_socket_path in Options.">>),
+            erlang:error(Error1);
         Home ->
             filename:join([Home, ".beamtalk", "daemon.sock"])
     end.

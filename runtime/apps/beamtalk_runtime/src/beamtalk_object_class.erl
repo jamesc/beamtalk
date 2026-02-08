@@ -581,7 +581,12 @@ convert_methods_to_info(Methods) ->
         %% Validate that method has correct arity
         case Arity of
             3 -> ok;
-            _ -> error({invalid_method_arity, Selector, Arity, expected_3})
+            _ ->
+                Error0 = beamtalk_error:new(arity_mismatch, 'DynamicClass'),
+                Error1 = beamtalk_error:with_selector(Error0, Selector),
+                Error2 = beamtalk_error:with_hint(Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>),
+                Error3 = beamtalk_error:with_details(Error2, #{actual_arity => Arity, expected_arity => 3}),
+                error(Error3)
         end,
         #{
             arity => Arity,

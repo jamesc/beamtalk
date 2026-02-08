@@ -450,9 +450,12 @@ dispatch(version, [], _Receiver) ->
     %% Return Beamtalk version
     <<"0.1.0">>;
 
-dispatch(Selector, Args, _Receiver) ->
+dispatch(Selector, _Args, _Receiver) ->
     %% Unknown method
-    error({does_not_understand, 'Beamtalk', Selector, length(Args)}).
+    Error0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>),
+    error(Error2).
 
 %% @doc Check if the Beamtalk class responds to the given selector.
 -spec has_method(atom()) -> boolean().
