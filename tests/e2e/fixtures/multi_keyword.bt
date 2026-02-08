@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// MultiKeyword - actor class for testing 4+ keyword method dispatch (BT-327)
+// Verifies that the parser and codegen handle unlimited keyword parts correctly
+
+Actor subclass: MultiKeyword
+  state: result = 0
+
+  // 4-keyword method: sum four arguments
+  add: a and: b and: c and: d =>
+    self.result := a + b + c + d.
+    ^self.result
+
+  // 5-keyword method: sum five arguments
+  add: a and: b and: c and: d and: e =>
+    self.result := a + b + c + d + e.
+    ^self.result
+
+  // 4-keyword method: verify argument order by weighted sum
+  first: a second: b third: c fourth: d =>
+    ^a * 1000 + b * 100 + c * 10 + d
+
+  getResult => ^self.result

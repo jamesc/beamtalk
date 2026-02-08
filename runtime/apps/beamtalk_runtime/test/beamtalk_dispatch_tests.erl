@@ -64,7 +64,12 @@ dispatch_test_() ->
           {"responds_to inherited method", fun test_responds_to_inherited_method/0},
           {"invoke_with_combinations delegates", fun test_invoke_with_combinations_delegates/0},
           {"extension error propagation", fun test_extension_error_propagation/0},
-          {"responds_to extension method", fun test_responds_to_extension_method/0}
+          {"responds_to extension method", fun test_responds_to_extension_method/0},
+          {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
+          {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
+          {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
+          {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0},
+          {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0}
          ]
      end
     }.
@@ -359,3 +364,160 @@ test_responds_to_extension_method() ->
     after
         catch ets:delete(beamtalk_extensions, {'Counter', extTestMethod})
     end.
+
+%%% ============================================================================
+%%% BT-283: Performance Benchmark Tests (ADR 0006 Phase 2)
+%%% ============================================================================
+
+%% Benchmark: O(1) lookup with flattened table vs O(depth) hierarchy walk
+test_flattened_table_performance() ->
+    ok = ensure_counter_loaded(),
+    
+    State = #{
+        '__class__' => 'Counter',
+        'value' => 0
+    },
+    Self = make_ref(),
+    
+    %% Warm up - ensure Counter's flattened table is built
+    _ = beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter'),
+    
+    %% Benchmark flattened table lookup (should be O(1))
+    %% Call an inherited method that would require hierarchy walk without flattening
+    %% 'class' is defined in Object, so Counter -> Actor -> Object (depth 3)
+    N = 10000,
+    
+    StartFlattened = erlang:monotonic_time(microsecond),
+    lists:foreach(fun(_) ->
+        _ = beamtalk_dispatch:lookup(class, [], Self, State, 'Counter')
+    end, lists:seq(1, N)),
+    EndFlattened = erlang:monotonic_time(microsecond),
+    
+    FlattenedTime = EndFlattened - StartFlattened,
+    AvgFlattenedTime = FlattenedTime / N,
+    
+    logger:notice("Flattened table: ~p lookups in ~p μs (avg ~.2f μs/call)", [N, FlattenedTime, AvgFlattenedTime]),
+    
+    %% Flattened lookup should complete (no hard timing assertion — CI machines vary)
+    ?assert(AvgFlattenedTime < 500.0).
+
+%% Memory benchmark: document overhead per class
+test_flattened_table_memory_overhead() ->
+    ok = ensure_counter_loaded(),
+    
+    %% Get Counter class process
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    ?assertNotEqual(undefined, CounterPid),
+    
+    %% Get process memory info
+    {memory, MemoryBytes} = erlang:process_info(CounterPid, memory),
+    
+    %% Get flattened methods map and measure its serialized size
+    {ok, FlattenedMethods} = gen_server:call(CounterPid, get_flattened_methods),
+    FlattenedSize = erlang:external_size(FlattenedMethods),
+    NumFlattened = maps:size(FlattenedMethods),
+    
+    logger:notice("Flattened table: ~p methods, ~p bytes serialized, ~p bytes process total",
+                  [NumFlattened, FlattenedSize, MemoryBytes]),
+    
+    %% Flattened table should be less than 10KB per class (typical case)
+    ?assert(FlattenedSize < 10000).
+
+%% Test flattened table invalidation on method addition
+test_flattened_table_invalidation_on_method_add() ->
+    ok = ensure_counter_loaded(),
+    
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    
+    %% Get initial flattened methods
+    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    InitialSize = maps:size(InitialFlattened),
+    
+    %% Add a new method
+    TestMethod = fun(_Self, [], State) -> {reply, test_result, State} end,
+    ok = beamtalk_object_class:put_method(CounterPid, testNewMethod, TestMethod),
+    
+    %% Get updated flattened methods
+    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    UpdatedSize = maps:size(UpdatedFlattened),
+    
+    %% Verify new method is in flattened table
+    ?assert(maps:is_key(testNewMethod, UpdatedFlattened)),
+    ?assertEqual(InitialSize + 1, UpdatedSize),
+    
+    %% Verify the method is discoverable via flattened lookup
+    %% (Don't dispatch through compiled module — it doesn't know about dynamic methods)
+    Result = gen_server:call(CounterPid, {lookup_flattened, testNewMethod}),
+    ?assertMatch({ok, 'Counter', _}, Result).
+
+%% Test that adding a method to a parent class propagates to subclass flattened tables.
+%% This verifies the subclass invalidation mechanism: when Actor gets a new method,
+%% Counter (which inherits from Actor) should see it in its flattened table.
+test_subclass_invalidation_on_parent_change() ->
+    ok = ensure_counter_loaded(),
+    
+    %% Counter inherits from Actor. Get both pids.
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    ActorPid = beamtalk_object_class:whereis_class('Actor'),
+    ?assertNotEqual(undefined, CounterPid),
+    ?assertNotEqual(undefined, ActorPid),
+    
+    %% Verify Counter doesn't have parentTestMethod yet
+    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    ?assertNot(maps:is_key(parentTestMethod, InitialFlattened)),
+    
+    %% Add a method to Actor (parent of Counter)
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
+    ok = beamtalk_object_class:put_method(ActorPid, parentTestMethod, ParentMethod),
+    
+    %% The invalidation uses handle_info (async message). Use a synchronous
+    %% gen_server:call as a barrier — it will be queued after rebuild_flattened.
+    _ = beamtalk_object_class:superclass(CounterPid),
+    
+    %% Counter's flattened table should now include the new Actor method
+    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    ?assert(maps:is_key(parentTestMethod, UpdatedFlattened)),
+    
+    %% The defining class should be Actor, not Counter
+    {ok, DefiningClass, _MethodInfo} = gen_server:call(CounterPid, {lookup_flattened, parentTestMethod}),
+    ?assertEqual('Actor', DefiningClass).
+
+%% Test that registering a parent class AFTER a child class still produces
+%% complete flattened tables in the child (out-of-order bootstrap).
+test_out_of_order_registration() ->
+    %% Step 1: Register child class with non-existent parent
+    ChildMethod = fun(_Self, [], State) -> {reply, child_result, State} end,
+    {ok, ChildPid} = beamtalk_object_class:start_link('TestChild', #{
+        superclass => 'TestParent',
+        instance_methods => #{childMethod => #{block => ChildMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    %% Child's flattened table should only have local methods (parent missing)
+    {ok, ChildFlattened1} = gen_server:call(ChildPid, get_flattened_methods),
+    ?assert(maps:is_key(childMethod, ChildFlattened1)),
+    ?assertNot(maps:is_key(parentMethod, ChildFlattened1)),
+
+    %% Step 2: Register parent class — this should trigger child rebuild
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
+    {ok, ParentPid} = beamtalk_object_class:start_link('TestParent', #{
+        superclass => none,
+        instance_methods => #{parentMethod => #{block => ParentMethod, arity => 0}},
+        instance_variables => []
+    }),
+
+    %% Use synchronous barrier to ensure child processed rebuild_flattened
+    _ = beamtalk_object_class:superclass(ChildPid),
+
+    %% Child's flattened table should now include parent's method
+    {ok, ChildFlattened2} = gen_server:call(ChildPid, get_flattened_methods),
+    ?assert(maps:is_key(childMethod, ChildFlattened2)),
+    ?assert(maps:is_key(parentMethod, ChildFlattened2)),
+
+    %% Verify defining class is correct
+    {ok, DefClass, _} = gen_server:call(ChildPid, {lookup_flattened, parentMethod}),
+    ?assertEqual('TestParent', DefClass),
+
+    %% Clean up test-only class processes to avoid leaking between tests
+    gen_server:stop(ChildPid),
+    gen_server:stop(ParentPid).

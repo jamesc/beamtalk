@@ -20,6 +20,7 @@
 %%% | Tuple | Object | beamtalk_tuple |
 %%% | Beamtalk | Object | beamtalk_stdlib |
 %%% | Transcript | Object | transcript |
+%%% | File | Object | beamtalk_file |
 %%%
 %%% ## Usage
 %%%
@@ -82,14 +83,15 @@ do_init() ->
         register_tuple_class(),
         register_beamtalk_class(),
         register_float_class(),
-        register_transcript_class()
+        register_transcript_class(),
+        register_file_class()
     ],
     %% Log any failures but don't crash
     lists:foreach(fun
         ({ok, ClassName}) -> 
-            logger:debug("Registered primitive class", #{class => ClassName});
+            logger:debug("Registered stdlib class", #{class => ClassName});
         ({error, ClassName, Reason}) -> 
-            logger:warning("Failed to register primitive class", #{class => ClassName, reason => Reason})
+            logger:warning("Failed to register stdlib class", #{class => ClassName, reason => Reason})
     end, Results),
     ok.
 
@@ -395,6 +397,26 @@ register_transcript_class() ->
         instance_variables => []
     },
     register_class('Transcript', ClassInfo).
+
+%%% ============================================================================
+%%% File Class (BT-336)
+%%% ============================================================================
+
+-spec register_file_class() -> {ok, atom()} | {error, atom(), term()}.
+register_file_class() ->
+    ClassInfo = #{
+        name => 'File',
+        module => beamtalk_file,
+        superclass => 'Object',
+        instance_methods => #{},
+        class_methods => #{
+            'exists:' => #{arity => 1},
+            'readAll:' => #{arity => 1},
+            'writeAll:contents:' => #{arity => 2}
+        },
+        instance_variables => []
+    },
+    register_class('File', ClassInfo).
 
 %%% ============================================================================
 %%% Helper Functions
