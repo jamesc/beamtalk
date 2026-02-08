@@ -185,11 +185,25 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
                 _ -> ClassName
             end,
             
-            %% Notify registered callback (if any) - supports optional REPL/workspace tracking
-            %% The beamtalk_repl app registers this callback on startup
+            %% Notify registered callback (if any) - supports optional REPL/workspace tracking.
+            %% The beamtalk_repl app registers this callback on startup.
+            %% Guarded with try/catch so actor spawning succeeds even if the
+            %% callback module is missing, not loaded, or fails.
             case application:get_env(beamtalk_runtime, actor_spawn_callback) of
                 {ok, CallbackMod} ->
-                    CallbackMod:on_actor_spawned(RegistryPid, Pid, Class, Module);
+                    try
+                        CallbackMod:on_actor_spawned(RegistryPid, Pid, Class, Module)
+                    catch
+                        Kind:Reason ->
+                            logger:warning("Actor spawn callback failed", #{
+                                callback => CallbackMod,
+                                kind => Kind,
+                                reason => Reason,
+                                actor_pid => Pid,
+                                class => Class
+                            }),
+                            ok
+                    end;
                 undefined ->
                     ok
             end,

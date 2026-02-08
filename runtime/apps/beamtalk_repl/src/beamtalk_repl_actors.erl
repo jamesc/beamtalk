@@ -71,11 +71,21 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
 
 %% @doc Actor spawn callback for beamtalk_runtime integration.
 %% This is registered via application:set_env by beamtalk_repl_app:start/2.
-%% Wraps register_actor and workspace_meta registration in a single callback.
+%% Best-effort: catches errors so the runtime spawn path never crashes.
 -spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok.
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
-    ok = register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
-    beamtalk_workspace_meta:register_actor(ActorPid),
+    try
+        register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
+        beamtalk_workspace_meta:register_actor(ActorPid)
+    catch
+        Kind:Reason ->
+            logger:warning("REPL actor tracking failed", #{
+                kind => Kind,
+                reason => Reason,
+                actor_pid => ActorPid,
+                class => ClassName
+            })
+    end,
     ok.
 
 %% @doc Unregister an actor from the registry.
