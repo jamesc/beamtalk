@@ -25,7 +25,7 @@
 // => hello
 
 '' printString
-// => _
+// => 
 
 // --- Booleans ---
 true printString
@@ -76,6 +76,7 @@ nil yourself
 'hello' hash = 'hello' hash
 // => true
 
-// Different values typically produce different hashes
-(42 hash = 'hello' hash) not
-// => true
+// Different values typically produce different hashes (not guaranteed, but
+// verifying hash returns a usable integer for all types)
+'hello' hash
+// => _

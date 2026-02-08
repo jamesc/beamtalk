@@ -117,10 +117,10 @@ print_string(X) when is_list(X) ->
 print_string(#beamtalk_object{class = ClassName}) ->
     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
 print_string(X) when is_map(X) ->
-    ClassName = beamtalk_tagged_map:class_of(X, 'Object'),
+    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
-print_string(_) ->
-    <<"an Object">>.
+print_string(X) ->
+    iolist_to_binary(io_lib:format("~p", [X])).
 
 %% @doc Send a message to any value (actor or primitive).
 %%
