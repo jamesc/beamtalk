@@ -420,15 +420,15 @@ numbers := List with: 1 with: 2 with: 3
 
 ### Phase 1: Lexer + Parser (S)
 - Add `ListOpen` token to lexer: `#(` (two-character token, like `MapOpen` `#{`)
-- Add `Comma` token to lexer
+- Reuse existing `BinarySelector(",")` token as list element separator (same approach as map literals)
 - Add parser rule: `#(` starts list literal, comma-separated expressions, `)` closes
 - Support `#()` (empty), `#(expr)` (single), `#(expr, expr, ...)` (multi)
 - Support cons syntax: `#(expr | expr)` for prepend
 - Rename AST `Literal::Array` to `Literal::List` for clarity
 
 **Files:**
-- `crates/beamtalk-core/src/source_analysis/token.rs` — Add `ListOpen`, `Comma` tokens
-- `crates/beamtalk-core/src/source_analysis/lexer.rs` — Lex `#(` and `,`
+- `crates/beamtalk-core/src/source_analysis/token.rs` — Add `ListOpen` token
+- `crates/beamtalk-core/src/source_analysis/lexer.rs` — Lex `#(` as `ListOpen`
 - `crates/beamtalk-core/src/source_analysis/parser/expressions.rs` — `parse_list_literal()`
 - `crates/beamtalk-core/src/ast.rs` — Rename `Literal::Array` → `Literal::List`
 
