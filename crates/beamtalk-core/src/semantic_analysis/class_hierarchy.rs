@@ -190,6 +190,36 @@ impl ClassHierarchy {
         false
     }
 
+    /// Walk the superclass chain looking for a sealed method with the given selector.
+    /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
+    fn find_sealed_method_in_ancestors(
+        &self,
+        start_class: &str,
+        selector: &str,
+    ) -> Option<(EcoString, MethodInfo)> {
+        let mut current = Some(start_class.to_string());
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                for method in &info.methods {
+                    if method.selector.as_str() == selector && method.is_sealed {
+                        return Some((info.name.clone(), method.clone()));
+                    }
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
     /// Add classes from a parsed module. Returns diagnostics for errors.
     fn add_module_classes(&mut self, module: &Module) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
@@ -204,6 +234,21 @@ impl ClassHierarchy {
                     ));
                     // Still register the class so downstream passes (codegen routing,
                     // completions) can reason about it despite the error.
+                }
+            }
+
+            // Check sealed method override enforcement
+            for method in &class.methods {
+                let selector = method.selector.name();
+                if let Some((sealed_class, _)) =
+                    self.find_sealed_method_in_ancestors(class.superclass.name.as_str(), &selector)
+                {
+                    diagnostics.push(Diagnostic::error(
+                        format!(
+                            "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                        ),
+                        method.span,
+                    ));
                 }
             }
 
@@ -927,6 +972,94 @@ mod tests {
         let (h, diags) = ClassHierarchy::build(&module);
         assert!(diags.is_empty());
         assert!(h.has_class("MyActor"));
+    }
+
+    // --- Sealed method override enforcement tests ---
+
+    fn make_class_with_sealed_method(
+        name: &str,
+        superclass: &str,
+        method_name: &str,
+        sealed: bool,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, test_span()),
+            superclass: Identifier::new(superclass, test_span()),
+            is_abstract: false,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary(method_name.into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: sealed,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        }
+    }
+
+    #[test]
+    fn sealed_method_override_rejected() {
+        // Parent defines sealed method "describe", child tries to override it
+        let parent = make_class_with_sealed_method("Parent", "Actor", "describe", true);
+        let child = make_class_with_sealed_method("Child", "Parent", "describe", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`describe`"));
+        assert!(diags[0].message.contains("`Parent`"));
+        // Child class is still added despite the error
+        assert!(h.has_class("Child"));
+    }
+
+    #[test]
+    fn non_sealed_method_override_allowed() {
+        // Parent defines non-sealed method, child overrides it — no diagnostic
+        let parent = make_class_with_sealed_method("Parent", "Actor", "doWork", false);
+        let child = make_class_with_sealed_method("Child", "Parent", "doWork", false);
+
+        let module = Module {
+            classes: vec![parent, child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn sealed_method_in_grandparent_enforced() {
+        // Grandparent defines sealed method, grandchild tries to override it
+        let grandparent =
+            make_class_with_sealed_method("GrandParent", "Actor", "locked", true);
+        let parent = make_class_with_sealed_method("Parent", "GrandParent", "doWork", false);
+        let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
+
+        let module = Module {
+            classes: vec![grandparent, parent, grandchild],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`locked`"));
+        assert!(diags[0].message.contains("`GrandParent`"));
+        assert!(h.has_class("GrandChild"));
     }
 
     // --- MRO verification ---
