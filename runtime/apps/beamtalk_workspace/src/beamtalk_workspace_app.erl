@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Application callback module for Beamtalk REPL and workspace management.
+%%% @doc Application callback module for Beamtalk workspace management.
 %%%
 %%% This application provides the interactive development environment including:
 %%% - REPL evaluation and protocol
@@ -15,7 +15,7 @@
 %%% When started, this application registers itself with the runtime to receive
 %%% actor spawn notifications, enabling workspace-wide actor tracking.
 
--module(beamtalk_repl_app).
+-module(beamtalk_workspace_app).
 -behaviour(application).
 
 -export([start/2, stop/1]).
@@ -28,8 +28,8 @@ start(_StartType, _StartArgs) ->
     %% workspace-wide tracking without creating a compile-time dependency
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
     
-    %% Start the REPL supervisor tree
-    beamtalk_repl_sup:start_link().
+    %% Start the workspace supervisor tree
+    beamtalk_workspace_app_sup:start_link().
 
 %% @private
 -spec stop(term()) -> ok.

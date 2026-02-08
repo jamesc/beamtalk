@@ -1,10 +1,10 @@
-{application, beamtalk_repl, [
-    {description, "Beamtalk REPL and workspace management for interactive development"},
+{application, beamtalk_workspace, [
+    {description, "Beamtalk workspace and interactive development environment"},
     {vsn, "0.1.0"},
     {modules, []},
     {registered, []},
     {applications, [kernel, stdlib, beamtalk_runtime]},
-    {mod, {beamtalk_repl_app, []}},
+    {mod, {beamtalk_workspace_app, []}},
     {env, [
         {repl_port, 9000},
         {idle_timeout, 3600000},  % 1 hour in milliseconds

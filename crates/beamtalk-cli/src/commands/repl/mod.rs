@@ -227,7 +227,7 @@ pub fn run(
         let runtime_dir = find_runtime_dir()?;
         let build_lib_dir = runtime_dir.join("_build/default/lib");
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
-        let repl_beam_dir = build_lib_dir.join("beamtalk_repl/ebin");
+        let repl_beam_dir = build_lib_dir.join("beamtalk_workspace/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
         // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
         let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");

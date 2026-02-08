@@ -1489,7 +1489,7 @@ runtime/
 │   │       ├── logging_counter.bt
 │   │       ├── compile.sh  # Auto-compiles fixtures via rebar3 pre-hook
 │   │       └── README.md
-│   ├── beamtalk_repl/      # REPL and workspace management OTP application (ADR 0009) — NEW
+│   ├── beamtalk_workspace/  # Workspace and interactive development OTP application (ADR 0009) — NEW
 │   │   ├── src/            # REPL source (repl eval, server, workspace supervision, session management)
 │   │   └── test/           # REPL unit tests (*.erl)
 │   └── beamtalk_stdlib/    # Standard library OTP application (ADR 0007)
@@ -1510,7 +1510,7 @@ examples/
 
 **Dependency direction (ADR 0009):**
 ```
-beamtalk_repl (interactive dev)
+beamtalk_workspace (interactive dev)
     ↓ depends on
 beamtalk_runtime (core language runtime)
     ↓ depends on
@@ -1529,7 +1529,7 @@ beamtalk_stdlib (compiled stdlib)
 - Appropriate for testing low-level runtime behavior
 
 #### 2. REPL Unit Tests
-**Location:** `runtime/apps/beamtalk_repl/test/*_tests.erl` (ADR 0009)
+**Location:** `runtime/apps/beamtalk_workspace/test/*_tests.erl` (ADR 0009)
 - Tests REPL evaluation, protocol, server, workspace management
 - Includes session supervision and idle monitoring tests
 - Moved from `beamtalk_runtime/test/` in BT-351
@@ -1552,7 +1552,7 @@ beamtalk_stdlib (compiled stdlib)
 - E2E fixtures in `tests/e2e/fixtures/` (including canonical `counter.bt`)
 - **These are the TRUE end-to-end tests**
 
-**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/` or `runtime/apps/beamtalk_repl/test/`.**
+**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/` or `runtime/apps/beamtalk_workspace/test/`.**
 
 #### Test Fixture Organization (BT-239)
 

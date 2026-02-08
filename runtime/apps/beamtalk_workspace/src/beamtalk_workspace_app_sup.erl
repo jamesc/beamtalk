@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Root supervisor for Beamtalk REPL application.
+%%% @doc Root supervisor for Beamtalk workspace application.
 %%%
 %%% This supervisor manages workspace supervisors dynamically.
 %%% Each workspace is supervised independently and can be started/stopped
@@ -13,7 +13,7 @@
 %%%
 %%% Architecture:
 %%% ```
-%%% beamtalk_repl_sup (one_for_one)
+%%% beamtalk_workspace_app_sup (one_for_one)
 %%%   └─ [per-workspace children added dynamically]
 %%%       └─ beamtalk_workspace_sup (one_for_one)
 %%%           ├─ beamtalk_workspace_meta
@@ -24,13 +24,13 @@
 %%%           └─ beamtalk_session_sup
 %%% ```
 
--module(beamtalk_repl_sup).
+-module(beamtalk_workspace_app_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).
 -export([init/1]).
 
-%% @doc Start the REPL root supervisor.
+%% @doc Start the workspace root supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).

@@ -335,7 +335,7 @@ pub fn start_detached_node(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
-         {{ok, _}} = application:ensure_all_started(beamtalk_repl), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
