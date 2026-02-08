@@ -37,6 +37,13 @@ The tutorial walks you through:
 
 ### Advanced Examples
 
+- **hanoi.bt** - Towers of Hanoi: recursion, multi-keyword messages, Transcript I/O
+  ```bash
+  beamtalk repl
+  > :load examples/hanoi.bt
+  > h := Hanoi new
+  > h solve: 3 from: 'A' to: 'C' via: 'B'
+  ```
 - **super_example.bt** - Inheritance and super keyword usage
 - **logging_counter.bt** - Subclassing Counter with logging behavior
 - **protoobject_proxy.bt** - Proxy pattern with message forwarding
