@@ -310,10 +310,7 @@ impl CoreErlangGenerator {
         )?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "of ExtLookupResult -> ExtLookupResult"
-        )?;
+        writeln!(self.output, "of ExtLookupResult -> ExtLookupResult")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -328,10 +325,7 @@ impl CoreErlangGenerator {
 
         // Extension found - invoke it and wrap as gen_server reply
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->"
-        )?;
+        writeln!(self.output, "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "let ExtResult = apply ExtFun(Args, Self) in")?;
