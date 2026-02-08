@@ -64,7 +64,7 @@ c getValue
 //
 // Super dispatch flow (BT-203):
 // 1. Compiler generates: call 'beamtalk_class':'super_dispatch'(State, Selector, Args)
-// 2. Runtime looks up current class from State.__class__
+// 2. Runtime looks up current class from State.$beamtalk_class
 // 3. Queries class process for superclass via beamtalk_object_class:superclass/1
 // 4. Walks inheritance chain until method found
 // 5. Invokes method with current instance state

@@ -5,7 +5,7 @@
 %%%
 %%% This module provides method dispatch for CompiledMethod objects, enabling
 %%% method introspection in Beamtalk. CompiledMethod objects are maps with
-%%% `'__class__' => 'CompiledMethod'` returned by the `>>` operator:
+%%% `'$beamtalk_class' => 'CompiledMethod'` returned by the `>>` operator:
 %%%
 %%% ```beamtalk
 %%% method := Counter >> #increment

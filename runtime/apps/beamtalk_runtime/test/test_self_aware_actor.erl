@@ -23,7 +23,7 @@ start_link(InitialValue) ->
 
 init(InitialValue) ->
     beamtalk_actor:init(#{
-        '__class__' => 'SelfAwareActor',
+        '$beamtalk_class' => 'SelfAwareActor',
         '__class_mod__' => 'test_self_aware_actor',
         '__methods__' => #{
             getSelf => fun ?MODULE:handle_getSelf/4,

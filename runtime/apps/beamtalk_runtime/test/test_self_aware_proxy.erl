@@ -23,7 +23,7 @@ start_link() ->
 
 init(_Args) ->
     beamtalk_actor:init(#{
-        '__class__' => 'SelfAwareProxy',
+        '$beamtalk_class' => 'SelfAwareProxy',
         '__class_mod__' => 'test_self_aware_proxy',
         '__methods__' => #{
             'doesNotUnderstand:args:' => fun ?MODULE:'handle_doesNotUnderstand:args:'/3

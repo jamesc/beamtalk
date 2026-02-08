@@ -31,3 +31,4 @@ ProtoObject subclass: Object
 
   // Dynamic dispatch — structural intrinsic
   perform: selector => @primitive dynamicSend
+  perform: selector withArgs: args => @primitive dynamicSendWithArgs

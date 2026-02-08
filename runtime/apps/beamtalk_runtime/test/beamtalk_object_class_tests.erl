@@ -258,7 +258,7 @@ method_test_() ->
                      },
                      {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
                      MethodObj = beamtalk_object_class:method(Pid, increment),
-                     ?assertEqual('CompiledMethod', maps:get('__class__', MethodObj)),
+                     ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
                      ?assertEqual(increment, maps:get('__selector__', MethodObj)),
                      ?assertEqual(<<"increment => self.count := self.count + 1">>,
                                   maps:get('__source__', MethodObj))
@@ -323,7 +323,7 @@ put_method_test_() ->
                      
                      %% Verify we can retrieve it
                      MethodObj = beamtalk_object_class:method(Pid, newMethod),
-                     ?assertEqual('CompiledMethod', maps:get('__class__', MethodObj)),
+                     ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
                      ?assertEqual(newMethod, maps:get('__selector__', MethodObj)),
                      ?assertEqual(Source, maps:get('__source__', MethodObj))
                  end)
@@ -468,7 +468,7 @@ super_dispatch_missing_class_field_test_() ->
      fun teardown/1,
      fun(_) ->
          [?_test(begin
-              %% State without __class__ field
+              %% State without $beamtalk_class field
               State = #{value => 0},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
               ?assertMatch({error, missing_class_field_in_state}, Result)
@@ -482,7 +482,7 @@ super_dispatch_class_not_found_test_() ->
      fun(_) ->
          [?_test(begin
               %% State with class that doesn't exist
-              State = #{'__class__' => 'NonexistentClass999'},
+              State = #{'$beamtalk_class' => 'NonexistentClass999'},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
               ?assertMatch({error, {class_not_found, 'NonexistentClass999'}}, Result)
           end)]
@@ -501,7 +501,7 @@ super_dispatch_no_superclass_test_() ->
                   superclass => none
               },
               {ok, _Pid} = beamtalk_object_class:start_link('RootTestClass', ClassInfo),
-              State = #{'__class__' => 'RootTestClass'},
+              State = #{'$beamtalk_class' => 'RootTestClass'},
               Result = beamtalk_object_class:super_dispatch(State, someMethod, []),
               ?assertMatch({error, {no_superclass, 'RootTestClass', someMethod}}, Result)
           end)]

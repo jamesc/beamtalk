@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor lifecycle (BT-172)
+//
+// Tests that:
+// - isAlive returns true for running actors
+// - isAlive still works after message processing
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Spawn a counter actor
+counter := Counter spawn
+// => _
+
+// isAlive returns true for a running actor
+counter isAlive
+// => true
+
+// Actor still works after isAlive check
+counter increment
+// => 1
+
+// isAlive still true after message processing
+counter isAlive
+// => true
