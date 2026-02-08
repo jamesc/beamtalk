@@ -79,7 +79,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("printString", 0, "Object"),
                 builtin_method("inspect", 0, "Object"),
                 builtin_method("describe", 0, "Object"),
-                builtin_method("yourself", 0, "Object"),
+                builtin_sealed_method("yourself", 0, "Object"),
                 builtin_method("hash", 0, "Object"),
                 builtin_sealed_method("respondsTo:", 1, "Object"),
                 builtin_sealed_method("instVarNames", 0, "Object"),

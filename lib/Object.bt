@@ -25,7 +25,7 @@ ProtoObject subclass: Object
   describe => 'an Object'
 
   // Identity and hashing — structural intrinsics
-  yourself => self
+  sealed yourself => self
   hash => @primitive hash
 
   // Reflection — structural intrinsics
