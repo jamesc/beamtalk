@@ -87,7 +87,6 @@ multi := [x := 1. y := 2. x + y] // Multi-statement block
 | `#'quoted'` | Symbol | atom | ✅ Implemented |
 | `#{k => v}` | Dictionary | map | ✅ Implemented |
 | `#(1, 2, 3)` | List | linked list | **This ADR** |
-| `#(1, 2, 3)` | List | linked list | **This ADR** |
 | `{1, 2, 3}` | Array | tuple | **This ADR** |
 
 **The rule:** `#` means data. Bare delimiters mean code — *except* `{}` which is exclusively for Array (tuple) literals and has no code use.
@@ -335,7 +334,7 @@ Parser is trivial: `#(` is a two-character token (like `#{`). No disambiguation 
 ### For `#[1, 2, 3]` — Prefixed Brackets
 
 - ⚙️ **BEAM veteran**: "Brackets say 'list' to me — `#[...]` is the closest to Erlang's `[...]`"
-- 🎨 **Language designer**: "`#[]` for lists, `#()` for tuples, `#{}` for maps — each delimiter matches its BEAM counterpart"
+- 🎨 **Language designer**: "`#[]` for lists, `{}` for arrays, `#{}` for maps — each delimiter has its own meaning"
 
 ### Tension Points
 
@@ -378,7 +377,7 @@ single := #[42]           // Unambiguous
 
 **Not rejected outright** — this is a reasonable alternative. However:
 - `#(...)` is preferred because Smalltalk developers recognize `#(...)` as the collection literal form
-- `#[...]` could be reserved for tuple literals (fixed-size, indexed), giving each BEAM type its own natural delimiter: `#()` list, `#[]` tuple, `#{}` map
+- Arrays (tuples) use `{...}` instead, matching Erlang and existing pattern syntax
 - If the community strongly prefers brackets for lists, this remains viable
 
 ### Alternative C: `List(1, 2, 3)` — Message Send
