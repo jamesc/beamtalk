@@ -24,10 +24,10 @@ ProtoObject subclass: Object
   describe => 'an Object'
 
   // Reflection — structural intrinsics
-  respondsTo: selector => @primitive respondsTo
-  instVarNames => @primitive instVarNames
-  instVarAt: name => @primitive instVarAt
-  instVarAt: name put: value => @primitive instVarAtPut
+  sealed respondsTo: selector => @primitive respondsTo
+  sealed instVarNames => @primitive instVarNames
+  sealed instVarAt: name => @primitive instVarAt
+  sealed instVarAt: name put: value => @primitive instVarAtPut
 
   // Dynamic dispatch — structural intrinsic
-  perform: selector => @primitive dynamicSend
+  sealed perform: selector => @primitive dynamicSend
