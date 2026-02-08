@@ -393,6 +393,7 @@ impl Analyser {
         self.scope.pop(); // Exit method scope
     }
 
+    #[allow(clippy::too_many_lines)] // one arm per Expression variant
     fn analyse_expression(&mut self, expr: &Expression, parent_context: Option<ExprContext>) {
         #[allow(clippy::enum_glob_use)] // cleaner match arms
         use crate::ast::Expression::*;
@@ -512,6 +513,15 @@ impl Analyser {
                 for pair in pairs {
                     self.analyse_expression(&pair.key, None);
                     self.analyse_expression(&pair.value, None);
+                }
+            }
+
+            ListLiteral { elements, tail, .. } => {
+                for elem in elements {
+                    self.analyse_expression(elem, None);
+                }
+                if let Some(t) = tail {
+                    self.analyse_expression(t, None);
                 }
             }
 
@@ -745,6 +755,15 @@ impl Analyser {
                 for pair in pairs {
                     self.collect_captures_and_mutations(&pair.key, captures, mutations);
                     self.collect_captures_and_mutations(&pair.value, captures, mutations);
+                }
+            }
+
+            ListLiteral { elements, tail, .. } => {
+                for elem in elements {
+                    self.collect_captures_and_mutations(elem, captures, mutations);
+                }
+                if let Some(t) = tail {
+                    self.collect_captures_and_mutations(t, captures, mutations);
                 }
             }
 

@@ -486,6 +486,11 @@ impl<'src> Lexer<'src> {
                 self.advance(); // consume '{'
                 TokenKind::MapOpen
             }
+            // List literal: #(
+            Some('(') => {
+                self.advance(); // consume '('
+                TokenKind::ListOpen
+            }
             // Quoted symbol: #'hello world'
             Some('\'') => {
                 self.advance(); // opening quote

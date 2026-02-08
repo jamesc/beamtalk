@@ -379,7 +379,7 @@ i := 1.
 // sum = 15, product = 120, i = 6
 
 // Collection iteration
-numbers := #[1, 2, 3, 4, 5].
+numbers := #(1, 2, 3, 4, 5)
 total := 0.
 numbers do: [:n | total := total + n].
 // total = 15
