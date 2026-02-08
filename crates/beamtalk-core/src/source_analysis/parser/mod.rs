@@ -2271,4 +2271,28 @@ Actor subclass: Rectangle
             other => panic!("Expected message send to list, got: {other:?}"),
         }
     }
+
+    #[test]
+    fn parse_list_multi_cons() {
+        // Multiple elements before cons: #(1, 2 | rest) → [1, 2 | rest]
+        let module = parse_ok("#(1, 2 | rest)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(tail.is_some());
+            }
+            other => panic!("Expected list literal with cons, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_error_unterminated() {
+        // Missing closing paren produces diagnostic
+        let diagnostics = parse_err("#(1, 2");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for unterminated list"
+        );
+    }
 }

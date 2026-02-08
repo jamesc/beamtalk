@@ -343,11 +343,9 @@ impl Parser {
                 // Check if it's a map literal (followed by {)
                 if matches!(self.peek_kind(), Some(TokenKind::LeftBrace)) {
                     self.parse_map_literal()
-                } else if matches!(self.peek_kind(), Some(TokenKind::LeftParen)) {
-                    // #( could be a list literal if lexed as separate tokens
-                    self.parse_list_literal()
                 } else {
                     // Standalone '#' is not a valid primary expression
+                    // (#( is already lexed as ListOpen, #{ as MapOpen, #name as Symbol)
                     let bad_token = self.advance();
                     let span = bad_token.span();
                     let message: EcoString =
