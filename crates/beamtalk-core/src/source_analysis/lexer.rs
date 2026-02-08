@@ -520,11 +520,35 @@ impl<'src> Lexer<'src> {
                 let content = content.replace("''", "'");
                 TokenKind::Symbol(EcoString::from(content))
             }
-            // Identifier symbol: #foo
+            // Identifier symbol: #foo or keyword symbol: #setValue: or #at:put:
             Some(c) if c.is_ascii_alphabetic() || c == '_' => {
                 self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
+                // Check for trailing colon (keyword symbol like #setValue:)
+                // Also handle multi-keyword symbols like #at:put:
+                if self.peek_char() == Some(':') && self.peek_char_second() != Some('=') {
+                    self.advance(); // consume first colon
+                    // Continue consuming additional keyword parts (e.g., put: in #at:put:)
+                    while self
+                        .peek_char()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    {
+                        self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
+                        if self.peek_char() == Some(':') && self.peek_char_second() != Some('=') {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
                 let full_text = self.text_for(self.span_from(start));
                 // Extract symbol name without #
+                let name = &full_text[1..];
+                TokenKind::Symbol(EcoString::from(name))
+            }
+            // Binary operator symbol: #+, #>=, #~=
+            Some(c) if Self::is_binary_selector_char(c) => {
+                self.advance_while(Self::is_binary_selector_char);
+                let full_text = self.text_for(self.span_from(start));
                 let name = &full_text[1..];
                 TokenKind::Symbol(EcoString::from(name))
             }
@@ -570,6 +594,17 @@ impl<'src> Lexer<'src> {
         ))
     }
 
+    /// Returns true if the character is a binary selector (operator) character.
+    ///
+    /// Shared between `lex_binary_selector()` and symbol operator lexing
+    /// in `lex_symbol_or_hash()` to keep the character sets in sync.
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
     /// Lexes a binary selector (one or more operator characters).
     fn lex_binary_selector(&mut self) -> TokenKind {
         let start = self.current_position();
@@ -582,12 +617,7 @@ impl<'src> Lexer<'src> {
             return self.lex_number_with_prefix(start);
         }
 
-        self.advance_while(|c| {
-            matches!(
-                c,
-                '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-            )
-        });
+        self.advance_while(Self::is_binary_selector_char);
 
         let text = self.text_for(self.span_from(start));
         TokenKind::BinarySelector(EcoString::from(text))
@@ -785,6 +815,39 @@ mod tests {
                 TokenKind::Symbol("foo".into()),
                 TokenKind::Symbol("bar".into()),
                 TokenKind::Symbol("hello world".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_keyword_symbols() {
+        assert_eq!(
+            lex_kinds("#setValue: #at:put:"),
+            vec![
+                TokenKind::Symbol("setValue:".into()),
+                TokenKind::Symbol("at:put:".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_keyword_symbol_before_assignment() {
+        // #foo:= should NOT consume the colon (it's part of :=)
+        assert_eq!(
+            lex_kinds("#foo:="),
+            vec![TokenKind::Symbol("foo".into()), TokenKind::Assign,]
+        );
+    }
+
+    #[test]
+    fn lex_binary_operator_symbols() {
+        assert_eq!(
+            lex_kinds("#+ #- #>= #~="),
+            vec![
+                TokenKind::Symbol("+".into()),
+                TokenKind::Symbol("-".into()),
+                TokenKind::Symbol(">=".into()),
+                TokenKind::Symbol("~=".into()),
             ]
         );
     }
