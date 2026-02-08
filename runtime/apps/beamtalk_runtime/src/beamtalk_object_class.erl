@@ -515,11 +515,20 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
 handle_call(get_flattened_methods, _From, #class_state{flattened_methods = Flattened} = State) ->
     {reply, {ok, Flattened}, State};
 
+%% ADR 0006 Phase 2: Fast single-selector lookup in flattened table.
+%% Returns just the result to avoid copying the entire map to the caller.
+handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods = Flattened} = State) ->
+    Result = case maps:find(Selector, Flattened) of
+        {ok, {DefiningClass, MethodInfo}} -> {ok, DefiningClass, MethodInfo};
+        error -> not_found
+    end,
+    {reply, Result, State};
+
 %% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State}.
 
-handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
+handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
     %% Handle async message dispatch (Future protocol)
     case Msg of
         {Selector, Args, FuturePid} ->
@@ -527,7 +536,8 @@ handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
             %% Match the same selectors as handle_call
             case {Selector, Args} of
                 {methods, []} ->
-                    Result = maps:keys(Methods),
+                    %% ADR 0006 Phase 2: Return all methods (local + inherited)
+                    Result = maps:keys(Flattened),
                     FuturePid ! {resolve, Result},
                     {noreply, State};
                 {superclass, []} ->
@@ -564,14 +574,15 @@ terminate(_Reason, _State) ->
     ok.
 
 code_change(OldVsn, State, Extra) ->
-    %% ADR 0006 Phase 2: Invalidate and rebuild flattened methods on hot reload
+    %% First let hot_reload modify state (may update instance_methods)
+    {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
+    %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
     NewFlattened = build_flattened_methods(
-        State#class_state.name,
-        State#class_state.superclass,
-        State#class_state.instance_methods
+        NewState#class_state.name,
+        NewState#class_state.superclass,
+        NewState#class_state.instance_methods
     ),
-    NewState = State#class_state{flattened_methods = NewFlattened},
-    beamtalk_hot_reload:code_change(OldVsn, NewState, Extra).
+    {ok, NewState#class_state{flattened_methods = NewFlattened}}.
 
 %%====================================================================
 %% Internal functions
@@ -740,9 +751,14 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
                     LocalFlattened;
                 SuperclassPid ->
                     %% Get the superclass's flattened methods
-                    SuperclassFlattenedMethods = case gen_server:call(SuperclassPid, get_flattened_methods, 5000) of
+                    %% Wrapped in try/catch: if superclass is busy/restarting,
+                    %% degrade gracefully to local-only methods (slow path
+                    %% will still find inherited methods at dispatch time)
+                    SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, get_flattened_methods, 5000) of
                         {ok, Methods} -> Methods;
-                        _ -> #{}  % Superclass may not have flattened table yet
+                        _ -> #{}
+                    catch
+                        _:_ -> #{}
                     end,
                     
                     %% Merge: local methods override inherited

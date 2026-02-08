@@ -422,17 +422,7 @@ check_extension(ClassName, Selector) ->
     {ok, class_name(), term()} | not_found.
 try_flattened_lookup(ClassPid, Selector) ->
     try
-        case gen_server:call(ClassPid, get_flattened_methods, 5000) of
-            {ok, FlattenedMethods} ->
-                case maps:find(Selector, FlattenedMethods) of
-                    {ok, {DefiningClass, MethodInfo}} ->
-                        {ok, DefiningClass, MethodInfo};
-                    error ->
-                        not_found
-                end;
-            _ ->
-                not_found
-        end
+        gen_server:call(ClassPid, {lookup_flattened, Selector}, 5000)
     catch
         _:_ ->
             %% gen_server call failed (timeout, noproc, etc.)
