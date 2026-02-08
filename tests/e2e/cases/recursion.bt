@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for recursive method dispatch BT-330
+// Verifies that methods can call themselves recursively via self.
+
+// @load tests/e2e/fixtures/math_helper.bt
+
+// ===========================================================================
+// SETUP
+// ===========================================================================
+
+m := MathHelper new
+// => _
+
+// ===========================================================================
+// RECURSIVE KEYWORD METHOD: FACTORIAL
+// ===========================================================================
+
+// Base cases
+m factorial: 0
+// => 1
+
+m factorial: 1
+// => 1
+
+// Recursive cases (5+ depth)
+m factorial: 5
+// => 120
+
+m factorial: 10
+// => 3628800
+
+// ===========================================================================
+// DOUBLE-RECURSIVE KEYWORD METHOD: FIBONACCI
+// ===========================================================================
+
+// Base cases
+m fibonacci: 0
+// => 0
+
+m fibonacci: 1
+// => 1
+
+// Recursive cases (5+ depth)
+m fibonacci: 5
+// => 5
+
+m fibonacci: 10
+// => 55
+
+// ===========================================================================
+// RECURSIVE COUNTDOWN (DEPTH VERIFICATION)
+// ===========================================================================
+
+// Verifies 10+ recursion depth
+m countdown: 10
+// => 10
+
+m countdown: 20
+// => 20
