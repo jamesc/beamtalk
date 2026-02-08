@@ -33,6 +33,17 @@ pub enum SemanticErrorKind {
 
     /// Variable bound multiple times in the same pattern.
     DuplicatePatternVariable { name: EcoString, first_span: Span },
+
+    /// Method expects a symbol literal argument but received something else.
+    ///
+    /// Reflection methods like `respondsTo:`, `instVarAt:`, and `classNamed:`
+    /// require symbol literal arguments (e.g., `#increment`).
+    ExpectedSymbolLiteral {
+        /// The method selector that expects a symbol.
+        method: EcoString,
+        /// The identifier name if the user passed a bare identifier.
+        found_identifier: Option<EcoString>,
+    },
 }
 
 impl SemanticError {
