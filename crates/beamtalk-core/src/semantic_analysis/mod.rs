@@ -20,6 +20,7 @@ use std::collections::HashMap;
 pub mod block_context;
 pub mod class_hierarchy;
 pub mod error;
+pub(crate) mod method_validators;
 pub mod name_resolver;
 pub mod primitive_validator;
 pub mod scope;
@@ -306,6 +307,7 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
 struct Analyser {
     result: AnalysisResult,
     scope: scope::Scope,
+    method_validators: method_validators::MethodValidatorRegistry,
 }
 
 impl Analyser {
@@ -320,6 +322,7 @@ impl Analyser {
         Self {
             result: AnalysisResult::new(),
             scope,
+            method_validators: method_validators::MethodValidatorRegistry::new(),
         }
     }
 
@@ -428,9 +431,16 @@ impl Analyser {
                 receiver,
                 selector,
                 arguments,
-                span: _,
+                span,
             } => {
                 self.analyse_expression(receiver, None);
+
+                // Run method-specific validators
+                let selector_name = selector.name();
+                if let Some(validator) = self.method_validators.get(&selector_name) {
+                    let diagnostics = validator.validate(selector, arguments, *span);
+                    self.result.diagnostics.extend(diagnostics);
+                }
 
                 // Determine context for block arguments
                 let selector_str = block_context::selector_to_string(selector);
@@ -2139,6 +2149,190 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("sealed") && d.message.contains("Integer")),
             "Expected sealed class diagnostic, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // --- Method Validator Integration Tests (BT-244) ---
+
+    #[test]
+    fn test_responds_to_with_symbol_no_diagnostic() {
+        // counter respondsTo: #increment — should be fine
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "counter",
+                test_span(),
+            ))),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "respondsTo:",
+                test_span(),
+            )]),
+            arguments: vec![Expression::Literal(
+                Literal::Symbol("increment".into()),
+                test_span(),
+            )],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+        let result = analyse_with_known_vars(&module, &["counter"]);
+
+        // No symbol-related diagnostics
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("expects a symbol literal")),
+            "Should not report error for symbol literal, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_responds_to_with_identifier_emits_error() {
+        // counter respondsTo: increment — should error
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "counter",
+                test_span(),
+            ))),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "respondsTo:",
+                test_span(),
+            )]),
+            arguments: vec![Expression::Identifier(Identifier::new(
+                "increment",
+                Span::new(20, 29),
+            ))],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+        let result = analyse_with_known_vars(&module, &["counter"]);
+
+        let symbol_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects a symbol literal"))
+            .collect();
+
+        assert_eq!(
+            symbol_errors.len(),
+            1,
+            "Expected 1 symbol literal error, got: {:?}",
+            result.diagnostics
+        );
+        assert!(symbol_errors[0].message.contains("#increment"));
+        assert!(
+            symbol_errors[0]
+                .message
+                .contains("checks if an object understands a message")
+        );
+        assert_eq!(symbol_errors[0].span, Span::new(20, 29));
+    }
+
+    #[test]
+    fn test_class_named_with_class_reference_emits_error() {
+        // Beamtalk classNamed: Counter — should error
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Beamtalk", test_span()),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "classNamed:",
+                test_span(),
+            )]),
+            arguments: vec![Expression::ClassReference {
+                name: Identifier::new("Counter", Span::new(22, 29)),
+                span: Span::new(22, 29),
+            }],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+        let result = analyse(&module);
+
+        let symbol_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects a symbol literal"))
+            .collect();
+
+        assert_eq!(
+            symbol_errors.len(),
+            1,
+            "Expected 1 symbol literal error, got: {:?}",
+            result.diagnostics
+        );
+        assert!(symbol_errors[0].message.contains("#Counter"));
+        assert!(
+            symbol_errors[0]
+                .message
+                .contains("looks up a class by name")
+        );
+    }
+
+    #[test]
+    fn test_inst_var_at_with_integer_emits_error() {
+        // obj instVarAt: 42 — should error
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new("obj", test_span()))),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "instVarAt:",
+                test_span(),
+            )]),
+            arguments: vec![Expression::Literal(Literal::Integer(42), Span::new(15, 17))],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+        let result = analyse_with_known_vars(&module, &["obj"]);
+
+        let symbol_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("expects a symbol literal"))
+            .collect();
+
+        assert_eq!(
+            symbol_errors.len(),
+            1,
+            "Expected 1 symbol literal error, got: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            symbol_errors[0]
+                .message
+                .contains("accesses an instance variable by name")
+        );
+    }
+
+    #[test]
+    fn test_non_reflection_method_no_validation() {
+        // obj someMethod: increment — should NOT trigger validator
+        let expr = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new("obj", test_span()))),
+            selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                "someMethod:",
+                test_span(),
+            )]),
+            arguments: vec![Expression::Identifier(Identifier::new(
+                "increment",
+                test_span(),
+            ))],
+            span: test_span(),
+        };
+
+        let module = Module::new(vec![expr], test_span());
+        let result = analyse_with_known_vars(&module, &["obj"]);
+
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("expects a symbol literal")),
+            "Non-reflection methods should not trigger symbol validation, got: {:?}",
             result.diagnostics
         );
     }
