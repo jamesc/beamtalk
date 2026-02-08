@@ -20,6 +20,7 @@
 %%% | Tuple | Object | beamtalk_tuple |
 %%% | Beamtalk | Object | beamtalk_stdlib |
 %%% | Transcript | Object | transcript |
+%%% | File | Object | beamtalk_file |
 %%%
 %%% ## Usage
 %%%

@@ -92,8 +92,7 @@
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
             Hint = case Reason of
                 absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>;
-                _ -> <<"Use relative paths within the project">>
+                directory_traversal -> <<"Use relative paths within the project">>
             end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             error(Error3)
@@ -144,8 +143,7 @@
             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
             Hint = case Reason of
                 absolute_path -> <<"Use relative paths only">>;
-                directory_traversal -> <<"Use relative paths within the project">>;
-                _ -> <<"Use relative paths within the project">>
+                directory_traversal -> <<"Use relative paths within the project">>
             end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
             error(Error3)
@@ -198,13 +196,11 @@ validate_path(Path) when is_binary(Path) ->
             {error, absolute_path};
         _ ->
             %% Check for directory traversal attempts
-            case string:find(PathStr, "..") of
-                nomatch ->
-                    %% Path is safe
-                    {ok, PathStr};
-                _ ->
-                    {error, directory_traversal}
+            Components = filename:split(PathStr),
+            case lists:member("..", Components) of
+                true ->
+                    {error, directory_traversal};
+                false ->
+                    {ok, PathStr}
             end
-    end;
-validate_path(_) ->
-    {error, invalid_type}.
+    end.

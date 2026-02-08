@@ -607,13 +607,14 @@ impl CoreErlangGenerator {
     /// - `Beamtalk allClasses` → `call 'Beamtalk':'allClasses'()`
     /// - `Point new` → `call 'Point':'new'()`
     /// - `Counter spawn` → Already handled by `generate_actor_spawn`
+    /// - `File exists: 'test.txt'` → `call 'beamtalk_file':'exists:'(...)` (BT-336)
     fn generate_class_method_call(
         &mut self,
         class_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        let module_name = to_module_name(class_name);
+        let module_name = class_method_module_name(class_name);
         let method_name = selector.to_erlang_atom();
 
         write!(self.output, "call '{module_name}':'{method_name}'(")?;
@@ -628,5 +629,62 @@ impl CoreErlangGenerator {
         write!(self.output, ")")?;
 
         Ok(())
+    }
+}
+
+/// Resolves the module name for class method dispatch.
+///
+/// Most classes use `to_module_name()` (`CamelCase` → `snake_case`), but some
+/// class names produce module names that conflict with Erlang stdlib modules.
+/// These use the `beamtalk_` prefix matching their runtime implementation.
+fn class_method_module_name(class_name: &str) -> String {
+    let module = to_module_name(class_name);
+    if is_erlang_stdlib_module(&module) {
+        format!("beamtalk_{module}")
+    } else {
+        module
+    }
+}
+
+/// Returns true if the given name conflicts with a well-known Erlang/OTP module.
+///
+/// When a Beamtalk class name (e.g., `File`) converts to an Erlang stdlib module
+/// name (e.g., `file`), we must prefix with `beamtalk_` to avoid collisions.
+fn is_erlang_stdlib_module(name: &str) -> bool {
+    matches!(
+        name,
+        "file" | "io" | "lists" | "maps" | "math" | "timer" | "os" | "net" | "code" | "error"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_class_method_module_name_no_conflict() {
+        assert_eq!(class_method_module_name("Transcript"), "transcript");
+        assert_eq!(class_method_module_name("Counter"), "counter");
+        assert_eq!(
+            class_method_module_name("MyCounterActor"),
+            "my_counter_actor"
+        );
+    }
+
+    #[test]
+    fn test_class_method_module_name_erlang_conflict() {
+        assert_eq!(class_method_module_name("File"), "beamtalk_file");
+        assert_eq!(class_method_module_name("Io"), "beamtalk_io");
+        assert_eq!(class_method_module_name("Timer"), "beamtalk_timer");
+    }
+
+    #[test]
+    fn test_is_erlang_stdlib_module() {
+        assert!(is_erlang_stdlib_module("file"));
+        assert!(is_erlang_stdlib_module("io"));
+        assert!(is_erlang_stdlib_module("lists"));
+        assert!(!is_erlang_stdlib_module("transcript"));
+        assert!(!is_erlang_stdlib_module("counter"));
+        assert!(!is_erlang_stdlib_module("beamtalk_file"));
     }
 }

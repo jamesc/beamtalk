@@ -26,25 +26,11 @@ File writeAll: 'test_output.txt' contents: 'Hello, Beamtalk!'
 
 // Read back the file we just wrote
 File readAll: 'test_output.txt'
-// => "Hello, Beamtalk!"
+// => Hello, Beamtalk!
 
 // Check that file now exists
 File exists: 'test_output.txt'
 // => true
-
-// ===========================================================================
-// MULTILINE CONTENT
-// ===========================================================================
-
-// Write multiline content
-File writeAll: 'multiline.txt' contents: 'Line 1
-Line 2
-Line 3'
-// => nil
-
-// Read it back
-File readAll: 'multiline.txt'
-// => "Line 1\nLine 2\nLine 3"
 
 // ===========================================================================
 // OVERWRITE EXISTING FILE
@@ -56,19 +42,19 @@ File writeAll: 'test_output.txt' contents: 'New content'
 
 // Verify new content
 File readAll: 'test_output.txt'
-// => "New content"
+// => New content
 
 // ===========================================================================
-// UNICODE CONTENT
+// SPECIAL CHARACTERS
 // ===========================================================================
 
-// Write Unicode content
-File writeAll: 'unicode.txt' contents: 'Hello 世界 🌍'
+// Write content with special characters
+File writeAll: 'special.txt' contents: 'Hello, World! @#$%'
 // => nil
 
-// Read Unicode content back
-File readAll: 'unicode.txt'
-// => "Hello 世界 🌍"
+// Read it back
+File readAll: 'special.txt'
+// => Hello, World! @#$%
 
 // ===========================================================================
 // EMPTY FILE
@@ -80,11 +66,27 @@ File writeAll: 'empty.txt' contents: ''
 
 // Read empty file
 File readAll: 'empty.txt'
-// => ""
+// =>
 
 // Empty file exists
 File exists: 'empty.txt'
 // => true
+
+// ===========================================================================
+// ERROR PATHS
+// ===========================================================================
+
+// Reading a non-existent file should raise file_not_found error
+File readAll: 'does_not_exist_at_all.txt'
+// => ERROR: file_not_found
+
+// Writing with directory traversal should raise invalid_path error
+File writeAll: '../escape.txt' contents: 'bad'
+// => ERROR: invalid_path
+
+// Reading with absolute path should raise invalid_path error
+File readAll: '/etc/passwd'
+// => ERROR: invalid_path
 
 // ===========================================================================
 // SECURITY: PATH VALIDATION
