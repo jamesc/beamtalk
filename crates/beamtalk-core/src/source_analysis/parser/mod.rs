@@ -2157,4 +2157,142 @@ Actor subclass: Rectangle
         assert_eq!(module.classes[0].methods[0].selector.name(), "m");
         assert_eq!(module.classes[0].methods[1].selector.name(), "n");
     }
+
+    // ========================================================================
+    // List Literal Tests (BT-402)
+    // ========================================================================
+
+    #[test]
+    fn parse_empty_list() {
+        let module = parse_ok("#()");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert!(elements.is_empty());
+                assert!(tail.is_none());
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_single_element_list() {
+        let module = parse_ok("#(42)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_none());
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multi_element_list() {
+        let module = parse_ok("#(1, 2, 3)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 3);
+                assert!(tail.is_none());
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_trailing_comma() {
+        let module = parse_ok("#(1, 2, 3,)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 3);
+                assert!(tail.is_none());
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_cons_syntax() {
+        let module = parse_ok("#(0 | rest)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_some());
+            }
+            other => panic!("Expected list literal with cons, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_list() {
+        let module = parse_ok("#(#(1, 2), #(3, 4))");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(tail.is_none());
+                // Each element should be a list literal
+                assert!(matches!(&elements[0], Expression::ListLiteral { .. }));
+                assert!(matches!(&elements[1], Expression::ListLiteral { .. }));
+            }
+            other => panic!("Expected nested list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_with_mixed_types() {
+        let module = parse_ok("#(1, 'hello', #ok)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 3);
+                assert!(tail.is_none());
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_as_message_receiver() {
+        // List literal as receiver of a message
+        let module = parse_ok("#(1, 2, 3) size");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                receiver, selector, ..
+            } => {
+                assert!(matches!(receiver.as_ref(), Expression::ListLiteral { .. }));
+                assert_eq!(selector.name(), "size");
+            }
+            other => panic!("Expected message send to list, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_multi_cons() {
+        // Multiple elements before cons: #(1, 2 | rest) → [1, 2 | rest]
+        let module = parse_ok("#(1, 2 | rest)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(tail.is_some());
+            }
+            other => panic!("Expected list literal with cons, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_error_unterminated() {
+        // Missing closing paren produces diagnostic
+        let diagnostics = parse_err("#(1, 2");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for unterminated list"
+        );
+    }
 }

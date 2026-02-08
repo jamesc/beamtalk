@@ -345,10 +345,11 @@ impl Parser {
                     self.parse_map_literal()
                 } else {
                     // Standalone '#' is not a valid primary expression
+                    // (#( is already lexed as ListOpen, #{ as MapOpen, #name as Symbol)
                     let bad_token = self.advance();
                     let span = bad_token.span();
                     let message: EcoString =
-                        "Unexpected '#': expected '#{' for a map literal or a valid expression"
+                        "Unexpected '#': expected '#(' for a list, '#{' for a map, or '#name'/'#\\'quoted\\'' for a symbol"
                             .into();
                     self.diagnostics
                         .push(Diagnostic::error(message.clone(), span));
@@ -367,6 +368,9 @@ impl Parser {
 
             // Map literal
             TokenKind::MapOpen => self.parse_map_literal(),
+
+            // List literal
+            TokenKind::ListOpen => self.parse_list_literal(),
 
             // Primitive pragma: @primitive 'name' or @primitive intrinsicName
             TokenKind::AtPrimitive => self.parse_primitive(),
@@ -719,6 +723,97 @@ impl Parser {
 
         let span = start.merge(end_span);
         Expression::MapLiteral { pairs, span }
+    }
+
+    /// Parses a list literal: `#(expr, expr, ...)` or `#(head | tail)` (cons)
+    ///
+    /// List elements are parsed as unary expressions (primaries + unary messages),
+    /// which stops at binary operators like `,` and `|`. This matches map literal
+    /// parsing behavior.
+    fn parse_list_literal(&mut self) -> Expression {
+        let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
+        let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut elements = Vec::new();
+
+        // Handle empty list: #()
+        if self.check(&TokenKind::RightParen) {
+            let end_token = self.advance();
+            let span = start.merge(end_token.span());
+            return Expression::ListLiteral {
+                elements,
+                tail: None,
+                span,
+            };
+        }
+
+        // Parse elements
+        loop {
+            // Parse element expression (unary only - stops at `,`, `|`, `)`)
+            let elem = self.parse_unary_message();
+            elements.push(elem);
+
+            // Check for cons operator `|`
+            if self.check(&TokenKind::Pipe) {
+                self.advance(); // consume `|`
+                let tail = self.parse_unary_message();
+                // Expect closing paren after tail
+                let end_span = if self.check(&TokenKind::RightParen) {
+                    self.advance().span()
+                } else {
+                    self.diagnostics.push(Diagnostic::error(
+                        "Expected ')' to close list literal after cons tail",
+                        self.current_token().span(),
+                    ));
+                    self.current_token().span()
+                };
+                let span = start.merge(end_span);
+                return Expression::ListLiteral {
+                    elements,
+                    tail: Some(Box::new(tail)),
+                    span,
+                };
+            }
+
+            // Check for comma (continue) or closing paren (end)
+            if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
+                self.advance(); // consume comma
+                // Allow trailing comma
+                if self.check(&TokenKind::RightParen) {
+                    break;
+                }
+            } else if self.check(&TokenKind::RightParen) {
+                break;
+            } else {
+                let bad_token = self.advance();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Expected ',', '|', or ')' in list literal, found {}",
+                        bad_token.kind()
+                    ),
+                    bad_token.span(),
+                ));
+                break;
+            }
+        }
+
+        // Expect closing paren
+        let end_span = if self.check(&TokenKind::RightParen) {
+            self.advance().span()
+        } else {
+            self.diagnostics.push(Diagnostic::error(
+                "Expected ')' to close list literal",
+                self.current_token().span(),
+            ));
+            self.current_token().span()
+        };
+
+        let span = start.merge(end_span);
+        Expression::ListLiteral {
+            elements,
+            tail: None,
+            span,
+        }
     }
 
     /// Parses a parenthesized expression.

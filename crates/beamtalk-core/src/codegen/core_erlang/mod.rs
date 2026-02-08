@@ -710,6 +710,9 @@ impl CoreErlangGenerator {
             } => self.generate_field_access(receiver, field),
             Expression::Parenthesized { expression, .. } => self.generate_expression(expression),
             Expression::MapLiteral { pairs, .. } => self.generate_map_literal(pairs),
+            Expression::ListLiteral { elements, tail, .. } => {
+                self.generate_list_literal(elements, tail.as_deref())
+            }
             Expression::Cascade {
                 receiver, messages, ..
             } => self.generate_cascade(receiver, messages),
