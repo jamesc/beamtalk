@@ -327,6 +327,11 @@ fn check_abstract_instantiation(
     }
 }
 
+/// Returns true if the selector name is an instantiation method (spawn, new, etc.)
+fn is_instantiation_selector(name: &str) -> bool {
+    matches!(name, "spawn" | "spawnWith:" | "new" | "new:")
+}
+
 fn check_abstract_in_expr(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
@@ -349,9 +354,7 @@ fn check_abstract_in_expr(
             if let Some(name) = receiver_name {
                 let selector_name = selector.name();
 
-                if (selector_name == "spawn" || selector_name == "spawnWith:")
-                    && hierarchy.is_abstract(name)
-                {
+                if is_instantiation_selector(&selector_name) && hierarchy.is_abstract(name) {
                     diagnostics.push(Diagnostic::error(
                         format!("Cannot instantiate abstract class `{name}`. Subclass it first.",),
                         *span,
@@ -387,7 +390,7 @@ fn check_abstract_in_expr(
             if let Some(name) = receiver_name {
                 for msg in messages {
                     let sel = msg.selector.name();
-                    if (sel == "spawn" || sel == "spawnWith:") && hierarchy.is_abstract(name) {
+                    if is_instantiation_selector(&sel) && hierarchy.is_abstract(name) {
                         diagnostics.push(Diagnostic::error(
                             format!(
                                 "Cannot instantiate abstract class `{name}`. Subclass it first.",

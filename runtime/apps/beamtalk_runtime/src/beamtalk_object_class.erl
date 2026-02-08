@@ -96,7 +96,8 @@
 -type selector() :: atom().
 -type method_info() :: #{
     arity => non_neg_integer(),
-    block => fun()
+    block => fun(),
+    is_sealed => boolean()
 }.
 
 -record(class_state, {
@@ -406,13 +407,17 @@ init({ClassName, ClassInfo}) ->
     invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
-handle_call({new, _Args}, _From, #class_state{
+handle_call({new, Args}, _From, #class_state{
     name = ClassName,
     is_abstract = true
 } = State) ->
     %% BT-105: Abstract classes cannot be instantiated
+    Selector = case Args of
+        [] -> 'new';
+        _ -> 'new:'
+    end,
     Error0 = beamtalk_error:new(instantiation_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, 'new'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>),
     {reply, {error, Error2}, State};
 
