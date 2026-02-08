@@ -336,34 +336,49 @@ impl Parser {
     /// - Semicolon (`;`) - cascade separator
     /// - Newline (when inside method body) - implicit statement separator (BT-360)
     pub(super) fn synchronize(&mut self) {
+        // BT-368: If we're already at a newline boundary in a method body, don't
+        // advance past the first token of the next statement. parse_expression()
+        // typically consumes the bad token via advance() in parse_primary, so
+        // current may already point to the next statement's first token.
+        if !self.is_at_end() && self.in_method_body && self.current_token().has_leading_newline() {
+            return;
+        }
+
         self.advance();
 
         while !self.is_at_end() {
-            // Found a statement boundary
-            if matches!(
-                self.current_kind(),
-                TokenKind::Period
-                    | TokenKind::RightBracket
-                    | TokenKind::RightParen
-                    | TokenKind::RightBrace
-                    | TokenKind::Semicolon
-            ) {
-                return;
-            }
-
-            // New statement may be starting
-            if matches!(self.current_kind(), TokenKind::Caret) {
-                return;
-            }
-
-            // BT-368: In method bodies, newlines act as implicit statement separators (BT-360)
-            // so we can recover at newline boundaries
-            if self.in_method_body && self.current_token().has_leading_newline() {
+            if self.at_recovery_point() {
                 return;
             }
 
             self.advance();
         }
+    }
+
+    /// Returns true if the current token is at a recovery point.
+    fn at_recovery_point(&self) -> bool {
+        if matches!(
+            self.current_kind(),
+            TokenKind::Period
+                | TokenKind::RightBracket
+                | TokenKind::RightParen
+                | TokenKind::RightBrace
+                | TokenKind::Semicolon
+        ) {
+            return true;
+        }
+
+        if matches!(self.current_kind(), TokenKind::Caret) {
+            return true;
+        }
+
+        // BT-368: In method bodies, newlines act as implicit statement separators (BT-360)
+        // so we can recover at newline boundaries
+        if self.in_method_body && self.current_token().has_leading_newline() {
+            return true;
+        }
+
+        false
     }
 
     // ========================================================================
@@ -768,21 +783,24 @@ mod tests {
 
     #[test]
     fn parse_top_level_error_recovery_unchanged() {
-        // BT-368: Top-level parsing should NOT treat newlines as recovery points
-        // (only periods are statement separators at module level)
+        // BT-368: Top-level parsing currently treats newlines as statement separators.
+        // This test ensures that error recovery on the first statement does not
+        // regress that behaviour and that we still parse subsequent top-level
+        // expressions after a newline.
         let source = "x := @\ny := 3";
         let tokens = lex_with_eof(source);
         let (module, diagnostics) = parse(tokens);
 
-        // Should have error diagnostic
+        // Should have exactly one error diagnostic from the invalid '@' token
         assert_eq!(diagnostics.len(), 1, "Expected one error diagnostic");
 
-        // At module level, newlines don't separate statements without periods
-        // so after the error, parsing stops (synchronize doesn't stop at newlines at top level)
-        // The module should have parsed the error expression
-        assert!(
-            !module.expressions.is_empty(),
-            "Module should have at least the error expression"
+        // The parser should recover at the newline and continue parsing the
+        // second top-level expression (we rely on this behaviour elsewhere,
+        // e.g. in `parse_multiple_map_assignments`).
+        assert_eq!(
+            module.expressions.len(),
+            2,
+            "Expected both top-level expressions to be parsed despite the first containing an error"
         );
     }
 
@@ -1061,7 +1079,8 @@ mod tests {
     #[test]
     fn parse_method_body_error_recovery_multiple_methods() {
         // BT-368: Parser should not skip following methods after error recovery
-        let source = "Object subclass: Test\n\n  methodOne =>\n    x := @\n\n  methodTwo =>\n    y := 42";
+        let source =
+            "Object subclass: Test\n\n  methodOne =>\n    x := @\n\n  methodTwo =>\n    y := 42";
         let tokens = lex_with_eof(source);
         let (module, diagnostics) = parse(tokens);
 
@@ -1093,6 +1112,45 @@ mod tests {
         assert!(
             !class.methods[1].body[0].is_error(),
             "Second method statement should be valid"
+        );
+    }
+
+    #[test]
+    fn parse_method_body_bare_error_recovery_at_newline() {
+        // BT-368: A bare error token (not in an assignment) should not cause
+        // synchronize() to skip the first token of the next statement.
+        // This tests the fix where synchronize() checks recovery points
+        // before the initial advance().
+        let source = "Object subclass: Test\n\n  go =>\n    x := 1\n    #\n    z := 3";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+
+        // Should have error diagnostic for the bare '#'
+        assert!(!diagnostics.is_empty(), "Expected error diagnostics");
+
+        // Should still parse the class and method
+        assert_eq!(module.classes.len(), 1, "Should parse the class");
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1, "Should parse the method");
+
+        // Method should recover and parse z := 3 after the error
+        let method = &class.methods[0];
+        assert!(
+            method.body.len() >= 3,
+            "Method should have at least 3 statements: x := 1, error, z := 3 (got {})",
+            method.body.len()
+        );
+
+        // First statement should be valid (x := 1)
+        assert!(
+            !method.body[0].is_error(),
+            "First statement should be valid"
+        );
+
+        // Last statement should be valid (z := 3) — recovered after error
+        assert!(
+            !method.body[method.body.len() - 1].is_error(),
+            "Last statement should be valid after recovery"
         );
     }
 
