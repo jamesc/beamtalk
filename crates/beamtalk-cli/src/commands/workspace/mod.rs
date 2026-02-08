@@ -317,6 +317,7 @@ pub fn create_workspace(
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
 #[allow(dead_code)] // Used in Phase 3
+#[allow(clippy::too_many_arguments)]
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
@@ -332,8 +333,8 @@ pub fn start_detached_node(
 
     // Read cookie
     let cookie = read_workspace_cookie(workspace_id)?;
-    
-    // Determine idle timeout (environment variable > default)
+
+    // Determine idle timeout (explicit arg > environment variable > default)
     let idle_timeout = max_idle_seconds.unwrap_or_else(|| {
         std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
             .ok()
@@ -439,6 +440,7 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
 #[allow(dead_code)] // Used in Phase 3
+#[allow(clippy::too_many_arguments)]
 pub fn get_or_start_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,
@@ -460,7 +462,7 @@ pub fn get_or_start_workspace(
             return Ok((node_info, false, workspace_id)); // Existing node
         }
         // Stale node.info file - orphaned workspace detected
-        tracing::info!("Cleaning up orphaned workspace: {}", workspace_id);
+        eprintln!("Cleaning up orphaned workspace: {workspace_id}");
         cleanup_stale_node_info(&workspace_id)?;
     }
 

@@ -1,15 +1,30 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Integration tests for workspace activity tracking
+%%% @doc Unit tests for workspace_meta activity tracking API
 %%%
-%%% Tests that activity tracking is correctly integrated across components:
-%%% - Session connections update activity
-%%% - Actor spawns update activity
-%%% - Code reloads update activity
+%%% Tests that workspace_meta:update_activity/0 correctly updates the
+%%% last_activity timestamp. These are unit tests for the activity tracking
+%%% mechanism itself. Integration tests that exercise the real call sites
+%%% (repl_server session creation, actor spawn, code reload) are in
+%%% their respective test modules.
 
 -module(beamtalk_activity_tracking_tests).
 -include_lib("eunit/include/eunit.hrl").
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+%% Stop any pre-existing beamtalk_workspace_meta process to ensure
+%% a clean slate for each test.
+stop_if_running() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Pid ->
+            gen_server:stop(Pid),
+            ok
+    end.
 
 %%====================================================================
 %% Tests
@@ -18,7 +33,7 @@
 %%% Session connection activity tracking
 
 session_connect_updates_activity_test() ->
-    %% Start workspace_meta
+    stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_session">>,
         project_path => <<"/tmp/test">>,
@@ -46,7 +61,7 @@ session_connect_updates_activity_test() ->
 %%% Actor spawn activity tracking
 
 actor_spawn_updates_activity_test() ->
-    %% Start workspace_meta
+    stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_actor">>,
         project_path => <<"/tmp/test">>,
@@ -74,7 +89,7 @@ actor_spawn_updates_activity_test() ->
 %%% Code reload activity tracking
 
 code_reload_updates_activity_test() ->
-    %% Start workspace_meta
+    stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_reload">>,
         project_path => <<"/tmp/test">>,
@@ -102,7 +117,7 @@ code_reload_updates_activity_test() ->
 %%% Multiple activity updates
 
 multiple_activity_updates_test() ->
-    %% Start workspace_meta
+    stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_multiple">>,
         project_path => <<"/tmp/test">>,
@@ -137,7 +152,7 @@ multiple_activity_updates_test() ->
 %%% Mark activity convenience function
 
 mark_activity_delegates_to_workspace_meta_test() ->
-    %% Start workspace_meta
+    stop_if_running(),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"test_mark">>,
         project_path => <<"/tmp/test">>,
