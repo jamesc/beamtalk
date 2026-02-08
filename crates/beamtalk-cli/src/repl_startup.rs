@@ -85,3 +85,48 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
     }
     args
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_cmd_contains_required_steps() {
+        let cmd = build_eval_cmd(9000);
+        // Must set application env before starting apps
+        assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
+        // Must start the workspace OTP application
+        assert!(cmd.contains("application:ensure_all_started(beamtalk_workspace)"));
+        // Must start the REPL TCP listener
+        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+        // Must block to keep the VM alive
+        assert!(cmd.contains("receive stop -> ok end"));
+    }
+
+    #[test]
+    fn eval_cmd_with_node_includes_node_name() {
+        let cmd = build_eval_cmd_with_node(9000, "mynode");
+        assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
+        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+    }
+
+    #[test]
+    fn beam_paths_uses_correct_layout() {
+        let paths = beam_paths(Path::new("/rt"));
+        assert_eq!(paths.runtime_ebin, PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin"));
+        assert_eq!(paths.workspace_ebin, PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin"));
+        assert_eq!(paths.jsx_ebin, PathBuf::from("/rt/_build/default/lib/jsx/ebin"));
+        assert_eq!(paths.stdlib_ebin, PathBuf::from("/rt/apps/beamtalk_stdlib/ebin"));
+    }
+
+    #[test]
+    fn beam_pa_args_alternates_flag_and_path() {
+        let paths = beam_paths(Path::new("/rt"));
+        let args = beam_pa_args(&paths);
+        // Should be 8 elements: 4 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 8);
+        for i in (0..args.len()).step_by(2) {
+            assert_eq!(args[i], "-pa");
+        }
+    }
+}
