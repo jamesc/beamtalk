@@ -11,7 +11,7 @@ ADRs document significant architectural and design decisions, including:
 
 Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 
-- **Status:** Proposed, Accepted, Deprecated, Superseded
+- **Status:** Proposed, Accepted, Implemented, Deprecated, Superseded
 - **Context:** Background, problem statement, constraints
 - **Decision:** What was decided, with code and REPL examples
 - **Prior Art:** How reference languages handle this
