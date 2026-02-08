@@ -212,6 +212,7 @@ jobs:
           badge: true
           format: markdown
           output: both
+          hide_complexity: true
 
       - name: Preserve Rust Coverage Report
         run: |
@@ -225,7 +226,7 @@ jobs:
         continue-on-error: true
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
-          filename: runtime/_build/test/covertool/beamtalk_runtime.covertool.xml
+          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml'
           badge: true
           format: markdown
           output: both
