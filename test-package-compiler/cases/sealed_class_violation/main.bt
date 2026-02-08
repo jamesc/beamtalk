@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test that subclassing a sealed class produces a diagnostic error.
+// Integer is a built-in sealed class.
+
+Integer subclass: MyInt
+  doubled => self * 2

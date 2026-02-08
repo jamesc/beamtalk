@@ -1,0 +1,11 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (3):
+  - Undefined variable: self
+  - Undefined variable: self
+  - cannot assign to field 'value' inside a stored closure
+
+= help: field assignments require immediate execution context
+= help: use control flow directly: `items do: [:item | self.value := value]`
