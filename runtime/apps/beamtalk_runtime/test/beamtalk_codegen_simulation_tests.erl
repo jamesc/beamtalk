@@ -1758,3 +1758,24 @@ unregistered_extension_gives_dnu_test() ->
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
     
     gen_server:stop(Pid).
+
+%% Test: Extension that throws propagates error through safe_dispatch
+extension_error_propagation_test() ->
+    beamtalk_extensions:init(),
+    
+    %% Extension that crashes
+    CrashFun = fun([], _Self) -> error(extension_crash) end,
+    beamtalk_extensions:register('Counter', crashMethod, CrashFun, test_owner),
+    
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    
+    %% Error should be caught by safe_dispatch and returned
+    Result = gen_server:call(Pid, {crashMethod, []}),
+    ?assertMatch({error, {error, extension_crash}}, Result),
+    
+    %% Actor should still be alive after extension crash
+    {ok, 0} = gen_server:call(Pid, {getValue, []}),
+    
+    gen_server:stop(Pid),
+    ets:delete(beamtalk_extensions, {'Counter', crashMethod}).
