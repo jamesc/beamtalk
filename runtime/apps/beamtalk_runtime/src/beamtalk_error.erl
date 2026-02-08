@@ -125,6 +125,22 @@ generate_message(instantiation_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Cannot instantiate ~s", [Class]));
 generate_message(instantiation_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Cannot call '~s' on ~s", [Selector, Class]));
+generate_message(file_not_found, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s: file not found", [Class]));
+generate_message(file_not_found, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s '~s': file not found", [Class, Selector]));
+generate_message(permission_denied, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s: permission denied", [Class]));
+generate_message(permission_denied, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s '~s': permission denied", [Class, Selector]));
+generate_message(invalid_path, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s: invalid file path", [Class]));
+generate_message(invalid_path, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s '~s': invalid file path", [Class, Selector]));
+generate_message(io_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s: I/O error", [Class]));
+generate_message(io_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s '~s': I/O error", [Class, Selector]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
