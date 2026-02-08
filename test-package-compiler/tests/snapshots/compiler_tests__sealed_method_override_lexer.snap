@@ -1,0 +1,24 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 203, end: 209 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test that overriding a sealed method produces a diagnostic error."), Whitespace("\n"), LineComment("// Parent defines a sealed method, Child tries to override it."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 210, end: 219 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Parent"), span: Span { start: 220, end: 226 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("sealed"), span: Span { start: 229, end: 235 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("frozen"), span: Span { start: 236, end: 242 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 243, end: 245 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("42"), span: Span { start: 246, end: 248 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Object"), span: Span { start: 250, end: 256 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 257, end: 266 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("AllowedChild"), span: Span { start: 267, end: 279 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("frozen"), span: Span { start: 282, end: 288 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 289, end: 291 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("99"), span: Span { start: 292, end: 294 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Parent"), span: Span { start: 296, end: 302 }, leading_trivia: [Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 303, end: 312 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Child"), span: Span { start: 313, end: 318 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("frozen"), span: Span { start: 321, end: 327 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 328, end: 330 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("99"), span: Span { start: 331, end: 333 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 334, end: 334 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

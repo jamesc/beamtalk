@@ -87,6 +87,17 @@ fn main() {
         writeln!(f, "    test_codegen_snapshot(\"{}\");", case_name).expect("Failed to write test");
         writeln!(f, "}}\n").expect("Failed to write test");
 
+        // Generate semantic analysis test
+        writeln!(f, "#[test]").expect("Failed to write test");
+        writeln!(f, "fn test_{}_semantic() {{", case_name).expect("Failed to write test");
+        writeln!(
+            f,
+            "    test_semantic_snapshot(\"{}\");",
+            case_name
+        )
+        .expect("Failed to write test");
+        writeln!(f, "}}\n").expect("Failed to write test");
+
         // Generate compilation verification test
         writeln!(f, "#[test]").expect("Failed to write test");
         writeln!(f, "fn test_{}_compiles() {{", case_name).expect("Failed to write test");

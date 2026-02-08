@@ -1,0 +1,19 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (14):
+  - Undefined variable: dict
+  - Undefined variable: list
+  - Undefined variable: string
+  - Undefined variable: object
+  - Undefined variable: transformer
+  - Undefined variable: filter
+  - Undefined variable: value
+  - Undefined variable: options
+  - Undefined variable: object
+  - Undefined variable: newValue
+  - Undefined variable: logger
+  - Undefined variable: formatter
+  - Undefined variable: message
+  - Undefined variable: timestamp

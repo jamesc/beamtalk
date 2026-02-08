@@ -1,0 +1,195 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Parent",
+                span: Span {
+                    start: 220,
+                    end: 226,
+                },
+            },
+            superclass: Identifier {
+                name: "Object",
+                span: Span {
+                    start: 203,
+                    end: 209,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "frozen",
+                    ),
+                    parameters: [],
+                    body: [
+                        Literal(
+                            Integer(
+                                42,
+                            ),
+                            Span {
+                                start: 246,
+                                end: 248,
+                            },
+                        ),
+                    ],
+                    return_type: None,
+                    is_sealed: true,
+                    kind: Primary,
+                    span: Span {
+                        start: 229,
+                        end: 248,
+                    },
+                },
+            ],
+            span: Span {
+                start: 203,
+                end: 248,
+            },
+        },
+        ClassDefinition {
+            name: Identifier {
+                name: "AllowedChild",
+                span: Span {
+                    start: 267,
+                    end: 279,
+                },
+            },
+            superclass: Identifier {
+                name: "Object",
+                span: Span {
+                    start: 250,
+                    end: 256,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "frozen",
+                    ),
+                    parameters: [],
+                    body: [
+                        Literal(
+                            Integer(
+                                99,
+                            ),
+                            Span {
+                                start: 292,
+                                end: 294,
+                            },
+                        ),
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 282,
+                        end: 294,
+                    },
+                },
+            ],
+            span: Span {
+                start: 250,
+                end: 294,
+            },
+        },
+        ClassDefinition {
+            name: Identifier {
+                name: "Child",
+                span: Span {
+                    start: 313,
+                    end: 318,
+                },
+            },
+            superclass: Identifier {
+                name: "Parent",
+                span: Span {
+                    start: 296,
+                    end: 302,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "frozen",
+                    ),
+                    parameters: [],
+                    body: [
+                        Literal(
+                            Integer(
+                                99,
+                            ),
+                            Span {
+                                start: 331,
+                                end: 333,
+                            },
+                        ),
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 321,
+                        end: 333,
+                    },
+                },
+            ],
+            span: Span {
+                start: 296,
+                end: 333,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 203,
+        end: 333,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 203,
+                end: 209,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 203,
+                end: 209,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test that overriding a sealed method produces a diagnostic error.",
+            span: Span {
+                start: 203,
+                end: 209,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Parent defines a sealed method, Child tries to override it.",
+            span: Span {
+                start: 203,
+                end: 209,
+            },
+            kind: Line,
+        },
+    ],
+}
