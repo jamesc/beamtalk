@@ -239,6 +239,17 @@ impl NameResolver {
                 }
             }
 
+            ListLiteral {
+                elements, tail, ..
+            } => {
+                for elem in elements {
+                    self.resolve_expression(elem);
+                }
+                if let Some(t) = tail {
+                    self.resolve_expression(t);
+                }
+            }
+
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No name resolution needed
             }

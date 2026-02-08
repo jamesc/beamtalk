@@ -515,6 +515,17 @@ impl Analyser {
                 }
             }
 
+            ListLiteral {
+                elements, tail, ..
+            } => {
+                for elem in elements {
+                    self.analyse_expression(elem, None);
+                }
+                if let Some(t) = tail {
+                    self.analyse_expression(t, None);
+                }
+            }
+
             Literal(..) | Super(..) | Error { .. } | ClassReference { .. } | Primitive { .. } => {
                 // No analysis needed
             }
@@ -745,6 +756,17 @@ impl Analyser {
                 for pair in pairs {
                     self.collect_captures_and_mutations(&pair.key, captures, mutations);
                     self.collect_captures_and_mutations(&pair.value, captures, mutations);
+                }
+            }
+
+            ListLiteral {
+                elements, tail, ..
+            } => {
+                for elem in elements {
+                    self.collect_captures_and_mutations(elem, captures, mutations);
+                }
+                if let Some(t) = tail {
+                    self.collect_captures_and_mutations(t, captures, mutations);
                 }
             }
 

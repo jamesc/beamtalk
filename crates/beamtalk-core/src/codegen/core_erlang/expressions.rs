@@ -53,7 +53,7 @@ impl CoreErlangGenerator {
             }
             Literal::Symbol(s) => write!(self.output, "'{s}'")?,
             Literal::Character(c) => write!(self.output, "{}", *c as u32)?,
-            Literal::Array(elements) => {
+            Literal::List(elements) => {
                 write!(self.output, "[")?;
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -167,6 +167,31 @@ impl CoreErlangGenerator {
 
         write!(self.output, " }}~")?;
 
+        Ok(())
+    }
+
+    /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
+    ///
+    /// Cons syntax `#(head | tail)` → `[head | tail]`
+    pub(super) fn generate_list_literal(
+        &mut self,
+        elements: &[Expression],
+        tail: &Option<Box<Expression>>,
+    ) -> Result<()> {
+        write!(self.output, "[")?;
+        for (i, elem) in elements.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(elem)?;
+        }
+        if let Some(t) = tail {
+            if !elements.is_empty() {
+                write!(self.output, " | ")?;
+            }
+            self.generate_expression(t)?;
+        }
+        write!(self.output, "]")?;
         Ok(())
     }
 

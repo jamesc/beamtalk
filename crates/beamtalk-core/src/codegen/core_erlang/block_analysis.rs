@@ -213,6 +213,17 @@ fn analyze_expression(
                 analyze_expression(&pair.value, analysis, ctx);
             }
         }
+
+        Expression::ListLiteral {
+            elements, tail, ..
+        } => {
+            for elem in elements {
+                analyze_expression(elem, analysis, ctx);
+            }
+            if let Some(t) = tail {
+                analyze_expression(t, analysis, ctx);
+            }
+        }
     }
 }
 

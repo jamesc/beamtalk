@@ -180,6 +180,16 @@ fn validate_expr(
                 validate_expr(&pair.value, is_stdlib, options, diagnostics);
             }
         }
+        Expression::ListLiteral {
+            elements, tail, ..
+        } => {
+            for elem in elements {
+                validate_expr(elem, is_stdlib, options, diagnostics);
+            }
+            if let Some(t) = tail {
+                validate_expr(t, is_stdlib, options, diagnostics);
+            }
+        }
 
         // Leaf expressions — no primitives to validate
         Expression::Literal(..)

@@ -139,7 +139,7 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                     Literal::Float(f) => format!("Float: `{f}`"),
                     Literal::String(s) => format!("String: `\"{s}\"`"),
                     Literal::Symbol(s) => format!("Symbol: `#{s}`"),
-                    Literal::Array(_) => "Array literal".to_string(),
+                    Literal::List(_) => "List literal".to_string(),
                     Literal::Character(c) => format!("Character: `${c}`"),
                 };
                 Some(HoverInfo::new(info, *span))
@@ -275,6 +275,30 @@ fn find_hover_in_expr(expr: &Expression, offset: u32) -> Option<HoverInfo> {
                 // Hovering over the map literal itself
                 Some(HoverInfo::new(
                     format!("Map literal with {} pairs", pairs.len()),
+                    *span,
+                ))
+            } else {
+                None
+            }
+        }
+        Expression::ListLiteral {
+            elements,
+            tail,
+            span,
+        } => {
+            if offset >= span.start() && offset < span.end() {
+                for elem in elements {
+                    if let Some(hover) = find_hover_in_expr(elem, offset) {
+                        return Some(hover);
+                    }
+                }
+                if let Some(t) = tail {
+                    if let Some(hover) = find_hover_in_expr(t, offset) {
+                        return Some(hover);
+                    }
+                }
+                Some(HoverInfo::new(
+                    format!("List literal with {} elements", elements.len()),
                     *span,
                 ))
             } else {

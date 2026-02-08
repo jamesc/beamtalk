@@ -84,6 +84,9 @@ pub enum TokenKind {
     /// Map open (map literal start): `#{`
     MapOpen,
 
+    /// List open (list literal start): `#(`
+    ListOpen,
+
     // === Punctuation ===
     /// Assignment operator: `:=`
     Assign,
@@ -166,6 +169,7 @@ impl TokenKind {
                 | Self::LeftBrace
                 | Self::RightBrace
                 | Self::MapOpen
+                | Self::ListOpen
         )
     }
 
@@ -202,6 +206,7 @@ impl TokenKind {
             | Self::LeftBrace
             | Self::RightBrace
             | Self::MapOpen
+            | Self::ListOpen
             | Self::Assign
             | Self::Caret
             | Self::Semicolon
@@ -239,6 +244,7 @@ impl std::fmt::Display for TokenKind {
             Self::LeftBrace => write!(f, "{{"),
             Self::RightBrace => write!(f, "}}"),
             Self::MapOpen => write!(f, "#{{"),
+            Self::ListOpen => write!(f, "#("),
             Self::Assign => write!(f, ":="),
             Self::Caret => write!(f, "^"),
             Self::Semicolon => write!(f, ";"),
