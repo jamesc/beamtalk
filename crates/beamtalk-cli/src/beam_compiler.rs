@@ -664,20 +664,36 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
+        let source = "Integer subclass: MyInt\n  doubled => self * 2\n";
         let source_file = temp_path.join("sealed.bt");
         let core_file = temp_path.join("sealed.core");
-        fs::write(
-            &source_file,
-            "Integer subclass: MyInt\n  doubled => self * 2\n",
-        )
-        .unwrap();
+        fs::write(&source_file, source).unwrap();
 
+        // Verify parse and primitive validation produce no errors —
+        // so compile_source failure must come from semantic analysis.
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            !parse_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error),
+            "Source should parse without errors"
+        );
         let options = beamtalk_core::CompilerOptions::default();
-        let result = compile_source(&source_file, "sealed", &core_file, &options);
+        let prim_diags = beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+        assert!(
+            !prim_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error),
+            "Primitive validation should produce no errors"
+        );
 
+        let result = compile_source(&source_file, "sealed", &core_file, &options);
         assert!(
             result.is_err(),
-            "Sealed class violation should fail compilation"
+            "Sealed class violation should fail compilation via semantic analysis"
         );
     }
 
@@ -686,20 +702,36 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
+        let source = "Object subclass: Parent\n  sealed frozen => 42\n\nParent subclass: Child\n  frozen => 99\n";
         let source_file = temp_path.join("sealed_method.bt");
         let core_file = temp_path.join("sealed_method.core");
-        fs::write(
-            &source_file,
-            "Object subclass: Parent\n  sealed frozen => 42\n\nParent subclass: Child\n  frozen => 99\n",
-        )
-        .unwrap();
+        fs::write(&source_file, source).unwrap();
 
+        // Verify parse and primitive validation produce no errors —
+        // so compile_source failure must come from semantic analysis.
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = beamtalk_core::source_analysis::parse(tokens);
+        assert!(
+            !parse_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error),
+            "Source should parse without errors"
+        );
         let options = beamtalk_core::CompilerOptions::default();
-        let result = compile_source(&source_file, "sealed_method", &core_file, &options);
+        let prim_diags = beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+        assert!(
+            !prim_diags
+                .iter()
+                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error),
+            "Primitive validation should produce no errors"
+        );
 
+        let result = compile_source(&source_file, "sealed_method", &core_file, &options);
         assert!(
             result.is_err(),
-            "Sealed method override should fail compilation"
+            "Sealed method override should fail compilation via semantic analysis"
         );
     }
 
