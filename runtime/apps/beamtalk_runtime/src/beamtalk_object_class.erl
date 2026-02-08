@@ -575,12 +575,18 @@ handle_info({rebuild_flattened, ChangedClass}, #class_state{
     superclass = Superclass,
     instance_methods = InstanceMethods
 } = State) ->
-    %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it
-    case inherits_from(Superclass, ChangedClass) of
+    %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it.
+    %% Wrapped in try/catch: if any ancestor process is dead/busy, we skip the
+    %% rebuild rather than crashing this class process. The slow-path dispatch
+    %% will still find inherited methods correctly.
+    try inherits_from(Superclass, ChangedClass) of
         true ->
             NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
             {noreply, State#class_state{flattened_methods = NewFlattened}};
         false ->
+            {noreply, State}
+    catch
+        _:_ ->
             {noreply, State}
     end;
 handle_info(_Info, State) ->
@@ -598,6 +604,8 @@ code_change(OldVsn, State, Extra) ->
         NewState#class_state.superclass,
         NewState#class_state.instance_methods
     ),
+    %% Invalidate subclass tables in case hot_reload modified our methods
+    invalidate_subclass_flattened_tables(NewState#class_state.name),
     {ok, NewState#class_state{flattened_methods = NewFlattened}}.
 
 %%====================================================================

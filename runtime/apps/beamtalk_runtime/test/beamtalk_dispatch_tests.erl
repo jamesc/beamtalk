@@ -470,8 +470,9 @@ test_subclass_invalidation_on_parent_change() ->
     ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
     ok = beamtalk_object_class:put_method(ActorPid, parentTestMethod, ParentMethod),
     
-    %% The invalidation uses handle_info (async message), so give it a moment
-    timer:sleep(50),
+    %% The invalidation uses handle_info (async message). Use a synchronous
+    %% gen_server:call as a barrier — it will be queued after rebuild_flattened.
+    _ = beamtalk_object_class:superclass(CounterPid),
     
     %% Counter's flattened table should now include the new Actor method
     {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
