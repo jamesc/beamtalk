@@ -59,3 +59,34 @@ m countdown: 10
 
 m countdown: 20
 // => 20
+
+// ===========================================================================
+// ACTOR RECURSIVE SELF-SENDS (BT-330 FIX)
+// ===========================================================================
+
+// Actor self-sends use synchronous direct dispatch, so recursive methods
+// and cross-method self-sends work correctly (no Future/badarith).
+
+// @load tests/e2e/fixtures/recursive_actor.bt
+
+a := RecursiveActor spawn
+// => _
+
+// Base case (no self-send needed)
+a factorial: 1
+// => 1
+
+// Recursive self-send on Actor
+a factorial: 5
+// => 120
+
+a factorial: 10
+// => 3628800
+
+// Double recursion on Actor
+a fibonacci: 10
+// => 55
+
+// Cross-method self-send (self double: n, then * 2)
+a quadruple: 5
+// => 20
