@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test that instantiating an abstract class produces a diagnostic error.
+
+abstract Actor subclass: Shape
+  area => self subclassResponsibility
+
+Shape spawn

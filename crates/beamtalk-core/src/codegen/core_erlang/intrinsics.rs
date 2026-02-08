@@ -11,7 +11,7 @@
 //!
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
-//! - **Object**: `isNil`, `notNil`, `respondsTo:` → Protocol methods
+//! - **Object**: `isNil`, `notNil`, `respondsTo:`, `subclassResponsibility` → Protocol methods
 //! - **Dynamic dispatch**: `perform:`, `perform:withArgs:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
@@ -549,6 +549,23 @@ impl CoreErlangGenerator {
 
                     Ok(Some(()))
                 }
+                "subclassResponsibility" if arguments.is_empty() => {
+                    // Raise a structured beamtalk_error for abstract methods
+                    let err0 = self.fresh_temp_var("Err");
+                    let err1 = self.fresh_temp_var("Err");
+                    let err2 = self.fresh_temp_var("Err");
+                    let hint = core_erlang_binary_string(
+                        "This method is abstract and must be overridden by a subclass.",
+                    );
+                    write!(
+                        self.output,
+                        "let {err0} = call 'beamtalk_error':'new'('does_not_understand', 'Object') in \
+                         let {err1} = call 'beamtalk_error':'with_selector'({err0}, 'subclassResponsibility') in \
+                         let {err2} = call 'beamtalk_error':'with_hint'({err1}, {hint}) in \
+                         call 'erlang':'error'({err2})"
+                    )?;
+                    Ok(Some(()))
+                }
                 _ => Ok(None),
             },
             MessageSelector::Keyword(parts) => {
@@ -732,4 +749,18 @@ impl CoreErlangGenerator {
             MessageSelector::Binary(_) => Ok(None),
         }
     }
+}
+
+/// Converts a Rust string to Core Erlang binary literal format.
+///
+/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
+fn core_erlang_binary_string(s: &str) -> String {
+    if s.is_empty() {
+        return "#{}#".to_string();
+    }
+    let segments: Vec<String> = s
+        .bytes()
+        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
+        .collect();
+    format!("#{{{}}}#", segments.join(","))
 }
