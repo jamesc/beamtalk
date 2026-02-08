@@ -1292,7 +1292,7 @@ beamtalk_extensions:register('Counter', myMethod, Fun, my_library).
 beamtalk_extensions:has('Counter', myMethod).  % => true
 
 %% List all extensions on a class
-beamtalk_extensions:list('Counter').  % => [{myMethod, Fun, my_library}]
+beamtalk_extensions:list('Counter').  % => [{myMethod, my_library}]
 ```
 
 ### Implementation Notes
