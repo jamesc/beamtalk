@@ -12,6 +12,7 @@
 //! these helpers so that any change to the startup sequence is
 //! automatically reflected in tests.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use miette::{Result, miette};
@@ -66,12 +67,12 @@ pub fn build_eval_cmd(port: u16) -> String {
 pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
     let safe_name = escape_erlang_atom(node_name);
     format!(
-        "application:set_env(beamtalk_runtime, repl_port, {port}), \
-         application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
-         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+        "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
+         {}, \
          {{ok, _}} = beamtalk_repl:start_link({port}), \
          io:format(\"REPL backend started on port {port} (node: {safe_name})~n\"), \
-         receive stop -> ok end."
+         receive stop -> ok end.",
+        startup_prelude(port),
     )
 }
 
@@ -92,14 +93,11 @@ fn escape_erlang_atom(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
-/// Collect `-pa` paths as a `Vec<String>` for passing to `Command::args`.
+/// Collect `-pa` paths as `OsString` arguments for passing to `Command::args`.
 ///
 /// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
-///
-/// # Panics
-///
-/// Panics if any path in `paths` is not valid UTF-8.
-pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
+/// Uses `OsString` so non-UTF8 filesystem paths are handled without panicking.
+pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     let dirs = [
         &paths.runtime_ebin,
         &paths.workspace_ebin,
@@ -108,12 +106,8 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
     ];
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
-        args.push("-pa".to_string());
-        args.push(
-            dir.to_str()
-                .expect("Non-UTF8 path in BeamPaths; REPL requires UTF-8 paths for -pa arguments")
-                .to_string(),
-        );
+        args.push(OsString::from("-pa"));
+        args.push(dir.as_os_str().to_os_string());
     }
     args
 }

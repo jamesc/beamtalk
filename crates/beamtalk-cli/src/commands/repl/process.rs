@@ -5,6 +5,7 @@
 //!
 //! **DDD Context:** REPL — Process Management
 
+use std::ffi::OsString;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -75,19 +76,19 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
                     "Invalid node name '{name}': expected format 'name@host'"
                 ));
             }
-            args.push("-name".to_string());
+            args.push(OsString::from("-name"));
         } else if name.contains('.') {
             // FQDN without @ — use -name
-            args.push("-name".to_string());
+            args.push(OsString::from("-name"));
         } else {
             // Simple short name — use -sname
-            args.push("-sname".to_string());
+            args.push(OsString::from("-sname"));
         }
-        args.push(name.clone());
+        args.push(OsString::from(name.as_str()));
     }
 
-    args.push("-eval".to_string());
-    args.push(eval_cmd);
+    args.push(OsString::from("-eval"));
+    args.push(OsString::from(eval_cmd));
 
     let child = Command::new("erl")
         .arg("-noshell")

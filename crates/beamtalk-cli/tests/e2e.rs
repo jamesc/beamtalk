@@ -377,8 +377,8 @@ impl DaemonManager {
         );
 
         let mut pa_args = repl_startup::beam_pa_args(&paths);
-        pa_args.push("-eval".to_string());
-        pa_args.push(eval_cmd);
+        pa_args.push("-eval".into());
+        pa_args.push(eval_cmd.into());
 
         let beam_child = Command::new("erl")
             .arg("-noshell")
