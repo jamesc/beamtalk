@@ -208,6 +208,9 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
                     ok
             end,
             
+            %% Mark activity - new actor spawned
+            beamtalk_workspace_meta:update_activity(),
+            
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
