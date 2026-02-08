@@ -1,7 +1,7 @@
 # ADR 0001: No Compound Assignment in Beamtalk
 
 ## Status
-Accepted
+Implemented (2026-02-08)
 
 ## Context
 
