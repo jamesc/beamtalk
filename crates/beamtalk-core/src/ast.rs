@@ -648,6 +648,18 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A list literal.
+    ///
+    /// Example: `#(1, 2, 3)` or `#(head | tail)` (cons)
+    ListLiteral {
+        /// The elements of the list.
+        elements: Vec<Expression>,
+        /// Optional tail expression (cons syntax: `#(head | tail)`).
+        tail: Option<Box<Expression>>,
+        /// Source location of the entire list literal.
+        span: Span,
+    },
+
     /// A primitive pragma (`@primitive 'selector'` or `@primitive intrinsicName`).
     ///
     /// Declares that a method body delegates to a runtime primitive or
@@ -693,6 +705,7 @@ impl Expression {
             | Self::Pipe { span, .. }
             | Self::Match { span, .. }
             | Self::MapLiteral { span, .. }
+            | Self::ListLiteral { span, .. }
             | Self::Primitive { span, .. }
             | Self::Error { span, .. } => *span,
             Self::Identifier(id) => id.span,
@@ -751,10 +764,10 @@ pub enum Literal {
     /// Example: `#symbol`, `#'symbol with spaces'`
     Symbol(EcoString),
 
-    /// An array literal.
+    /// A list literal (compile-time constant list).
     ///
-    /// Example: `#(1 2 'three')`
-    Array(Vec<Literal>),
+    /// Example: `#(1, 2, 3)`
+    List(Vec<Literal>),
 
     /// A character literal.
     ///
@@ -1269,7 +1282,7 @@ mod tests {
         let _string = Literal::String("hello".into());
         let _symbol = Literal::Symbol("symbol".into());
         let _char = Literal::Character('a');
-        let _array = Literal::Array(vec![Literal::Integer(1), Literal::Integer(2)]);
+        let _array = Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]);
     }
 
     #[test]
