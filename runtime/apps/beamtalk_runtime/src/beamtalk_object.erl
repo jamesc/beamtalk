@@ -152,7 +152,7 @@ dispatch(subclassResponsibility, [], _Self, State) ->
     Error0 = beamtalk_error:new(does_not_understand, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, subclassResponsibility),
     Error2 = beamtalk_error:with_hint(Error1, <<"This method is abstract and must be implemented by a subclass.">>),
-    error(Error2);
+    {error, Error2, State};
 
 %% --- Fallback: method not found ---
 

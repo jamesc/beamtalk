@@ -377,10 +377,64 @@ fn check_abstract_in_expr(
             receiver, messages, ..
         } => {
             check_abstract_in_expr(receiver, hierarchy, diagnostics);
+
+            // BT-105: Check cascade messages for abstract class instantiation
+            let receiver_name = match receiver.as_ref() {
+                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            };
+            if let Some(name) = receiver_name {
+                for msg in messages {
+                    let sel = msg.selector.name();
+                    if (sel == "spawn" || sel == "spawnWith:") && hierarchy.is_abstract(name) {
+                        diagnostics.push(Diagnostic::error(
+                            format!(
+                                "Cannot instantiate abstract class `{name}`. Subclass it first.",
+                            ),
+                            msg.span,
+                        ));
+                    }
+                }
+            }
+
             for msg in messages {
                 for arg in &msg.arguments {
                     check_abstract_in_expr(arg, hierarchy, diagnostics);
                 }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            check_abstract_in_expr(expression, hierarchy, diagnostics);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+        }
+        Expression::Pipe { value, target, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+            check_abstract_in_expr(target, hierarchy, diagnostics);
+        }
+        Expression::Match { value, arms, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    check_abstract_in_expr(guard, hierarchy, diagnostics);
+                }
+                check_abstract_in_expr(&arm.body, hierarchy, diagnostics);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                check_abstract_in_expr(&pair.key, hierarchy, diagnostics);
+                check_abstract_in_expr(&pair.value, hierarchy, diagnostics);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                check_abstract_in_expr(elem, hierarchy, diagnostics);
+            }
+            if let Some(t) = tail {
+                check_abstract_in_expr(t, hierarchy, diagnostics);
             }
         }
         _ => {}
