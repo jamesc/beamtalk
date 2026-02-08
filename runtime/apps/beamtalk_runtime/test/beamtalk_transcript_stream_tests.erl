@@ -239,3 +239,26 @@ spawn_with_max_buffer_test() ->
     {ok, Pid} = beamtalk_transcript_stream:spawn(5),
     ?assert(is_pid(Pid)),
     gen_server:stop(Pid).
+
+%% --- invalid max_buffer rejected ---
+
+invalid_max_buffer_zero_test() ->
+    ?assertEqual({error, {invalid_max_buffer, 0}},
+                 beamtalk_transcript_stream:spawn(0)).
+
+invalid_max_buffer_negative_test() ->
+    ?assertEqual({error, {invalid_max_buffer, -1}},
+                 beamtalk_transcript_stream:spawn(-1)).
+
+%% --- non-pid subscribe is safe (no crash) ---
+
+subscribe_non_pid_safe_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    gen_server:cast(Pid, {subscribe, not_a_pid}),
+    timer:sleep(10),
+    %% Server should still be alive and functional
+    gen_server:cast(Pid, {'show:', <<"ok">>}),
+    timer:sleep(10),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"ok">>], Result),
+    gen_server:stop(Pid).

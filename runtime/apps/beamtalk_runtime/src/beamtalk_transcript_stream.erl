@@ -93,14 +93,16 @@ has_method(_)            -> false.
 %%% ============================================================================
 
 %% @private
--spec init([max_buffer()]) -> {ok, state()}.
-init([MaxBuffer]) ->
+-spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
+init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     {ok, #state{
         buffer      = queue:new(),
         buffer_size = 0,
         max_buffer  = MaxBuffer,
         subscribers = #{}
-    }}.
+    }};
+init([MaxBuffer]) ->
+    {stop, {invalid_max_buffer, MaxBuffer}}.
 
 %% @private
 -spec handle_call(term(), {pid(), term()}, state()) ->
@@ -171,16 +173,18 @@ push_to_subscribers(Text, #state{subscribers = Subs}) ->
     ok.
 
 %% @private
-%% @doc Add a subscriber and monitor it.
+%% @doc Add a subscriber and monitor it. Ignores non-pid values.
 -spec add_subscriber(pid(), state()) -> state().
-add_subscriber(Pid, #state{subscribers = Subs} = State) ->
+add_subscriber(Pid, #state{subscribers = Subs} = State) when is_pid(Pid) ->
     case maps:is_key(Pid, Subs) of
         true ->
             State;
         false ->
             Ref = monitor(process, Pid),
             State#state{subscribers = Subs#{Pid => Ref}}
-    end.
+    end;
+add_subscriber(_NotPid, State) ->
+    State.
 
 %% @private
 %% @doc Remove a subscriber and demonitor it.
