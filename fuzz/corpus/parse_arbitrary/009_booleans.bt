@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for boolean values
+// Tests for boolean literals (true and false) and boolean methods
+
+// ===========================================================================
+// BOOLEAN LITERALS
+// ===========================================================================
+
+// True literal
+true
+// => true
+
+// False literal
+false
+// => false
+
+// ===========================================================================
+// BOOLEAN OPERATIONS - ifTrue:ifFalse:
+// ===========================================================================
+
+// True ifTrue:ifFalse: evaluates true block
+true ifTrue: [1] ifFalse: [2]
+// => 1
+
+// False ifTrue:ifFalse: evaluates false block
+false ifTrue: [1] ifFalse: [2]
+// => 2
+
+// True ifTrue:ifFalse: with computed values
+true ifTrue: [10 + 5] ifFalse: [10 - 5]
+// => 15
+
+// False ifTrue:ifFalse: with computed values
+false ifTrue: [10 + 5] ifFalse: [10 - 5]
+// => 5
+
+// ===========================================================================
+// BOOLEAN OPERATIONS - ifTrue: and ifFalse:
+// ===========================================================================
+
+// True ifTrue: evaluates block
+true ifTrue: [42]
+// => 42
+
+// False ifTrue: returns self (false)
+false ifTrue: [42]
+// => false
+
+// True ifFalse: returns self (true)
+true ifFalse: [42]
+// => true
+
+// False ifFalse: evaluates block
+false ifFalse: [42]
+// => 42
+
+// ===========================================================================
+// BOOLEAN OPERATIONS - and: / or: (short-circuit)
+// ===========================================================================
+
+// True and: evaluates block
+true and: [true]
+// => true
+
+// True and: false block
+true and: [false]
+// => false
+
+// False and: short-circuits (doesn't evaluate block)
+false and: [true]
+// => false
+
+// False and: short-circuits
+false and: [false]
+// => false
+
+// True or: short-circuits (doesn't evaluate block)
+true or: [false]
+// => true
+
+// True or: short-circuits
+true or: [true]
+// => true
+
+// False or: evaluates block
+false or: [true]
+// => true
+
+// False or: evaluates block returning false
+false or: [false]
+// => false
+
+// ===========================================================================
+// BOOLEAN OPERATIONS - not
+// ===========================================================================
+
+// True not returns false
+true not
+// => false
+
+// False not returns true
+false not
+// => true
+
+// Double negation
+true not not
+// => true
+
+// Double negation of false
+false not not
+// => false

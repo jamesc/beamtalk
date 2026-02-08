@@ -564,6 +564,139 @@ ls -la ~/.beamtalk/daemon.sock
 
 ---
 
+## Fuzzing (Parser Crash Safety)
+
+Fuzzing tests the parser's robustness by feeding it random or mutated input to detect crashes, infinite loops, and excessive memory use.
+
+**Technology:** cargo-fuzz (libFuzzer)
+
+**Location:** `fuzz/fuzz_targets/parse_arbitrary.rs`
+
+**Corpus:** `fuzz/corpus/parse_arbitrary/` (32 seed files from examples/ and tests/e2e/cases/)
+
+### Running Locally
+
+```bash
+# Fuzz for 60 seconds (default)
+just fuzz
+
+# Fuzz for a specific duration
+just fuzz 300  # 5 minutes
+
+# Or use cargo directly
+cargo +nightly fuzz run parse_arbitrary -- -max_total_time=60
+```
+
+**Requirements:**
+- Rust nightly toolchain
+- cargo-fuzz: `cargo install cargo-fuzz`
+
+### What Fuzzing Tests
+
+| Test Type | What It Catches |
+|-----------|-----------------|
+| **Crash safety** | Panics on unexpected token sequences |
+| **Infinite loops** | Hangs during error recovery |
+| **Stack overflow** | Deeply nested expressions causing stack exhaustion |
+| **Out-of-memory** | Excessive memory allocation on malformed input |
+| **Index bounds** | Array/buffer out-of-bounds access |
+
+### CI Integration
+
+Fuzzing runs nightly (not per-PR) via `.github/workflows/fuzz.yml`:
+- Duration: 10 minutes per run
+- Memory limit: 4GB RSS
+- Artifacts uploaded on failure
+- Auto-creates GitHub issues for crashes
+
+**Why nightly?** Fuzzing is too slow for per-PR CI (minutes to hours). Nightly runs catch regressions without blocking development.
+
+### Interpreting Results
+
+**Success:** No artifacts produced, fuzzer completes normally
+```
+Done 17654 runs in 60 second(s)
+```
+
+**Crash (CRITICAL):** `crash-*` artifacts indicate parser panic
+```
+artifact_prefix='fuzz/artifacts/parse_arbitrary/'; Test unit written to crash-abc123
+```
+Action: Fix immediately, parser must never panic on user input.
+
+**Timeout (WARNING):** `timeout-*` artifacts indicate infinite loop
+```
+SUMMARY: libFuzzer: timeout
+```
+Action: Investigate error recovery logic, add timeout limits.
+
+**OOM (INFO):** `oom-*` artifacts indicate excessive memory use
+```
+SUMMARY: libFuzzer: out-of-memory
+```
+Action: Expected for extremely malformed input. Consider resource limits if frequent.
+
+### Reproducing Failures
+
+```bash
+# Reproduce exact crash
+cargo +nightly fuzz run parse_arbitrary fuzz/artifacts/parse_arbitrary/crash-abc123
+
+# Minimize test case to smallest reproducer
+cargo +nightly fuzz tmin parse_arbitrary fuzz/artifacts/parse_arbitrary/crash-abc123
+```
+
+### Adding Corpus Files
+
+The corpus seeds fuzzing with realistic starting points. To add new files:
+
+```bash
+# Copy new .bt file to corpus
+cp my_new_test.bt fuzz/corpus/parse_arbitrary/033_my_new_test.bt
+
+# Fuzzer will use it as seed for mutation
+just fuzz
+```
+
+**Keep corpus in sync:** When adding new `.bt` files to `examples/` or `tests/e2e/cases/`, also copy them to `fuzz/corpus/parse_arbitrary/` so the fuzzer can use them as mutation seeds.
+
+**Corpus minimization:** `cargo +nightly fuzz cmin` rewrites the corpus directory in-place. Run it on a **temporary copy** to avoid deleting tracked seed files:
+```bash
+# Safe minimization (don't run cmin directly on tracked corpus)
+cp -r fuzz/corpus/parse_arbitrary /tmp/corpus-backup
+cargo +nightly fuzz cmin parse_arbitrary
+# Review changes, restore any deleted seeds if needed
+```
+
+### Troubleshooting
+
+**"cargo-fuzz not found":**
+```bash
+cargo install cargo-fuzz
+```
+
+**"nightly toolchain required":**
+```bash
+rustup toolchain install nightly
+```
+
+**"workspace errors":**
+Ensure `fuzz` is in `workspace.exclude` in root `Cargo.toml`.
+
+**Fuzzer runs too long:**
+Use shorter duration for quick checks:
+```bash
+just fuzz 5  # 5 seconds
+```
+
+### References
+
+- [Rust Fuzz Book](https://rust-fuzz.github.io/book/) - cargo-fuzz guide
+- [ADR 0011](../ADR/0011-robustness-testing-layered-fuzzing.md) - Robustness testing strategy
+- Epic: BT-362
+
+---
+
 ## Performance Testing (Future)
 
 From [AGENTS.md](../AGENTS.md), targets for tooling responsiveness:
