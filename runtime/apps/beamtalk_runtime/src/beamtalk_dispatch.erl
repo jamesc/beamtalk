@@ -220,12 +220,37 @@ responds_to(Selector, ClassName) ->
         {ok, _Fun} ->
             true;
         not_found ->
-            %% ADR 0006 Phase 2: Use flattened table for O(1) check
             case beamtalk_object_class:whereis_class(ClassName) of
                 undefined ->
                     false;
                 ClassPid ->
-                    try_flattened_lookup(ClassPid, Selector) =/= not_found
+                    %% ADR 0006 Phase 2: Try flattened table first (O(1))
+                    case try_flattened_lookup(ClassPid, Selector) of
+                        {ok, _, _} ->
+                            true;
+                        not_found ->
+                            %% Fall back to hierarchy walk in case flattened
+                            %% table is incomplete (bootstrap, rebuild failure)
+                            responds_to_slow(Selector, ClassPid)
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Slow path for responds_to: walk hierarchy checking each class.
+-spec responds_to_slow(selector(), pid()) -> boolean().
+responds_to_slow(Selector, ClassPid) ->
+    case beamtalk_object_class:has_method(ClassPid, Selector) of
+        true ->
+            true;
+        false ->
+            case beamtalk_object_class:superclass(ClassPid) of
+                none -> false;
+                SuperclassName ->
+                    case beamtalk_object_class:whereis_class(SuperclassName) of
+                        undefined -> false;
+                        SuperclassPid -> responds_to_slow(Selector, SuperclassPid)
+                    end
             end
     end.
 

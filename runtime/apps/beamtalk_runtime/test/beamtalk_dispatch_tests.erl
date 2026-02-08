@@ -18,7 +18,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
 %%% Test Setup/Teardown
@@ -501,7 +500,7 @@ test_out_of_order_registration() ->
 
     %% Step 2: Register parent class — this should trigger child rebuild
     ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
-    {ok, _ParentPid} = beamtalk_object_class:start_link('TestParent', #{
+    {ok, ParentPid} = beamtalk_object_class:start_link('TestParent', #{
         superclass => none,
         instance_methods => #{parentMethod => #{block => ParentMethod, arity => 0}},
         instance_variables => []
@@ -517,4 +516,8 @@ test_out_of_order_registration() ->
 
     %% Verify defining class is correct
     {ok, DefClass, _} = gen_server:call(ChildPid, {lookup_flattened, parentMethod}),
-    ?assertEqual('TestParent', DefClass).
+    ?assertEqual('TestParent', DefClass),
+
+    %% Clean up test-only class processes to avoid leaking between tests
+    gen_server:stop(ChildPid),
+    gen_server:stop(ParentPid).
