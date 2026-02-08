@@ -18,7 +18,7 @@ This blocks several features:
 **Partial implementation exists but is disconnected:**
 - AST: `Literal::Array(Vec<Literal>)` variant exists, documented as `#(1 2 'three')` (Smalltalk-style)
 - Codegen: `generate_literal` handles `Literal::Array` → Erlang list `[1, 2, 3]`
-- Semantic analysis: `ClassHierarchy` registers both Array (11 methods) and List (13 methods)
+- Semantic analysis: `ClassHierarchy` registers both Array (11 methods) and List (14 methods)
 - Control flow: Full list iteration codegen (`do:`, `collect:`, `select:`, `reject:`, `inject:into:`)
 - **No lexer/parser support**: No syntax to create these values from Beamtalk source
 
