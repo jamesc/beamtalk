@@ -368,7 +368,7 @@ In Beamtalk, `Object subclass: Counter` is **parsed as syntax**, not a message s
 | String (interpolated) | `"..."` | `"Hello, {name}!"` |
 | Symbol | `#name` | `#ok`, `#error` |
 | Tuple | `{a, b, c}` | `{1, 'two', 3}` |
-| List | `[a, b, c]` | `[1, 2, 3]` |
+| List | `#(a, b, c)` | `#(1, 2, 3)` |
 | Statement separator | newline or `;` | implicit |
 
 ---
