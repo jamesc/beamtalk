@@ -34,6 +34,7 @@
 //! cargo test --test e2e -- --ignored --nocapture
 //! ```
 
+use beamtalk_cli::repl_startup;
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -245,10 +246,13 @@ struct DaemonManager {
 ///
 /// When `cover` is true, instruments runtime modules with Erlang cover and
 /// polls for a signal file to trigger graceful shutdown with cover export.
+/// The non-cover path delegates to the shared `repl_startup` module (BT-390)
+/// so the E2E startup matches production exactly.
 fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
     if cover {
+        // Cover mode wraps instrumentation around the shared startup prelude
         format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+            "{}, \
              cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
@@ -267,14 +271,11 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  ExpErr -> io:format(standard_error, \"Cover export failed: ~p~n\", [ExpErr]), halt(1) \
              end, \
              cover:stop(), \
-             init:stop()."
+             init:stop().",
+            repl_startup::startup_prelude(REPL_PORT),
         )
     } else {
-        format!(
-            "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-             {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
-             receive stop -> ok end."
-        )
+        repl_startup::build_eval_cmd(REPL_PORT)
     }
 }
 
@@ -285,10 +286,6 @@ impl DaemonManager {
     /// and not start its own processes. This is useful for development but means
     /// the test won't manage the lifecycle. If the external REPL fails or stops
     /// mid-test, errors may be confusing. For CI, always start with a clean state.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "startup orchestrates daemon + BEAM + cover setup"
-    )]
     fn start() -> Self {
         // Check if REPL is already running by trying to connect
         if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
@@ -330,13 +327,10 @@ impl DaemonManager {
         // Start the BEAM node with REPL backend
         eprintln!("E2E: Starting BEAM REPL backend...");
         let runtime = runtime_dir();
-        let ebin_dir = runtime.join("_build/default/lib/beamtalk_runtime/ebin");
-        let workspace_dir = runtime.join("_build/default/lib/beamtalk_workspace/ebin");
-        let jsx_dir = runtime.join("_build/default/lib/jsx/ebin");
-        let stdlib_dir = runtime.join("apps/beamtalk_stdlib/ebin");
+        let paths = repl_startup::beam_paths(&runtime);
 
         // Build runtime if needed
-        if !ebin_dir.exists() {
+        if !paths.runtime_ebin.exists() {
             eprintln!("E2E: Building runtime...");
             let status = Command::new("rebar3")
                 .arg("compile")
@@ -370,7 +364,10 @@ impl DaemonManager {
         let _ = fs::remove_file(&cover_signal_path);
         let eval_cmd = beam_eval_cmd(
             cover_enabled,
-            ebin_dir.to_str().expect("ebin path must be UTF-8"),
+            paths
+                .runtime_ebin
+                .to_str()
+                .expect("ebin path must be UTF-8"),
             cover_signal_path
                 .to_str()
                 .expect("signal path must be UTF-8"),
@@ -379,22 +376,13 @@ impl DaemonManager {
                 .expect("export path must be UTF-8"),
         );
 
+        let mut pa_args = repl_startup::beam_pa_args(&paths);
+        pa_args.push("-eval".to_string());
+        pa_args.push(eval_cmd);
+
         let beam_child = Command::new("erl")
-            .args([
-                "-noshell",
-                "-pa",
-                ebin_dir.to_str().expect("ebin path must be UTF-8"),
-                "-pa",
-                workspace_dir
-                    .to_str()
-                    .expect("workspace ebin path must be UTF-8"),
-                "-pa",
-                jsx_dir.to_str().expect("jsx path must be UTF-8"),
-                "-pa",
-                stdlib_dir.to_str().expect("stdlib path must be UTF-8"),
-                "-eval",
-                &eval_cmd,
-            ])
+            .arg("-noshell")
+            .args(&pa_args)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()

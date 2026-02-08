@@ -14,6 +14,10 @@ readme = "README.md"
 keywords = ["compiler", "beam", "smalltalk", "erlang"]
 categories = ["compilers", "development-tools"]
 
+[lib]
+name = "beamtalk_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "beamtalk"
 path = "src/main.rs"
