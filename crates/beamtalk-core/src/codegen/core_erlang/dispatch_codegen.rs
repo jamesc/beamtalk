@@ -32,7 +32,7 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
-use super::{CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
@@ -177,6 +177,20 @@ impl CoreErlangGenerator {
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
+        // BT-330: Self-sends in actor methods use direct synchronous dispatch.
+        //
+        // When receiver is `self` inside an Actor method, bypass gen_server:cast
+        // and call safe_dispatch/3 directly. This avoids the async Future return
+        // that causes badarith when the result is used in arithmetic (e.g.,
+        // `n * (self factorial: n - 1)` would get `n * Future` without this).
+        if self.context == CodeGenContext::Actor {
+            if let Expression::Identifier(id) = receiver {
+                if id.name == "self" {
+                    return self.generate_self_dispatch(selector, arguments);
+                }
+            }
+        }
+
         // BT-296 / ADR 0007 Phase 4: Type-specific dispatch tables removed.
         // All non-intrinsic messages go through runtime dispatch:
         // - Actors: async via gen_server:cast with futures
@@ -284,7 +298,69 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Checks if an expression is a field assignment (`self.field := value`).
+    /// Generates synchronous self-dispatch for actor self-sends (BT-330).
+    ///
+    /// When an actor method sends a message to `self`, we bypass the async
+    /// `gen_server:cast` path and call `safe_dispatch/3` directly. This ensures
+    /// the result is a value (not a Future), enabling recursive algorithms like
+    /// factorial and fibonacci to work correctly.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// case call 'module':'safe_dispatch'('selector', [Args], State) of
+    ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
+    /// end
+    /// ```
+    fn generate_self_dispatch(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let selector_atom = selector.to_erlang_atom();
+        let result_var = self.fresh_var("SelfResult");
+        let state_var = self.fresh_var("SelfState");
+        let error_var = self.fresh_var("SelfError");
+
+        let current_state = if self.in_loop_body {
+            "StateAcc".to_string()
+        } else {
+            self.state_threading.current_var()
+        };
+
+        // Call safe_dispatch directly (synchronous, with error isolation)
+        write!(
+            self.output,
+            "case call '{}':'safe_dispatch'('{selector_atom}', [",
+            self.module_name
+        )?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "], {current_state}) of ")?;
+
+        // Success: extract result value
+        write!(
+            self.output,
+            "<{{'reply', {result_var}, {state_var}}}> when 'true' -> {result_var} "
+        )?;
+
+        // Error: re-raise for proper error propagation
+        write!(
+            self.output,
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+        )?;
+
+        write!(self.output, "end")?;
+
+        Ok(())
+    }
     ///
     /// This is used to detect state mutations that require threading through
     /// control flow constructs.
