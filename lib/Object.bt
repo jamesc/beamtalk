@@ -32,3 +32,6 @@ ProtoObject subclass: Object
   // Dynamic dispatch — structural intrinsic
   sealed perform: selector => @primitive dynamicSend
   sealed perform: selector withArgs: args => @primitive dynamicSendWithArgs
+
+  // Abstract method contract — subclasses must override (BT-105)
+  subclassResponsibility => @primitive subclassResponsibility

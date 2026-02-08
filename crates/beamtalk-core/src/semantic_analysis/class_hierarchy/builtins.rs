@@ -83,6 +83,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_sealed_method("instVarAt:", 1, "Object"),
                 builtin_sealed_method("instVarAt:put:", 2, "Object"),
                 builtin_sealed_method("perform:", 1, "Object"),
+                builtin_method("subclassResponsibility", 0, "Object"),
                 builtin_method("new", 0, "Object"),
                 builtin_method("new:", 1, "Object"),
             ],

@@ -72,6 +72,8 @@
     put_method/3,
     put_method/4,
     instance_variables/1,
+    is_sealed/1,
+    is_abstract/1,
     add_before/3,
     add_after/3,
     super_dispatch/3,
