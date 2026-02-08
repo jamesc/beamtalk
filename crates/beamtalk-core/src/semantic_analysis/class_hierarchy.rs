@@ -190,7 +190,7 @@ impl ClassHierarchy {
         false
     }
 
-    /// Walk the superclass chain looking for a sealed method with the given selector.
+    /// Walk the superclass chain looking for a sealed primary method with the given selector.
     /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
     fn find_sealed_method_in_ancestors(
         &self,
@@ -205,7 +205,10 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
-                    if method.selector.as_str() == selector && method.is_sealed {
+                    if method.selector.as_str() == selector
+                        && method.is_sealed
+                        && method.kind == MethodKind::Primary
+                    {
                         return Some((info.name.clone(), method.clone()));
                     }
                 }
@@ -237,8 +240,12 @@ impl ClassHierarchy {
                 }
             }
 
-            // Check sealed method override enforcement
+            // Check sealed method override enforcement (primary methods only —
+            // before/after/around methods are not overrides)
             for method in &class.methods {
+                if method.kind != MethodKind::Primary {
+                    continue;
+                }
                 let selector = method.selector.name();
                 if let Some((sealed_class, _)) =
                     self.find_sealed_method_in_ancestors(class.superclass.name.as_str(), &selector)
@@ -1059,6 +1066,23 @@ mod tests {
         assert!(diags[0].message.contains("`locked`"));
         assert!(diags[0].message.contains("`GrandParent`"));
         assert!(h.has_class("GrandChild"));
+    }
+
+    #[test]
+    fn before_method_on_sealed_method_allowed() {
+        // Parent defines sealed primary method, child adds a before advice — not an override
+        let parent = make_class_with_sealed_method("Parent", "Actor", "frozen", true);
+        let mut child = make_class_with_sealed_method("Child", "Parent", "frozen", false);
+        child.methods[0].kind = MethodKind::Before;
+
+        let module = Module {
+            classes: vec![parent, child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (_, diags) = ClassHierarchy::build(&module);
+        assert!(diags.is_empty());
     }
 
     // --- MRO verification ---
