@@ -11,7 +11,7 @@
 //!
 //! Each Beamtalk module becomes an Erlang module implementing `gen_server`:
 //!
-//! - **Actor State**: A map containing `__class__`, `__methods__`, and actor fields
+//! - **Actor State**: A map containing `$beamtalk_class`, `__methods__`, and actor fields
 //! - **Message Dispatch**: Messages route through `handle_cast` or `handle_call`
 //! - **Hot Code Reload**: The `code_change/3` callback handles state migration
 //!
@@ -31,7 +31,7 @@
 //!
 //! 'init'/1 = fun (_Args) ->
 //!     let InitialState = ~{
-//!       '__class__' => 'Counter',
+//!       '$beamtalk_class' => 'Counter',
 //!       '__methods__' => call 'counter':'method_table'(),
 //!       'value' => 0
 //!     }~
@@ -1608,7 +1608,7 @@ end
         // Check that init/1 creates the default state with fields and merges with InitArgs
         assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
         assert!(code.contains("let DefaultState = ~{"));
-        assert!(code.contains("'__class__' => 'Counter'"));
+        assert!(code.contains("'$beamtalk_class' => 'Counter'"));
         assert!(code.contains("'__methods__' => call 'counter':'method_table'()"));
         assert!(code.contains("'value' => 0"));
         // Check that InitArgs is merged into DefaultState

@@ -679,7 +679,7 @@ mod tests {
   attributes ['behaviour' = ['gen_server']]
 
 'init'/1 = fun (_Args) ->
-    let InitialState = ~{'__class__' => 'Test', '__methods__' => ~{}~}~
+    let InitialState = ~{'$beamtalk_class' => 'Test', '__methods__' => ~{}~}~
     in {'ok', InitialState}
 
 'handle_cast'/2 = fun (Msg, State) ->
