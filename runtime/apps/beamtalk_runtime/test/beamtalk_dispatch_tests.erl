@@ -68,7 +68,8 @@ dispatch_test_() ->
           {"responds_to extension method", fun test_responds_to_extension_method/0},
           {"BT-283: flattened table performance", fun test_flattened_table_performance/0},
           {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
-          {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0}
+          {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
+          {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0}
          ]
      end
     }.
@@ -448,3 +449,34 @@ test_flattened_table_invalidation_on_method_add() ->
     %% (Don't dispatch through compiled module — it doesn't know about dynamic methods)
     Result = gen_server:call(CounterPid, {lookup_flattened, testNewMethod}),
     ?assertMatch({ok, 'Counter', _}, Result).
+
+%% Test that adding a method to a parent class propagates to subclass flattened tables.
+%% This verifies the subclass invalidation mechanism: when Actor gets a new method,
+%% Counter (which inherits from Actor) should see it in its flattened table.
+test_subclass_invalidation_on_parent_change() ->
+    ok = ensure_counter_loaded(),
+    
+    %% Counter inherits from Actor. Get both pids.
+    CounterPid = beamtalk_object_class:whereis_class('Counter'),
+    ActorPid = beamtalk_object_class:whereis_class('Actor'),
+    ?assertNotEqual(undefined, CounterPid),
+    ?assertNotEqual(undefined, ActorPid),
+    
+    %% Verify Counter doesn't have parentTestMethod yet
+    {ok, InitialFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    ?assertNot(maps:is_key(parentTestMethod, InitialFlattened)),
+    
+    %% Add a method to Actor (parent of Counter)
+    ParentMethod = fun(_Self, [], State) -> {reply, parent_result, State} end,
+    ok = beamtalk_object_class:put_method(ActorPid, parentTestMethod, ParentMethod),
+    
+    %% The invalidation uses handle_info (async message), so give it a moment
+    timer:sleep(50),
+    
+    %% Counter's flattened table should now include the new Actor method
+    {ok, UpdatedFlattened} = gen_server:call(CounterPid, get_flattened_methods),
+    ?assert(maps:is_key(parentTestMethod, UpdatedFlattened)),
+    
+    %% The defining class should be Actor, not Counter
+    {ok, DefiningClass, _MethodInfo} = gen_server:call(CounterPid, {lookup_flattened, parentTestMethod}),
+    ?assertEqual('Actor', DefiningClass).

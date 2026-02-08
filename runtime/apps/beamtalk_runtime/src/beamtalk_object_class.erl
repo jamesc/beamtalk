@@ -496,6 +496,9 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     %% Notify running instances to pick up new method table
     notify_instances(State#class_state.name, NewMethods),
     
+    %% ADR 0006 Phase 2: Notify subclasses to rebuild their flattened tables
+    invalidate_subclass_flattened_tables(State#class_state.name),
+    
     {reply, ok, NewState};
 
 handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
@@ -567,6 +570,19 @@ handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
             {noreply, State}
     end.
 
+handle_info({rebuild_flattened, ChangedClass}, #class_state{
+    name = Name,
+    superclass = Superclass,
+    instance_methods = InstanceMethods
+} = State) ->
+    %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it
+    case inherits_from(Superclass, ChangedClass) of
+        true ->
+            NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
+            {noreply, State#class_state{flattened_methods = NewFlattened}};
+        false ->
+            {noreply, State}
+    end;
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -610,6 +626,41 @@ notify_instances(_ClassName, _NewMethods) ->
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
+
+%% @private
+%% @doc Broadcast rebuild_flattened to all class processes except ourselves.
+%%
+%% ADR 0006 Phase 2: When a class's methods change, all subclasses need to
+%% rebuild their flattened tables to include the new/changed method.
+%% Uses pg group for fire-and-forget broadcast.
+-spec invalidate_subclass_flattened_tables(class_name()) -> ok.
+invalidate_subclass_flattened_tables(ChangedClass) ->
+    AllClasses = pg:get_members(beamtalk_classes),
+    Self = self(),
+    lists:foreach(fun(Pid) ->
+        case Pid of
+            Self -> ok;  % Skip ourselves
+            _ -> Pid ! {rebuild_flattened, ChangedClass}
+        end
+    end, AllClasses),
+    ok.
+
+%% @private
+%% @doc Check if a class inherits from a given ancestor (walks superclass chain).
+-spec inherits_from(class_name() | none, class_name()) -> boolean().
+inherits_from(none, _Ancestor) ->
+    false;
+inherits_from(SuperclassName, Ancestor) when SuperclassName =:= Ancestor ->
+    true;
+inherits_from(SuperclassName, Ancestor) ->
+    case whereis_class(SuperclassName) of
+        undefined -> false;
+        SuperclassPid ->
+            case gen_server:call(SuperclassPid, superclass, 5000) of
+                none -> false;
+                GrandparentName -> inherits_from(GrandparentName, Ancestor)
+            end
+    end.
 
 %% @private
 %% Convert dynamic method closures to method_info maps.
