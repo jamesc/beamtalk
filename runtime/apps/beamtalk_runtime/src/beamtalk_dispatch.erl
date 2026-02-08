@@ -224,14 +224,32 @@ responds_to(Selector, ClassName) ->
                 undefined ->
                     false;
                 ClassPid ->
-                    case beamtalk_object_class:has_method(ClassPid, Selector) of
-                        true ->
+                    %% ADR 0006 Phase 2: Try flattened table first (O(1))
+                    case try_flattened_lookup(ClassPid, Selector) of
+                        {ok, _, _} ->
                             true;
-                        false ->
-                            case beamtalk_object_class:superclass(ClassPid) of
-                                none -> false;
-                                SuperclassName -> responds_to(Selector, SuperclassName)
-                            end
+                        not_found ->
+                            %% Fall back to hierarchy walk in case flattened
+                            %% table is incomplete (bootstrap, rebuild failure)
+                            responds_to_slow(Selector, ClassPid)
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Slow path for responds_to: walk hierarchy checking each class.
+-spec responds_to_slow(selector(), pid()) -> boolean().
+responds_to_slow(Selector, ClassPid) ->
+    case beamtalk_object_class:has_method(ClassPid, Selector) of
+        true ->
+            true;
+        false ->
+            case beamtalk_object_class:superclass(ClassPid) of
+                none -> false;
+                SuperclassName ->
+                    case beamtalk_object_class:whereis_class(SuperclassName) of
+                        undefined -> false;
+                        SuperclassPid -> responds_to_slow(Selector, SuperclassPid)
                     end
             end
     end.
@@ -241,14 +259,18 @@ responds_to(Selector, ClassName) ->
 %%% ============================================================================
 
 %% @private
-%% @doc Look up method in class chain (recursive hierarchy walk).
+%% @doc Look up method in class chain (with flattened table optimization).
 %%
-%% This is the core hierarchy walking function. It:
-%% 1. Checks if the class exists
-%% 2. Checks the class's method table for the selector
-%% 3. If found, invokes the method
-%% 4. If not found, recurses to the superclass
-%% 5. Returns error if reached root without finding method
+%% ADR 0006 Phase 2: This function first checks the flattened method table
+%% for O(1) lookup. If the flattened table is missing or stale, it falls back
+%% to the recursive hierarchy walk.
+%%
+%% Algorithm:
+%% 1. Check if class exists
+%% 2. Try flattened table lookup (O(1) - fast path)
+%% 3. If not in flattened table or table missing, fall back to hierarchy walk
+%% 4. If found, invoke the method from the defining class
+%% 5. Returns error if not found anywhere
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case beamtalk_object_class:whereis_class(ClassName) of
@@ -258,27 +280,64 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             {error, Error1};
         ClassPid ->
-            %% Check if this class has the method
-            case beamtalk_object_class:has_method(ClassPid, Selector) of
-                true ->
-                    %% Found the method - invoke it
-                    %% Pass ClassPid to avoid redundant whereis_class lookup
-                    logger:debug("Found method ~p in class ~p", [Selector, ClassName]),
-                    invoke_method(ClassName, ClassPid, Selector, Args, Self, State);
-                false ->
-                    %% Not found in this class - try superclass
-                    case beamtalk_object_class:superclass(ClassPid) of
-                        none ->
-                            %% Reached root without finding method
-                            logger:debug("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
-                            Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, ClassName)),
+            %% ADR 0006 Phase 2: Try flattened table first (O(1) lookup)
+            case try_flattened_lookup(ClassPid, Selector) of
+                {ok, DefiningClass, _MethodInfo} ->
+                    %% Found in flattened table - invoke from defining class
+                    logger:debug("Found method ~p in flattened table (defined in ~p)", [Selector, DefiningClass]),
+                    case beamtalk_object_class:whereis_class(DefiningClass) of
+                        undefined ->
+                            %% Defining class no longer exists (hot reload edge case)
+                            %% Fall back to hierarchy walk
+                            logger:debug("Defining class ~p not found, falling back to hierarchy walk", [DefiningClass]),
+                            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid);
+                        DefiningClassPid ->
+                            invoke_method(DefiningClass, DefiningClassPid, Selector, Args, Self, State)
+                    end;
+                not_found ->
+                    %% Not in flattened table - fall back to hierarchy walk
+                    %% This handles:
+                    %% - Methods added at runtime (not yet in flattened table)
+                    %% - Bootstrap ordering (flattened table incomplete)
+                    %% - Extension methods (checked by caller before this)
+                    logger:debug("Method ~p not in flattened table, falling back to hierarchy walk", [Selector]),
+                    lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid)
+            end
+    end.
+
+%% @private
+%% @doc Slow path: recursive hierarchy walk (O(depth)).
+%%
+%% Used when flattened table is missing, stale, or incomplete.
+%% This is the original ADR 0006 Phase 1 implementation.
+-spec lookup_in_class_chain_slow(selector(), args(), bt_self(), state(), class_name(), pid()) -> dispatch_result().
+lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
+    %% Check if this class has the method
+    case beamtalk_object_class:has_method(ClassPid, Selector) of
+        true ->
+            %% Found the method - invoke it
+            logger:debug("Found method ~p in class ~p (hierarchy walk)", [Selector, ClassName]),
+            invoke_method(ClassName, ClassPid, Selector, Args, Self, State);
+        false ->
+            %% Not found in this class - try superclass
+            case beamtalk_object_class:superclass(ClassPid) of
+                none ->
+                    %% Reached root without finding method
+                    logger:debug("Method ~p not found in hierarchy (root: ~p)", [Selector, ClassName]),
+                    Error0 = beamtalk_error:new(does_not_understand, maps:get('__class__', State, ClassName)),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+                    {error, Error2};
+                SuperclassName ->
+                    %% Recurse to superclass
+                    logger:debug("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
+                    case beamtalk_object_class:whereis_class(SuperclassName) of
+                        undefined ->
+                            Error0 = beamtalk_error:new(class_not_found, SuperclassName),
                             Error1 = beamtalk_error:with_selector(Error0, Selector),
-                            Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
-                            {error, Error2};
-                        SuperclassName ->
-                            %% Recurse to superclass
-                            logger:debug("Method ~p not in ~p, trying superclass ~p", [Selector, ClassName, SuperclassName]),
-                            lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
+                            {error, Error1};
+                        SuperclassPid ->
+                            lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
                     end
             end
     end.
@@ -366,5 +425,24 @@ check_extension(ClassName, Selector) ->
     catch
         error:badarg ->
             %% ETS table doesn't exist yet (early bootstrap)
+            not_found
+    end.
+
+%% @private
+%% @doc Try to look up a method in the flattened method table.
+%%
+%% ADR 0006 Phase 2: Fast O(1) lookup using pre-computed method table.
+%% Returns {ok, DefiningClass, MethodInfo} if found, not_found otherwise.
+%%
+%% The flattened table maps Selector => {DefiningClass, MethodInfo} where
+%% DefiningClass is the class that actually implements the method.
+-spec try_flattened_lookup(pid(), selector()) ->
+    {ok, class_name(), term()} | not_found.
+try_flattened_lookup(ClassPid, Selector) ->
+    try
+        gen_server:call(ClassPid, {lookup_flattened, Selector}, 5000)
+    catch
+        _:_ ->
+            %% gen_server call failed (timeout, noproc, etc.)
             not_found
     end.

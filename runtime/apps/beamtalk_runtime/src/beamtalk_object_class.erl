@@ -108,7 +108,8 @@
     method_source = #{} :: #{selector() => binary()},
     before_methods = #{} :: #{selector() => [fun()]},
     after_methods = #{} :: #{selector() => [fun()]},
-    dynamic_methods = #{} :: #{selector() => fun()}  % For dynamic classes: actual closures
+    dynamic_methods = #{} :: #{selector() => fun()},  % For dynamic classes: actual closures
+    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}}  % ADR 0006 Phase 2: cached method table including inherited
 }).
 
 %%====================================================================
@@ -361,20 +362,32 @@ init({ClassName, ClassInfo}) ->
     %% Join pg group for all_classes enumeration
     ok = pg:join(beamtalk_classes, self()),
     
+    %% Extract class info
+    Superclass = maps:get(superclass, ClassInfo, none),
+    InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
+    
+    %% Build flattened method table (ADR 0006 Phase 2)
+    FlattenedMethods = build_flattened_methods(ClassName, Superclass, InstanceMethods),
+    
     %% Build state
     State = #class_state{
         name = ClassName,
         module = maps:get(module, ClassInfo, ClassName),
-        superclass = maps:get(superclass, ClassInfo, none),
-        instance_methods = maps:get(instance_methods, ClassInfo, #{}),
+        superclass = Superclass,
+        instance_methods = InstanceMethods,
         class_methods = maps:get(class_methods, ClassInfo, #{}),
         instance_variables = maps:get(instance_variables, ClassInfo, []),
         class_variables = maps:get(class_variables, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         before_methods = maps:get(before_methods, ClassInfo, #{}),
         after_methods = maps:get(after_methods, ClassInfo, #{}),
-        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{})
+        dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
+        flattened_methods = FlattenedMethods
     },
+    %% ADR 0006 Phase 2: Notify existing subclasses to rebuild their flattened
+    %% tables. Handles out-of-order registration (e.g., Counter registered
+    %% before Actor) — subclasses that had incomplete tables now pick up our methods.
+    invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
 handle_call({new, Args}, _From, #class_state{
@@ -434,8 +447,9 @@ handle_call({new, Args}, _From, #class_state{
             end
     end;
 
-handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
-    {reply, maps:keys(Methods), State};
+handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
+    %% ADR 0006 Phase 2: Return all methods (local + inherited) from flattened table
+    {reply, maps:keys(Flattened), State};
 
 handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
     {reply, Super, State};
@@ -469,13 +483,25 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     MethodInfo = #{block => Fun, arity => Arity},
     NewMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
     NewSource = maps:put(Selector, Source, State#class_state.method_source),
+    
+    %% ADR 0006 Phase 2: Rebuild flattened methods when method added/changed
+    NewFlattened = build_flattened_methods(
+        State#class_state.name,
+        State#class_state.superclass,
+        NewMethods
+    ),
+    
     NewState = State#class_state{
         instance_methods = NewMethods,
-        method_source = NewSource
+        method_source = NewSource,
+        flattened_methods = NewFlattened
     },
     
     %% Notify running instances to pick up new method table
     notify_instances(State#class_state.name, NewMethods),
+    
+    %% ADR 0006 Phase 2: Notify subclasses to rebuild their flattened tables
+    invalidate_subclass_flattened_tables(State#class_state.name),
     
     {reply, ok, NewState};
 
@@ -492,11 +518,24 @@ handle_call({add_after, Selector, Fun}, _From, State) ->
     NewAfters = maps:put(Selector, Afters ++ [Fun], State#class_state.after_methods),
     {reply, ok, State#class_state{after_methods = NewAfters}};
 
+%% ADR 0006 Phase 2: Query for flattened methods (used by build_flattened_methods)
+handle_call(get_flattened_methods, _From, #class_state{flattened_methods = Flattened} = State) ->
+    {reply, {ok, Flattened}, State};
+
+%% ADR 0006 Phase 2: Fast single-selector lookup in flattened table.
+%% Returns just the result to avoid copying the entire map to the caller.
+handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods = Flattened} = State) ->
+    Result = case maps:find(Selector, Flattened) of
+        {ok, {DefiningClass, MethodInfo}} -> {ok, DefiningClass, MethodInfo};
+        error -> not_found
+    end,
+    {reply, Result, State};
+
 %% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State}.
 
-handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
+handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
     %% Handle async message dispatch (Future protocol)
     case Msg of
         {Selector, Args, FuturePid} ->
@@ -504,7 +543,8 @@ handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
             %% Match the same selectors as handle_call
             case {Selector, Args} of
                 {methods, []} ->
-                    Result = maps:keys(Methods),
+                    %% ADR 0006 Phase 2: Return all methods (local + inherited)
+                    Result = maps:keys(Flattened),
                     FuturePid ! {resolve, Result},
                     {noreply, State};
                 {superclass, []} ->
@@ -534,6 +574,25 @@ handle_cast(Msg, #class_state{instance_methods = Methods} = State) ->
             {noreply, State}
     end.
 
+handle_info({rebuild_flattened, ChangedClass}, #class_state{
+    name = Name,
+    superclass = Superclass,
+    instance_methods = InstanceMethods
+} = State) ->
+    %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it.
+    %% Wrapped in try/catch: if any ancestor process is dead/busy, we skip the
+    %% rebuild rather than crashing this class process. The slow-path dispatch
+    %% will still find inherited methods correctly.
+    try inherits_from(Superclass, ChangedClass) of
+        true ->
+            NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
+            {noreply, State#class_state{flattened_methods = NewFlattened}};
+        false ->
+            {noreply, State}
+    catch
+        _:_ ->
+            {noreply, State}
+    end;
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -541,7 +600,17 @@ terminate(_Reason, _State) ->
     ok.
 
 code_change(OldVsn, State, Extra) ->
-    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
+    %% First let hot_reload modify state (may update instance_methods)
+    {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
+    %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
+    NewFlattened = build_flattened_methods(
+        NewState#class_state.name,
+        NewState#class_state.superclass,
+        NewState#class_state.instance_methods
+    ),
+    %% Invalidate subclass tables in case hot_reload modified our methods
+    invalidate_subclass_flattened_tables(NewState#class_state.name),
+    {ok, NewState#class_state{flattened_methods = NewFlattened}}.
 
 %%====================================================================
 %% Internal functions
@@ -569,6 +638,41 @@ notify_instances(_ClassName, _NewMethods) ->
     %% this will broadcast method table updates to running instances.
     %% For now, this is a no-op.
     ok.
+
+%% @private
+%% @doc Broadcast rebuild_flattened to all class processes except ourselves.
+%%
+%% ADR 0006 Phase 2: When a class's methods change, all subclasses need to
+%% rebuild their flattened tables to include the new/changed method.
+%% Uses pg group for fire-and-forget broadcast.
+-spec invalidate_subclass_flattened_tables(class_name()) -> ok.
+invalidate_subclass_flattened_tables(ChangedClass) ->
+    AllClasses = pg:get_members(beamtalk_classes),
+    Self = self(),
+    lists:foreach(fun(Pid) ->
+        case Pid of
+            Self -> ok;  % Skip ourselves
+            _ -> Pid ! {rebuild_flattened, ChangedClass}
+        end
+    end, AllClasses),
+    ok.
+
+%% @private
+%% @doc Check if a class inherits from a given ancestor (walks superclass chain).
+-spec inherits_from(class_name() | none, class_name()) -> boolean().
+inherits_from(none, _Ancestor) ->
+    false;
+inherits_from(SuperclassName, Ancestor) when SuperclassName =:= Ancestor ->
+    true;
+inherits_from(SuperclassName, Ancestor) ->
+    case whereis_class(SuperclassName) of
+        undefined -> false;
+        SuperclassPid ->
+            case gen_server:call(SuperclassPid, superclass, 5000) of
+                none -> false;
+                GrandparentName -> inherits_from(GrandparentName, Ancestor)
+            end
+    end.
 
 %% @private
 %% Convert dynamic method closures to method_info maps.
@@ -653,4 +757,75 @@ invoke_super_method(Module, Selector, MethodInfo, Args, State) ->
             %% Call the module's dispatch function with the selector
             %% This returns {reply, Result, NewState} - pass through as-is
             Module:dispatch(Selector, Args, Self, State)
+    end.
+
+%% @private
+%% @doc Build flattened method table by walking hierarchy and merging methods.
+%%
+%% ADR 0006 Phase 2: Pre-compute all methods (local + inherited) at class
+%% registration time for O(1) lookup. Child methods override parent methods.
+%%
+%% Returns a map of {Selector => {DefiningClass, MethodInfo}} where DefiningClass
+%% is the class that actually defines the method.
+%%
+%% ## Algorithm
+%%
+%% 1. Start with empty accumulator
+%% 2. Walk from current class up to root (none)
+%% 3. At each level, add methods from that class (if not already present)
+%% 4. Child methods naturally override parent (first-seen wins)
+%%
+%% ## Example
+%%
+%% ```
+%% Counter (defines: increment, getValue)
+%%   → Actor (defines: spawn)
+%%     → Object (defines: class, respondsTo:)
+%%
+%% Flattened table for Counter:
+%% #{
+%%   increment => {'Counter', #{arity => 0, ...}},
+%%   getValue => {'Counter', #{arity => 0, ...}},
+%%   spawn => {'Actor', #{arity => 1, ...}},
+%%   class => {'Object', #{arity => 0, ...}},
+%%   respondsTo: => {'Object', #{arity => 1, ...}}
+%% }
+%% ```
+-spec build_flattened_methods(class_name(), class_name() | none, #{selector() => method_info()}) ->
+    #{selector() => {class_name(), method_info()}}.
+build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
+    %% Start with local methods (maps each selector to {CurrentClass, MethodInfo})
+    LocalFlattened = maps:fold(fun(Selector, MethodInfo, Acc) ->
+        maps:put(Selector, {CurrentClass, MethodInfo}, Acc)
+    end, #{}, LocalMethods),
+    
+    %% Walk up the hierarchy and merge inherited methods
+    case Superclass of
+        none ->
+            %% At root - return local methods
+            LocalFlattened;
+        SuperclassName ->
+            %% Get inherited methods from superclass
+            case whereis_class(SuperclassName) of
+                undefined ->
+                    %% Superclass not registered yet (bootstrap ordering)
+                    %% Just return local methods - flattening will be incomplete
+                    %% but will be fixed on next hot reload
+                    LocalFlattened;
+                SuperclassPid ->
+                    %% Get the superclass's flattened methods
+                    %% Wrapped in try/catch: if superclass is busy/restarting,
+                    %% degrade gracefully to local-only methods (slow path
+                    %% will still find inherited methods at dispatch time)
+                    SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, get_flattened_methods, 5000) of
+                        {ok, Methods} -> Methods;
+                        _ -> #{}
+                    catch
+                        _:_ -> #{}
+                    end,
+                    
+                    %% Merge: local methods override inherited
+                    %% maps:merge prefers second argument on collision, so put inherited first
+                    maps:merge(SuperclassFlattenedMethods, LocalFlattened)
+            end
     end.
