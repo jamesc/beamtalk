@@ -538,6 +538,10 @@ pub fn compile_source_with_bindings(
         );
     diagnostics.extend(primitive_diags);
 
+    // Run semantic analysis (BT-401: sealed enforcement, undefined vars, etc.)
+    let analysis_result = beamtalk_core::semantic_analysis::analyse(&module);
+    diagnostics.extend(analysis_result.diagnostics);
+
     // Check for errors
     let has_errors = diagnostics
         .iter()
@@ -653,6 +657,50 @@ mod tests {
         let result = compile_source(&source_file, "nonexistent", &core_file, &options);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_compile_source_sealed_class_violation() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_file = temp_path.join("sealed.bt");
+        let core_file = temp_path.join("sealed.core");
+        fs::write(
+            &source_file,
+            "Integer subclass: MyInt\n  doubled => self * 2\n",
+        )
+        .unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source(&source_file, "sealed", &core_file, &options);
+
+        assert!(
+            result.is_err(),
+            "Sealed class violation should fail compilation"
+        );
+    }
+
+    #[test]
+    fn test_compile_source_sealed_method_override() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let source_file = temp_path.join("sealed_method.bt");
+        let core_file = temp_path.join("sealed_method.core");
+        fs::write(
+            &source_file,
+            "Object subclass: Parent\n  sealed frozen => 42\n\nParent subclass: Child\n  frozen => 99\n",
+        )
+        .unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source(&source_file, "sealed_method", &core_file, &options);
+
+        assert!(
+            result.is_err(),
+            "Sealed method override should fail compilation"
+        );
     }
 
     #[test]
