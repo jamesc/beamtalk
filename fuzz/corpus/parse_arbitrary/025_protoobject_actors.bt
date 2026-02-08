@@ -4,7 +4,7 @@
 // E2E tests for ProtoObject with actor loading
 //
 // These tests verify that actor futures are automatically awaited in the REPL
-// via `maybe_await_future/1` (see runtime/src/beamtalk_repl_eval.erl).
+// via `maybe_await_future/1` (see runtime/apps/beamtalk_runtime/src/beamtalk_repl_eval.erl).
 // No explicit `await` keyword is needed for synchronous REPL interaction.
 
 // @load tests/e2e/fixtures/counter.bt

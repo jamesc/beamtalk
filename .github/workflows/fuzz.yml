@@ -38,13 +38,12 @@ jobs:
             ${{ runner.os }}-cargo-fuzz-
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.1
 
       - name: Run parser fuzzing (10 minutes)
         id: fuzz
         continue-on-error: true
         run: |
-          cd fuzz
           # Run fuzzing for 600 seconds (10 minutes)
           # -rss_limit_mb=4096: Limit memory to 4GB to catch OOM issues faster
           # -max_total_time=600: Run for exactly 10 minutes

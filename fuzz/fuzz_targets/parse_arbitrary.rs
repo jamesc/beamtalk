@@ -7,10 +7,13 @@
 //! that it never panics. The parser must handle all input gracefully,
 //! producing either a valid AST or diagnostics.
 //!
+//! Invalid UTF-8 bytes are converted via lossy conversion (U+FFFD replacement)
+//! so the lexer/parser still get exercised with unusual character sequences.
+//!
 //! # Success Criteria
 //!
 //! The parser passes fuzzing if:
-//! - It never panics on any input (including invalid UTF-8)
+//! - It never panics on any input (including replacement characters from invalid UTF-8)
 //! - It always returns a Module and Vec<Diagnostic>
 //! - No assertions fail during parsing
 //!
@@ -26,16 +29,14 @@ use libfuzzer_sys::fuzz_target;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 fuzz_target!(|data: &[u8]| {
-    // Only test valid UTF-8 (parser expects strings)
-    // Invalid UTF-8 is not a parser concern - it's filtered earlier
-    if let Ok(source) = std::str::from_utf8(data) {
-        // Lex the source into tokens
-        let tokens = lex_with_eof(source);
-        
-        // Parse tokens into AST
-        // Success = no panic. We don't care if there are diagnostics.
-        let (_module, _diagnostics) = parse(tokens);
-        
-        // If we got here without panicking, the parser is robust!
-    }
+    // Convert to UTF-8 using lossy conversion so invalid bytes become U+FFFD
+    // replacement characters rather than being skipped entirely.
+    let source = String::from_utf8_lossy(data);
+
+    // Lex the source into tokens
+    let tokens = lex_with_eof(&source);
+
+    // Parse tokens into AST
+    // Success = no panic. We don't care if there are diagnostics.
+    let (_module, _diagnostics) = parse(tokens);
 });
