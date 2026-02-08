@@ -353,10 +353,7 @@ fn check_abstract_in_expr(
                     && hierarchy.is_abstract(name)
                 {
                     diagnostics.push(Diagnostic::error(
-                        format!(
-                            "Cannot instantiate abstract class `{}`. Subclass it first.",
-                            name
-                        ),
+                        format!("Cannot instantiate abstract class `{name}`. Subclass it first.",),
                         *span,
                     ));
                 }
@@ -373,10 +370,7 @@ fn check_abstract_in_expr(
                 check_abstract_in_expr(e, hierarchy, diagnostics);
             }
         }
-        Expression::Assignment { value, .. } => {
-            check_abstract_in_expr(value, hierarchy, diagnostics);
-        }
-        Expression::Return { value, .. } => {
+        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
             check_abstract_in_expr(value, hierarchy, diagnostics);
         }
         Expression::Cascade {

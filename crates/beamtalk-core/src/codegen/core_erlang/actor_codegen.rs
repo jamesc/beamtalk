@@ -42,10 +42,7 @@ impl CoreErlangGenerator {
         let has_classes = !module.classes.is_empty();
 
         // BT-105: Check if class is abstract
-        let is_abstract = module
-            .classes
-            .first()
-            .is_some_and(|c| c.is_abstract);
+        let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
         // Module header with expanded exports per BT-29
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods

@@ -239,8 +239,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{}') in",
-            class_name
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
         )?;
         self.write_indent()?;
         writeln!(
@@ -271,8 +270,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{}') in",
-            class_name
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
         )?;
         self.write_indent()?;
         writeln!(

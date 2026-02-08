@@ -130,9 +130,7 @@ impl ClassHierarchy {
     /// Returns true if the named class is abstract (cannot be instantiated).
     #[must_use]
     pub fn is_abstract(&self, name: &str) -> bool {
-        self.classes
-            .get(name)
-            .is_some_and(|info| info.is_abstract)
+        self.classes.get(name).is_some_and(|info| info.is_abstract)
     }
 
     /// Returns the ordered superclass chain for a class (excluding the class itself).
