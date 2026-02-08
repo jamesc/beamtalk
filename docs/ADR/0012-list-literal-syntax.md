@@ -1,7 +1,7 @@
 # ADR 0012: Collection Literal Syntax and the `#` Data Literal System
 
 ## Status
-Proposed (2026-02-08)
+Accepted (2026-02-08)
 
 ## Context
 
