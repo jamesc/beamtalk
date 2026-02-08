@@ -1157,7 +1157,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-197** | DDD Architecture Refactoring | 4 issues | ~50% | Medium |
 | **BT-162** | BEAM Object Model (ADR 0005) | 19 issues | ~55% | High |
 | **BT-278** | Unified Method Dispatch (ADR 0006) | 4 issues | ~0% | Urgent |
-| **BT-140** | Full Semantic Analysis Framework | 10 issues | ~60% | Medium |
+| **BT-140** | Full Semantic Analysis Framework | 12 issues | 100% ✅ | Medium |
 | **BT-185** | Persistent Workspace Management | TBD | ~10% | Urgent |
 | **BT-210** | Advanced Language Features | 5 issues | ~10% | Low |
 | **BT-286** | Compilable Standard Library (ADR 0007) | 12 issues | ~85% | Urgent |
@@ -1166,6 +1166,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 
 | Epic ID | Name | Child Issues | Completion Date |
 |---------|------|--------------|-----------------|
+| **BT-140** | Full Semantic Analysis Framework | 12 issues | 2026-02-08 |
 | **BT-134** | Improve Erlang Test Coverage | 5 issues | 2026-01-31 |
 | **BT-128** | Improve Test Coverage to >80% | 6 issues | 2026-02-01 |
 
