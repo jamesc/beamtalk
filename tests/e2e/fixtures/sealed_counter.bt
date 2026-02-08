@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Sealed counter class for testing sealed class codegen optimization (BT-403).
+// Self-sends in sealed classes use direct dispatch (skip safe_dispatch try/catch)
+// and direct function calls to __sealed_* methods.
+
+sealed Actor subclass: SealedCounter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+
+  decrement => self.value := self.value - 1
+
+  getValue => self.value
+
+  // Self-send within a sealed method (tests direct function call path)
+  doubleIncrement =>
+    self increment
+    self increment
+    self getValue
+
+  // Sealed method with parameter (tests argument passing in direct call)
+  addAmount: amount => self.value := self.value + amount

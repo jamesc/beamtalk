@@ -402,6 +402,9 @@ pub(super) struct CoreErlangGenerator {
     /// BT-295: Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.
     current_method_params: Vec<String>,
+    /// BT-403: Selectors of sealed methods in the current class.
+    /// Used to generate standalone functions and direct call dispatch.
+    sealed_method_selectors: std::collections::HashSet<String>,
 }
 
 impl CoreErlangGenerator {
@@ -420,6 +423,7 @@ impl CoreErlangGenerator {
             primitive_bindings: PrimitiveBindingTable::new(),
             class_identity: None,
             current_method_params: Vec::new(),
+            sealed_method_selectors: std::collections::HashSet::new(),
         }
     }
 
@@ -438,6 +442,7 @@ impl CoreErlangGenerator {
             primitive_bindings: bindings,
             class_identity: None,
             current_method_params: Vec::new(),
+            sealed_method_selectors: std::collections::HashSet::new(),
         }
     }
 
@@ -3142,12 +3147,12 @@ end
             "Should include instance_methods map. Got:\n{code}"
         );
         assert!(
-            code.contains("'increment' => ~{'arity' => 0}~"),
-            "Should include increment method with arity. Got:\n{code}"
+            code.contains("'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
+            "Should include increment method with arity and sealed flag. Got:\n{code}"
         );
         assert!(
-            code.contains("'getValue' => ~{'arity' => 0}~"),
-            "Should include getValue method with arity. Got:\n{code}"
+            code.contains("'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
+            "Should include getValue method with arity and sealed flag. Got:\n{code}"
         );
 
         // Check instance_variables list
@@ -3172,6 +3177,16 @@ end
 
         // Check function returns ok
         assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
+
+        // BT-403: Check sealed/abstract flags
+        assert!(
+            code.contains("'is_sealed' => 'false'"),
+            "Should include is_sealed flag. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'is_abstract' => 'false'"),
+            "Should include is_abstract flag. Got:\n{code}"
+        );
     }
 
     #[test]

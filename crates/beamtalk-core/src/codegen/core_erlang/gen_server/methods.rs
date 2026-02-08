@@ -452,11 +452,18 @@ impl CoreErlangGenerator {
                 if method_idx > 0 {
                     write!(self.output, ", ")?;
                 }
+                // BT-403: Include per-method is_sealed flag
+                let is_sealed = if method.is_sealed || class.is_sealed {
+                    "'true'"
+                } else {
+                    "'false'"
+                };
                 write!(
                     self.output,
-                    "'{}' => ~{{'arity' => {}}}~",
+                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
                     method.selector.name(),
-                    method.selector.arity()
+                    method.selector.arity(),
+                    is_sealed
                 )?;
             }
             writeln!(self.output, "}}~,")?;
@@ -495,7 +502,21 @@ impl CoreErlangGenerator {
                 write!(self.output, "'{}' => ", method.selector.name())?;
                 self.generate_binary_string(&source_str)?;
             }
-            writeln!(self.output, "}}~")?;
+            writeln!(self.output, "}}~,")?;
+
+            // BT-403: Sealed/abstract class flags for runtime enforcement
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'is_sealed' => '{}',",
+                if class.is_sealed { "true" } else { "false" }
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'is_abstract' => '{}'",
+                if class.is_abstract { "true" } else { "false" }
+            )?;
 
             self.indent -= 1;
             self.write_indent()?;
