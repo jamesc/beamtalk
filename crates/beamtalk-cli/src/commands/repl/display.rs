@@ -1,100 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! REPL utility helpers for formatting, history, and runtime discovery.
+//! REPL display formatting, help text, and history.
 //!
-//! **DDD Context:** REPL — Utilities
+//! **DDD Context:** REPL — Presentation
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::time::Duration;
 
-use miette::{IntoDiagnostic, Result, miette};
-use tracing::info;
+use miette::{IntoDiagnostic, Result};
 
-use crate::paths::{beamtalk_dir, is_daemon_running};
+use crate::paths::beamtalk_dir;
 
 pub(super) fn history_path() -> Result<PathBuf> {
     let dir = beamtalk_dir()?;
     fs::create_dir_all(&dir).into_diagnostic()?;
     Ok(dir.join("repl_history"))
-}
-
-/// Find the runtime directory by checking multiple possible locations.
-pub(super) fn find_runtime_dir() -> Result<PathBuf> {
-    // Check explicit env var first
-    if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
-        let path = PathBuf::from(dir);
-        if path.join("rebar.config").exists() {
-            return Ok(path);
-        }
-        return Err(miette!(
-            "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
-        ));
-    }
-
-    // Candidates in order of preference
-    let candidates = [
-        // 1. CARGO_MANIFEST_DIR (when running via cargo run)
-        std::env::var("CARGO_MANIFEST_DIR")
-            .ok()
-            .map(|d| PathBuf::from(d).join("../../runtime")),
-        // 2. Current working directory (running from repo root)
-        Some(PathBuf::from("runtime")),
-        // 3. Relative to executable (installed location)
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk/runtime"))),
-        // 4. Executable's grandparent (target/debug/beamtalk -> repo root)
-        std::env::current_exe().ok().and_then(|exe| {
-            exe.parent()
-                .and_then(|p| p.parent())
-                .and_then(|p| p.parent())
-                .map(|p| p.join("runtime"))
-        }),
-    ];
-
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.join("rebar.config").exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(miette!(
-        "Could not find Beamtalk runtime directory.\n\
-        Please run from the repository root or set BEAMTALK_RUNTIME_DIR."
-    ))
-}
-
-/// Start the compiler daemon in the background.
-pub(super) fn start_daemon() -> Result<()> {
-    info!("Starting compiler daemon...");
-
-    // Get path to beamtalk binary (ourselves)
-    let exe = std::env::current_exe().into_diagnostic()?;
-
-    // Spawn daemon in foreground mode as a background process
-    // (background mode in daemon itself is not implemented)
-    Command::new(exe)
-        .args(["daemon", "start", "--foreground"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .into_diagnostic()?;
-
-    // Wait a moment for daemon to start
-    std::thread::sleep(Duration::from_millis(1000));
-
-    if is_daemon_running()?.is_none() {
-        return Err(miette!(
-            "Failed to start compiler daemon. Try: beamtalk daemon start --foreground"
-        ));
-    }
-
-    info!("Compiler daemon started.");
-    Ok(())
 }
 
 /// Format a value for REPL display.

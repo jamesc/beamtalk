@@ -5,33 +5,23 @@
 //!
 //! **DDD Context:** REPL — Process Management
 
-use std::path::Path;
+use std::ffi::OsString;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use miette::{Result, miette};
+use miette::{IntoDiagnostic, Result, miette};
 use tracing::{info, warn};
 
 use beamtalk_cli::repl_startup;
 
-use super::helpers::find_runtime_dir;
-use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
+use crate::paths::is_daemon_running;
 
-pub(super) fn has_beam_files(dir: &Path) -> bool {
-    dir.is_dir()
-        && std::fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-            })
-            .unwrap_or(false)
-}
+use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 
 /// Start the BEAM node with REPL backend.
 pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
     // Find runtime directory - try multiple locations
-    let runtime_dir = find_runtime_dir()?;
+    let runtime_dir = repl_startup::find_runtime_dir()?;
     info!("Using runtime at: {}", runtime_dir.display());
 
     let paths = repl_startup::beam_paths(&runtime_dir);
@@ -53,7 +43,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     info!("Starting BEAM node with REPL backend on port {port}...");
 
     // Warn if stdlib is not compiled (directory may exist without .beam files)
-    if !has_beam_files(&paths.stdlib_ebin) {
+    if !repl_startup::has_beam_files(&paths.stdlib_ebin) {
         warn!("Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL");
     }
 
@@ -86,19 +76,19 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
                     "Invalid node name '{name}': expected format 'name@host'"
                 ));
             }
-            args.push("-name".to_string());
+            args.push(OsString::from("-name"));
         } else if name.contains('.') {
             // FQDN without @ — use -name
-            args.push("-name".to_string());
+            args.push(OsString::from("-name"));
         } else {
             // Simple short name — use -sname
-            args.push("-sname".to_string());
+            args.push(OsString::from("-sname"));
         }
-        args.push(name.clone());
+        args.push(OsString::from(name.as_str()));
     }
 
-    args.push("-eval".to_string());
-    args.push(eval_cmd);
+    args.push(OsString::from("-eval"));
+    args.push(OsString::from(eval_cmd));
 
     let child = Command::new("erl")
         .arg("-noshell")
@@ -166,4 +156,34 @@ pub(super) fn resolve_port(port_arg: Option<u16>) -> Result<u16> {
 /// Priority: CLI flag > `BEAMTALK_NODE_NAME` env var > None
 pub(super) fn resolve_node_name(node_arg: Option<String>) -> Option<String> {
     node_arg.or_else(|| std::env::var("BEAMTALK_NODE_NAME").ok())
+}
+
+/// Start the compiler daemon in the background.
+pub(super) fn start_daemon() -> Result<()> {
+    info!("Starting compiler daemon...");
+
+    // Get path to beamtalk binary (ourselves)
+    let exe = std::env::current_exe().into_diagnostic()?;
+
+    // Spawn daemon in foreground mode as a background process
+    // (background mode in daemon itself is not implemented)
+    Command::new(exe)
+        .args(["daemon", "start", "--foreground"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .into_diagnostic()?;
+
+    // Wait a moment for daemon to start
+    std::thread::sleep(Duration::from_millis(1000));
+
+    if is_daemon_running()?.is_none() {
+        return Err(miette!(
+            "Failed to start compiler daemon. Try: beamtalk daemon start --foreground"
+        ));
+    }
+
+    info!("Compiler daemon started.");
+    Ok(())
 }
