@@ -408,6 +408,7 @@ mod tests {
         assert!(h.has_class("Object"));
         assert!(h.has_class("Actor"));
         assert!(h.has_class("Integer"));
+        assert!(h.has_class("Float"));
         assert!(h.has_class("String"));
         assert!(h.has_class("Array"));
         assert!(h.has_class("List"));
@@ -446,6 +447,13 @@ mod tests {
         let h = ClassHierarchy::with_builtins();
         let int = h.get_class("Integer").unwrap();
         assert!(int.is_sealed);
+    }
+
+    #[test]
+    fn float_is_sealed() {
+        let h = ClassHierarchy::with_builtins();
+        let float = h.get_class("Float").unwrap();
+        assert!(float.is_sealed);
     }
 
     // --- Superclass chain tests ---
@@ -791,6 +799,46 @@ mod tests {
         };
         let (_, diags) = ClassHierarchy::build(&module);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn builtin_sealed_method_override_rejected() {
+        // Object's respondsTo: is sealed in builtins — user class cannot override it
+        let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
+
+        let module = Module {
+            classes: vec![child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`respondsTo:`"));
+        assert!(diags[0].message.contains("`Object`"));
+        assert!(h.has_class("MyObj"));
+    }
+
+    #[test]
+    fn builtin_actor_spawn_override_rejected() {
+        // Actor's spawn is sealed in builtins — subclass cannot override it
+        let child = make_class_with_sealed_method("MyActor", "Actor", "spawn", false);
+
+        let module = Module {
+            classes: vec![child],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (h, diags) = ClassHierarchy::build(&module);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("sealed method"));
+        assert!(diags[0].message.contains("`spawn`"));
+        assert!(diags[0].message.contains("`Actor`"));
+        assert!(h.has_class("MyActor"));
     }
 
     // --- MRO verification ---

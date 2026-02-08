@@ -25,6 +25,17 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
     }
 }
 
+/// Create a sealed built-in method info.
+pub(super) fn builtin_sealed_method(selector: &str, arity: usize, defined_in: &str) -> MethodInfo {
+    MethodInfo {
+        selector: selector.into(),
+        arity,
+        kind: MethodKind::Primary,
+        defined_in: defined_in.into(),
+        is_sealed: true,
+    }
+}
+
 /// Returns all built-in class definitions.
 #[allow(clippy::too_many_lines)]
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
@@ -67,12 +78,12 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifNil:ifNotNil:", 2, "Object"),
                 builtin_method("inspect", 0, "Object"),
                 builtin_method("describe", 0, "Object"),
-                builtin_method("respondsTo:", 1, "Object"),
-                builtin_method("instVarNames", 0, "Object"),
-                builtin_method("instVarAt:", 1, "Object"),
-                builtin_method("instVarAt:put:", 2, "Object"),
-                builtin_method("perform:", 1, "Object"),
-                builtin_method("perform:withArgs:", 2, "Object"),
+                builtin_sealed_method("respondsTo:", 1, "Object"),
+                builtin_sealed_method("instVarNames", 0, "Object"),
+                builtin_sealed_method("instVarAt:", 1, "Object"),
+                builtin_sealed_method("instVarAt:put:", 2, "Object"),
+                builtin_sealed_method("perform:", 1, "Object"),
+                builtin_sealed_method("perform:withArgs:", 2, "Object"),
                 builtin_method("new", 0, "Object"),
                 builtin_method("new:", 1, "Object"),
             ],
@@ -89,8 +100,10 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_abstract: false,
             state: vec![],
             methods: vec![
-                builtin_method("spawn", 0, "Actor"),
-                builtin_method("spawn:", 1, "Actor"),
+                builtin_sealed_method("spawn", 0, "Actor"),
+                builtin_sealed_method("spawn:", 1, "Actor"),
+                builtin_sealed_method("new", 0, "Actor"),
+                builtin_sealed_method("new:", 1, "Actor"),
                 builtin_method("describe", 0, "Actor"),
             ],
         },
@@ -131,6 +144,34 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("to:by:do:", 3, "Integer"),
                 builtin_method("asFloat", 0, "Integer"),
                 builtin_method("asString", 0, "Integer"),
+            ],
+        },
+    );
+
+    // Float (sealed)
+    classes.insert(
+        "Float".into(),
+        ClassInfo {
+            name: "Float".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            state: vec![],
+            methods: vec![
+                builtin_method("+", 1, "Float"),
+                builtin_method("-", 1, "Float"),
+                builtin_method("*", 1, "Float"),
+                builtin_method("/", 1, "Float"),
+                builtin_method("=", 1, "Float"),
+                builtin_method("<", 1, "Float"),
+                builtin_method("<=", 1, "Float"),
+                builtin_method(">", 1, "Float"),
+                builtin_method(">=", 1, "Float"),
+                builtin_method("negated", 0, "Float"),
+                builtin_method("abs", 0, "Float"),
+                builtin_method("min:", 1, "Float"),
+                builtin_method("max:", 1, "Float"),
+                builtin_method("asString", 0, "Float"),
             ],
         },
     );

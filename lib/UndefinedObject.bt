@@ -6,7 +6,7 @@
 // nil is the singleton instance of UndefinedObject (Smalltalk convention).
 // All methods are pure Beamtalk — no primitives needed.
 
-Object subclass: UndefinedObject
+sealed Object subclass: UndefinedObject
   isNil => true
   notNil => false
   ifNil: nilBlock => nilBlock value
