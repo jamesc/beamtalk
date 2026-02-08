@@ -250,10 +250,9 @@ struct DaemonManager {
 /// so the E2E startup matches production exactly.
 fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
     if cover {
-        // Cover mode wraps extra instrumentation around the shared startup core
+        // Cover mode wraps instrumentation around the shared startup prelude
         format!(
-            "application:set_env(beamtalk_runtime, repl_port, {REPL_PORT}), \
-             {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+            "{}, \
              cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
@@ -272,7 +271,8 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  ExpErr -> io:format(standard_error, \"Cover export failed: ~p~n\", [ExpErr]), halt(1) \
              end, \
              cover:stop(), \
-             init:stop()."
+             init:stop().",
+            repl_startup::startup_prelude(REPL_PORT),
         )
     } else {
         repl_startup::build_eval_cmd(REPL_PORT)

@@ -45,11 +45,11 @@ pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
 /// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
 pub fn build_eval_cmd(port: u16) -> String {
     format!(
-        "application:set_env(beamtalk_runtime, repl_port, {port}), \
-         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+        "{}, \
          {{ok, _}} = beamtalk_repl:start_link({port}), \
          io:format(\"REPL backend started on port {port}~n\"), \
-         receive stop -> ok end."
+         receive stop -> ok end.",
+        startup_prelude(port),
     )
 }
 
@@ -57,20 +57,45 @@ pub fn build_eval_cmd(port: u16) -> String {
 ///
 /// Like [`build_eval_cmd`] but also stores the node name in the application
 /// environment before starting the workspace application.
+///
+/// The `node_name` is escaped for safe interpolation into an Erlang
+/// single-quoted atom literal.
 pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
+    let safe_name = escape_erlang_atom(node_name);
     format!(
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
-         application:set_env(beamtalk_runtime, node_name, '{node_name}'), \
+         application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_repl:start_link({port}), \
-         io:format(\"REPL backend started on port {port} (node: {node_name})~n\"), \
+         io:format(\"REPL backend started on port {port} (node: {safe_name})~n\"), \
          receive stop -> ok end."
     )
+}
+
+/// The startup prelude shared by all startup modes.
+///
+/// Sets the port in the application environment and starts the workspace
+/// OTP application.  Callers append the REPL listener start and their own
+/// shutdown logic (e.g. `receive stop -> ok end` or cover export).
+pub fn startup_prelude(port: u16) -> String {
+    format!(
+        "application:set_env(beamtalk_runtime, repl_port, {port}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace)"
+    )
+}
+
+/// Escape characters that are special inside Erlang single-quoted atoms.
+fn escape_erlang_atom(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 /// Collect `-pa` paths as a `Vec<String>` for passing to `Command::args`.
 ///
 /// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
+///
+/// # Panics
+///
+/// Panics if any path in `paths` is not valid UTF-8.
 pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
     let dirs = [
         &paths.runtime_ebin,
@@ -81,7 +106,11 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<String> {
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
         args.push("-pa".to_string());
-        args.push(dir.to_str().unwrap_or("").to_string());
+        args.push(
+            dir.to_str()
+                .expect("Non-UTF8 path in BeamPaths; REPL requires UTF-8 paths for -pa arguments")
+                .to_string(),
+        );
     }
     args
 }
@@ -111,12 +140,40 @@ mod tests {
     }
 
     #[test]
+    fn eval_cmd_with_node_escapes_special_chars() {
+        let cmd = build_eval_cmd_with_node(9000, "node'inject");
+        assert!(cmd.contains("node\\'inject"));
+        assert!(!cmd.contains("node'inject"));
+    }
+
+    #[test]
+    fn startup_prelude_contains_set_env_and_ensure_started() {
+        let prelude = startup_prelude(9000);
+        assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
+        assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
+        // Prelude should NOT contain the blocking receive
+        assert!(!prelude.contains("receive"));
+    }
+
+    #[test]
     fn beam_paths_uses_correct_layout() {
         let paths = beam_paths(Path::new("/rt"));
-        assert_eq!(paths.runtime_ebin, PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin"));
-        assert_eq!(paths.workspace_ebin, PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin"));
-        assert_eq!(paths.jsx_ebin, PathBuf::from("/rt/_build/default/lib/jsx/ebin"));
-        assert_eq!(paths.stdlib_ebin, PathBuf::from("/rt/apps/beamtalk_stdlib/ebin"));
+        assert_eq!(
+            paths.runtime_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
+        );
+        assert_eq!(
+            paths.workspace_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin")
+        );
+        assert_eq!(
+            paths.jsx_ebin,
+            PathBuf::from("/rt/_build/default/lib/jsx/ebin")
+        );
+        assert_eq!(
+            paths.stdlib_ebin,
+            PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
+        );
     }
 
     #[test]
