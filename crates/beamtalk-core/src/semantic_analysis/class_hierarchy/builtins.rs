@@ -72,6 +72,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("instVarAt:", 1, "Object"),
                 builtin_method("instVarAt:put:", 2, "Object"),
                 builtin_method("perform:", 1, "Object"),
+                builtin_method("perform:withArgs:", 2, "Object"),
                 builtin_method("new", 0, "Object"),
                 builtin_method("new:", 1, "Object"),
             ],

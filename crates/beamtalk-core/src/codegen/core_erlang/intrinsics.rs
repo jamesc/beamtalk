@@ -288,7 +288,7 @@ impl CoreErlangGenerator {
                 match selector_name.as_str() {
                     "perform:withArguments:" | "perform:withArgs:" if arguments.len() == 2 => {
                         // Dynamic message dispatch: receiver perform: selector withArguments: args
-                        // This generates async message send via beamtalk_actor:async_send
+                        // Handles both actors (async via async_send) and primitives (sync via beamtalk_primitive:send)
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
                         let args_var = self.fresh_var("Args");
@@ -310,6 +310,35 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[1])?;
                         write!(self.output, " in ")?;
 
+                        // Runtime type check - actor vs primitive (same pattern as dispatch_codegen.rs)
+                        write!(
+                            self.output,
+                            "case case call 'erlang':'is_tuple'({receiver_var}) of "
+                        )?;
+
+                        // True branch: Receiver is a tuple, check size
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of "
+                        )?;
+
+                        // True branch: Size is 4, check first element
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') "
+                        )?;
+
+                        // Default branch: Size is not 4
+                        write!(self.output, "<_> when 'true' -> 'false' end ")?;
+
+                        // Default branch: Not a tuple
+                        write!(self.output, "<_> when 'true' -> 'false' end of ")?;
+
+                        // Case 1: Actor (beamtalk_object) - async dispatch with future
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+
                         // Extract pid from object record
                         write!(
                             self.output,
@@ -329,13 +358,20 @@ impl CoreErlangGenerator {
                         )?;
 
                         // Return the future
-                        write!(self.output, "{future_var}")?;
+                        write!(self.output, "{future_var} ")?;
+
+                        // Case 2: Primitive - sync dispatch
+                        write!(self.output, "<'false'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "call 'beamtalk_primitive':'send'({receiver_var}, {selector_var}, {args_var}) end"
+                        )?;
 
                         Ok(Some(()))
                     }
                     "perform:" if arguments.len() == 1 => {
                         // Dynamic message dispatch (zero-arity): receiver perform: selector
-                        // This is shorthand for perform:withArguments: with empty args list
+                        // Handles both actors (async) and primitives (sync) with empty args list
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
                         let pid_var = self.fresh_var("Pid");
@@ -351,6 +387,35 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in ")?;
 
+                        // Runtime type check - actor vs primitive
+                        write!(
+                            self.output,
+                            "case case call 'erlang':'is_tuple'({receiver_var}) of "
+                        )?;
+
+                        // True branch: Receiver is a tuple, check size
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of "
+                        )?;
+
+                        // True branch: Size is 4, check first element
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') "
+                        )?;
+
+                        // Default branch: Size is not 4
+                        write!(self.output, "<_> when 'true' -> 'false' end ")?;
+
+                        // Default branch: Not a tuple
+                        write!(self.output, "<_> when 'true' -> 'false' end of ")?;
+
+                        // Case 1: Actor (beamtalk_object) - async dispatch with future
+                        write!(self.output, "<'true'> when 'true' -> ")?;
+
                         // Extract pid from object record
                         write!(
                             self.output,
@@ -363,14 +428,21 @@ impl CoreErlangGenerator {
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
 
-                        // Send async message via beamtalk_actor:async_send with empty args
+                        // Send async message with empty args
                         write!(
                             self.output,
                             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, {selector_var}, [], {future_var}) in "
                         )?;
 
                         // Return the future
-                        write!(self.output, "{future_var}")?;
+                        write!(self.output, "{future_var} ")?;
+
+                        // Case 2: Primitive - sync dispatch with empty args
+                        write!(self.output, "<'false'> when 'true' -> ")?;
+                        write!(
+                            self.output,
+                            "call 'beamtalk_primitive':'send'({receiver_var}, {selector_var}, []) end"
+                        )?;
 
                         Ok(Some(()))
                     }
