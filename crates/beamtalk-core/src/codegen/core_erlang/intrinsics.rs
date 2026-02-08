@@ -245,7 +245,7 @@ impl CoreErlangGenerator {
     /// % For actors (objects):
     /// let Pid = call 'erlang':'element'(4, Receiver) in
     /// let Future = call 'beamtalk_future':'new'() in
-    /// let _ = call 'gen_server':'cast'(Pid, {Selector, Arguments, Future}) in
+    /// let _ = call 'beamtalk_actor':'async_send'(Pid, Selector, Arguments, Future) in
     /// Future
     /// ```
     pub(in crate::codegen::core_erlang) fn try_generate_protoobject_message(
@@ -286,9 +286,9 @@ impl CoreErlangGenerator {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
                 match selector_name.as_str() {
-                    "perform:withArguments:" if arguments.len() == 2 => {
+                    "perform:withArguments:" | "perform:withArgs:" if arguments.len() == 2 => {
                         // Dynamic message dispatch: receiver perform: selector withArguments: args
-                        // This generates async message send via gen_server:cast
+                        // This generates async message send via beamtalk_actor:async_send
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
                         let args_var = self.fresh_var("Args");
@@ -322,10 +322,10 @@ impl CoreErlangGenerator {
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
 
-                        // Send async message via gen_server:cast
+                        // Send async message via beamtalk_actor:async_send
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{{selector_var}, {args_var}, {future_var}}}) in "
+                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, {selector_var}, {args_var}, {future_var}) in "
                         )?;
 
                         // Return the future
@@ -363,10 +363,10 @@ impl CoreErlangGenerator {
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
 
-                        // Send async message via gen_server:cast with empty args
+                        // Send async message via beamtalk_actor:async_send with empty args
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{{selector_var}, [], {future_var}}}) in "
+                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, {selector_var}, [], {future_var}) in "
                         )?;
 
                         // Return the future
@@ -446,7 +446,7 @@ impl CoreErlangGenerator {
                     //                 only supports actor instances (see BT-164).
                     //
                     // Generate async call since actors need mailbox serialization:
-                    // gen_server:cast(Pid, {instVarNames, [], Future})
+                    // beamtalk_actor:async_send(Pid, instVarNames, [], Future)
 
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
@@ -468,7 +468,7 @@ impl CoreErlangGenerator {
 
                     write!(
                         self.output,
-                        "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarNames', [], {future_var}}}) in "
+                        "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in "
                     )?;
 
                     write!(self.output, "{future_var}")?;
@@ -600,7 +600,7 @@ impl CoreErlangGenerator {
 
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt:', [{name_var}], {future_var}}}) in "
+                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:', [{name_var}], {future_var}) in "
                         )?;
 
                         write!(self.output, "{future_var}")?;
@@ -645,7 +645,7 @@ impl CoreErlangGenerator {
 
                         write!(
                             self.output,
-                            "let _ = call 'gen_server':'cast'({pid_var}, {{'instVarAt:put:', [{name_var}, {value_var}], {future_var}}}) in "
+                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:put:', [{name_var}, {value_var}], {future_var}) in "
                         )?;
 
                         write!(self.output, "{future_var}")?;
