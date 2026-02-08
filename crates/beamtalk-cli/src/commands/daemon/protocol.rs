@@ -215,6 +215,9 @@ struct CompileParams {
     path: String,
     #[serde(default)]
     source: Option<String>,
+    /// When true, enables @primitive pragmas (for stdlib compilation via REPL)
+    #[serde(default)]
+    stdlib_mode: bool,
 }
 
 /// Result of the compile method.
@@ -255,6 +258,8 @@ fn handle_compile(
     id: Option<serde_json::Value>,
     service: &mut SimpleLanguageService,
 ) -> JsonRpcResponse {
+    use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
     let params: CompileParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
@@ -280,14 +285,33 @@ fn handle_compile(
     // Update the language service
     service.update_file(file_path.clone(), source.clone());
 
-    // Get diagnostics from language service
-    let core_diagnostics = service.diagnostics(&file_path);
+    // Get diagnostics from language service (includes parse errors)
+    let mut core_diagnostics = service.diagnostics(&file_path);
+
+    // Parse module again for primitive validation (parse diagnostics already
+    // captured by language service above, so we can safely discard them here)
+    let tokens = lex_with_eof(&source);
+    let (module, _) = parse(tokens);
+
+    // Run @primitive validation (ADR 0007)
+    let options = beamtalk_core::CompilerOptions {
+        stdlib_mode: params.stdlib_mode,
+        allow_primitives: false,
+    };
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+    core_diagnostics.extend(primitive_diags);
 
     let diagnostics: Vec<DiagnosticInfo> = core_diagnostics
         .iter()
         .map(|d| DiagnosticInfo {
             message: d.message.to_string(),
-            severity: "error".to_string(),
+            severity: match d.severity {
+                beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
+                beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
+            },
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -306,17 +330,13 @@ fn handle_compile(
         })
         .collect();
 
-    let has_errors = !diagnostics.is_empty();
+    let has_errors = diagnostics.iter().any(|d| d.severity == "error");
 
     // Generate Core Erlang if no errors
     let (core_erlang, class_names, module_name) = if has_errors {
         (None, vec![], None)
     } else {
-        // Parse and generate
-        use beamtalk_core::source_analysis::{lex_with_eof, parse};
-        let tokens = lex_with_eof(&source);
-        let (module, _) = parse(tokens);
-
+        // Module already parsed above for primitive validation
         // Derive module name from class name in AST (the class definition is
         // the source of truth). :load is for loading class definitions; fall
         // back to file stem only for legacy non-class files.
@@ -469,12 +489,21 @@ fn handle_compile_expression(
     let known_vars: Vec<&str> = params.known_variables.iter().map(String::as_str).collect();
 
     // Run semantic analysis with known REPL variables to avoid false "Undefined variable" errors
-    let all_diagnostics =
+    let mut all_diagnostics =
         beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
             &module,
             parse_diagnostics,
             &known_vars,
         );
+
+    // Run @primitive validation (ADR 0007)
+    // Default options: stdlib_mode=false (REPL is never stdlib), allow_primitives=false
+    let options = beamtalk_core::CompilerOptions::default();
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+    all_diagnostics.extend(primitive_diags);
 
     // Convert diagnostics
     let diagnostics: Vec<DiagnosticInfo> = all_diagnostics
@@ -789,6 +818,37 @@ mod tests {
     }
 
     #[test]
+    fn handle_compile_expression_with_primitive_fails() {
+        // @primitive can only appear in method bodies, so we need a class definition
+        let params = serde_json::json!({
+            "source": "Object subclass: T\n  m => @primitive '+'",
+            "module_name": "test_module"
+        });
+
+        let response = handle_compile_expression(params, Some(serde_json::json!(1)));
+
+        assert!(response.error.is_none());
+        let result: CompileExpressionResult =
+            serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(
+            !result.success,
+            "Expected REPL expression with primitive to fail"
+        );
+        assert!(!result.diagnostics.is_empty(), "Expected diagnostic errors");
+
+        // Should contain primitive validation error
+        let has_primitive_error = result.diagnostics.iter().any(|d| {
+            d.message
+                .contains("Primitives can only be declared in the standard library")
+        });
+        assert!(
+            has_primitive_error,
+            "Expected primitive validation error, got: {:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn handle_compile_expression_with_missing_params() {
         let params = serde_json::json!({
             "source": "42"
@@ -966,6 +1026,56 @@ mod tests {
         let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert!(result.success);
         assert_eq!(result.module_name, Some("test".to_string()));
+    }
+
+    #[test]
+    fn handle_compile_with_primitive_in_non_stdlib_fails() {
+        let mut service = SimpleLanguageService::new();
+        let params = serde_json::json!({
+            "path": "MyClass.bt",
+            "source": "Object subclass: MyClass\n  foo => @primitive '+'"
+        });
+
+        let response = handle_compile(params, Some(serde_json::json!(1)), &mut service);
+
+        assert!(response.error.is_none());
+        let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(
+            !result.success,
+            "Expected compilation to fail with primitive error"
+        );
+        assert!(!result.diagnostics.is_empty(), "Expected diagnostic errors");
+
+        // Should contain primitive validation error
+        let has_primitive_error = result.diagnostics.iter().any(|d| {
+            d.message
+                .contains("Primitives can only be declared in the standard library")
+        });
+        assert!(
+            has_primitive_error,
+            "Expected primitive validation error, got: {:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn handle_compile_with_primitive_in_stdlib_mode_succeeds() {
+        let mut service = SimpleLanguageService::new();
+        let params = serde_json::json!({
+            "path": "lib/MyClass.bt",
+            "source": "Object subclass: MyClass\n  foo => @primitive '+'",
+            "stdlib_mode": true
+        });
+
+        let response = handle_compile(params, Some(serde_json::json!(1)), &mut service);
+
+        assert!(response.error.is_none());
+        let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(
+            result.success,
+            "Expected stdlib compilation with primitive to succeed, got: {:#?}",
+            result.diagnostics
+        );
     }
 
     // ========================================================================

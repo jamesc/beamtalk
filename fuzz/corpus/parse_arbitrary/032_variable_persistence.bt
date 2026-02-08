@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for variable persistence across REPL expressions
+//
+// These tests verify that variables assigned in one expression can be
+// referenced in subsequent expressions within the same session.
+
+// ===========================================================================
+// SIMPLE VARIABLE ASSIGNMENT AND REFERENCE
+// ===========================================================================
+
+// Assign a simple integer
+x := 42
+// => 42
+
+// Reference the assigned variable
+x
+// => 42
+
+// Assign another variable
+y := 10
+// => 10
+
+// Use both variables together
+x + y
+// => 52
+
+// Reassign an existing variable
+x := 100
+// => 100
+
+// Use updated value
+x + y
+// => 110

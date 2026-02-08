@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for error handling
+// Each expression tests that specific errors are caught correctly
+
+// Division by zero
+// Note: Erlang returns 'badarith' for division by zero
+1 / 0
+// => ERROR: badarith
+
+// ===========================================================================
+// UNDEFINED VARIABLES
+// ===========================================================================
+
+// Accessing undefined variable
+undefinedVariable
+// => ERROR: undefined
+
+// Using undefined variable in arithmetic
+undefinedVar + 5
+// => ERROR: undefined
+
+// Undefined variable in block parameter (should work - params are local)
+[:undefinedParam | undefinedParam + 1] value: 5
+// => 6
+
+// ===========================================================================
+// SYNTAX ERRORS
+// ===========================================================================
+// Note: Error message formats are implementation-specific and may change
+// as the parser evolves. Tests validate that errors are caught, not the
+// exact wording of error messages.
+
+// Unmatched closing bracket
+]
+// => ERROR: expected expression, found ]
+
+// Incomplete block (missing closing bracket)
+[:x | x + 1
+// => ERROR: Expected ']' to close block
+
+// Invalid message selector (incomplete expression)
+123 + 
+// => ERROR: expected expression, found +
+
+// ===========================================================================
+// RUNTIME ERRORS
+// ===========================================================================
+
+// Calling non-existent method on integer
+42 nonExistentMethod
+// => ERROR: does_not_understand
+
+// Wrong number of block arguments (too few)
+[:x :y | x + y] value: 5
+// => ERROR: badarity
+
+// Wrong number of block arguments (too many)
+[:x | x + 1] value: 5 value: 10
+// => ERROR: badarity

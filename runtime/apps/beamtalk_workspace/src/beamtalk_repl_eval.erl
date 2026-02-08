@@ -28,7 +28,8 @@
          compile_core_erlang/2, extract_class_names/1, ensure_secure_temp_dir/0,
          ensure_dir_with_mode/2, maybe_await_future/1, should_purge_module/2,
          strip_internal_bindings/1, parse_file_compile_result/1,
-         start_io_capture/0, stop_io_capture/1, io_capture_loop/1]).
+         start_io_capture/0, stop_io_capture/1, io_capture_loop/1,
+         is_stdlib_path/1]).
 -endif.
 
 -define(RECV_TIMEOUT, 30000).
@@ -138,9 +139,11 @@ handle_load(Path, State) ->
                     {error, {read_error, Reason}, State};
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
+                    %% Detect if file is from the stdlib (lib/ directory)
+                    StdlibMode = is_stdlib_path(Path),
                     %% Compile via daemon — module name is derived from the
                     %% class name in the AST by the daemon, not the filename.
-                    case compile_file_via_daemon(Source, Path, State) of
+                    case compile_file_via_daemon(Source, Path, StdlibMode, State) of
                         {ok, Binary, ClassNames, ModuleName} ->
                             %% Load the module (persistent, not deleted)
                             case code:load_binary(ModuleName, Path, Binary) of
@@ -172,6 +175,17 @@ handle_load(Path, State) ->
     end.
 
 %%% Internal functions
+
+%% Check if a file path refers to a stdlib file (under lib/ directory).
+%% Matches both relative paths (lib/Integer.bt) and absolute paths
+%% containing /lib/ as a path component.
+-spec is_stdlib_path(string()) -> boolean().
+is_stdlib_path("lib/" ++ _) -> true;
+is_stdlib_path(Path) ->
+    case string:find(Path, "/lib/") of
+        nomatch -> false;
+        _ -> true
+    end.
 
 %% Compile a Beamtalk expression to bytecode via compiler daemon.
 -spec compile_expression(string(), atom(), map(), beamtalk_repl_state:state()) ->
@@ -459,9 +473,9 @@ extract_assignment(Expression) ->
 %% Compile a file via the daemon and extract class metadata.
 %% The daemon derives the module name from the class definition in the AST
 %% and returns it in the response, so we no longer derive from the filename.
--spec compile_file_via_daemon(string(), string(), beamtalk_repl_state:state()) ->
+-spec compile_file_via_daemon(string(), string(), boolean(), beamtalk_repl_state:state()) ->
     {ok, binary(), [string()], atom()} | {error, term()}.
-compile_file_via_daemon(Source, Path, State) ->
+compile_file_via_daemon(Source, Path, StdlibMode, State) ->
     SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
     case connect_to_daemon(SocketPath) of
         {ok, Socket} ->
@@ -474,7 +488,8 @@ compile_file_via_daemon(Source, Path, State) ->
                     <<"method">> => <<"compile">>,
                     <<"params">> => #{
                         <<"path">> => list_to_binary(Path),
-                        <<"source">> => list_to_binary(Source)
+                        <<"source">> => list_to_binary(Source),
+                        <<"stdlib_mode">> => StdlibMode
                     }
                 }),
                 
