@@ -334,7 +334,7 @@ enum CodeGenContext {
     /// Generating code for an actor class (`gen_server` with async messaging).
     ///
     /// - Field access: `call 'maps':'get'('field', State)`
-    /// - Method calls: Async via `gen_server:cast` with futures
+    /// - Method calls: Async via `beamtalk_actor:async_send` with futures
     /// - State threading: Use State, State1, State2... for mutations
     Actor,
 
@@ -1324,8 +1324,8 @@ end
             "Should create a future with beamtalk_future:new(). Got: {output}"
         );
         assert!(
-            output.contains("gen_server':'cast'("),
-            "Should send via gen_server:cast(). Got: {output}"
+            output.contains("beamtalk_actor':'async_send'("),
+            "Should send via beamtalk_actor:async_send(). Got: {output}"
         );
         assert!(
             output.contains("'increment'"),
@@ -1365,8 +1365,8 @@ end
             "Should create a future. Got: {output}"
         );
         assert!(
-            output.contains("gen_server':'cast'("),
-            "Should send via gen_server:cast(). Got: {output}"
+            output.contains("beamtalk_actor':'async_send'("),
+            "Should send via beamtalk_actor:async_send(). Got: {output}"
         );
         assert!(
             output.contains("'foo:bar:'"),
@@ -2225,8 +2225,8 @@ end
             "Non-block unary messages should create futures. Got: {output}"
         );
         assert!(
-            output.contains("gen_server':'cast'("),
-            "Non-block messages should use gen_server:cast(). Got: {output}"
+            output.contains("beamtalk_actor':'async_send'("),
+            "Non-block messages should use beamtalk_actor:async_send(). Got: {output}"
         );
     }
 
@@ -2603,10 +2603,10 @@ end
             "Should send second message 'abs'. Got: {output}"
         );
 
-        // Should use gen_server:cast for async message sends with extracted pid
+        // Should use beamtalk_actor:async_send for async message sends with extracted pid
         assert!(
-            output.contains("call 'gen_server':'cast'(_Pid"),
-            "Should send messages to the extracted pid from receiver object. Got: {output}"
+            output.contains("call 'beamtalk_actor':'async_send'(_Pid"),
+            "Should send messages via async_send to the extracted pid. Got: {output}"
         );
 
         // Should extract pid from beamtalk_object record
