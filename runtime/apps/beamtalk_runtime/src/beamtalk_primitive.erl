@@ -160,10 +160,13 @@ send(X, Selector, Args) when is_map(X) ->
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
     beamtalk_list:dispatch(Selector, Args, X);
-send(X, Selector, Args) ->
+send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
-    error({not_implemented, {Class, Selector, Args}}).
+    Error0 = beamtalk_error:new(does_not_understand, Class),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Primitive type does not support this message">>),
+    error(Error2).
 
 %% @doc Check if a value responds to a given selector.
 %%
