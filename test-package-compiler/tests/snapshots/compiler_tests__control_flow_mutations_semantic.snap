@@ -1,0 +1,19 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (14):
+  - Undefined variable: innerSum
+  - Undefined variable: self
+  - Undefined variable: self
+  - Undefined variable: self
+  - Undefined variable: self
+  - Undefined variable: multiplyFieldWithLoop
+  - Undefined variable: self
+  - Undefined variable: result
+  - Undefined variable: result
+  - Undefined variable: complexMutation
+  - Undefined variable: self
+  - Undefined variable: self
+  - Undefined variable: self
+  - Undefined variable: temp

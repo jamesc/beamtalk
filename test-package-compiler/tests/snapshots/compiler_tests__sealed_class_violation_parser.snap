@@ -1,0 +1,117 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "MyInt",
+                span: Span {
+                    start: 197,
+                    end: 202,
+                },
+            },
+            superclass: Identifier {
+                name: "Integer",
+                span: Span {
+                    start: 179,
+                    end: 186,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "doubled",
+                    ),
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 216,
+                                        end: 220,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                "*",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 223,
+                                        end: 224,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 216,
+                                end: 224,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 205,
+                        end: 224,
+                    },
+                },
+            ],
+            span: Span {
+                start: 179,
+                end: 224,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 179,
+        end: 224,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 179,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 179,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test that subclassing a sealed class produces a diagnostic error.",
+            span: Span {
+                start: 179,
+                end: 186,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Integer is a built-in sealed class.",
+            span: Span {
+                start: 179,
+                end: 186,
+            },
+            kind: Line,
+        },
+    ],
+}
