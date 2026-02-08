@@ -14,6 +14,7 @@
 
 -module(beamtalk_system_dictionary_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%====================================================================
 %% Setup/Teardown
@@ -33,7 +34,9 @@ setup() ->
     register_test_classes().
 
 teardown(_) ->
-    %% Clean up test classes
+    %% Trap exits to prevent linked class process kills from
+    %% terminating the EUnit fixture process.
+    process_flag(trap_exit, true),
     cleanup_test_classes().
 
 register_test_classes() ->
@@ -45,7 +48,7 @@ register_test_classes() ->
         instance_methods => #{},
         instance_variables => []
     },
-    {ok, _} = beamtalk_object_class:start_link('Object', ObjectInfo),
+    ensure_class_started('Object', ObjectInfo),
     
     %% Register Integer class
     IntegerInfo = #{
@@ -58,7 +61,7 @@ register_test_classes() ->
         },
         instance_variables => []
     },
-    {ok, _} = beamtalk_object_class:start_link('Integer', IntegerInfo),
+    ensure_class_started('Integer', IntegerInfo),
     
     %% Register Counter class (example user class)
     CounterInfo = #{
@@ -71,8 +74,15 @@ register_test_classes() ->
         },
         instance_variables => [value]
     },
-    {ok, _} = beamtalk_object_class:start_link('Counter', CounterInfo),
+    ensure_class_started('Counter', CounterInfo),
     ok.
+
+%% Start a class, tolerating already-started (from other test modules).
+ensure_class_started(ClassName, ClassInfo) ->
+    case beamtalk_object_class:start_link(ClassName, ClassInfo) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
 
 cleanup_test_classes() ->
     %% Get all class processes from pg group
@@ -292,8 +302,8 @@ class_named_unknown_class_atom_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', ['UnknownClass']}),
                      
-                     %% Should return an error
-                     ?assertMatch({error, {class_not_found, 'UnknownClass'}}, Result),
+                     %% Should return a structured error
+                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
                      
                      gen_server:stop(Pid)
                  end)
@@ -310,8 +320,26 @@ class_named_unknown_class_binary_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', [<<"UnknownClass">>]}),
                      
-                     %% Should return an error (binary doesn't exist as atom)
-                     ?assertMatch({error, {class_not_found, <<"UnknownClass">>}}, Result),
+                     %% Should return a structured error (binary doesn't exist as atom)
+                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+                     
+                     gen_server:stop(Pid)
+                 end)
+         ]
+     end}.
+
+class_named_invalid_type_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          ?_test(begin
+                     {ok, Pid} = beamtalk_system_dictionary:start_link(),
+                     Result = gen_server:call(Pid, {'classNamed:', [42]}),
+                     
+                     %% Should return a type error for non-atom/binary input
+                     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result),
                      
                      gen_server:stop(Pid)
                  end)
@@ -373,8 +401,8 @@ version_default_value_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Version = gen_server:call(Pid, {version, []}),
                      
-                     %% Default version should be 0.1.0-dev
-                     ?assertEqual(<<"0.1.0-dev">>, Version),
+                     %% Default version should match app vsn (0.1.0)
+                     ?assertEqual(<<"0.1.0">>, Version),
                      
                      gen_server:stop(Pid)
                  end)
@@ -413,8 +441,8 @@ unknown_selector_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {unknownMethod, []}),
                      
-                     %% Should return an error
-                     ?assertMatch({error, {unknown_selector, unknownMethod}}, Result),
+                     %% Should return a structured error
+                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = unknownMethod}}, Result),
                      
                      gen_server:stop(Pid)
                  end)
@@ -431,8 +459,8 @@ malformed_call_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, malformed_message),
                      
-                     %% Should return an error
-                     ?assertMatch({error, {unknown_call_format, malformed_message}}, Result),
+                     %% Should return a structured error
+                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
                      
                      gen_server:stop(Pid)
                  end)
@@ -455,8 +483,8 @@ unexpected_cast_test_() ->
                      %% Send a cast (should be logged but not crash)
                      ok = gen_server:cast(Pid, unexpected_cast_message),
                      
-                     %% Process should still be alive
-                     timer:sleep(50),  %% Give it time to process
+                     %% Use a synchronous call as barrier to ensure cast was processed
+                     _ = gen_server:call(Pid, {version, []}),
                      ?assert(is_process_alive(Pid)),
                      
                      gen_server:stop(Pid)
@@ -476,8 +504,8 @@ info_message_test_() ->
                      %% Send an info message (should be logged but not crash)
                      Pid ! unexpected_info_message,
                      
-                     %% Process should still be alive
-                     timer:sleep(50),  %% Give it time to process
+                     %% Use a synchronous call as barrier to ensure info was processed
+                     _ = gen_server:call(Pid, {version, []}),
                      ?assert(is_process_alive(Pid)),
                      
                      gen_server:stop(Pid)

@@ -3,6 +3,8 @@
 
 %%% @doc SystemDictionary actor - Beamtalk system introspection singleton.
 %%%
+%%% **DDD Context:** Runtime
+%%%
 %%% This gen_server implements the SystemDictionary actor that backs the
 %%% `Beamtalk` global object. It provides system-wide introspection:
 %%% - Class registry access (allClasses, classNamed:)
@@ -44,6 +46,8 @@
 %%% ```
 -module(beamtalk_system_dictionary).
 -behaviour(gen_server).
+
+-include("beamtalk.hrl").
 
 %% API
 -export([
@@ -105,7 +109,12 @@ has_method(_) -> false.
 %% @doc Initialize the SystemDictionary actor state.
 -spec init(proplists:proplist()) -> {ok, #system_dict_state{}}.
 init(Opts) ->
-    Version = proplists:get_value(version, Opts, <<"0.1.0-dev">>),
+    VersionDefault =
+        case application:get_key(beamtalk_runtime, vsn) of
+            {ok, Vsn} -> list_to_binary(Vsn);
+            _ -> <<"0.1.0">>
+        end,
+    Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),
     
     State = #system_dict_state{
@@ -118,7 +127,7 @@ init(Opts) ->
 %%
 %% Dispatches to the appropriate method implementation based on selector.
 -spec handle_call(term(), {pid(), term()}, #system_dict_state{}) ->
-    {reply, term(), #system_dict_state{}} | {stop, term(), term(), #system_dict_state{}}.
+    {reply, term(), #system_dict_state{}}.
 
 %% allClasses - Returns list of all class names
 handle_call({allClasses, []}, _From, State) ->
@@ -140,15 +149,19 @@ handle_call({version, []}, _From, State) ->
     Version = State#system_dict_state.version,
     {reply, Version, State};
 
-%% Unknown selector - return error
+%% Unknown selector - return structured error
 handle_call({UnknownSelector, _Args}, _From, State) ->
-    Error = {error, {unknown_selector, UnknownSelector}},
-    {reply, Error, State};
+    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: allClasses, classNamed:, globals, version">>),
+    {reply, {error, Error2}, State};
 
 %% Unknown call format
 handle_call(Request, _From, State) ->
-    Error = {error, {unknown_call_format, Request}},
-    {reply, Error, State}.
+    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error1 = beamtalk_error:with_hint(Error0, <<"Expected {Selector, Args} format">>),
+    Error2 = beamtalk_error:with_details(Error1, #{request => Request}),
+    {reply, {error, Error2}, State}.
 
 %% @doc Handle asynchronous messages.
 %%
@@ -183,39 +196,72 @@ code_change(_OldVsn, State, _Extra) ->
 %%
 %% Delegates to beamtalk_object_class:all_classes/0 which returns a list
 %% of class process pids, then extracts the class name from each pid.
+%% Guards against pg not running and filters dead processes.
 -spec handle_all_classes() -> [atom()].
 handle_all_classes() ->
-    ClassPids = beamtalk_object_class:all_classes(),
-    lists:map(
-        fun(Pid) ->
-            beamtalk_object_class:class_name(Pid)
-        end,
-        ClassPids
-    ).
+    try
+        ClassPids = beamtalk_object_class:all_classes(),
+        lists:filtermap(
+            fun(Pid) ->
+                try
+                    {true, beamtalk_object_class:class_name(Pid)}
+                catch
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
+                end
+            end,
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
+            logger:warning("pg not started when fetching all classes", #{module => ?MODULE}),
+            []
+    end.
 
 %% @doc Look up a class by name.
 %%
 %% Delegates to beamtalk_object_class:whereis_class/1.
-%% Returns the class pid if found, or {error, {class_not_found, ClassName}}.
--spec handle_class_named(binary() | atom()) -> pid() | {error, {class_not_found, term()}}.
+%% Returns the class pid if found, or a structured error.
+-spec handle_class_named(binary() | atom()) -> pid() | {error, #beamtalk_error{}}.
 handle_class_named(ClassName) when is_binary(ClassName) ->
-    %% Convert binary to atom for class lookup
     %% Use binary_to_existing_atom to avoid creating atoms at runtime
     try
         ClassAtom = binary_to_existing_atom(ClassName, utf8),
         handle_class_named(ClassAtom)
     catch
         error:badarg ->
-            %% Class name doesn't exist as an atom, so class doesn't exist
-            {error, {class_not_found, ClassName}}
+            class_not_found_error('classNamed:', ClassName)
     end;
 handle_class_named(ClassName) when is_atom(ClassName) ->
     case beamtalk_object_class:whereis_class(ClassName) of
         undefined ->
-            {error, {class_not_found, ClassName}};
+            class_not_found_error('classNamed:', ClassName);
         Pid when is_pid(Pid) ->
             Pid
-    end.
+    end;
+handle_class_named(_ClassName) ->
+    Error0 = beamtalk_error:new(type_error, 'SystemDictionary'),
+    Error1 = beamtalk_error:with_selector(Error0, 'classNamed:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"classNamed: expects an atom or binary class name">>),
+    {error, Error2}.
+
+%% @doc Build a structured class-not-found error.
+-spec class_not_found_error(atom(), binary() | atom()) -> {error, #beamtalk_error{}}.
+class_not_found_error(Selector, ClassName) ->
+    Error0 = beamtalk_error:new(does_not_understand, 'SystemDictionary'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Hint = iolib_format_hint(ClassName),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    Error3 = beamtalk_error:with_details(Error2, #{class_name => ClassName}),
+    {error, Error3}.
+
+-spec iolib_format_hint(binary() | atom()) -> binary().
+iolib_format_hint(ClassName) ->
+    iolist_to_binary([<<"Class '">>, to_binary(ClassName), <<"' not found. Use 'Beamtalk allClasses' to list available classes">>]).
+
+-spec to_binary(binary() | atom()) -> binary().
+to_binary(B) when is_binary(B) -> B;
+to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8).
 
 %% @doc Get workspace global bindings.
 %%
