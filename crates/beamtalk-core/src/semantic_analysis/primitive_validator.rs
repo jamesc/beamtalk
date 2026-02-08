@@ -34,6 +34,7 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "instVarNames",
     "instVarAt",
     "instVarAtPut",
+    "subclassResponsibility",
     // Control flow
     "conditional",
     "conditionalTrue",
