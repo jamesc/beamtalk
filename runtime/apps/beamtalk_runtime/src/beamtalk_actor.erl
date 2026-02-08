@@ -179,15 +179,34 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
     
     case gen_server:start_link(Module, ArgsWithRegistry, []) of
         {ok, Pid} ->
-            %% Register with REPL registry
+            %% Determine class name for callbacks
             Class = case ClassName of
                 undefined -> Module; % Use module name as fallback
                 _ -> ClassName
             end,
-            ok = beamtalk_repl_actors:register_actor(RegistryPid, Pid, Class, Module),
             
-            %% Also register with workspace metadata for tracking
-            beamtalk_workspace_meta:register_actor(Pid),
+            %% Notify registered callback (if any) - supports optional REPL/workspace tracking.
+            %% The beamtalk_repl app registers this callback on startup.
+            %% Guarded with try/catch so actor spawning succeeds even if the
+            %% callback module is missing, not loaded, or fails.
+            case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+                {ok, CallbackMod} ->
+                    try
+                        CallbackMod:on_actor_spawned(RegistryPid, Pid, Class, Module)
+                    catch
+                        Kind:Reason ->
+                            logger:warning("Actor spawn callback failed", #{
+                                callback => CallbackMod,
+                                kind => Kind,
+                                reason => Reason,
+                                actor_pid => Pid,
+                                class => Class
+                            }),
+                            ok
+                    end;
+                undefined ->
+                    ok
+            end,
             
             {ok, Pid};
         {error, Reason} ->
@@ -432,7 +451,10 @@ dispatch(Selector, Args, Self, State) ->
                     {reply, Self, NewState};
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, 'instVarAt:put:', length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: name and value">>),
+                    error(Error2)
             end;
         perform ->
             %% Dynamic message send with no arguments
@@ -442,7 +464,10 @@ dispatch(Selector, Args, Self, State) ->
                     dispatch(TargetSelector, [], Self, State);
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, perform, length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, perform),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 1 argument: a selector atom">>),
+                    error(Error2)
             end;
         'perform:withArgs:' ->
             %% Dynamic message send with argument array
@@ -459,7 +484,10 @@ dispatch(Selector, Args, Self, State) ->
                         end);
                 _ ->
                     ClassName = maps:get('__class__', State, unknown),
-                    error({does_not_understand, ClassName, 'perform:withArgs:', length(Args)})
+                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: a selector atom and an argument list">>),
+                    error(Error2)
             end;
         _ ->
             %% Not a built-in method, check user-defined methods

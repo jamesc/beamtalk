@@ -9,7 +9,7 @@
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,
@@ -99,6 +99,10 @@ acceptor_loop(ListenSocket) ->
             case beamtalk_session_sup:start_session(SessionId) of
                 {ok, SessionPid} ->
                     logger:info("Created session: ~p (pid: ~p)", [SessionId, SessionPid]),
+                    
+                    %% Mark activity - new session connected
+                    beamtalk_workspace_meta:update_activity(),
+                    
                     %% Spawn client handler with session pid in session mode
                     %% Monitor session so handler exits if session crashes
                     spawn(fun() ->

@@ -40,6 +40,7 @@ pub fn generate_primitive_bif(
         "Float" => generate_float_bif(output, selector, params),
         "String" => generate_string_bif(output, selector, params),
         "Block" => generate_block_bif(output, selector),
+        "File" => generate_file_bif(output, selector, params),
         _ => None,
     }
 }
@@ -263,6 +264,34 @@ fn generate_block_bif(output: &mut String, selector: &str) -> Option<()> {
     }
 }
 
+/// File primitive implementations (BT-336).
+///
+/// File class methods delegate directly to `beamtalk_file` runtime module.
+/// These are class-level methods (no Self parameter needed).
+fn generate_file_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        "exists:" => {
+            write!(output, "call 'beamtalk_file':'exists:'({p0})").ok()?;
+            Some(())
+        }
+        "readAll:" => {
+            write!(output, "call 'beamtalk_file':'readAll:'({p0})").ok()?;
+            Some(())
+        }
+        "writeAll:contents:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_file':'writeAll:contents:'({p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
 // Helper functions for generating common patterns
 
 /// Writes a binary BIF call: `call 'erlang':'op'(Self, Param0)`
@@ -349,5 +378,37 @@ mod tests {
         let result = generate_primitive_bif(&mut output, "Float", "asString", &[]);
         assert!(result.is_some());
         assert_eq!(output, "call 'erlang':'float_to_binary'(Self, ['short'])");
+    }
+
+    #[test]
+    fn test_file_exists() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "File", "exists:", &["Path".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'beamtalk_file':'exists:'(Path)");
+    }
+
+    #[test]
+    fn test_file_read_all() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "File", "readAll:", &["Path".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'beamtalk_file':'readAll:'(Path)");
+    }
+
+    #[test]
+    fn test_file_write_all_contents() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(
+            &mut output,
+            "File",
+            "writeAll:contents:",
+            &["Path".to_string(), "Text".to_string()],
+        );
+        assert!(result.is_some());
+        assert_eq!(
+            output,
+            "call 'beamtalk_file':'writeAll:contents:'(Path, Text)"
+        );
     }
 }

@@ -92,7 +92,9 @@ create_dynamic_class_test_() ->
              ?assertEqual('TestDynamicClass', beamtalk_object_class:class_name(ClassPid)),
              ?assertEqual('Actor', beamtalk_object_class:superclass(ClassPid)),
              ?assertEqual([count], beamtalk_object_class:instance_variables(ClassPid)),
-             ?assertEqual([increment], beamtalk_object_class:methods(ClassPid))
+             %% ADR 0006 Phase 2: methods/1 returns all methods (local + inherited)
+             AllMethods = beamtalk_object_class:methods(ClassPid),
+             ?assert(lists:member(increment, AllMethods))
          end)]
      end}.
 
@@ -292,8 +294,10 @@ repl_style_usage_test() ->
     CounterObj = element(2, beamtalk_object_class:new(ClassPid, [#{count => 0}])),
     CounterPid = CounterObj#beamtalk_object.pid,
     
-    %% Verify class was registered correctly
-    ?assertEqual([getValue, increment], lists:sort(beamtalk_object_class:methods(ClassPid))),
+    %% Verify class was registered correctly — methods/1 returns all (local + inherited)
+    AllMethods = lists:sort(beamtalk_object_class:methods(ClassPid)),
+    ?assert(lists:member(getValue, AllMethods)),
+    ?assert(lists:member(increment, AllMethods)),
     
     %% Step 3: Send messages to the instance
     ?assertEqual(0, gen_server:call(CounterPid, {getValue, []})),
@@ -323,11 +327,12 @@ class_introspection_test() ->
     ?assertEqual('Actor', beamtalk_object_class:superclass(ClassPid)),
     ?assertEqual([x, y, z], beamtalk_object_class:instance_variables(ClassPid)),
     
-    %% Test method enumeration (order may vary)
+    %% Test method enumeration — includes local + inherited methods
     Methods = beamtalk_object_class:methods(ClassPid),
     ?assert(lists:member(foo, Methods)),
     ?assert(lists:member(baz, Methods)),
-    ?assertEqual(2, length(Methods)).
+    %% Should have more than 2 methods (local + inherited from Actor/Object)
+    ?assert(length(Methods) >= 2).
 
 %% Test invalid method arity rejection
 invalid_method_arity_test() ->

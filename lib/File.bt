@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File - File system operations
+//
+// Provides basic file I/O operations using Erlang's file module.
+// All operations are class methods: exists: returns Bool, readAll: returns String,
+// writeAll:contents: returns nil on success. Errors use structured beamtalk_error.
+
+Object subclass: File
+  // File existence check
+  exists: path => @primitive 'exists:'
+
+  // Read operations
+  readAll: path => @primitive 'readAll:'
+
+  // Write operations
+  writeAll: path contents: text => @primitive 'writeAll:contents:'

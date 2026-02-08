@@ -192,6 +192,8 @@ pub fn run(
     node_arg: Option<String>,
     foreground: bool,
     workspace_name: Option<&str>,
+    persistent: bool,
+    timeout: Option<u64>,
 ) -> Result<()> {
     // Resolve port and node name using priority logic
     let port = resolve_port(port_arg)?;
@@ -227,6 +229,7 @@ pub fn run(
         let runtime_dir = find_runtime_dir()?;
         let build_lib_dir = runtime_dir.join("_build/default/lib");
         let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
+        let repl_beam_dir = build_lib_dir.join("beamtalk_workspace/ebin");
         let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
         // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
         let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");
@@ -243,8 +246,11 @@ pub fn run(
             workspace_name,
             port,
             &runtime_beam_dir,
+            &repl_beam_dir,
             &jsx_beam_dir,
             &stdlib_beam_dir,
+            !persistent, // auto_cleanup is opposite of persistent flag
+            timeout,
         )?;
 
         if is_new {

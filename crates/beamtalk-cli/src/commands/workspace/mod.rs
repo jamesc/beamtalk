@@ -54,6 +54,9 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Default idle timeout in seconds (4 hours)
+const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
+
 /// Workspace metadata stored in ~/.beamtalk/workspaces/{id}/metadata.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceMetadata {
@@ -314,18 +317,30 @@ pub fn create_workspace(
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
 #[allow(dead_code)] // Used in Phase 3
+#[allow(clippy::too_many_arguments)]
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
     runtime_beam_dir: &Path,
+    repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
     stdlib_beam_dir: &Path,
+    auto_cleanup: bool,
+    max_idle_seconds: Option<u64>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
 
     // Read cookie
     let cookie = read_workspace_cookie(workspace_id)?;
+
+    // Determine idle timeout (explicit arg > environment variable > default)
+    let idle_timeout = max_idle_seconds.unwrap_or_else(|| {
+        std::env::var("BEAMTALK_WORKSPACE_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_IDLE_TIMEOUT_SECONDS)
+    });
 
     // Build the eval command to start workspace supervisor and keep running
     let project_path = get_workspace_metadata(workspace_id)?.project_path;
@@ -334,10 +349,12 @@ pub fn start_detached_node(
         "application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_str}\">>, \
                                                           tcp_port => {port}, \
-                                                          auto_cleanup => true}}), \
+                                                          auto_cleanup => {auto_cleanup}, \
+                                                          max_idle_seconds => {idle_timeout}}}), \
          io:format(\"Workspace {workspace_id} started on port {port}~n\"), \
          receive stop -> ok end."
     );
@@ -358,6 +375,8 @@ pub fn start_detached_node(
         cookie,
         "-pa".to_string(),
         runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        repl_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
         jsx_beam_dir.to_str().unwrap_or("").to_string(),
         "-pa".to_string(),
@@ -421,13 +440,17 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
 #[allow(dead_code)] // Used in Phase 3
+#[allow(clippy::too_many_arguments)]
 pub fn get_or_start_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,
     port: u16,
     runtime_beam_dir: &Path,
+    repl_beam_dir: &Path,
     jsx_beam_dir: &Path,
     stdlib_beam_dir: &Path,
+    auto_cleanup: bool,
+    max_idle_seconds: Option<u64>,
 ) -> Result<(NodeInfo, bool, String)> {
     // Create workspace if it doesn't exist
     let metadata = create_workspace(project_path, workspace_name)?;
@@ -438,7 +461,8 @@ pub fn get_or_start_workspace(
         if is_node_running(&node_info) {
             return Ok((node_info, false, workspace_id)); // Existing node
         }
-        // Stale node.info file
+        // Stale node.info file - orphaned workspace detected
+        eprintln!("Cleaning up orphaned workspace: {workspace_id}");
         cleanup_stale_node_info(&workspace_id)?;
     }
 
@@ -447,8 +471,11 @@ pub fn get_or_start_workspace(
         &workspace_id,
         port,
         runtime_beam_dir,
+        repl_beam_dir,
         jsx_beam_dir,
         stdlib_beam_dir,
+        auto_cleanup,
+        max_idle_seconds,
     )?;
     Ok((node_info, true, workspace_id)) // New node started
 }
