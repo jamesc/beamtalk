@@ -290,6 +290,7 @@ impl ClassHierarchy {
         self.register_object();
         self.register_actor();
         self.register_integer();
+        self.register_float();
         self.register_string();
         self.register_array();
         self.register_list();
@@ -405,6 +406,35 @@ impl ClassHierarchy {
                     builtin_method("to:by:do:", 3, "Integer"),
                     builtin_method("asFloat", 0, "Integer"),
                     builtin_method("asString", 0, "Integer"),
+                ],
+            },
+        );
+    }
+
+    fn register_float(&mut self) {
+        self.classes.insert(
+            "Float".into(),
+            ClassInfo {
+                name: "Float".into(),
+                superclass: Some("Object".into()),
+                is_sealed: true,
+                is_abstract: false,
+                state: vec![],
+                methods: vec![
+                    builtin_method("+", 1, "Float"),
+                    builtin_method("-", 1, "Float"),
+                    builtin_method("*", 1, "Float"),
+                    builtin_method("/", 1, "Float"),
+                    builtin_method("=", 1, "Float"),
+                    builtin_method("<", 1, "Float"),
+                    builtin_method("<=", 1, "Float"),
+                    builtin_method(">", 1, "Float"),
+                    builtin_method(">=", 1, "Float"),
+                    builtin_method("negated", 0, "Float"),
+                    builtin_method("abs", 0, "Float"),
+                    builtin_method("min:", 1, "Float"),
+                    builtin_method("max:", 1, "Float"),
+                    builtin_method("asString", 0, "Float"),
                 ],
             },
         );
@@ -738,6 +768,13 @@ mod tests {
         let h = ClassHierarchy::with_builtins();
         let int = h.get_class("Integer").unwrap();
         assert!(int.is_sealed);
+    }
+
+    #[test]
+    fn float_is_sealed() {
+        let h = ClassHierarchy::with_builtins();
+        let float = h.get_class("Float").unwrap();
+        assert!(float.is_sealed);
     }
 
     // --- Superclass chain tests ---

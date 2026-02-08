@@ -5,7 +5,7 @@
 //
 // Floats in Beamtalk are IEEE 754 double-precision (Erlang floats).
 
-Object subclass: Float
+sealed Object subclass: Float
   // Binary operators — quoted selectors route through runtime dispatch
   + other => @primitive '+'
   - other => @primitive '-'

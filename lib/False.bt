@@ -6,7 +6,7 @@
 // Implements control flow messages for the false case. All methods are
 // pure Beamtalk — no primitives needed.
 
-Object subclass: False
+sealed Object subclass: False
   ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
   ifTrue: trueBlock => self
   ifFalse: falseBlock => falseBlock value
