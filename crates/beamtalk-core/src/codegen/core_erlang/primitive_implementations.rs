@@ -62,7 +62,7 @@ fn generate_integer_bif(output: &mut String, selector: &str, params: &[String]) 
         "<=" => write_binary_bif(output, "=<", params),
         ">=" => write_binary_bif(output, ">=", params),
         // Conversion
-        "asString" => {
+        "asString" | "printString" => {
             write!(output, "call 'erlang':'integer_to_binary'(Self)").ok()?;
             Some(())
         }
@@ -89,7 +89,7 @@ fn generate_float_bif(output: &mut String, selector: &str, params: &[String]) ->
         "<=" => write_binary_bif(output, "=<", params),
         ">=" => write_binary_bif(output, ">=", params),
         // Conversion
-        "asString" => {
+        "asString" | "printString" => {
             write!(output, "call 'erlang':'float_to_binary'(Self, ['short'])").ok()?;
             Some(())
         }

@@ -35,6 +35,9 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "instVarAt",
     "instVarAtPut",
     "subclassResponsibility",
+    // Object protocol
+    "printString",
+    "hash",
     // Control flow
     "conditional",
     "conditionalTrue",
