@@ -1,0 +1,6 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (1):
+  - Undefined variable: object

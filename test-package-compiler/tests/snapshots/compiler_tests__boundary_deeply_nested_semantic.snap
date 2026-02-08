@@ -1,0 +1,20 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (15):
+  - Undefined variable: object
+  - Undefined variable: object
+  - Undefined variable: dict
+  - Undefined variable: array
+  - Undefined variable: list
+  - Undefined variable: map
+  - Undefined variable: object
+  - Undefined variable: a
+  - Undefined variable: b
+  - Undefined variable: x
+  - Undefined variable: y
+  - Undefined variable: c
+  - Undefined variable: d
+  - Undefined variable: z
+  - Undefined variable: w

@@ -1,7 +1,7 @@
 # ADR NNNN: Title
 
 ## Status
-Proposed | Accepted | Deprecated | Superseded (YYYY-MM-DD)
+Proposed | Accepted | Implemented | Deprecated | Superseded (YYYY-MM-DD)
 
 ## Context
 <!-- Problem statement — why this decision is needed -->

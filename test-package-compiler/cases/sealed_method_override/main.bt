@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test that overriding a sealed method produces a diagnostic error.
+// Parent defines a sealed method, Child tries to override it.
+
+Object subclass: Parent
+  sealed frozen => 42
+
+Object subclass: AllowedChild
+  frozen => 99
+
+Parent subclass: Child
+  frozen => 99

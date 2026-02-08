@@ -1245,3 +1245,79 @@ Planned improvements tracked in Linear:
 - Block reflection (`sourceNode`, `numArgs`)
 
 See `docs/beamtalk-object-model.md` section 1.6 for full reflection design.
+
+## Extension Methods (BT-229)
+
+Extension methods allow adding new methods to existing classes without subclassing.
+This follows Pharo's proven extension method design.
+
+### How Extensions Work
+
+Extensions are registered at runtime via the extension registry (`beamtalk_extensions`).
+When a message is sent that doesn't match a class's compiled methods, the dispatch
+checks the extension registry before walking to the superclass or raising a
+`does_not_understand` error.
+
+### Dispatch Priority
+
+For both Actor classes and value types, the dispatch order is:
+
+1. **Compiled methods** — Methods defined in the class source
+2. **Extension methods** — Methods registered via the extension registry (ADR 0005)
+3. **Inherited methods** — Methods from superclass chain (hierarchy walk)
+4. **doesNotUnderstand:args:** — Custom error handler if defined
+5. **Error** — Structured `#beamtalk_error{kind=does_not_understand}`
+
+### Supported Class Types
+
+| Class Type | Extension Support | Since |
+|------------|-------------------|-------|
+| **Value types** (Integer, String, Boolean, etc.) | ✅ Supported | Initial |
+| **Actor classes** (user-defined via `Actor subclass:`) | ✅ Supported | BT-229 |
+
+### Extension Function Signature
+
+Extension functions receive `(Args, Self)`:
+- `Args` — List of message arguments
+- `Self` — The receiver object (value for primitives, `#beamtalk_object{}` for actors)
+
+### Runtime Registration (Erlang API)
+
+```erlang
+%% Register an extension method
+Fun = fun([], Self) -> 42 end,
+beamtalk_extensions:register('Counter', myMethod, Fun, my_library).
+
+%% Check if extension exists
+beamtalk_extensions:has('Counter', myMethod).  % => true
+
+%% List all extensions on a class
+beamtalk_extensions:list('Counter').  % => [{myMethod, my_library}]
+```
+
+### Implementation Notes
+
+- Extensions use a global ETS-based registry with conflict tracking
+- Last-writer-wins policy for conflicting registrations
+- Provenance tracking records which library registered each extension
+- Generated dispatch includes try/catch for bootstrap safety (ETS table may not exist yet)
+
+### Future: `extend` Syntax
+
+A dedicated `extend` keyword message for defining extensions in Beamtalk source
+is planned but not yet implemented:
+
+```beamtalk
+// Future syntax (not yet available):
+Counter extend
+  reset => self setValue: 0
+
+Integer extend
+  factorial => self <= 1 ifTrue: [1] ifFalse: [self * (self - 1) factorial]
+```
+
+### References
+
+- Extension registry: `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl`
+- ADR 0005: `docs/ADR/0005-beam-object-model-pragmatic-hybrid.md` (Q3: Extension methods)
+- Design doc: `docs/internal/design-self-as-object.md` (Section 3.3)

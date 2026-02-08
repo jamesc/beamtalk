@@ -15,6 +15,7 @@
 //! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
 
 use beamtalk_core::erlang::generate_with_name;
+use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
 use std::fs;
@@ -137,6 +138,37 @@ fn test_codegen_compiles(case_name: &str) {
         String::from_utf8_lossy(&output.stderr),
         core_erlang
     );
+}
+
+/// Test semantic analysis diagnostics for a given test case.
+///
+/// Runs the full semantic analysis pipeline (class hierarchy, name resolution,
+/// type checking, block analysis) and captures error diagnostics in a snapshot.
+fn test_semantic_snapshot(case_name: &str) {
+    let source = read_test_case(case_name);
+    let tokens = lex_with_eof(&source);
+    let (module, _parser_diagnostics) = parse(tokens);
+
+    let result = semantic_analysis::analyse(&module);
+
+    // Only capture error-level diagnostics (skip warnings for focused testing)
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .collect();
+
+    let mut output = String::new();
+    if errors.is_empty() {
+        output.push_str("No semantic errors\n");
+    } else {
+        output.push_str(&format!("Semantic errors ({}):\n", errors.len()));
+        for diag in &errors {
+            output.push_str(&format!("  - {}\n", diag.message));
+        }
+    }
+
+    insta::assert_snapshot!(format!("{}_semantic", case_name), output);
 }
 
 // Test cases will be generated here by build.rs
