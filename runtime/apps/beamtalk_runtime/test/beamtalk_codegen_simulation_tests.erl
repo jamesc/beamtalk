@@ -1682,3 +1682,83 @@ super_with_init_args_test() ->
     {ok, 6} = gen_server:call(Pid, {getLogCount, []}),
     
     gen_server:stop(Pid).
+
+%%% ===========================================================================
+%%% Extension method tests (BT-229)
+%%%
+%%% Tests that extension methods work on compiled Actor classes.
+%%% Uses counter:spawn() from compiled tests/e2e/fixtures/counter.bt.
+%%% ===========================================================================
+
+%% Test: Extension method dispatches on compiled Actor
+extension_method_on_compiled_actor_test() ->
+    beamtalk_extensions:init(),
+    ExtFun = fun([], _Self) -> 42 end,
+    beamtalk_extensions:register('Counter', testExtension, ExtFun, test_owner),
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    try
+        {ok, Result} = gen_server:call(Pid, {testExtension, []}),
+        ?assertEqual(42, Result)
+    after
+        gen_server:stop(Pid),
+        ets:delete(beamtalk_extensions, {'Counter', testExtension})
+    end.
+
+%% Test: Extension method receives Args correctly
+extension_method_with_args_test() ->
+    beamtalk_extensions:init(),
+    ExtFun = fun([N], _Self) -> N * 10 end,
+    beamtalk_extensions:register('Counter', 'scaleBy:', ExtFun, test_owner),
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    try
+        {ok, Result} = gen_server:call(Pid, {'scaleBy:', [5]}),
+        ?assertEqual(50, Result)
+    after
+        gen_server:stop(Pid),
+        ets:delete(beamtalk_extensions, {'Counter', 'scaleBy:'})
+    end.
+
+%% Test: Extension doesn't interfere with regular methods
+extension_coexists_with_regular_methods_test() ->
+    beamtalk_extensions:init(),
+    ExtFun = fun([], _Self) -> extended end,
+    beamtalk_extensions:register('Counter', myExtension, ExtFun, test_owner),
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    try
+        {ok, 0} = gen_server:call(Pid, {getValue, []}),
+        {ok, 1} = gen_server:call(Pid, {increment, []}),
+        {ok, extended} = gen_server:call(Pid, {myExtension, []})
+    after
+        gen_server:stop(Pid),
+        ets:delete(beamtalk_extensions, {'Counter', myExtension})
+    end.
+
+%% Test: Unregistered extension falls through to DNU error
+unregistered_extension_gives_dnu_test() ->
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    try
+        Result = gen_server:call(Pid, {nonExistentMethod, []}),
+        ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
+    after
+        gen_server:stop(Pid)
+    end.
+
+%% Test: Extension that throws propagates error through safe_dispatch
+extension_error_propagation_test() ->
+    beamtalk_extensions:init(),
+    CrashFun = fun([], _Self) -> error(extension_crash) end,
+    beamtalk_extensions:register('Counter', crashMethod, CrashFun, test_owner),
+    Object = counter:spawn(),
+    Pid = element(4, Object),
+    try
+        Result = gen_server:call(Pid, {crashMethod, []}),
+        ?assertMatch({error, {error, extension_crash}}, Result),
+        {ok, 0} = gen_server:call(Pid, {getValue, []})
+    after
+        gen_server:stop(Pid),
+        ets:delete(beamtalk_extensions, {'Counter', crashMethod})
+    end.
