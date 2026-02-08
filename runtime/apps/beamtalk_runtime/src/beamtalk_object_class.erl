@@ -101,6 +101,8 @@
     name :: class_name(),
     module :: atom(),
     superclass :: class_name() | none,
+    is_sealed = false :: boolean(),
+    is_abstract = false :: boolean(),
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     instance_variables = [] :: [atom()],
@@ -241,6 +243,16 @@ put_method(ClassPid, Selector, Fun, Source) ->
 instance_variables(ClassPid) ->
     gen_server:call(ClassPid, instance_variables).
 
+%% @doc Check if a class is sealed (cannot be subclassed).
+-spec is_sealed(pid()) -> boolean().
+is_sealed(ClassPid) ->
+    gen_server:call(ClassPid, is_sealed).
+
+%% @doc Check if a class is abstract (cannot be instantiated).
+-spec is_abstract(pid()) -> boolean().
+is_abstract(ClassPid) ->
+    gen_server:call(ClassPid, is_abstract).
+
 %% @doc Add a before daemon (Flavors pattern).
 -spec add_before(pid(), selector(), fun()) -> ok.
 add_before(ClassPid, Selector, Fun) ->
@@ -374,6 +386,8 @@ init({ClassName, ClassInfo}) ->
         name = ClassName,
         module = maps:get(module, ClassInfo, ClassName),
         superclass = Superclass,
+        is_sealed = maps:get(is_sealed, ClassInfo, false),
+        is_abstract = maps:get(is_abstract, ClassInfo, false),
         instance_methods = InstanceMethods,
         class_methods = maps:get(class_methods, ClassInfo, #{}),
         instance_variables = maps:get(instance_variables, ClassInfo, []),
@@ -389,6 +403,16 @@ init({ClassName, ClassInfo}) ->
     %% before Actor) — subclasses that had incomplete tables now pick up our methods.
     invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
+
+handle_call({new, _Args}, _From, #class_state{
+    name = ClassName,
+    is_abstract = true
+} = State) ->
+    %% BT-105: Abstract classes cannot be instantiated
+    Error0 = beamtalk_error:new(instantiation_error, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, 'new'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>),
+    {reply, {error, Error2}, State};
 
 handle_call({new, Args}, _From, #class_state{
     name = ClassName,
@@ -507,6 +531,12 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
 
 handle_call(instance_variables, _From, #class_state{instance_variables = IVars} = State) ->
     {reply, IVars, State};
+
+handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
+    {reply, Sealed, State};
+
+handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
+    {reply, Abstract, State};
 
 handle_call({add_before, Selector, Fun}, _From, State) ->
     Befores = maps:get(Selector, State#class_state.before_methods, []),

@@ -3136,17 +3136,27 @@ end
             "Should include superclass in metadata. Got:\n{code}"
         );
 
+        // BT-105: Check sealing modifier flags
+        assert!(
+            code.contains("'is_sealed' => 'false'"),
+            "Should include is_sealed flag. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'is_abstract' => 'false'"),
+            "Should include is_abstract flag. Got:\n{code}"
+        );
+
         // Check instance_methods map
         assert!(
             code.contains("'instance_methods' => ~{"),
             "Should include instance_methods map. Got:\n{code}"
         );
         assert!(
-            code.contains("'increment' => ~{'arity' => 0}~"),
+            code.contains("'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
             "Should include increment method with arity. Got:\n{code}"
         );
         assert!(
-            code.contains("'getValue' => ~{'arity' => 0}~"),
+            code.contains("'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
             "Should include getValue method with arity. Got:\n{code}"
         );
 
