@@ -23,7 +23,7 @@ start_link(InitialValue) ->
 
 init(InitialValue) ->
     beamtalk_actor:init(#{
-        '__class__' => 'MixedActor',
+        '$beamtalk_class' => 'MixedActor',
         '__class_mod__' => 'test_mixed_actor',
         '__methods__' => #{
             getValueOldStyle => fun ?MODULE:handle_getValueOldStyle/2,

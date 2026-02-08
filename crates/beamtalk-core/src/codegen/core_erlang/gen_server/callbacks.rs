@@ -22,7 +22,7 @@ impl CoreErlangGenerator {
     /// 4. Returns `{ok, FinalState}` or propagates parent init errors
     ///
     /// For base classes (extending Actor), it generates a simple init:
-    /// 1. Creates a default state map with `__class__`, `__methods__`, and field values
+    /// 1. Creates a default state map with `$beamtalk_class`, `__methods__`, and field values
     /// 2. Merges `InitArgs` into the default state (`InitArgs` values override defaults)
     /// 3. Returns `{ok, FinalState}`
     ///
@@ -33,7 +33,7 @@ impl CoreErlangGenerator {
     ///     case call 'counter':'init'(InitArgs) of
     ///         <{'ok', ParentState}> when 'true' ->
     ///             let ChildFields = ~{
-    ///                 '__class__' => 'LoggingCounter',
+    ///                 '$beamtalk_class' => 'LoggingCounter',
     ///                 '__methods__' => call 'logging_counter':'method_table'(),
     ///                 'logCount' => 0
     ///             }~
@@ -50,7 +50,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'init'/1 = fun (InitArgs) ->
     ///     let DefaultState = ~{
-    ///         '__class__' => 'Counter',
+    ///         '$beamtalk_class' => 'Counter',
     ///         '__methods__' => call 'counter':'method_table'(),
     ///         'value' => 0
     ///     }~
@@ -117,7 +117,7 @@ impl CoreErlangGenerator {
             writeln!(self.output, "let ChildFields = ~{{")?;
             self.indent += 1;
             self.write_indent()?;
-            writeln!(self.output, "'__class__' => '{}',", self.class_name())?;
+            writeln!(self.output, "'$beamtalk_class' => '{}',", self.class_name())?;
             self.write_indent()?;
             writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
             self.write_indent()?;
@@ -164,7 +164,7 @@ impl CoreErlangGenerator {
             writeln!(self.output, "let DefaultState = ~{{")?;
             self.indent += 1;
             self.write_indent()?;
-            writeln!(self.output, "'__class__' => '{}',", self.class_name())?;
+            writeln!(self.output, "'$beamtalk_class' => '{}',", self.class_name())?;
             self.write_indent()?;
             writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
             self.write_indent()?;

@@ -31,7 +31,7 @@ impl CoreErlangGenerator {
     ///   attributes []
     ///
     /// 'new'/0 = fun () ->
-    ///     ~{'__class__' => 'Point', 'x' => 0, 'y' => 0}~
+    ///     ~{'$beamtalk_class' => 'Point', 'x' => 0, 'y' => 0}~
     ///
     /// 'new'/1 = fun (InitArgs) ->
     ///     DefaultState = call 'point':'new'(),
@@ -44,7 +44,7 @@ impl CoreErlangGenerator {
     ///         call 'maps':'get'('x', Other)
     ///     ),
     ///     ...
-    ///     ~{'__class__' => 'Point', 'x' => NewX, 'y' => NewY}~
+    ///     ~{'$beamtalk_class' => 'Point', 'x' => NewX, 'y' => NewY}~
     /// ```
     ///
     /// ## Key Differences from Actors
@@ -159,14 +159,18 @@ impl CoreErlangGenerator {
 
     /// Generates the `new/0` function for a value type.
     ///
-    /// Creates an instance map with __class__ and default field values.
+    /// Creates an instance map with `$beamtalk_class` and default field values.
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
         writeln!(self.output, "'new'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
 
-        // Generate map literal with __class__ and fields
-        write!(self.output, "~{{'__class__' => '{}'", self.class_name())?;
+        // Generate map literal with $beamtalk_class and fields
+        write!(
+            self.output,
+            "~{{'$beamtalk_class' => '{}'",
+            self.class_name()
+        )?;
 
         // Add each field with its default value
         for field in &class.state {

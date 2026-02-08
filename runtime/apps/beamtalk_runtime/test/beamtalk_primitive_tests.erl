@@ -59,6 +59,18 @@ class_of_dictionary_test() ->
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{a => 1})),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => value, x => 42})).
 
+%% BT-324: Dictionary with user '__class__' key must NOT be misclassified
+class_of_dictionary_with_old_class_key_collision_test() ->
+    %% A user Dictionary that happens to have '__class__' key (old tag)
+    %% must still be treated as Dictionary, not as a tagged map
+    Dict = #{'__class__' => 'Integer', value => 42},
+    ?assertEqual('Dictionary', beamtalk_primitive:class_of(Dict)).
+
+class_of_dictionary_with_class_key_string_collision_test() ->
+    %% Non-atom __class__ value was already handled, verify it still works
+    Dict = #{'__class__' => <<"Integer">>, value => 42},
+    ?assertEqual('Dictionary', beamtalk_primitive:class_of(Dict)).
+
 class_of_tuple_test() ->
     ?assertEqual('Tuple', beamtalk_primitive:class_of({})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({1, 2})),
@@ -461,7 +473,7 @@ value_type_send_routes_to_class_module_test() ->
     MockModule = create_mock_value_type_module(mock_vt, 'MockVT', [
         {'getX', x}
     ]),
-    Self = #{'__class__' => 'MockVT', x => 42},
+    Self = #{'$beamtalk_class' => 'MockVT', x => 42},
     try
         Result = beamtalk_primitive:send(Self, 'getX', []),
         ?assertEqual(42, Result)
@@ -472,7 +484,7 @@ value_type_send_routes_to_class_module_test() ->
 
 value_type_send_falls_back_to_object_class_test() ->
     %% Value type instances support inherited 'class' method
-    Self = #{'__class__' => 'MockVTEmpty'},
+    Self = #{'$beamtalk_class' => 'MockVTEmpty'},
     create_mock_value_type_module(mock_vtempty, 'MockVTEmpty', []),
     try
         Result = beamtalk_primitive:send(Self, class, []),
@@ -484,7 +496,7 @@ value_type_send_falls_back_to_object_class_test() ->
 
 value_type_send_does_not_understand_test() ->
     %% Unknown method raises does_not_understand
-    Self = #{'__class__' => 'MockVTErr'},
+    Self = #{'$beamtalk_class' => 'MockVTErr'},
     create_mock_value_type_module(mock_vterr, 'MockVTErr', []),
     try
         ?assertError(#beamtalk_error{kind = does_not_understand, class = 'MockVTErr',
@@ -496,10 +508,24 @@ value_type_send_does_not_understand_test() ->
     end.
 
 plain_map_still_routes_to_dictionary_test() ->
-    %% Plain maps without __class__ still route to beamtalk_map
+    %% Plain maps without $beamtalk_class still route to beamtalk_map
     Self = #{a => 1, b => 2},
     Result = beamtalk_primitive:send(Self, 'size', []),
     ?assertEqual(2, Result).
+
+%% BT-324: Dictionary with user '__class__' key dispatches as Dictionary
+dictionary_with_old_class_key_dispatches_as_dictionary_test() ->
+    %% A user Dictionary with '__class__' (old tag) must route to beamtalk_map,
+    %% not to whatever class name the key contains
+    Dict = #{'__class__' => 'Integer', value => 42},
+    ?assertEqual(2, beamtalk_primitive:send(Dict, 'size', [])).
+
+dictionary_with_old_class_key_responds_to_dictionary_methods_test() ->
+    %% responds_to should check Dictionary methods, not the colliding class
+    Dict = #{'__class__' => 'Integer', value => 42},
+    ?assert(beamtalk_primitive:responds_to(Dict, 'size')),
+    ?assert(beamtalk_primitive:responds_to(Dict, 'at:')),
+    ?assertNot(beamtalk_primitive:responds_to(Dict, '+')).
 
 %% --- Value type responds_to/2 ---
 
@@ -509,7 +535,7 @@ value_type_responds_to_class_method_test() ->
     create_mock_value_type_module(mock_vt_rt, 'MockVtRt', [
         {'getX', x}
     ]),
-    Self = #{'__class__' => 'MockVtRt', x => 0},
+    Self = #{'$beamtalk_class' => 'MockVtRt', x => 0},
     try
         ?assert(beamtalk_primitive:responds_to(Self, 'getX')),
         ?assertNot(beamtalk_primitive:responds_to(Self, 'nonexistent'))
@@ -520,7 +546,7 @@ value_type_responds_to_class_method_test() ->
 
 value_type_responds_to_object_methods_test() ->
     %% Value type instances respond to inherited Object methods
-    Self = #{'__class__' => 'MockVTObj'},
+    Self = #{'$beamtalk_class' => 'MockVTObj'},
     create_mock_value_type_module(mock_vtobj, 'MockVTObj', []),
     try
         ?assert(beamtalk_primitive:responds_to(Self, class)),

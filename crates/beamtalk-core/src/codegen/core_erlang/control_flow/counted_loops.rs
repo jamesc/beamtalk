@@ -431,7 +431,7 @@ impl CoreErlangGenerator {
                     // Copy all fields from StateAcc
                     write!(
                         self.output,
-                        "'__class__' => call 'maps':'get'('__class__', StateAcc), "
+                        "'$beamtalk_class' => call 'maps':'get'('$beamtalk_class', StateAcc), "
                     )?;
                     write!(
                         self.output,

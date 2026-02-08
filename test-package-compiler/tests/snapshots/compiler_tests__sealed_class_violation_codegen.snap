@@ -6,7 +6,7 @@ module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1]
   attributes []
 
 'new'/0 = fun () ->
-    ~{'__class__' => 'MyInt'}~
+    ~{'$beamtalk_class' => 'MyInt'}~
 
 
 'new'/1 = fun (InitArgs) ->

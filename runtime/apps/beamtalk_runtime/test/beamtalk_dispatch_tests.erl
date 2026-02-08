@@ -88,7 +88,7 @@ test_lookup_local_method() ->
     
     %% Create a Counter instance state
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -109,7 +109,7 @@ test_lookup_inherited_method() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -126,7 +126,7 @@ test_lookup_missing_method() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -150,7 +150,7 @@ test_super_skips_current() ->
     %% Counter defines 'increment', but super should NOT find it in Counter.
     %% It should look in Actor (no increment there), then Object, etc.
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -174,7 +174,7 @@ test_super_at_root() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Object'
+        '$beamtalk_class' => 'Object'
     },
     
     Self = make_ref(),
@@ -199,7 +199,7 @@ test_extension_priority() ->
     ok = beamtalk_extensions:register('Counter', testExtension, TestFun, test_owner),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -221,7 +221,7 @@ test_error_tuple_shape() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -245,7 +245,7 @@ test_super_finds_inherited() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     
@@ -255,7 +255,7 @@ test_super_finds_inherited() ->
     %% Super walks from Counter → Actor → Object, finds 'class' in beamtalk_object.erl.
     Result = beamtalk_dispatch:super(class, [], Self, State, 'Counter'),
     
-    %% Object's dispatch/4 handles 'class' by reading __class__ from State
+    %% Object's dispatch/4 handles 'class' by reading $beamtalk_class from State
     ?assertMatch({reply, 'Counter', _}, Result).
 
 %%% ============================================================================
@@ -316,7 +316,7 @@ test_invoke_with_combinations_delegates() ->
     ok = ensure_counter_loaded(),
 
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     Self = make_ref(),
@@ -338,7 +338,7 @@ test_extension_error_propagation() ->
     ok = beamtalk_extensions:register('Counter', crashExt, CrashFun, test_owner),
 
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     Self = make_ref(),
@@ -374,7 +374,7 @@ test_flattened_table_performance() ->
     ok = ensure_counter_loaded(),
     
     State = #{
-        '__class__' => 'Counter',
+        '$beamtalk_class' => 'Counter',
         'value' => 0
     },
     Self = make_ref(),

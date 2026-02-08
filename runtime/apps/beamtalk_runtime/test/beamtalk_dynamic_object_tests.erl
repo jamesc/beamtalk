@@ -20,7 +20,7 @@ test_init_state(ClassName, Methods) ->
 test_init_state(ClassName, Methods, ExtraFields) ->
     %% __class_pid__ requires a real pid — use self() as placeholder
     Base = #{
-        '__class__' => ClassName,
+        '$beamtalk_class' => ClassName,
         '__methods__' => Methods,
         '__class_pid__' => self()
     },
@@ -202,7 +202,7 @@ terminate_returns_ok_test() ->
 dispatch_empty_methods_map_test() ->
     %% When __methods__ key is missing, should default to empty map
     Fields = #{
-        '__class__' => 'TestClass',
+        '$beamtalk_class' => 'TestClass',
         '__class_pid__' => self()
     },
     Self = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_dynamic_object, pid = self()},
