@@ -26,4 +26,5 @@ sealed Object subclass: Float
 
   // Conversion
   asString => @primitive 'asString'
+  printString => @primitive 'printString'
   describe => self asString

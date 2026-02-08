@@ -439,6 +439,30 @@ impl CoreErlangGenerator {
                     )?;
                     Ok(Some(()))
                 }
+                "yourself" if arguments.is_empty() => {
+                    // Identity: just return the receiver
+                    self.generate_expression(receiver)?;
+                    Ok(Some(()))
+                }
+                "hash" if arguments.is_empty() => {
+                    // Hash using erlang:phash2/1 — works for all BEAM types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
+                    Ok(Some(()))
+                }
+                "printString" if arguments.is_empty() => {
+                    // Delegate to beamtalk_primitive:print_string/1 which handles all types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in call 'beamtalk_primitive':'print_string'({recv_var})"
+                    )?;
+                    Ok(Some(()))
+                }
                 "instVarNames" if arguments.is_empty() => {
                     // For actors: Extract instance variable names from state map
                     // For primitives: Intended future semantics is to return empty list
