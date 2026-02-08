@@ -32,7 +32,8 @@
     workspace_id => binary(),
     project_path => binary(),
     tcp_port => inet:port_number(),
-    auto_cleanup => boolean()
+    auto_cleanup => boolean(),
+    max_idle_seconds => integer()
 }.
 
 -export_type([workspace_config/0]).
@@ -55,6 +56,7 @@ init(Config) ->
     ProjectPath = maps:get(project_path, Config),
     TcpPort = maps:get(tcp_port, Config),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
+    MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
     
     ChildSpecs = [
         %% Workspace metadata (must start first - others may query it)
@@ -97,7 +99,7 @@ init(Config) ->
             id => beamtalk_idle_monitor,
             start => {beamtalk_idle_monitor, start_link, [#{
                 enabled => AutoCleanup,
-                max_idle_seconds => 3600 * 4  % 4 hours
+                max_idle_seconds => MaxIdleSeconds
             }]},
             restart => permanent,
             shutdown => 5000,
