@@ -215,6 +215,9 @@ struct CompileParams {
     path: String,
     #[serde(default)]
     source: Option<String>,
+    /// When true, enables @primitive pragmas (for stdlib compilation via REPL)
+    #[serde(default)]
+    stdlib_mode: bool,
 }
 
 /// Result of the compile method.
@@ -291,8 +294,10 @@ fn handle_compile(
     let (module, _) = parse(tokens);
 
     // Run @primitive validation (ADR 0007)
-    // Default options: stdlib_mode=false, allow_primitives=false
-    let options = beamtalk_core::CompilerOptions::default();
+    let options = beamtalk_core::CompilerOptions {
+        stdlib_mode: params.stdlib_mode,
+        allow_primitives: false,
+    };
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
             &module, &options,
@@ -1049,6 +1054,26 @@ mod tests {
         assert!(
             has_primitive_error,
             "Expected primitive validation error, got: {:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn handle_compile_with_primitive_in_stdlib_mode_succeeds() {
+        let mut service = SimpleLanguageService::new();
+        let params = serde_json::json!({
+            "path": "lib/MyClass.bt",
+            "source": "Object subclass: MyClass\n  foo => @primitive '+'",
+            "stdlib_mode": true
+        });
+
+        let response = handle_compile(params, Some(serde_json::json!(1)), &mut service);
+
+        assert!(response.error.is_none());
+        let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
+        assert!(
+            result.success,
+            "Expected stdlib compilation with primitive to succeed, got: {:#?}",
             result.diagnostics
         );
     }
