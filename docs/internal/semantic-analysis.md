@@ -2,7 +2,8 @@
 
 This document describes the design for semantic analysis in the beamtalk compiler.
 
-**Status**: Infrastructure Ready, Implementation Pending  
+**Status**: ✅ Implemented (Phase 1 & 2 complete; Phase 3 future work)  
+**Epic**: [BT-140](https://linear.app/beamtalk/issue/BT-140) (Full Semantic Analysis Framework)  
 **Related Issues**: [BT-90](https://linear.app/beamtalk/issue/BT-90) (block-local variable mutation)
 
 ## Overview
@@ -20,19 +21,18 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
 | Lexer | ✅ Complete |
 | Parser | ✅ Complete |
 | AST | ✅ Rich, with spans and error recovery |
-| **Semantic Analysis** | 🟡 **Infrastructure in place, needs implementation** |
+| **Semantic Analysis** | ✅ **Phase 1 & 2 implemented, integrated into pipeline** |
 | Code Generation | ✅ Works for supported constructs |
 
-### Existing Infrastructure
-
-The semantic analysis module structure exists with type definitions:
+### Implemented Modules
 
 - **Module**: `crates/beamtalk-core/src/semantic_analysis/mod.rs`
-  - `AnalysisResult` - Container for diagnostics and block metadata
+  - `AnalysisResult` - Container for diagnostics, block metadata, and class hierarchy
   - `BlockInfo` - Block context, captures, and mutations
-  - `BlockContext` - Enum for control flow, stored, passed contexts
-  - `CapturedVar`, `Mutation`, `MutationKind` - Analysis metadata types
-  - `analyse()` - Public API (currently returns empty result)
+  - `analyse()` / `analyse_with_known_vars()` - Public API (fully functional)
+  - Pattern binding extraction with duplicate detection
+  - AST traversal for scope population and block analysis
+  - **48 tests**
 
 - **Scope tracking**: `crates/beamtalk-core/src/semantic_analysis/scope.rs`
   - `Scope` - Hierarchical scope tracker with push/pop
@@ -40,25 +40,54 @@ The semantic analysis module structure exists with type definitions:
   - `BindingKind` - Enum distinguishing Local, Parameter, InstanceField, ClassField
   - Variable lookup and capture detection
   - Depth tracking (module, class, method, block)
-  - Full test coverage (17 tests)
+  - **17 tests**
+
+- **Block context**: `crates/beamtalk-core/src/semantic_analysis/block_context.rs`
+  - Block context classification (ControlFlow, Stored, Passed, Other, Unknown)
+  - Control flow selector detection (30+ selectors)
+  - Literal vs variable block distinction
+  - **22 tests**
+
+- **Name resolution**: `crates/beamtalk-core/src/semantic_analysis/name_resolver.rs`
+  - Scope management during AST traversal
+  - Undefined variable detection
+  - `self` recognition in method bodies
+
+- **Class hierarchy**: `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/mod.rs`
+  - Static class hierarchy for built-in + user-defined classes
+  - Method resolution and sealed class enforcement
+  - **36 tests**
+
+- **Primitive validator**: `crates/beamtalk-core/src/semantic_analysis/primitive_validator.rs`
+  - Validates primitive constraints on classes
+  - **10 tests**
 
 - **Error types**: `crates/beamtalk-core/src/semantic_analysis/error.rs`
   - `SemanticError` and `SemanticErrorKind`
   - Error types: undefined variables, unused variables, mutated captures, escaping blocks
 
-- **Integration**: `crates/beamtalk-core/src/queries/diagnostics.rs`
-  - `compute_diagnostics()` has placeholder for semantic diagnostics
-  - Ready to merge parse + semantic diagnostics
+- **Type checker**: `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`
+  - Stub for future gradual typing (Phase 3)
 
-### What's Missing
+- **Integration**: `crates/beamtalk-core/src/queries/diagnostic_provider.rs`
+  - `compute_diagnostics()` calls `analyse_with_known_vars()`
+  - Merges parse + semantic diagnostics
+  - REPL-aware variable handling
 
-The infrastructure is complete, and block context detection is implemented. Remaining work:
+### Implementation Summary
 
-1. ❌ AST traversal to populate scope and detect blocks
-2. ✅ Block context classification (control flow vs stored vs passed) - **DONE (BT-148)**
-3. ❌ Capture and mutation detection
-4. ❌ Diagnostic generation from analysis errors
-5. ❌ Integration with `compute_diagnostics()`
+All planned Phase 1 and Phase 2 work is complete:
+
+1. ✅ AST traversal to populate scope and detect blocks — **DONE**
+2. ✅ Block context classification (control flow vs stored vs passed) — **DONE (BT-148)**
+3. ✅ Capture and mutation detection — **DONE**
+4. ✅ Diagnostic generation from analysis errors — **DONE**
+5. ✅ Integration with `compute_diagnostics()` — **DONE (BT-149)**
+6. ✅ Pattern variable binding with duplicate detection — **DONE (BT-174, BT-183)**
+7. ✅ Class hierarchy with sealed enforcement — **DONE (BT-284)**
+8. ✅ Symbol literal validation — **DONE (BT-244)**
+
+**Total: 124+ unit tests across all modules.**
 
 ## Motivation: BT-90
 
@@ -95,19 +124,22 @@ Without semantic analysis, we cannot:
                                  codegen)
 ```
 
-### Current Module Structure
+### Module Structure
 
 ```
-crates/beamtalk-core/src/
-├── analyse/
-│   ├── mod.rs           # ✅ Public API types and analyse() stub
-│   ├── scope.rs         # ✅ Scope tracking with full tests
-│   ├── block_context.rs # ✅ Block context classification (BT-148)
-│   ├── visitor.rs       # ❌ TODO: AST visitor trait
-│   └── error.rs         # ✅ Semantic error types
+crates/beamtalk-core/src/semantic_analysis/
+├── mod.rs                 # ✅ Public API, AST traversal, pattern binding extraction
+├── scope.rs               # ✅ Hierarchical scope tracking
+├── block_context.rs       # ✅ Block context classification
+├── name_resolver.rs       # ✅ Name resolution and undefined variable detection
+├── class_hierarchy/       # ✅ Static class hierarchy and method resolution
+│   ├── mod.rs             # ✅ Module root
+│   └── builtins.rs        # ✅ Built-in classes and protocols
+├── primitive_validator.rs # ✅ Primitive constraint validation
+├── method_validators.rs   # ✅ Selector-specific argument validation
+├── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
+└── error.rs               # ✅ Semantic error types
 ```
-
-**Status**: Types, scope tracking, and block context detection implemented. Need to add visitor for full analysis.
 
 ## Key Types
 
@@ -233,47 +265,24 @@ enum BlockContext {
 
 4. **Test Coverage**: 22 tests covering all context types and edge cases
 
-**Remaining Work:**
-- Integration with AST visitor (Phase 1.3)
-- Mutation detection within blocks (Phase 1.4)
-- Diagnostic emission (Phase 1.5)
+**All Phase 1 work is complete.** Mutation detection, capture tracking, and diagnostic emission are fully implemented and integrated.
 
-#### Control Flow Detection (Legacy Example)
-
-The following shows the original design concept. The actual implementation is in `block_context.rs`:
-
-```rust
-fn is_control_flow_position(receiver: &Expr, selector: &str, arg_index: usize) -> bool {
-    match selector {
-        "whileTrue:" | "whileFalse:" => 
-            // Receiver must be literal block, arg must be literal block
-            arg_index == 0,
-        "timesRepeat:" | "do:" | "collect:" | "select:" | "reject:" => 
-            arg_index == 0,
-        "to:do:" => 
-            arg_index == 1,  // Second arg is the block
-        "inject:into:" => 
-            arg_index == 1,
-        "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNil:" | "ifNotNil:" =>
-            true,  // All block args are control flow
-        _ => false
-    }
-}
-```
-
-### Phase 2: Name Resolution (Foundation)
+### Phase 2: Name Resolution ✅ IMPLEMENTED
 
 Full symbol table with:
-- Variable definitions and references
-- Field declarations and accesses
-- Method signatures
-- Undefined identifier detection
+- ✅ Variable definitions and references
+- ✅ Field declarations and accesses
+- ✅ Undefined identifier detection
+- ✅ `self` recognition in method bodies (BT-189)
+- ✅ REPL-aware known variable handling
 
 ### Phase 3: Type Checking (Future)
 
-- Type inference
-- Type annotation validation
-- Message signature checking
+- ❌ Type inference
+- ❌ Type annotation validation
+- ❌ Message signature checking
+
+**Note:** Phase 3 is tracked separately as future work. The `type_checker.rs` module exists as a stub.
 
 ## Design Decisions
 
@@ -342,35 +351,19 @@ Rationale:
 - No false positives from cascading errors
 - Matches parser's error recovery approach
 
-## Open Questions
+## Resolved Design Questions
 
 ### Q1: How much name resolution for BT-90?
 
-BT-90 needs to distinguish:
-- Local variables (defined in current block)
-- Captured variables (defined in outer scope)
-- Fields (`self.x`)
-
-**Minimal approach**: Track scope depth when variable defined vs. used.
-
-**Full approach**: Complete symbol table with all definitions.
-
-**Recommendation**: Start minimal, extend as needed.
+**Resolved**: Used minimal approach — scope depth tracking distinguishes local, captured, and field variables. Extended as needed for pattern binding (BT-174) and `self` recognition (BT-189).
 
 ### Q2: How to handle analysis errors in codegen?
 
-If analysis fails or is incomplete:
-- Codegen should still work for valid parts
-- Unanalyzed blocks treated conservatively (no special codegen)
-- Errors already reported by analysis
+**Resolved**: Codegen works for valid parts. Unanalyzed blocks treated conservatively. Errors already reported by analysis via the diagnostics pipeline.
 
 ### Q3: Should analysis be incremental?
 
-For IDE responsiveness, we may want incremental analysis:
-- Only re-analyze changed methods/blocks
-- Cache analysis results
-
-**For now**: Full analysis on each request. Optimize later if needed.
+**Current**: Full analysis on each request. Performance is acceptable for current codebase sizes. Incremental analysis remains a future optimization opportunity.
 
 ## Error Messages
 
