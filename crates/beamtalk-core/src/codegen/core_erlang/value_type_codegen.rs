@@ -155,10 +155,7 @@ impl CoreErlangGenerator {
         }
 
         // Generate superclass/0 for reflection
-        let superclass_atom = class
-            .superclass
-            .as_ref()
-            .map_or("nil", |s| s.name.as_str());
+        let superclass_atom = class.superclass.as_ref().map_or("nil", |s| s.name.as_str());
         writeln!(
             self.output,
             "'superclass'/0 = fun () -> '{superclass_atom}'"
