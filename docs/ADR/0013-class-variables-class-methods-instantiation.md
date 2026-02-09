@@ -16,8 +16,8 @@ ADR 0005 committed to "full Smalltalk metaclass model as the target" with classe
 
 ### What doesn't work
 
-1. **No class variables**: Classes can't hold shared state (e.g., `UniqueInstance` for singletons). The `#class_state{}` record has no slot for them.
-2. **No class-side methods**: No syntax to define methods on the class (vs. on instances). All methods in a `.bt` file are instance methods.
+1. **Class variables not wired end-to-end**: Classes can't hold shared state (e.g., `UniqueInstance` for singletons) via the language today. While `#class_state{}` already includes a `class_variables` field in the runtime, there is no syntax, parser/codegen support, or get/set handling wired up to expose it.
+2. **Class-side methods not exposed to the language**: There is no syntax to define methods on the class (vs. on instances), and the parser/codegen/runtime dispatch path for `class_methods` is not implemented, so all methods in a `.bt` file are effectively instance methods only.
 3. **No dynamic class dispatch**: `cls := Point. cls new` fails — the compiler only generates direct module calls for `ClassReference` AST nodes, not for variables holding class objects.
 4. **No `initialize` hook**: `new` returns a map with defaults; there's no post-creation initialization protocol.
 
@@ -25,7 +25,7 @@ ADR 0005 committed to "full Smalltalk metaclass model as the target" with classe
 
 **REPL introspection** (interactive-first language):
 ```beamtalk
-cls := Beamtalk classNamed: #Point
+cls := (Beamtalk classNamed: #Point) await
 cls new: #{x => 3, y => 4}
 cls methods
 ```
@@ -43,7 +43,7 @@ Object subclass: TranscriptStream
   classVar: uniqueInstance = nil
   
   class uniqueInstance =>
-    self.uniqueInstance ifNil: [self.uniqueInstance := self basicNew initialize].
+    self.uniqueInstance ifNil: [self.uniqueInstance := super new].
     self.uniqueInstance
 ```
 
@@ -62,7 +62,7 @@ Object subclass: TranscriptStream
 
 **Semantics**:
 - Class variables are **shared state on the class process** (not on instances).
-- Stored in the class gen_server state (`#class_state{class_vars :: map()}`).
+- Stored in the class gen_server state (`#class_state{class_variables :: map()}`).
 - Accessible from both class-side and instance-side methods via `self.varName` on the class side, and a yet-to-be-determined syntax on the instance side.
 - Mutable via `:=` assignment (same as instance state).
 - **Not inherited** by subclasses — each class has its own class variables (class instance variables in Pharo terminology). This matches Pharo's class instance variables, which is what singletons actually need.
@@ -83,7 +83,7 @@ Object subclass: TranscriptStream
   
   // Class-side methods (class prefix)
   class uniqueInstance =>
-    self.uniqueInstance ifNil: [self.uniqueInstance := self basicNew initialize].
+    self.uniqueInstance ifNil: [self.uniqueInstance := super new].
     self.uniqueInstance
 
   class new => self error: 'Use uniqueInstance instead'
@@ -152,7 +152,7 @@ In Smalltalk, `new → basicNew → initialize` works because `initialize` mutat
 When the receiver is not a compile-time `ClassReference`, dispatch goes through the runtime:
 
 ```beamtalk
-cls := Beamtalk classNamed: #Point   // cls is a #beamtalk_object{class='Class', pid=ClassPid}
+cls := (Beamtalk classNamed: #Point) await   // cls is a {beamtalk_object, 'Point', point, ClassPid}
 cls new                               // → gen_server:call(ClassPid, {new, []})
 cls methods                           // → gen_server:call(ClassPid, methods)
 ```
@@ -160,11 +160,9 @@ cls methods                           // → gen_server:call(ClassPid, methods)
 **Two paths** (ADR 0005 principle: "runtime dispatch is the contract, direct calls are the optimization"):
 
 1. **Optimized path** (compile-time known class): `Point new` → `call 'point':'new'()` (direct module call, zero overhead). This is what works today.
-2. **Dynamic path** (runtime class object): `cls new` → `gen_server:call(ClassPid, {new, Args})`. The class process handles the message and calls the module function internally.
+2. **Dynamic path** (runtime class object): `cls new` → `gen_server:call(ClassPid, {new, Args})`. In today's runtime, `beamtalk_object_class:handle_call({new, Args}, ...)` delegates to `Module:spawn/1` for actor classes and returns a `#beamtalk_object{}` wrapping the spawned pid; it does **not** invoke a `Module:new/*` function or construct an immutable value map. For Phase 1 value types where `new` is intended to return maps, dynamic `cls new` will require additional runtime support (e.g., a separate dispatch branch in `beamtalk_object_class.erl`) **in addition to** codegen changes — the gap is not purely in code generation.
 
 **Future optimization**: The dynamic path can be made ~10x faster for methods that don't access class variables. The `#beamtalk_object{}` record already carries the module name — extract it and use `apply(Module, Selector, Args)` (~0.5μs) instead of routing through the class gen_server (~5-10μs). The gen_server path is only needed when the method accesses class variable state. This is a codegen optimization pass that requires no language-level changes.
-
-The class process (`beamtalk_object_class.erl`) already handles `new` in `handle_call` — the gap is only in **codegen** not generating the dynamic dispatch path.
 
 ### 5. `super` in Class-Side Methods
 
@@ -261,7 +259,7 @@ Class-side state via "class declarations" in the class header. Modules are insta
 ### Smalltalk Developer
 - Will expect `classVariableNames:` shared across hierarchy — we use per-class variables instead (Pharo class instance variable semantics). This is actually what they want for singletons.
 - `class uniqueInstance` instead of defining on `TranscriptStream class` — minor syntax difference.
-- `new → basicNew → initialize` chain is identical.
+- For actor-backed classes, the `new → basicNew → initialize` chain is identical; value types only support `new`/`basicNew` and do not have `initialize`.
 
 ### Erlang/BEAM Developer
 - Class variables stored in gen_server state is natural OTP.
@@ -375,9 +373,9 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 
 ### Phase 1: `new` for Value Types + Dynamic Dispatch (BT-221)
 **Parser**: No changes needed — `Point new` already parses.
-**Codegen**: When receiver is not a `ClassReference`, emit `gen_server:call(ClassPid, {Selector, Args})` instead of `beamtalk_primitive:send`. The class process already handles `new` in `handle_call`.
-**Runtime**: `beamtalk_object_class` already implements `new/1`, `new/2`, `methods/1`, `superclass/1`.
-**Test**: `cls := Beamtalk classNamed: #Point. cls new` works end-to-end.
+**Codegen**: When receiver is not a `ClassReference`, emit `gen_server:call(ClassPid, {Selector, Args})` instead of `beamtalk_primitive:send`. Note: The class process currently uses mixed message formats — `{new, Args}` and `{method, Selector}` use tuple messages, while `methods`, `superclass`, and `class_name` use bare atoms. The codegen must match these existing formats. A future cleanup issue should standardize the class process to use the `{Selector, Args}` protocol consistently (like other actors).
+**Runtime**: `beamtalk_object_class` handles `{new, Args}` in `handle_call`, but currently delegates to `Module:spawn/1` (actor-style). For value types, a new `handle_call` clause is needed that constructs an immutable map via `Module:new/0` or `Module:new/1`.
+**Test**: `cls := (Beamtalk classNamed: #Point) await. cls new` works end-to-end.
 
 ### Phase 2: Class-Side Methods with Inheritance (BT-246)
 **Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`).
@@ -396,7 +394,7 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 **Parser**: Add `classVar:` declaration (same as `state:` but different AST node).
 **AST**: Add `class_variables: Vec<StateDeclaration>` to `ClassDefinition`.
 **Codegen**: Initialize class variables in the class gen_server `init/1`. Generate `gen_server:call` for class variable access from class-side methods.
-**Runtime**: Add `class_vars` field to `#class_state{}`. Handle `{get_class_var, Name}` and `{set_class_var, Name, Value}` in `handle_call`.
+**Runtime**: The `class_variables` field already exists in `#class_state{}`; add `{get_class_var, Name}` and `{set_class_var, Name, Value}` handlers in `handle_call` and wire up initialization from parsed `classVar:` declarations.
 **Test**: Singleton pattern with class variable storage.
 
 ### Phase 5: Instance-Side Access to Class Variables
