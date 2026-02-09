@@ -437,11 +437,18 @@ impl CoreErlangGenerator {
                     });
                 }
 
-                // Look up PID from persistent_term
+                // Look up binding object from persistent_term (beamtalk_object tuple)
+                let binding_var = self.fresh_temp_var("BindingObj");
+                write!(
+                    self.output,
+                    "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+                )?;
+
+                // Extract PID from beamtalk_object record (4th element)
                 let pid_var = self.fresh_temp_var("BindingPid");
                 write!(
                     self.output,
-                    "let {pid_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+                    "let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "
                 )?;
                 pid_var
             } else {

@@ -5,7 +5,7 @@
 //
 // Integers in Beamtalk are arbitrary precision (Erlang integers).
 
-sealed Object subclass: Integer
+sealed Number subclass: Integer
   // Binary operators — quoted selectors route through beamtalk_integer:dispatch
   + other => @primitive '+'
   - other => @primitive '-'
@@ -23,9 +23,6 @@ sealed Object subclass: Integer
   // Pure Beamtalk
   negated => 0 - self
   abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
-  isZero => self = 0
-  isPositive => self > 0
-  isNegative => self < 0
   isEven => (self % 2) = 0
   isOdd => (self % 2) ~= 0
   min: other => (self < other) ifTrue: [self] ifFalse: [other]

@@ -90,6 +90,23 @@ fn generate_float_bif(output: &mut String, selector: &str, params: &[String]) ->
         ">" => write_binary_bif(output, ">", params),
         "<=" => write_binary_bif(output, "=<", params),
         ">=" => write_binary_bif(output, ">=", params),
+        // Rounding
+        "rounded" => {
+            write!(output, "call 'erlang':'round'(Self)").ok()?;
+            Some(())
+        }
+        "ceiling" => {
+            write!(output, "call 'erlang':'ceil'(Self)").ok()?;
+            Some(())
+        }
+        "floor" => {
+            write!(output, "call 'erlang':'floor'(Self)").ok()?;
+            Some(())
+        }
+        "truncated" | "asInteger" => {
+            write!(output, "call 'erlang':'trunc'(Self)").ok()?;
+            Some(())
+        }
         // Conversion
         "asString" | "printString" => {
             write!(output, "call 'erlang':'float_to_binary'(Self, ['short'])").ok()?;
@@ -500,6 +517,46 @@ mod tests {
         let result = generate_primitive_bif(&mut output, "Float", "asString", &[]);
         assert!(result.is_some());
         assert_eq!(output, "call 'erlang':'float_to_binary'(Self, ['short'])");
+    }
+
+    #[test]
+    fn test_float_rounded() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Float", "rounded", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'round'(Self)");
+    }
+
+    #[test]
+    fn test_float_ceiling() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Float", "ceiling", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'ceil'(Self)");
+    }
+
+    #[test]
+    fn test_float_floor() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Float", "floor", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'floor'(Self)");
+    }
+
+    #[test]
+    fn test_float_truncated() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Float", "truncated", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'trunc'(Self)");
+    }
+
+    #[test]
+    fn test_float_as_integer() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Float", "asInteger", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'trunc'(Self)");
     }
 
     #[test]
