@@ -53,6 +53,8 @@
 -export([
     start_link/0,
     start_link/1,
+    start_link_singleton/0,
+    start_link_singleton/1,
     has_method/1
 ]).
 
@@ -70,7 +72,8 @@
 
 -record(system_dict_state, {
     version :: binary(),
-    workspace :: atom() | undefined  % Workspace name for future phases
+    workspace :: atom() | undefined,  % Workspace name for future phases
+    is_singleton :: boolean()
 }).
 
 %%====================================================================
@@ -90,6 +93,17 @@ start_link() ->
 -spec start_link(proplists:proplist()) -> {ok, pid()} | {error, term()}.
 start_link(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
+
+%% @doc Start a named SystemDictionary singleton for workspace use.
+%% Registers as 'Beamtalk' via register/2 and persistent_term binding.
+-spec start_link_singleton() -> {ok, pid()} | {error, term()}.
+start_link_singleton() ->
+    start_link_singleton([]).
+
+%% @doc Start a named SystemDictionary singleton with options.
+-spec start_link_singleton(proplists:proplist()) -> {ok, pid()} | {error, term()}.
+start_link_singleton(Opts) ->
+    gen_server:start_link({local, 'Beamtalk'}, ?MODULE, [{singleton, true} | Opts], []).
 
 %% @doc Check if SystemDictionary supports a given method selector.
 %%
@@ -116,10 +130,18 @@ init(Opts) ->
         end,
     Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),
+    IsSingleton = proplists:get_value(singleton, Opts, false),
+    
+    %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
+    case IsSingleton of
+        true -> persistent_term:put({beamtalk_binding, 'Beamtalk'}, self());
+        false -> ok
+    end,
     
     State = #system_dict_state{
         version = Version,
-        workspace = Workspace
+        workspace = Workspace,
+        is_singleton = IsSingleton
     },
     {ok, State}.
 
@@ -180,6 +202,10 @@ handle_info(Info, State) ->
 
 %% @doc Handle process termination.
 -spec terminate(term(), #system_dict_state{}) -> ok.
+terminate(_Reason, #system_dict_state{is_singleton = true}) ->
+    %% Clean up workspace binding on shutdown
+    persistent_term:erase({beamtalk_binding, 'Beamtalk'}),
+    ok;
 terminate(_Reason, _State) ->
     ok.
 

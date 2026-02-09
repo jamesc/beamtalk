@@ -42,8 +42,8 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
-    %% Should have 6 children: workspace_meta, actor_registry, repl_server, idle_monitor, actor_sup, session_sup
-    ?assertEqual(6, length(ChildSpecs)).
+    %% Should have 8 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, repl_server, idle_monitor, actor_sup, session_sup
+    ?assertEqual(8, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -51,6 +51,8 @@ children_ids_test() ->
     %% Verify all expected children are present
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
+    ?assert(lists:member(beamtalk_transcript_stream, Ids)),
+    ?assert(lists:member(beamtalk_system_dictionary, Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
@@ -129,3 +131,44 @@ session_sup_spec_test() ->
     ?assertEqual(supervisor, maps:get(type, SessionSupSpec)),
     ?assertEqual(permanent, maps:get(restart, SessionSupSpec)),
     ?assertEqual({beamtalk_session_sup, start_link, []}, maps:get(start, SessionSupSpec)).
+
+%%% Singleton child spec tests (ADR 0010 Phase 2)
+
+transcript_stream_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+    
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_transcript_stream],
+    ?assertEqual(worker, maps:get(type, Spec)),
+    ?assertEqual(permanent, maps:get(restart, Spec)),
+    ?assertEqual({beamtalk_transcript_stream, start_link_singleton, [1000]}, maps:get(start, Spec)).
+
+system_dictionary_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+    
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_system_dictionary],
+    ?assertEqual(worker, maps:get(type, Spec)),
+    ?assertEqual(permanent, maps:get(restart, Spec)),
+    ?assertEqual({beamtalk_system_dictionary, start_link_singleton, []}, maps:get(start, Spec)).
+
+singletons_after_metadata_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+    
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    %% Singletons must come after workspace_meta (boot ordering)
+    MetaIdx = index_of(beamtalk_workspace_meta, Ids),
+    TranscriptIdx = index_of(beamtalk_transcript_stream, Ids),
+    SysDictIdx = index_of(beamtalk_system_dictionary, Ids),
+    ?assert(TranscriptIdx > MetaIdx),
+    ?assert(SysDictIdx > MetaIdx).
+
+%%% Helpers
+
+index_of(Elem, List) ->
+    index_of(Elem, List, 1).
+
+index_of(_Elem, [], _N) ->
+    not_found;
+index_of(Elem, [Elem | _], N) ->
+    N;
+index_of(Elem, [_ | Rest], N) ->
+    index_of(Elem, Rest, N + 1).
