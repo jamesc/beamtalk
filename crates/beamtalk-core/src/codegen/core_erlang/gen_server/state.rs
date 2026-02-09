@@ -74,7 +74,7 @@ impl CoreErlangGenerator {
 
         if let Some(class) = current_class {
             // Collect inherited fields from parent classes (recursively)
-            let inherited_fields = Self::collect_inherited_fields(&class.superclass.name, module)?;
+            let inherited_fields = Self::collect_inherited_fields(class.superclass_name(), module)?;
 
             // Emit inherited fields first
             for (field_name, default_value) in inherited_fields {
@@ -132,8 +132,8 @@ impl CoreErlangGenerator {
     ) -> Result<Vec<(String, Expression)>> {
         let mut fields = Vec::new();
 
-        // Base case: Actor and other built-in types have no state fields
-        if parent_name == "Actor" || parent_name == "Object" {
+        // Base case: Actor, Object, and root classes (none) have no state fields
+        if parent_name == "Actor" || parent_name == "Object" || parent_name == "none" {
             return Ok(fields);
         }
 
@@ -146,7 +146,7 @@ impl CoreErlangGenerator {
         if let Some(parent) = parent_class {
             // Recursively collect grandparent fields first
             let grandparent_fields =
-                Self::collect_inherited_fields(&parent.superclass.name, module)?;
+                Self::collect_inherited_fields(parent.superclass_name(), module)?;
             fields.extend(grandparent_fields);
 
             // Add this parent's fields

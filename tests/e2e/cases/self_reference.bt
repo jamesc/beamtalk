@@ -51,8 +51,8 @@ a classInBlock
 a perform: #getValue
 // => 99
 
-// perform:withArgs: dispatches methods with arguments on actors
-a perform: #setValue: withArgs: #(42)
+// perform:withArguments: dispatches methods with arguments on actors
+a perform: #setValue: withArguments: #(42)
 // => _
 
 a getValue
@@ -62,6 +62,6 @@ a getValue
 42 perform: #asString
 // => 42
 
-// perform:withArgs: works on primitives
-10 perform: #+ withArgs: #(32)
+// perform:withArguments: works on primitives
+10 perform: #+ withArguments: #(32)
 // => 42

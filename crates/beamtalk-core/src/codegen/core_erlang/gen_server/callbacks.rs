@@ -78,8 +78,9 @@ impl CoreErlangGenerator {
         // Check if we have a superclass that's not Actor (base class)
         // When true, we'll call the parent's init to inherit state fields
         let has_parent_init = if let Some(class) = current_class {
-            !class.superclass.name.eq_ignore_ascii_case("Actor")
-                && !class.superclass.name.eq_ignore_ascii_case("Object")
+            class.superclass.as_ref().is_some_and(|s| {
+                !s.name.eq_ignore_ascii_case("Actor") && !s.name.eq_ignore_ascii_case("Object")
+            })
         } else {
             false
         };
@@ -91,7 +92,7 @@ impl CoreErlangGenerator {
             let class = current_class.expect("has_parent_init implies current_class is Some");
             let parent_module = {
                 use super::super::util::to_module_name;
-                to_module_name(&class.superclass.name)
+                to_module_name(class.superclass_name())
             };
 
             self.write_indent()?;

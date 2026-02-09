@@ -470,9 +470,9 @@ dispatch(Selector, Args, Self, State) ->
                     Error2 = beamtalk_error:with_hint(Error1, <<"Expected 1 argument: a selector atom">>),
                     error(Error2)
             end;
-        'perform:withArgs:' ->
+        'perform:withArguments:' ->
             %% Dynamic message send with argument array
-            %% obj perform: #'at:put:' withArgs: [1, 'x']  => obj at: 1 put: 'x'
+            %% obj perform: #'at:put:' withArguments: #(1, 'x')  => obj at: 1 put: 'x'
             case Args of
                 [TargetSelector, ArgList] when is_atom(TargetSelector) ->
                     when_list(ArgList,
@@ -480,13 +480,13 @@ dispatch(Selector, Args, Self, State) ->
                         fun() ->
                             ClassName = beamtalk_tagged_map:class_of(State, unknown),
                             Error0 = beamtalk_error:new(type_error, ClassName),
-                            Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                            Error = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
                             {error, Error, State}
                         end);
                 _ ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
                     Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: a selector atom and an argument list">>),
                     error(Error2)
             end;
@@ -602,7 +602,7 @@ handle_dnu(Selector, Args, Self, State) ->
 
 %% @private
 %% @doc Execute ThenFun if Value is a list, else execute ElseFun.
-%% Used for type checking in perform:withArgs:
+%% Used for type checking in perform:withArguments:
 -spec when_list(term(), fun(() -> term()), fun(() -> term())) -> term().
 when_list(Value, ThenFun, _ElseFun) when is_list(Value) ->
     ThenFun();

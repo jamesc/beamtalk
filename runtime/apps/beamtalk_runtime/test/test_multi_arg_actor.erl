@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Test actor with multi-argument methods for perform:withArgs: tests
+%%% @doc Test actor with multi-argument methods for perform:withArguments: tests
 
 -module(test_multi_arg_actor).
 -behaviour(gen_server).
