@@ -12,7 +12,7 @@
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
 //! - **Object**: `isNil`, `notNil`, `respondsTo:`, `subclassResponsibility` → Protocol methods
-//! - **Dynamic dispatch**: `perform:`, `perform:withArgs:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
+//! - **Dynamic dispatch**: `perform:`, `perform:withArguments:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
 //! at runtime), these intrinsics generate efficient inline code because they are
@@ -288,7 +288,7 @@ impl CoreErlangGenerator {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
                 match selector_name.as_str() {
-                    "perform:withArguments:" | "perform:withArgs:" if arguments.len() == 2 => {
+                    "perform:withArguments:" if arguments.len() == 2 => {
                         // Dynamic message dispatch: receiver perform: selector withArguments: args
                         // Handles both actors (async via async_send) and primitives (sync via beamtalk_primitive:send)
                         let receiver_var = self.fresh_var("Receiver");

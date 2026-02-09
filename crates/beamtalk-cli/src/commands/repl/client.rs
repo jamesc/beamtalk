@@ -5,61 +5,36 @@
 //!
 //! **DDD Context:** REPL — Client Communication
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
-use std::time::Duration;
+use miette::{Result, miette};
 
-use miette::{IntoDiagnostic, Result, miette};
-
-use super::{CONNECT_TIMEOUT_MS, ReplResponse, next_msg_id};
+use super::ReplResponse;
+use crate::commands::protocol::{self, ProtocolClient};
 
 pub(super) struct ReplClient {
-    stream: TcpStream,
-    reader: BufReader<TcpStream>,
+    inner: ProtocolClient,
     last_loaded_file: Option<String>,
 }
 
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(super) fn connect(port: u16) -> Result<Self> {
-        let addr = format!("127.0.0.1:{port}");
-        let stream = TcpStream::connect_timeout(
-            &addr.parse().into_diagnostic()?,
-            Duration::from_millis(CONNECT_TIMEOUT_MS),
-        )
-        .map_err(|e| miette!("Failed to connect to REPL backend at {addr}: {e}"))?;
-
-        // Clone for reader
-        let reader_stream = stream.try_clone().into_diagnostic()?;
-        let reader = BufReader::new(reader_stream);
-
+        let inner = ProtocolClient::connect(port, None)?;
         Ok(Self {
-            stream,
-            reader,
+            inner,
             last_loaded_file: None,
         })
     }
 
     /// Send a protocol request and receive the response.
     pub(super) fn send_request(&mut self, request: &serde_json::Value) -> Result<ReplResponse> {
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        serde_json::from_str(&response_line)
-            .map_err(|e| miette!("Failed to parse REPL response: {e}\nRaw: {response_line}"))
+        self.inner.send_request(request)
     }
 
     /// Send an eval request and receive the response.
     pub(super) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "eval",
-            "id": next_msg_id(),
+            "id": protocol::next_msg_id(),
             "code": expression
         }))
     }
@@ -68,7 +43,7 @@ impl ReplClient {
     pub(super) fn clear_bindings(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "clear",
-            "id": next_msg_id()
+            "id": protocol::next_msg_id()
         }))
     }
 
@@ -76,7 +51,7 @@ impl ReplClient {
     pub(super) fn get_bindings(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "bindings",
-            "id": next_msg_id()
+            "id": protocol::next_msg_id()
         }))
     }
 
@@ -84,7 +59,7 @@ impl ReplClient {
     pub(super) fn load_file(&mut self, path: &str) -> Result<ReplResponse> {
         let response = self.send_request(&serde_json::json!({
             "op": "load-file",
-            "id": next_msg_id(),
+            "id": protocol::next_msg_id(),
             "path": path
         }))?;
 
@@ -109,7 +84,7 @@ impl ReplClient {
     pub(super) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "actors",
-            "id": next_msg_id()
+            "id": protocol::next_msg_id()
         }))
     }
 
@@ -117,7 +92,7 @@ impl ReplClient {
     pub(super) fn kill_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "kill",
-            "id": next_msg_id(),
+            "id": protocol::next_msg_id(),
             "actor": pid_str
         }))
     }
@@ -126,7 +101,7 @@ impl ReplClient {
     pub(super) fn list_modules(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "modules",
-            "id": next_msg_id()
+            "id": protocol::next_msg_id()
         }))
     }
 
@@ -134,7 +109,7 @@ impl ReplClient {
     pub(super) fn unload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "unload",
-            "id": next_msg_id(),
+            "id": protocol::next_msg_id(),
             "module": module_name
         }))
     }
@@ -143,7 +118,7 @@ impl ReplClient {
     pub(super) fn list_sessions(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "sessions",
-            "id": next_msg_id()
+            "id": protocol::next_msg_id()
         }))
     }
 
@@ -151,7 +126,7 @@ impl ReplClient {
     pub(super) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
             "op": "inspect",
-            "id": next_msg_id(),
+            "id": protocol::next_msg_id(),
             "actor": pid_str
         }))
     }

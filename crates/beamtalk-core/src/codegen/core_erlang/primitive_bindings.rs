@@ -159,15 +159,14 @@ impl PrimitiveBindingTable {
     /// Returns the runtime module name for a class's selector-based primitives.
     ///
     /// Convention: class name → `snake_case` with `beamtalk_` prefix.
+    /// Uses `to_module_name()` for proper `CamelCase` → `snake_case` conversion,
+    /// which handles multi-word names like `TranscriptStream` → `beamtalk_transcript_stream`.
     ///
     /// BT-340: True/False now have their own compiled modules (`beamtalk_true`,
     /// `beamtalk_false`) instead of sharing `beamtalk_boolean`.
     #[must_use]
     pub fn runtime_module_for_class(class_name: &str) -> String {
-        match class_name {
-            "SequenceableCollection" => "beamtalk_sequenceable_collection".to_string(),
-            _ => format!("beamtalk_{}", class_name.to_lowercase()),
-        }
+        format!("beamtalk_{}", super::to_module_name(class_name))
     }
 }
 
@@ -451,6 +450,15 @@ mod tests {
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("SequenceableCollection"),
             "beamtalk_sequenceable_collection"
+        );
+        // BT-375: Actor-based singletons
+        assert_eq!(
+            PrimitiveBindingTable::runtime_module_for_class("TranscriptStream"),
+            "beamtalk_transcript_stream"
+        );
+        assert_eq!(
+            PrimitiveBindingTable::runtime_module_for_class("SystemDictionary"),
+            "beamtalk_system_dictionary"
         );
     }
 

@@ -110,45 +110,62 @@ nil ~= nil
 //
 // For actors (stateful objects), `==` tests whether two references
 // point to the same process (pid equality)
-//
-// NOTE: Requires actor spawn support. This documents expected behavior.
-//
-// // @load tests/e2e/fixtures/counter.bt
-//
-// a := Counter spawn
-// b := a
-// c := Counter spawn
-//
-// a == b
-// // => true (same reference)
-//
-// a == c
-// // => false (different processes)
-//
-// a ~= c
-// // => true (different processes)
+
+// @load tests/e2e/fixtures/counter.bt
+
+a := Counter spawn
+// => _
+
+b := a
+// => _
+
+c := Counter spawn
+// => _
+
+// Same reference
+a == b
+// => true
+
+// Different processes
+a == c
+// => false
+
+a ~= c
+// => true
 
 // ===========================================================================
 // DOESNOTUNDERSTAND TESTS
 // ===========================================================================
 //
 // When an object receives a message it doesn't understand, the runtime
-// calls `doesNotUnderstand:args:` which raises MessageNotUnderstood by default
+// calls `doesNotUnderstand:args:` which raises a does_not_understand error.
+// (See also errors.bt for additional doesNotUnderstand coverage)
+
+// Send unknown message to integer
+42 nonExistentMethod
+// => ERROR: does_not_understand
+
+// Send unknown message to string
+'hello' nonExistentMethod
+// => ERROR: does_not_understand
+
+// ===========================================================================
+// PERFORM:WITHARGUMENTS: TESTS
+// ===========================================================================
 //
-// Subclasses can override this to implement proxies or custom dispatch
-//
-// NOTE: Requires doesNotUnderstand support in compiler/runtime
-//
-// // Send unknown message to integer
-// 42 unknownMessage
-// // => Error: MessageNotUnderstood: Integer does not understand #unknownMessage
-//
-// // Proxy pattern (requires ProtoObject subclass support)
-// ProtoObject subclass: Proxy
-//   state: target
-//
-//   doesNotUnderstand: selector args: arguments =>
-//     target perform: selector withArguments: arguments
+// Dynamic dispatch - send a message to an object at runtime
+
+// Primitive: perform binary operation dynamically
+42 perform: #+ withArguments: #(3)
+// => 45
+
+// Primitive: perform unary dynamically
+42 perform: #asString withArguments: #()
+// => 42
+
+// String: perform binary operation dynamically
+'hello' perform: #++ withArguments: #(' world')
+// => hello world
 
 // ===========================================================================
 // INHERITANCE TESTS
@@ -156,16 +173,16 @@ nil ~= nil
 //
 // All classes (Actor, Object, etc.) should inherit from ProtoObject
 // Method lookup should terminate at ProtoObject
-//
-// NOTE: Requires compiler support for explicit inheritance chains
-//
-// // Actor inherits from ProtoObject
-// Actor superclass
-// // => ProtoObject
-//
-// // ProtoObject has no superclass
-// ProtoObject superclass
-// // => nil
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Actor class has superclass
+Counter superclass
+// => Actor
+
+// Root class has no superclass
+ProtoObject superclass
+// => nil
 
 // ===========================================================================
 // IMPLEMENTATION STATUS
@@ -175,5 +192,7 @@ nil ~= nil
 // ✅ Compiler support for `class` message
 // ✅ Compiler support for `==` and `~=` operators
 // ✅ Compiler support for `doesNotUnderstand:args:`
+// ✅ Compiler support for `perform:withArguments:`
 // ✅ Runtime dispatch for ProtoObject methods
-// ✅ Method lookup chain terminating at ProtoObject
+// ✅ Actor identity (== / ~=) tests
+// ✅ Inheritance chain (superclass) tests
