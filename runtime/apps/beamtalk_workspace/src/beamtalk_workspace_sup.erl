@@ -14,12 +14,14 @@
 %%% Architecture (from ADR 0004, implemented in BT-262):
 %%% ```
 %%% beamtalk_workspace_sup
-%%%   ├─ beamtalk_actor_registry   % Workspace-wide actor registry
-%%%   ├─ beamtalk_repl_server      % TCP server (session-per-connection)
-%%%   ├─ beamtalk_idle_monitor     % Tracks activity, self-terminates if idle
-%%%   ├─ beamtalk_workspace_meta   % Metadata (project path, created_at)
-%%%   ├─ beamtalk_actor_sup        % Supervises user actors
-%%%   └─ beamtalk_session_sup      % Supervises session shell processes
+%%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
+%%%   ├─ beamtalk_transcript_stream   % Transcript singleton (ADR 0010)
+%%%   ├─ beamtalk_system_dictionary   % Beamtalk singleton (ADR 0010)
+%%%   ├─ beamtalk_actor_registry      % Workspace-wide actor registry
+%%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
+%%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
+%%%   ├─ beamtalk_actor_sup           % Supervises user actors
+%%%   └─ beamtalk_session_sup         % Supervises session shell processes
 %%% ```
 
 -module(beamtalk_workspace_sup).
@@ -72,6 +74,26 @@ init(Config) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_meta]
+        },
+        
+        %% Singleton actors — workspace bindings (ADR 0010 Phase 2)
+        %% Must start after beamtalk_stdlib (guaranteed by OTP app dependency)
+        %% Each registers itself in init/1: persistent_term + register/2
+        #{
+            id => beamtalk_transcript_stream,
+            start => {beamtalk_transcript_stream, start_link_singleton, [1000]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_transcript_stream]
+        },
+        #{
+            id => beamtalk_system_dictionary,
+            start => {beamtalk_system_dictionary, start_link_singleton, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_system_dictionary]
         },
         
         %% Actor registry (workspace-wide, shared across sessions)

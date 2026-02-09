@@ -95,9 +95,11 @@ test: test-rust test-runtime
 
 # Run Rust tests (unit + integration, skip slow E2E)
 test-rust:
-    @echo "🧪 Running Rust tests (fast)..."
-    @cargo test --all-targets 2>&1 | awk '/Running.*\(/ { s=$0; sub(/.*Running /, "", s); sub(/unittests /, "", s); split(s, b, / \(/); src=b[1]; crate=b[2]; gsub(/.*\//, "", crate); sub(/-[a-f0-9]+\)$/, "", crate); label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print }' || true
-    @echo "✅ Rust tests complete"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Running Rust tests (fast)..."
+    cargo test --all-targets 2>&1 | awk '/Running.*\(/ { s=$0; sub(/.*Running /, "", s); sub(/unittests /, "", s); split(s, b, / \(/); src=b[1]; crate=b[2]; gsub(/.*\//, "", crate); sub(/-[a-f0-9]+\)$/, "", crate); label=crate "::" src } /^test result:/ { sub(/^test result: ok\. /, ""); printf "  %-45s %s\n", label, $0 } /^warning:/ { print } /^test result: FAILED/ { failed=1 } END { if (failed) exit 1 }'
+    echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
 test-e2e: build-stdlib _clean-daemon-state
@@ -122,9 +124,9 @@ test-runtime:
     set -euo pipefail
     cd runtime
     echo "🧪 Running Erlang runtime unit tests..."
-    # Only run beamtalk_runtime tests (stdlib has no test modules)
+    # Only run beamtalk_runtime and beamtalk_workspace tests (stdlib has no test modules)
     # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime 2>&1); then
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
         # Check if tests actually failed (as opposed to being cancelled)
         if echo "$OUTPUT" | grep -qE "[1-9][0-9]* failures"; then
             # Show full output only on real failures

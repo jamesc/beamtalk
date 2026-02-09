@@ -33,7 +33,7 @@
 -include("beamtalk.hrl").
 
 %% API
--export([start_link/0, start_link/1, spawn/0, spawn/1]).
+-export([start_link/0, start_link/1, start_link_singleton/1, spawn/0, spawn/1]).
 -export([has_method/1]).
 
 %% gen_server callbacks
@@ -46,10 +46,11 @@
 -type max_buffer() :: pos_integer().
 
 -record(state, {
-    buffer      :: queue:queue(binary()),
-    buffer_size :: non_neg_integer(),
-    max_buffer  :: max_buffer(),
-    subscribers :: #{pid() => reference()}
+    buffer       :: queue:queue(binary()),
+    buffer_size  :: non_neg_integer(),
+    max_buffer   :: max_buffer(),
+    subscribers  :: #{pid() => reference()},
+    is_singleton :: boolean()
 }).
 
 -type state() :: #state{}.
@@ -67,6 +68,12 @@ start_link() ->
 -spec start_link(max_buffer()) -> {ok, pid()} | {error, term()}.
 start_link(MaxBuffer) ->
     gen_server:start_link(?MODULE, [MaxBuffer], []).
+
+%% @doc Start a linked, named TranscriptStream singleton for workspace use.
+%% Registers as 'Transcript' via register/2 and persistent_term binding.
+-spec start_link_singleton(max_buffer()) -> {ok, pid()} | {error, term()}.
+start_link_singleton(MaxBuffer) ->
+    gen_server:start_link({local, 'Transcript'}, ?MODULE, [{singleton, MaxBuffer}], []).
 
 %% @doc Spawn an unlinked TranscriptStream with default buffer size.
 -spec spawn() -> {ok, pid()} | {error, term()}.
@@ -93,13 +100,24 @@ has_method(_)            -> false.
 %%% ============================================================================
 
 %% @private
--spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
+-spec init([max_buffer()] | [{singleton, max_buffer()}]) -> {ok, state()} | {stop, term()}.
+init([{singleton, MaxBuffer}]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
+    %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
+    persistent_term:put({beamtalk_binding, 'Transcript'}, self()),
+    {ok, #state{
+        buffer       = queue:new(),
+        buffer_size  = 0,
+        max_buffer   = MaxBuffer,
+        subscribers  = #{},
+        is_singleton = true
+    }};
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     {ok, #state{
-        buffer      = queue:new(),
-        buffer_size = 0,
-        max_buffer  = MaxBuffer,
-        subscribers = #{}
+        buffer       = queue:new(),
+        buffer_size  = 0,
+        max_buffer   = MaxBuffer,
+        subscribers  = #{},
+        is_singleton = false
     }};
 init([MaxBuffer]) ->
     {stop, {invalid_max_buffer, MaxBuffer}}.
@@ -148,6 +166,10 @@ handle_info(_Info, State) ->
 
 %% @private
 -spec terminate(term(), state()) -> ok.
+terminate(_Reason, #state{is_singleton = true}) ->
+    %% Clean up workspace binding on shutdown
+    persistent_term:erase({beamtalk_binding, 'Transcript'}),
+    ok;
 terminate(_Reason, _State) ->
     ok.
 
