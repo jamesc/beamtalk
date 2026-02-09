@@ -112,7 +112,7 @@ stdlib_loop() ->
 register_number_class() ->
     ClassInfo = #{
         name => 'Number',
-        module => undefined,
+        module => bt_stdlib_number,
         superclass => 'Object',
         is_abstract => true,
         instance_methods => #{
@@ -156,13 +156,8 @@ register_integer_class() ->
             negated => #{arity => 0},
             '%' => #{arity => 1},
             '**' => #{arity => 1},
-            isZero => #{arity => 0},
-            isPositive => #{arity => 0},
-            isNegative => #{arity => 0},
             isEven => #{arity => 0},
             isOdd => #{arity => 0},
-            sign => #{arity => 0},
-            'between:and:' => #{arity => 2},
             'min:' => #{arity => 1},
             'max:' => #{arity => 1},
             'timesRepeat:' => #{arity => 1},
@@ -407,10 +402,6 @@ register_float_class() ->
             isNaN => #{arity => 0},
             isInfinite => #{arity => 0},
             isZero => #{arity => 0},
-            isPositive => #{arity => 0},
-            isNegative => #{arity => 0},
-            sign => #{arity => 0},
-            'between:and:' => #{arity => 2},
             describe => #{arity => 0}
         },
         class_methods => #{},

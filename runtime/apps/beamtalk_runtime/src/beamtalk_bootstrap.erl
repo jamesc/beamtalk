@@ -118,7 +118,7 @@ init(Parent) ->
         %% Step 3: Create Number class (abstract numeric superclass, inherits from Object)
         NumberClassInfo = #{
             name => 'Number',
-            module => undefined,
+            module => bt_stdlib_number,
             superclass => 'Object',
             is_abstract => true,
             instance_methods => #{

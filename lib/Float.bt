@@ -34,12 +34,8 @@ sealed Number subclass: Float
   isNaN => false
   isInfinite => false
 
-  // Numeric protocol (from Number)
+  // Override: Float needs exact 0.0 comparison (= is type-strict)
   isZero => self = 0.0
-  isPositive => self > 0.0
-  isNegative => self < 0.0
-  sign => (self > 0.0) ifTrue: [1] ifFalse: [(self < 0.0) ifTrue: [-1] ifFalse: [0]]
-  between: min and: max => (self >= min) and: [self <= max]
 
   // Conversion
   asInteger => @primitive 'asInteger'

@@ -74,9 +74,6 @@ impl CoreErlangGenerator {
             return self.generate_beamtalk_module(class);
         }
 
-        // BT-340: Detect primitive types (native Erlang values, not map-backed)
-        let is_primitive = Self::is_primitive_type(&class.name.name);
-
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
         // If so, skip auto-generating constructors to avoid duplicate definitions
@@ -108,12 +105,10 @@ impl CoreErlangGenerator {
             exports.push(format!("'{mangled}'/{arity}"));
         }
 
-        // BT-340: Primitive types export dispatch/3 and has_method/1
-        // for runtime dispatch via beamtalk_primitive:send/3
-        if is_primitive {
-            exports.push("'dispatch'/3".to_string());
-            exports.push("'has_method'/1".to_string());
-        }
+        // All value types export dispatch/3 and has_method/1
+        // for runtime dispatch via superclass delegation chain
+        exports.push("'dispatch'/3".to_string());
+        exports.push("'has_method'/1".to_string());
 
         // Module header
         writeln!(
@@ -143,13 +138,12 @@ impl CoreErlangGenerator {
             writeln!(self.output)?;
         }
 
-        // BT-340: Generate dispatch/3 and has_method/1 for primitive types
-        if is_primitive {
-            self.generate_primitive_dispatch(class)?;
-            writeln!(self.output)?;
-            self.generate_primitive_has_method(class)?;
-            writeln!(self.output)?;
-        }
+        // Generate dispatch/3 and has_method/1 for all value types
+        // (superclass delegation chain — same pattern as actors)
+        self.generate_primitive_dispatch(class)?;
+        writeln!(self.output)?;
+        self.generate_primitive_has_method(class)?;
+        writeln!(self.output)?;
 
         // Module end
         writeln!(self.output, "end")?;
@@ -293,6 +287,27 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// Computes the module name for a superclass in the dispatch chain.
+    ///
+    /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
+    /// delegate to). For all other classes, applies the same naming convention
+    /// as `build_stdlib::module_name_from_path`:
+    /// - Primitive types → `beamtalk_{snake_case}`
+    /// - Non-primitive types → `bt_stdlib_{snake_case}`
+    ///
+    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
+    fn superclass_module_name(superclass: &str) -> Option<String> {
+        if superclass == "ProtoObject" {
+            return None;
+        }
+        let snake = super::util::to_module_name(superclass);
+        if Self::is_primitive_type(superclass) {
+            Some(format!("beamtalk_{snake}"))
+        } else {
+            Some(format!("bt_stdlib_{snake}"))
+        }
+    }
+
     /// Encode a string as a Core Erlang binary literal.
     /// Core Erlang uses `#{#<charcode>(8,1,'integer',['unsigned'|['big']]),..}#`
     fn core_erlang_binary(s: &str) -> String {
@@ -306,16 +321,18 @@ impl CoreErlangGenerator {
         format!("#{{{}}}#", segments.join(","))
     }
 
-    /// Generates the `dispatch/3` function for a primitive type.
+    /// Generates the `dispatch/3` function for a value type.
     ///
     /// This routes selectors to individual method functions, provides reflection
     /// methods (class, respondsTo:, instVarNames, instVarAt:, instVarAt:put:,
     /// perform:, perform:withArgs:), checks the extension registry for unknown
-    /// selectors, and raises structured `#beamtalk_error{}` for `does_not_understand`.
+    /// selectors, and delegates to superclass dispatch/3 for inherited methods.
+    /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
     #[allow(clippy::too_many_lines)]
     fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
+        let superclass_mod = Self::superclass_module_name(&class.superclass.name);
 
         writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, Self) ->")?;
         self.indent += 1;
@@ -486,7 +503,7 @@ impl CoreErlangGenerator {
             self.indent -= 1;
         }
 
-        // Default case: does_not_understand with extension fallback
+        // Default case: extension fallback, then superclass delegation
         self.write_indent()?;
         writeln!(self.output, "<_Other> when 'true' ->")?;
         self.indent += 1;
@@ -505,25 +522,38 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "<'not_found'> when 'true' ->")?;
         self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', '{class_name}') in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in"
-        )?;
-        self.write_indent()?;
-        let dnu_hint =
-            Self::core_erlang_binary("Check spelling or use 'respondsTo:' to verify method exists");
-        writeln!(
-            self.output,
-            "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(DnuErr2)")?;
+
+        if let Some(ref super_mod) = superclass_mod {
+            // Delegate to superclass dispatch/3
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "call '{super_mod}':'dispatch'(Selector, Args, Self)"
+            )?;
+        } else {
+            // Root of hierarchy — raise does_not_understand
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', '{class_name}') in"
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in"
+            )?;
+            self.write_indent()?;
+            let dnu_hint = Self::core_erlang_binary(
+                "Check spelling or use 'respondsTo:' to verify method exists",
+            );
+            writeln!(
+                self.output,
+                "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "call 'erlang':'error'(DnuErr2)")?;
+        }
+
         self.indent -= 1;
         self.indent -= 1;
         self.write_indent()?;
@@ -541,11 +571,13 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates the `has_method/1` function for a primitive type.
+    /// Generates the `has_method/1` function for a value type.
     ///
-    /// Returns `true` for all known selectors (class-defined + reflection).
+    /// Returns `true` for all known selectors (class-defined + reflection +
+    /// extensions + superclass methods via delegation).
     fn generate_primitive_has_method(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
+        let superclass_mod = Self::superclass_module_name(&class.superclass.name);
 
         writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
         self.indent += 1;
@@ -583,7 +615,7 @@ impl CoreErlangGenerator {
             selectors.push(format!("'{mangled}'"));
         }
 
-        // Check lists:member first, then extension registry if false
+        // Check lists:member first, then extensions, then superclass
         writeln!(
             self.output,
             "case call 'lists':'member'(Selector, [{}]) of",
@@ -593,10 +625,32 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
         self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
         writeln!(
             self.output,
-            "<'false'> when 'true' -> call 'beamtalk_extensions':'has'('{class_name}', Selector)"
+            "case call 'beamtalk_extensions':'has'('{class_name}', Selector) of"
         )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
+        self.write_indent()?;
+
+        if let Some(ref super_mod) = superclass_mod {
+            writeln!(
+                self.output,
+                "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)"
+            )?;
+        } else {
+            writeln!(self.output, "<'false'> when 'true' -> 'false'")?;
+        }
+
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "end")?;
