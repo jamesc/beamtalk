@@ -53,13 +53,20 @@ Beamtalk respondsTo: #allClasses
 // ===========================================================================
 
 // Beamtalk allClasses returns a list including core classes
-// (await the future to get the actual result)
-classes := Beamtalk allClasses
+classes := (Beamtalk allClasses) await
 // => _
 
+// Validate allClasses returns a non-empty list
+classes isEmpty
+// => false
+
 // Beamtalk version returns a string
-version := Beamtalk version
+version := (Beamtalk version) await
 // => _
+
+// Validate version is a non-empty string
+version isEmpty
+// => false
 
 // ===========================================================================
 // TRANSCRIPT BINDING — CASCADE (SEMICOLON CHAINING)
