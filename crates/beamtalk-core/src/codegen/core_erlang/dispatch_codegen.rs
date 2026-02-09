@@ -36,6 +36,17 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, util::to_
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
+/// BT-374 / ADR 0010: Compile-time known workspace binding names.
+///
+/// These names resolve to workspace singletons via `persistent_term` rather than
+/// direct module function calls. The set is static — dynamic bindings are out of scope.
+const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk"];
+
+/// Returns true if the given class name is a workspace binding (ADR 0010).
+pub(super) fn is_workspace_binding(name: &str) -> bool {
+    WORKSPACE_BINDING_NAMES.contains(&name)
+}
+
 impl CoreErlangGenerator {
     /// Generates code for a message send.
     ///
@@ -170,10 +181,20 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-215: Class-level message sends (e.g., Beamtalk allClasses, Point new)
-        // For now, generate direct function calls to class methods
-        // Future: Full metaclass dispatch through class objects
+        // BT-374 / ADR 0010: Workspace binding dispatch.
+        // Check if ClassReference is a workspace binding before falling through to
+        // direct module function calls. Workspace bindings use persistent_term lookup.
+        // BT-215: Class-level message sends (e.g., Point new, Counter spawn)
+        // For non-binding classes, generate direct function calls to class methods.
         if let Expression::ClassReference { name, .. } = receiver {
+            if is_workspace_binding(&name.name) {
+                if self.workspace_mode {
+                    return self.generate_workspace_binding_send(&name.name, selector, arguments);
+                }
+                return Err(CodeGenError::WorkspaceBindingInBatchMode {
+                    name: name.name.to_string(),
+                });
+            }
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
@@ -821,6 +842,61 @@ impl CoreErlangGenerator {
         )?;
         self.generate_expression(&arguments[0])?;
         write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates a workspace binding message send (BT-374 / ADR 0010).
+    ///
+    /// Workspace bindings (`Transcript`, `Beamtalk`) are singleton actors whose
+    /// PIDs are stored in `persistent_term`. The generated code:
+    ///
+    /// 1. Looks up the PID: `persistent_term:get({beamtalk_binding, 'Name'})`
+    /// 2. Creates a future: `beamtalk_future:new()`
+    /// 3. Sends async message: `beamtalk_actor:async_send(Pid, Selector, Args, Future)`
+    /// 4. Returns the future
+    ///
+    /// ```erlang
+    /// let Pid = call 'persistent_term':'get'({'beamtalk_binding', 'Transcript'}) in
+    /// let Future = call 'beamtalk_future':'new'() in
+    /// let _ = call 'beamtalk_actor':'async_send'(Pid, 'show:', [Arg], Future) in Future
+    /// ```
+    pub(super) fn generate_workspace_binding_send(
+        &mut self,
+        binding_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let pid_var = self.fresh_var("BindingPid");
+        let future_var = self.fresh_var("Future");
+        let selector_atom = selector.to_erlang_atom();
+
+        // Look up binding PID from persistent_term
+        write!(
+            self.output,
+            "let {pid_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+        )?;
+
+        // Create future for async result
+        write!(
+            self.output,
+            "let {future_var} = call 'beamtalk_future':'new'() in "
+        )?;
+
+        // Send async message via beamtalk_actor:async_send
+        write!(
+            self.output,
+            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
+        )?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "], {future_var}) in {future_var}")?;
+
         Ok(())
     }
 

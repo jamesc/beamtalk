@@ -1,0 +1,159 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Logger",
+                span: Span {
+                    start: 146,
+                    end: 152,
+                },
+            },
+            superclass: Identifier {
+                name: "Actor",
+                span: Span {
+                    start: 130,
+                    end: 135,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "run",
+                    ),
+                    parameters: [],
+                    body: [
+                        Cascade {
+                            receiver: MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 162,
+                                            end: 172,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 162,
+                                        end: 172,
+                                    },
+                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 173,
+                                                end: 178,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        String(
+                                            "Hello",
+                                        ),
+                                        Span {
+                                            start: 179,
+                                            end: 186,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 162,
+                                    end: 186,
+                                },
+                            },
+                            messages: [
+                                CascadeMessage {
+                                    selector: Unary(
+                                        "cr",
+                                    ),
+                                    arguments: [],
+                                    span: Span {
+                                        start: 188,
+                                        end: 190,
+                                    },
+                                },
+                                CascadeMessage {
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "show:",
+                                                span: Span {
+                                                    start: 192,
+                                                    end: 197,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            String(
+                                                "World",
+                                            ),
+                                            Span {
+                                                start: 198,
+                                                end: 205,
+                                            },
+                                        ),
+                                    ],
+                                    span: Span {
+                                        start: 192,
+                                        end: 205,
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 162,
+                                end: 205,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 155,
+                        end: 205,
+                    },
+                },
+            ],
+            span: Span {
+                start: 130,
+                end: 205,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 130,
+        end: 205,
+    },
+    leading_comments: [
+        Comment {
+            content: "// BT-374: Workspace binding cascade dispatch.",
+            span: Span {
+                start: 130,
+                end: 135,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Cascade messages to a workspace binding should use persistent_term PID lookup.",
+            span: Span {
+                start: 130,
+                end: 135,
+            },
+            kind: Line,
+        },
+    ],
+}

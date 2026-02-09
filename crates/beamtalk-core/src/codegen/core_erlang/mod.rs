@@ -178,6 +178,18 @@ pub enum CodeGenError {
         /// Source location.
         location: String,
     },
+
+    /// BT-374 / ADR 0010: Workspace binding used in batch compilation mode.
+    #[error(
+        "{name} is a workspace binding, not available in batch compilation.\n\n\
+             Workspace bindings like Transcript and Beamtalk are only available in the REPL \
+             (interactive workspace context).\n\n\
+             Fix: Use `beamtalk repl` to access workspace bindings interactively."
+    )]
+    WorkspaceBindingInBatchMode {
+        /// The binding name (e.g., "Transcript", "Beamtalk").
+        name: String,
+    },
 }
 
 /// Result type for code generation operations.
@@ -273,6 +285,11 @@ pub fn generate_with_name_and_source(
 /// pragma-driven dispatch information from the compiled stdlib. The codegen
 /// consults this table before falling back to hardcoded dispatch tables.
 ///
+/// BT-374 / ADR 0010: When `workspace_mode` is true, workspace binding names
+/// (`Transcript`, `Beamtalk`) generate `persistent_term` lookup + async actor
+/// send. Stdlib compilation should set this to true since stdlib classes run
+/// in workspace context.
+///
 /// When `source_text` is provided, method source is captured in class registration
 /// metadata for `CompiledMethod` introspection (BT-101).
 ///
@@ -284,9 +301,11 @@ pub fn generate_with_bindings(
     module_name: &str,
     bindings: PrimitiveBindingTable,
     source_text: Option<&str>,
+    workspace_mode: bool,
 ) -> Result<String> {
     let mut generator = CoreErlangGenerator::with_bindings(module_name, bindings);
     generator.source_text = source_text.map(String::from);
+    generator.workspace_mode = workspace_mode;
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -320,6 +339,53 @@ pub fn generate_with_bindings(
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.generate_repl_module(expression)?;
+    Ok(generator.output)
+}
+
+/// Generates Core Erlang code with workspace mode enabled.
+///
+/// BT-374 / ADR 0010: When `workspace_mode` is true, workspace binding names
+/// (`Transcript`, `Beamtalk`) generate `persistent_term` lookup + async actor
+/// send instead of direct module function calls. When false (batch compile),
+/// workspace binding names produce a compile error.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError::WorkspaceBindingInBatchMode`] if workspace bindings
+/// are used in batch mode. Returns other [`CodeGenError`] variants for other failures.
+pub fn generate_with_workspace(
+    module: &Module,
+    module_name: &str,
+    workspace_mode: bool,
+) -> Result<String> {
+    generate_with_workspace_and_source(module, module_name, workspace_mode, None)
+}
+
+/// Like [`generate_with_workspace`] but also captures source text for
+/// `CompiledMethod` introspection (BT-101).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError::WorkspaceBindingInBatchMode`] if workspace bindings
+/// are used in batch mode. Returns other [`CodeGenError`] variants for other failures.
+pub fn generate_with_workspace_and_source(
+    module: &Module,
+    module_name: &str,
+    workspace_mode: bool,
+    source_text: Option<&str>,
+) -> Result<String> {
+    let mut generator = CoreErlangGenerator::new(module_name);
+    generator.workspace_mode = workspace_mode;
+    generator.source_text = source_text.map(String::from);
+
+    let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
+
+    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?;
+    } else {
+        generator.generate_value_type_module(module)?;
+    }
+
     Ok(generator.output)
 }
 
@@ -405,6 +471,11 @@ pub(super) struct CoreErlangGenerator {
     /// BT-403: Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     sealed_method_selectors: std::collections::HashSet<String>,
+    /// BT-374 / ADR 0010: Whether workspace bindings (`Transcript`, `Beamtalk`) are available.
+    /// When true (REPL context), workspace binding class references generate
+    /// `persistent_term:get` + async actor send. When false (batch compile),
+    /// workspace binding names produce a compile error.
+    workspace_mode: bool,
 }
 
 impl CoreErlangGenerator {
@@ -424,6 +495,7 @@ impl CoreErlangGenerator {
             class_identity: None,
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
+            workspace_mode: false,
         }
     }
 
@@ -443,6 +515,7 @@ impl CoreErlangGenerator {
             class_identity: None,
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
+            workspace_mode: false,
         }
     }
 
@@ -3400,11 +3473,13 @@ end
 
     #[test]
     fn test_class_method_call_generation() {
-        // BT-215: Test that ClassReference message sends generate direct function calls
-        use crate::ast::{Expression, Identifier, MessageSelector, Module};
+        // BT-215: Test that ClassReference message sends generate appropriate code
+        // BT-374: Workspace bindings (Beamtalk, Transcript) use persistent_term
+        //         in REPL context; non-bindings use direct function calls
+        use crate::ast::{Expression, Identifier, MessageSelector};
         use crate::source_analysis::Span;
 
-        // Create expression: Beamtalk allClasses
+        // Test 1: Workspace binding (Beamtalk) generates persistent_term lookup in REPL
         let expr = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Beamtalk", Span::new(0, 8)),
@@ -3415,30 +3490,43 @@ end
             span: Span::new(0, 20),
         };
 
-        let module = Module {
-            expressions: vec![expr],
-            classes: vec![],
-            span: Span::new(0, 20),
-            leading_comments: vec![],
+        let code = generate_repl_expression(&expr, "repl_eval").expect("codegen should succeed");
+
+        // Workspace binding should use persistent_term lookup + async actor send
+        assert!(
+            code.contains("persistent_term"),
+            "Workspace binding should use persistent_term in REPL. Got:\n{code}"
+        );
+        assert!(
+            code.contains("beamtalk_binding"),
+            "Should reference beamtalk_binding. Got:\n{code}"
+        );
+        assert!(
+            code.contains("async_send"),
+            "Workspace binding should use async_send. Got:\n{code}"
+        );
+
+        // Test 2: Non-binding class (Counter) generates direct function call in REPL
+        let expr2 = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Point", Span::new(0, 5)),
+                span: Span::new(0, 5),
+            }),
+            selector: MessageSelector::Unary("new".into()),
+            arguments: vec![],
+            span: Span::new(0, 10),
         };
 
-        let code = generate_repl_expression(&module.expressions[0], "repl_eval")
-            .expect("codegen should succeed");
+        let code2 = generate_repl_expression(&expr2, "repl_eval2")
+            .expect("codegen should succeed for non-binding class");
 
-        // Should generate direct function call, not async message protocol
         assert!(
-            code.contains("call 'beamtalk':'allClasses'()"),
-            "Should generate direct function call to beamtalk:allClasses. Got:\n{code}"
-        );
-
-        // Should NOT contain async message protocol
-        assert!(
-            !code.contains("beamtalk_future"),
-            "Should not use async protocol for class methods. Got:\n{code}"
+            code2.contains("call 'point':'new'()"),
+            "Non-binding class should generate direct function call. Got:\n{code2}"
         );
         assert!(
-            !code.contains("gen_server':'cast"),
-            "Should not use gen_server:cast for class methods. Got:\n{code}"
+            !code2.contains("persistent_term"),
+            "Non-binding class should NOT use persistent_term. Got:\n{code2}"
         );
     }
 
@@ -3811,7 +3899,7 @@ end
         };
 
         let bindings = primitive_bindings::PrimitiveBindingTable::new();
-        let result = generate_with_bindings(&module, "point", bindings, None);
+        let result = generate_with_bindings(&module, "point", bindings, None, false);
         assert!(result.is_ok());
         let code = result.unwrap();
         assert!(code.contains("module 'point'"));

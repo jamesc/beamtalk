@@ -413,18 +413,52 @@ impl CoreErlangGenerator {
             ..
         } = receiver
         {
-            // Bind the underlying receiver once
-            let receiver_var = self.fresh_temp_var("Receiver");
-            write!(self.output, "let {receiver_var} = ")?;
-            self.generate_expression(underlying_receiver)?;
-            write!(self.output, " in ")?;
+            // BT-374 / ADR 0010: Workspace binding cascade support.
+            // When the underlying receiver is a workspace binding (e.g., `Transcript show: 'Hello'; cr`),
+            // look up PID from persistent_term instead of extracting from beamtalk_object record.
+            let is_binding_cascade =
+                if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
+                    super::dispatch_codegen::is_workspace_binding(&name.name)
+                } else {
+                    false
+                };
 
-            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
-            let pid_var = self.fresh_temp_var("Pid");
-            write!(
-                self.output,
-                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-            )?;
+            let pid_var = if is_binding_cascade {
+                let binding_name =
+                    if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
+                        &name.name
+                    } else {
+                        unreachable!()
+                    };
+
+                if !self.workspace_mode {
+                    return Err(CodeGenError::WorkspaceBindingInBatchMode {
+                        name: binding_name.to_string(),
+                    });
+                }
+
+                // Look up PID from persistent_term
+                let pid_var = self.fresh_temp_var("BindingPid");
+                write!(
+                    self.output,
+                    "let {pid_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+                )?;
+                pid_var
+            } else {
+                // Bind the underlying receiver once
+                let receiver_var = self.fresh_temp_var("Receiver");
+                write!(self.output, "let {receiver_var} = ")?;
+                self.generate_expression(underlying_receiver)?;
+                write!(self.output, " in ")?;
+
+                // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
+                let pid_var = self.fresh_temp_var("Pid");
+                write!(
+                    self.output,
+                    "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                )?;
+                pid_var
+            };
 
             // Total number of messages in the cascade: first + remaining
             let total_messages = messages.len() + 1;

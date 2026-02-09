@@ -21,7 +21,7 @@ ProtoObject subclass: Object
 
   // Display — pure Beamtalk / structural intrinsics
   printString => @primitive printString
-  inspect => Transcript show: self describe
+  inspect => self describe
   describe => 'an Object'
 
   // Identity and hashing — structural intrinsics

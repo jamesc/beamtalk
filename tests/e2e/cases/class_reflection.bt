@@ -12,6 +12,10 @@
 //
 // Class objects are returned by `Beamtalk classNamed:` and support
 // reflection messages to introspect the class definition.
+//
+// BT-374: Beamtalk is a workspace binding (actor) dispatched via
+// persistent_term. Sends are async and return Futures, so we must
+// `await` to get the actual class object.
 
 // @load lib/Beamtalk.bt
 // @load tests/e2e/fixtures/counter.bt
@@ -24,7 +28,7 @@
 // Look up existing primitive class
 // ---------------------------------------------------------------------------
 
-stringClass := Beamtalk classNamed: #String
+stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 stringClass class_name
@@ -34,17 +38,17 @@ stringClass class_name
 // Look up existing actor class
 // ---------------------------------------------------------------------------
 
-counterClass := Beamtalk classNamed: #Counter
+counterClass := (Beamtalk classNamed: #Counter) await
 // => _
 
 counterClass class_name
 // => Counter
 
 // ---------------------------------------------------------------------------
-// Look up non-existent class returns nil
+// Look up non-existent class returns nil (await the Future)
 // ---------------------------------------------------------------------------
 
-Beamtalk classNamed: #NonExistentClass
+(Beamtalk classNamed: #NonExistentClass) await
 // => nil
 
 // ===========================================================================
@@ -55,7 +59,7 @@ Beamtalk classNamed: #NonExistentClass
 // Get methods list from String class
 // ---------------------------------------------------------------------------
 
-stringClass := Beamtalk classNamed: #String
+stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 methods := stringClass methods
@@ -74,7 +78,7 @@ methods isEmpty
 // This is a known issue with how :load creates class objects
 // See related tests with primitive classes (String, Integer) which work correctly
 
-// counterClass := Beamtalk classNamed: #Counter
+// counterClass := (Beamtalk classNamed: #Counter) await
 // => _
 
 // counterMethods := counterClass methods
@@ -88,7 +92,7 @@ methods isEmpty
 // Get methods list from Integer class
 // ---------------------------------------------------------------------------
 
-intClass := Beamtalk classNamed: #Integer
+intClass := (Beamtalk classNamed: #Integer) await
 // => _
 
 intMethods := intClass methods
@@ -106,7 +110,7 @@ intMethods isEmpty
 // String superclass is Object
 // ---------------------------------------------------------------------------
 
-stringClass := Beamtalk classNamed: #String
+stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 stringClass superclass
@@ -116,7 +120,7 @@ stringClass superclass
 // Counter superclass is Actor
 // ---------------------------------------------------------------------------
 
-counterClass := Beamtalk classNamed: #Counter
+counterClass := (Beamtalk classNamed: #Counter) await
 // => _
 
 counterClass superclass
@@ -126,7 +130,7 @@ counterClass superclass
 // Actor superclass is Object
 // ---------------------------------------------------------------------------
 
-actorClass := Beamtalk classNamed: #Actor
+actorClass := (Beamtalk classNamed: #Actor) await
 // => _
 
 actorClass superclass
@@ -140,7 +144,7 @@ actorClass superclass
 // Get module name for primitive class
 // ---------------------------------------------------------------------------
 
-stringClass := Beamtalk classNamed: #String
+stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 stringClass module_name
@@ -150,7 +154,7 @@ stringClass module_name
 // Get module name for actor class
 // ---------------------------------------------------------------------------
 
-counterClass := Beamtalk classNamed: #Counter
+counterClass := (Beamtalk classNamed: #Counter) await
 // => _
 
 counterClass module_name
@@ -164,19 +168,19 @@ counterClass module_name
 // Class name matches the lookup name
 // ---------------------------------------------------------------------------
 
-stringClass := Beamtalk classNamed: #String
+stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 stringClass class_name
 // => String
 
-integerClass := Beamtalk classNamed: #Integer
+integerClass := (Beamtalk classNamed: #Integer) await
 // => _
 
 integerClass class_name
 // => Integer
 
-trueClass := Beamtalk classNamed: #True
+trueClass := (Beamtalk classNamed: #True) await
 // => _
 
 trueClass class_name
@@ -186,7 +190,7 @@ trueClass class_name
 // IMPLEMENTATION STATUS
 // ===========================================================================
 //
-// ✅ Beamtalk classNamed: - Returns wrapped class object
+// ✅ Beamtalk classNamed: - Returns wrapped class object (async, needs await)
 // ✅ Class methods - Returns list of instance methods
 // ✅ Class class_name - Returns class name atom
 // ✅ Class superclass - Returns superclass name atom
