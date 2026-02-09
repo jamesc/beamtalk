@@ -1,0 +1,71 @@
+// Dictionary primitive tests (BT-418)
+// Dictionaries are Erlang maps — key-value collections.
+
+// Class
+#{#a => 1} class
+// => Dictionary
+
+// Empty dictionary
+#{} class
+// => Dictionary
+
+// keys — returns list of keys
+#{#a => 1, #b => 2} keys
+// => _
+
+// values — returns list of values
+#{#x => 10} values
+// => _
+
+// size — returns number of entries
+#{#a => 1, #b => 2, #c => 3} size
+// => 3
+
+#{} size
+// => 0
+
+// at: — gets value by key
+#{#name => "Alice", #age => 30} at: #name
+// => Alice
+
+// at:put: — returns new dictionary with added entry
+d := #{#x => 1}
+// => _
+
+d at: #y put: 2
+// => _
+
+// includesKey: — checks if key exists
+#{#a => 1, #b => 2} includesKey: #a
+// => true
+
+#{#a => 1} includesKey: #missing
+// => false
+
+// removeKey: — returns new dictionary without key
+#{#a => 1, #b => 2} removeKey: #a
+// => _
+
+// merge: — combines two dictionaries
+d1 := #{#a => 1, #b => 2}
+// => _
+
+d2 := #{#b => 20, #c => 3}
+// => _
+
+d1 merge: d2
+// => _
+
+// at:ifAbsent: — returns value or evaluates block
+#{#x => 10} at: #x ifAbsent: [99]
+// => 10
+
+#{#x => 10} at: #missing ifAbsent: [99]
+// => 99
+
+// keysAndValuesDo: — iterates over entries (returns nil)
+count := 0
+// => _
+
+#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | count := count + 1]
+// => nil
