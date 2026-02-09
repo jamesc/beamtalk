@@ -1,0 +1,112 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for String class methods (BT-408)
+
+// ===========================================================================
+// CASE TRANSFORMATION
+// ===========================================================================
+
+// uppercase
+'hello' uppercase
+// => HELLO
+
+// lowercase
+'HELLO' lowercase
+// => hello
+
+// ===========================================================================
+// WHITESPACE TRIMMING
+// ===========================================================================
+
+// trim both sides
+'  hello  ' trim
+// => hello
+
+// trimLeft
+'  hello' trimLeft
+// => hello
+
+// trimRight
+'hello  ' trimRight
+// => hello
+
+// trim with no whitespace (no-op)
+'hello' trim
+// => hello
+
+// ===========================================================================
+// CONCATENATION
+// ===========================================================================
+
+// ++ operator
+'hello' ++ ' world'
+// => hello world
+
+// ===========================================================================
+// COMPARISON
+// ===========================================================================
+
+// String equality
+'hello' = 'hello'
+// => true
+
+// String inequality
+'hello' ~= 'world'
+// => true
+
+// String less than (lexicographic)
+'abc' < 'def'
+// => true
+
+// String greater than
+'def' > 'abc'
+// => true
+
+// String less than or equal
+'abc' <= 'abc'
+// => true
+
+// String greater than or equal
+'def' >= 'abc'
+// => true
+
+// ===========================================================================
+// SPLITTING
+// ===========================================================================
+
+// split:
+'a,b,c' split: ','
+// => _
+
+// ===========================================================================
+// CONVERSION
+// ===========================================================================
+
+// asInteger
+'42' asInteger
+// => 42
+
+// asFloat
+'3.14' asFloat
+// => 3.14
+
+// ===========================================================================
+// EMPTY/SIZE
+// ===========================================================================
+
+// isEmpty (true)
+'' isEmpty
+// => true
+
+// isEmpty (false)
+'hello' isEmpty
+// => false
+
+// isNotEmpty
+'hello' isNotEmpty
+// => true
+
+// size (alias for length)
+'hello' size
+// => 5
