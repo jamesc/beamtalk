@@ -1,0 +1,63 @@
+// String operations E2E tests (BT-361)
+
+// at: - 1-based grapheme access
+'hello' at: 1
+// => h
+
+'hello' at: 5
+// => o
+
+// capitalize
+'hello' capitalize
+// => Hello
+
+'HELLO' capitalize
+// => HELLO
+
+// reverse
+'hello' reverse
+// => olleh
+
+// includes:
+'hello world' includes: 'world'
+// => true
+
+'hello' includes: 'xyz'
+// => false
+
+// startsWith:
+'hello' startsWith: 'hel'
+// => true
+
+'hello' startsWith: 'xyz'
+// => false
+
+// endsWith:
+'hello' endsWith: 'llo'
+// => true
+
+'hello' endsWith: 'xyz'
+// => false
+
+// indexOf:
+'hello' indexOf: 'ell'
+// => 2
+
+'hello' indexOf: 'xyz'
+// => nil
+
+// splitOn:
+'a,b,c' splitOn: ','
+// => ["a","b","c"]
+
+// repeat:
+'ab' repeat: 3
+// => ababab
+
+// asList
+'hi' asList
+// => ["h","i"]
+
+// each: returns nil
+'hi' each: [:ch | nil]
+// => nil
