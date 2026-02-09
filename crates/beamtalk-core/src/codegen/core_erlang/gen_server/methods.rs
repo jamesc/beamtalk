@@ -466,12 +466,18 @@ impl CoreErlangGenerator {
                 if method_idx > 0 {
                     write!(self.output, ", ")?;
                 }
+                // BT-403: Include per-method is_sealed flag
+                let is_sealed = if method.is_sealed || class.is_sealed {
+                    "'true'"
+                } else {
+                    "'false'"
+                };
                 write!(
                     self.output,
-                    "'{}' => ~{{'arity' => {}, 'is_sealed' => '{}'}}~",
+                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
                     method.selector.name(),
                     method.selector.arity(),
-                    if method.is_sealed { "true" } else { "false" }
+                    is_sealed
                 )?;
             }
             writeln!(self.output, "}}~,")?;
