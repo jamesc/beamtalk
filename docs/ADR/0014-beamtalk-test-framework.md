@@ -78,16 +78,16 @@ Reuse the existing `// =>` assertion format but compile test files directly to E
 -include_lib("eunit/include/eunit.hrl").
 
 line_3_test() ->
-    ?assertEqual(3, beamtalk_integer:dispatch(1, '+', [2])).
+    ?assertEqual(3, beamtalk_integer:dispatch('+', [2], 1)).
 
 line_6_test() ->
-    ?assertEqual(-5, beamtalk_integer:dispatch(5, negated, [])).
+    ?assertEqual(-5, beamtalk_integer:dispatch(negated, [], 5)).
 
 line_10_test() ->
-    ?assertEqual(5, beamtalk_string:dispatch(<<"hello">>, size, [])).
+    ?assertEqual(5, beamtalk_string:dispatch(size, [], <<"hello">>)).
 
 line_13_test() ->
-    ?assertEqual(<<"hello world">>, beamtalk_string:dispatch(<<"hello">>, ',', [<<" world">>])).
+    ?assertEqual(<<"hello world">>, beamtalk_string:dispatch(',', [<<" world">>], <<"hello">>)).
 ```
 
 Note: The wrapper is generated Erlang source (`.erl`), not Core Erlang. This lets us use EUnit's `?assertEqual` macros directly. The actual Beamtalk expressions compile through the normal Core Erlang pipeline; the wrapper just calls the compiled dispatch functions.
@@ -111,7 +111,8 @@ Running tests...
 - Compiles to EUnit — runs in ~1-2 seconds (vs ~90 seconds via REPL)
 - No REPL daemon needed
 - Existing test files work with minimal changes
-- Tests with `@load` directives or workspace bindings remain E2E (need REPL)
+- Tests that require workspace bindings remain E2E (need REPL)
+- Tests with `@load` directives compile under `beamtalk test` (no REPL needed for actor tests)
 
 **Stateful tests:** Tests that use variables across expressions (e.g., `counter := Counter spawn` then `counter increment`) compile to a single EUnit test function with sequential statements, preserving variable bindings. Each test file becomes one EUnit test with internal assertions. This matches EUnit's fixture pattern.
 
@@ -136,7 +137,7 @@ Add a `TestCase` base class enabling idiomatic Smalltalk-style test classes:
 
 ```beamtalk
 // test/counter_test.bt
-@load tests/e2e/fixtures/counter.bt
+@load test/fixtures/counter.bt
 
 Object subclass: CounterTest
 
@@ -344,7 +345,7 @@ Focus on property-based testing (QuickCheck/PropEr style) instead of unit tests.
 | Assertion parser | `crates/beamtalk-core/src/source_analysis/parser/` | Parse `// =>` as `TestAssertion` AST nodes |
 | EUnit codegen | `crates/beamtalk-core/src/codegen/core_erlang/` | Generate EUnit test functions from assertion pairs |
 | `beamtalk test` CLI | `crates/beamtalk-cli/src/commands/test.rs` | Scan dir → compile → run EUnit → format output |
-| Test classifier | `crates/beamtalk-cli/src/commands/test.rs` | Detect `@load` / workspace bindings → route to E2E |
+| Test classifier | `crates/beamtalk-cli/src/commands/test.rs` | Detect workspace binding usage → route to E2E; compile all other tests including `@load` |
 | Output formatter | `crates/beamtalk-cli/src/commands/test.rs` | Parse EUnit output → user-friendly format |
 
 **Affected layers:** Parser (Rust), Codegen (Rust), CLI (Rust), minimal Erlang glue.
