@@ -433,8 +433,8 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `on:do:` | ❌ `on:` defined but not implemented | **Critical** |
-| `ensure:` | ❌ Defined but not implemented | **Critical** |
+| `on:do:` | ❌ `on:` defined but not implemented — **BT-338** | **Critical** |
+| `ensure:` | ❌ Defined but not implemented — **BT-338** | **Critical** |
 | `valueWithArguments:` | ❌ Not defined | Medium |
 | `cull:` | ❌ Not defined | Low |
 | `newProcess` / `fork` | ❌ Not defined (use Actor >> spawn) | Low |
