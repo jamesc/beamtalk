@@ -10,9 +10,9 @@
 | Metric | Value |
 |--------|-------|
 | **Total stdlib methods** | 185 |
-| **✅ Implemented** | 185 (100%) |
-| **❌ Not Implemented** | 0 (0%) |
-| **E2E test coverage** | 69 methods (37.3%) |
+| **✅ Implemented** | 183 (98.9%) |
+| **❌ Not Implemented** | 2 (1.1%) |
+| **E2E test coverage** | 67 methods (36.2%) |
 | **Stdlib .bt files** | 12 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
 | **Missing .bt files** | 6 (ProtoObject, Collection, SequenceableCollection, Set, Dictionary, List) |
@@ -168,7 +168,7 @@
 ### Block (`lib/Block.bt`)
 
 **Class:** `Block` — superclass: `Object` — `@sealed`
-**Methods:** 11/11 implemented (100%)
+**Methods:** 9/11 implemented (81.8%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -179,10 +179,14 @@
 | `whileTrue:` | intrinsic `whileTrue` | ✅ | 🧪 | `BlockClosure>>whileTrue:` |
 | `whileFalse:` | intrinsic `whileFalse` | ✅ | | `BlockClosure>>whileFalse:` |
 | `repeat` | intrinsic `repeat` | ✅ | | `BlockClosure>>repeat` |
-| `on:` | intrinsic `on` | ✅ | 🧪 | `BlockClosure>>on:do:` |
-| `ensure:` | intrinsic `ensure` | ✅ | 🧪 | `BlockClosure>>ensure:` |
+| `on:` | @primitive selector | **❌** | | `BlockClosure>>on:do:` |
+| `ensure:` | @primitive selector | **❌** | | `BlockClosure>>ensure:` |
 | `arity` | @primitive selector | ✅ | | `BlockClosure>>argumentCount` |
 | `describe` | pure BT | ✅ | | N/A |
+
+> **⚠️ `on:` and `ensure:` are declared with `@primitive` in Block.bt but have no runtime handler.**
+> These are critical for exception handling (`try/catch` equivalent) and resource cleanup (`try/finally` equivalent).
+> **Tracked in:** BT-338 (Implement Error/Exception class hierarchy)
 
 ### True (`lib/True.bt`) & False (`lib/False.bt`)
 
@@ -429,8 +433,8 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `on:do:` | ✅ `on:` implemented as intrinsic | — |
-| `ensure:` | ✅ Implemented as intrinsic | — |
+| `on:do:` | ❌ `on:` defined but not implemented | **Critical** |
+| `ensure:` | ❌ Defined but not implemented | **Critical** |
 | `valueWithArguments:` | ❌ Not defined | Medium |
 | `cull:` | ❌ Not defined | Low |
 | `newProcess` / `fork` | ❌ Not defined (use Actor >> spawn) | Low |
