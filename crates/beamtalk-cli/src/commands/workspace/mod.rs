@@ -156,8 +156,8 @@ pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
 
 /// Generate a unique Erlang cookie for a workspace.
 pub fn generate_cookie() -> String {
-    use rand::RngCore;
-    let mut rng = rand::thread_rng();
+    use rand::Rng;
+    let mut rng = rand::rng();
     let mut bytes = vec![0u8; 24];
     rng.fill_bytes(&mut bytes);
     base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
