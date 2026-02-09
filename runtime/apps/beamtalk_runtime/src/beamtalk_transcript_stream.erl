@@ -103,7 +103,9 @@ has_method(_)            -> false.
 -spec init([max_buffer()] | [{singleton, max_buffer()}]) -> {ok, state()} | {stop, term()}.
 init([{singleton, MaxBuffer}]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
-    persistent_term:put({beamtalk_binding, 'Transcript'}, self()),
+    %% Store a full beamtalk_object tuple so intrinsics (class, respondsTo:) work naturally.
+    persistent_term:put({beamtalk_binding, 'Transcript'},
+                        {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()}),
     {ok, #state{
         buffer       = queue:new(),
         buffer_size  = 0,
