@@ -63,7 +63,7 @@ init_registers_all_classes_test() ->
     
     %% After init, should have bootstrap + stdlib classes
     ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(15, length(ClassesAfter)),  % 3 bootstrap + 12 stdlib
+    ?assertEqual(15, length(ClassesAfter)),  % 4 bootstrap + 11 stdlib
     
     %% Verify expected classes are present
     ?assert(lists:member('ProtoObject', ClassesAfter)),
