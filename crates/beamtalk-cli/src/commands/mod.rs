@@ -9,4 +9,5 @@ pub mod daemon;
 pub mod new;
 pub mod repl;
 pub mod run;
+pub mod transcript;
 pub mod workspace;
