@@ -43,7 +43,6 @@ tempfile = "3.14"
 
 [dev-dependencies]
 serial_test = "3"
-filetime = "0.2"
 
 [lints]
 workspace = true
