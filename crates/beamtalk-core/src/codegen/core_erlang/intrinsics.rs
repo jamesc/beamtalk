@@ -47,6 +47,11 @@ impl CoreErlangGenerator {
     /// - `timesRepeat:` (1 arg) → repeat body N times
     /// - `to:do:` (2 args) → range iteration from start to end
     /// - `to:by:do:` (3 args) → range iteration with custom step
+    ///
+    /// # Exception Handling
+    ///
+    /// - `on:` (1 arg) → try/catch: execute block, call handler on error
+    /// - `ensure:` (1 arg) → try/after: execute block, always run cleanup
     pub(in crate::codegen::core_erlang) fn try_generate_block_message(
         &mut self,
         receiver: &Expression,
@@ -109,6 +114,18 @@ impl CoreErlangGenerator {
                             &arguments[1],
                             &arguments[2],
                         )?;
+                        Ok(Some(()))
+                    }
+
+                    // `on:` - exception handling (try/catch)
+                    "on:" => {
+                        self.generate_on(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+
+                    // `ensure:` - cleanup (try/after via try/catch + re-raise)
+                    "ensure:" => {
+                        self.generate_ensure(receiver, &arguments[0])?;
                         Ok(Some(()))
                     }
 

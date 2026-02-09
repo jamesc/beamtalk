@@ -1,0 +1,43 @@
+// Exception handling: on: and ensure:
+
+// === on: — catches errors and passes to handler block ===
+
+// Catch a division by zero error
+[1 / 0] on: [:e | 'caught']
+// => caught
+
+// Handler receives the error value
+[1 / 0] on: [:e | e]
+// => _
+
+// Normal execution (no error) returns the block result
+[42] on: [:e | 'caught']
+// => 42
+
+// Nested computation that succeeds
+[3 + 4] on: [:e | 0]
+// => 7
+
+// Catch doesNotUnderstand error
+[42 foo] on: [:e | 'no method']
+// => no method
+
+// === ensure: — always runs cleanup block ===
+
+// ensure: returns the block result on success
+[42] ensure: [nil]
+// => 42
+
+// ensure: runs cleanup and returns result
+[3 + 4] ensure: [nil]
+// => 7
+
+// === on: with ensure: combined ===
+
+// Catch error, ensure cleanup runs
+[[1 / 0] on: [:e | 'caught']] ensure: [nil]
+// => caught
+
+// Success path with ensure
+[[42] ensure: [nil]] on: [:e | 'caught']
+// => 42

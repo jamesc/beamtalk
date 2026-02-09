@@ -16,13 +16,16 @@
 //! - **List iteration**: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`
 //! - **While loops**: `whileTrue:`, `whileFalse:`
 //! - **Counted loops**: `repeat`, `timesRepeat:`, `to:do:`, `to:by:do:`
+//! - **Exception handling**: `on:`, `ensure:`
 //!
 //! Submodules organize the code by domain:
 //! - [`list_ops`] — List iteration constructs
 //! - [`while_loops`] — While loop constructs
 //! - [`counted_loops`] — Counted loop constructs
+//! - [`exception_handling`] — Exception handling constructs (`on:`, `ensure:`)
 
 mod counted_loops;
+mod exception_handling;
 mod list_ops;
 mod while_loops;
 
