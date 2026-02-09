@@ -481,7 +481,7 @@ fn generate_dictionary_bif(output: &mut String, selector: &str, params: &[String
                 output,
                 "case call 'maps':'find'({key}, Self) of \
                  <{{'ok', Value}}> when 'true' -> Value \
-                 <'error'> when 'true' -> call {block}() \
+                 <'error'> when 'true' -> apply {block}() \
                  end"
             )
             .ok()?;
