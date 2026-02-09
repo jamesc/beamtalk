@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for workspace bindings (BT-376 / ADR 0010 Phase 4).
+//
+// Workspace bindings (Transcript, Beamtalk) are singleton actors
+// looked up via persistent_term. These tests validate that the
+// full dispatch pipeline works end-to-end: codegen → persistent_term
+// lookup → actor send → future resolution.
+
+// ===========================================================================
+// TRANSCRIPT BINDING — BASIC DISPATCH
+// ===========================================================================
+
+// Transcript show: dispatches through workspace binding (async send → future)
+Transcript show: 'Hello'
+// => _
+
+// Transcript cr dispatches through workspace binding
+Transcript cr
+// => _
+
+// ===========================================================================
+// TRANSCRIPT BINDING — CLASS INTROSPECTION
+// ===========================================================================
+
+// Transcript class returns TranscriptStream (the actual class of the singleton)
+Transcript class
+// => TranscriptStream
+
+// Transcript respondsTo: #show: returns true
+Transcript respondsTo: #show:
+// => true
+
+// Transcript respondsTo: a method it doesn't have
+Transcript respondsTo: #nonExistentMethod
+// => false
+
+// ===========================================================================
+// BEAMTALK BINDING — CLASS INTROSPECTION
+// ===========================================================================
+
+// Beamtalk class returns SystemDictionary
+Beamtalk class
+// => SystemDictionary
+
+// Beamtalk respondsTo: #allClasses returns true
+Beamtalk respondsTo: #allClasses
+// => true
+
+// ===========================================================================
+// BEAMTALK BINDING — METHODS
+// ===========================================================================
+
+// Beamtalk allClasses returns a list including core classes
+// (await the future to get the actual result)
+classes := Beamtalk allClasses
+// => _
+
+// Beamtalk version returns a string
+version := Beamtalk version
+// => _
+
+// ===========================================================================
+// TRANSCRIPT BINDING — CASCADE (SEMICOLON CHAINING)
+// ===========================================================================
+
+// Cascade on workspace binding: all messages dispatched to same actor
+Transcript show: 'Hello'; cr; show: 'World'
+// => _

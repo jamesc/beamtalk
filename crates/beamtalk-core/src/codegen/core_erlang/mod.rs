@@ -691,9 +691,21 @@ impl CoreErlangGenerator {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
             Expression::ClassReference { name, .. } => {
+                // BT-376 / ADR 0010: Workspace bindings resolve to singleton actor objects
+                // stored in persistent_term, not class objects from the registry.
+                if self.workspace_mode
+                    && dispatch_codegen::is_workspace_binding(&name.name)
+                {
+                    write!(
+                        self.output,
+                        "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
+                        name.name
+                    )?;
+                    return Ok(());
+                }
+
                 // BT-215: Standalone class references resolve to class objects
                 // Wrap the class PID in a beamtalk_object record for uniform dispatch
-                // Pattern matches generate_beamtalk_class_named (lines 915-922)
                 //
                 // Generate a case expression to handle undefined classes gracefully:
                 //   case call 'beamtalk_object_class':'whereis_class'('Point') of
@@ -702,8 +714,6 @@ impl CoreErlangGenerator {
                 //       let ClassModName = call 'beamtalk_object_class':'module_name'(ClassPid) in
                 //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
                 //   end
-                //
-                // This matches the pattern in generate_beamtalk_class_named (lines 906-923).
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
 
