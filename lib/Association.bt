@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Association - Key-value pair for dictionary construction
+//
+// Created with the -> binary message: #name -> 'James'
+// Maps to Erlang {Key, Value} tuple under the hood.
+// Associations are the elements of Dictionaries.
+
+sealed Object subclass: Association
+  // Access
+  key => @primitive 'key'
+  value => @primitive 'value'
+
+  // Display
+  asString => @primitive 'asString'
+  printString => self asString
+  describe => self asString

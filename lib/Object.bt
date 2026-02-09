@@ -40,3 +40,6 @@ ProtoObject subclass: Object
 
   // Abstract method marker — raises error if not overridden by subclass
   subclassResponsibility => @primitive subclassResponsibility
+
+  // Association creation — binary message for key-value pairs
+  -> value => @primitive '->'

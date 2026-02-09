@@ -288,11 +288,22 @@ impl<'src> Lexer<'src> {
                 }
             }
 
+            // Arrow operator (->) for Association creation - must check before binary operators
+            '-' => {
+                if self.peek_char_second() == Some('>') {
+                    self.advance(); // -
+                    self.advance(); // >
+                    TokenKind::BinarySelector(EcoString::from("->"))
+                } else {
+                    self.lex_binary_selector()
+                }
+            }
+
             // Pragma directives
             '@' => self.lex_at_directive(start),
 
             // Binary operators
-            '+' | '-' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
+            '+' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()
             }
 

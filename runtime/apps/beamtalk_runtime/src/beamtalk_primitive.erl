@@ -88,6 +88,8 @@ class_of(X) when is_map(X) ->
     beamtalk_tagged_map:class_of(X, 'Dictionary');
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
     element(2, X);  % Extract class field from #beamtalk_object{}
+class_of(X) when is_tuple(X), tuple_size(X) =:= 3, element(1, X) =:= association ->
+    'Association';
 class_of(X) when is_tuple(X) -> 'Tuple';
 class_of(X) when is_pid(X) -> 'Pid';
 class_of(X) when is_port(X) -> 'Port';
@@ -173,8 +175,15 @@ send(X, Selector, Args) when is_tuple(X) ->
             Pid = element(4, X),
             gen_server:call(Pid, {Selector, Args});
         false ->
-            %% Regular tuple - dispatch to tuple class
-            beamtalk_tuple:dispatch(Selector, Args, X)
+            %% Check if it's an Association (tagged tuple)
+            case tuple_size(X) =:= 3 andalso element(1, X) =:= association of
+                true ->
+                    %% Association - dispatch to association module
+                    beamtalk_association:dispatch(Selector, Args, X);
+                false ->
+                    %% Regular tuple - dispatch to tuple class
+                    beamtalk_tuple:dispatch(Selector, Args, X)
+            end
     end;
 send(X, Selector, Args) when is_float(X) ->
     beamtalk_float:dispatch(Selector, Args, X);

@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Association class (key-value pairs)
+// Association is created with the -> binary message
+
+// ===========================================================================
+// CREATION
+// ===========================================================================
+
+// Create association with symbol key
+#name -> 'James'
+// => _
+
+// Create association with integer key
+42 -> 'answer'
+// => _
+
+// Create association with string key
+'city' -> 'London'
+// => _
+
+// ===========================================================================
+// ACCESS
+// ===========================================================================
+
+// Access key
+a := #name -> 'James'
+// => _
+
+a key
+// => #name
+
+// Access value
+a value
+// => James
+
+// ===========================================================================
+// STRING REPRESENTATION
+// ===========================================================================
+
+// asString formatting
+(#name -> 'James') asString
+// => #name -> James
+
+// With integer key
+(42 -> 'answer') asString
+// => 42 -> answer
+
+// With string key and integer value
+('count' -> 5) asString
+// => count -> 5
+
+// ===========================================================================
+// CLASS REFLECTION
+// ===========================================================================
+
+// Check class
+(#name -> 'James') class
+// => Association
+
+// respondsTo: key
+(#name -> 'James') respondsTo: #key
+// => true
+
+// respondsTo: value
+(#name -> 'James') respondsTo: #value
+// => true
+
+// ===========================================================================
+// USAGE IN COLLECTIONS
+// ===========================================================================
+
+// Array of associations
+assocs := #(#a -> 1, #b -> 2, #c -> 3)
+// => _
+
+assocs size
+// => 3
+
+// Extract keys
+assocs collect: [:assoc | assoc key]
+// => #(#a, #b, #c)
+
+// Extract values
+assocs collect: [:assoc | assoc value]
+// => #(1, 2, 3)

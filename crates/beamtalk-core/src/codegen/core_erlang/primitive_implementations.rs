@@ -43,6 +43,8 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Association" => generate_association_bif(output, selector, params),
+        "Object" => generate_object_bif(output, selector, params),
         _ => None,
     }
 }
@@ -440,6 +442,40 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Association primitive implementations.
+fn generate_association_bif(output: &mut String, selector: &str, _params: &[String]) -> Option<()> {
+    match selector {
+        // Access
+        "key" => {
+            write!(output, "call 'erlang':'element'(2, Self)").ok()?;
+            Some(())
+        }
+        "value" => {
+            write!(output, "call 'erlang':'element'(3, Self)").ok()?;
+            Some(())
+        }
+        // Conversion — delegate to runtime for proper formatting
+        "asString" | "printString" => {
+            write!(output, "call 'beamtalk_association':'dispatch'('asString', [], Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Object primitive implementations.
+fn generate_object_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Association creation: Self -> Value creates {association, Self, Value}
+        "->" => {
+            let p0 = params.first()?;
+            write!(output, "{{'association', Self, {p0}}}").ok()?;
             Some(())
         }
         _ => None,
