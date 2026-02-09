@@ -81,14 +81,23 @@ builtin_dispatch('last', [], []) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Cannot get last element of empty list">>),
     error(Error2);
 builtin_dispatch('last', [], X) -> {ok, lists:last(X)};
-builtin_dispatch('at:', [N], X) when is_integer(N), N >= 1, N =< length(X) ->
-    {ok, lists:nth(N, X)};
-builtin_dispatch('at:', [N], _X) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    Hint = iolist_to_binary(io_lib:format("Index ~p is out of bounds", [N])),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+builtin_dispatch('at:', [N], X) when is_integer(N), N >= 1 ->
+    try
+        {ok, lists:nth(N, X)}
+    catch
+        error:badarg ->
+            Error0 = beamtalk_error:new(does_not_understand, 'Array'),
+            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+            Hint = iolist_to_binary(io_lib:format("Index ~p is out of bounds", [N])),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            error(Error2);
+        error:function_clause ->
+            Error0 = beamtalk_error:new(does_not_understand, 'Array'),
+            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+            Hint = iolist_to_binary(io_lib:format("Index ~p is out of bounds", [N])),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            error(Error2)
+    end;
 builtin_dispatch('includes:', [Item], X) -> {ok, lists:member(Item, X)};
 builtin_dispatch('sort', [], X) -> {ok, lists:sort(X)};
 builtin_dispatch('sort:', [Block], X) when is_function(Block, 2) ->
@@ -180,11 +189,12 @@ zip_to_maps([H1 | T1], [H2 | T2]) ->
 
 %% @private Group elements by block result into a map
 group_by(Block, List) ->
-    lists:foldl(fun(Item, Acc) ->
+    Map0 = lists:foldl(fun(Item, Acc) ->
         Key = Block(Item),
         Existing = maps:get(Key, Acc, []),
-        maps:put(Key, Existing ++ [Item], Acc)
-    end, #{}, List).
+        maps:put(Key, [Item | Existing], Acc)
+    end, #{}, List),
+    maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map0).
 
 %% @private Intersperse separator between elements
 intersperse(_Sep, []) -> [];
