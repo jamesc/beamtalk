@@ -1895,7 +1895,7 @@ mod tests {
 
         let class_def = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
-            superclass: Identifier::new("Actor", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![state_decl],
@@ -2249,7 +2249,7 @@ mod tests {
 
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
-            superclass: Identifier::new("Actor", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![StateDeclaration {
@@ -2294,7 +2294,7 @@ mod tests {
 
         let class = ClassDefinition {
             name: Identifier::new("MyInt", test_span()),
-            superclass: Identifier::new("Integer", test_span()),
+            superclass: Some(Identifier::new("Integer", test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -2566,7 +2566,7 @@ mod tests {
         // BT-105: abstract class cannot be instantiated
         let class = ClassDefinition {
             name: Identifier::new("Shape", test_span()),
-            superclass: Identifier::new("Actor", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: true,
             is_sealed: false,
             state: vec![],
