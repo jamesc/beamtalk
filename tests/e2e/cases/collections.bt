@@ -142,8 +142,8 @@
 #(1, 2, 3, 4) select: [:x | (x % 2) = 0]
 // => [2,4]
 
-// --- reject: (BT-408: known issue with reject: on lists in REPL)
-// #(1, 2, 3, 4) reject: [:x | x isEven]
+// --- reject: ---
+#(1, 2, 3, 4) reject: [:x | x isEven]
 // => [1,3]
 
 // --- inject:into: ---
