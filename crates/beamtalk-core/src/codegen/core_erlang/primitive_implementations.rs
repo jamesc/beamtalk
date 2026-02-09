@@ -493,7 +493,11 @@ fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) ->
         }
         "unwrapOrElse:" => {
             let p0 = params.first()?;
-            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})").ok()?;
+            write!(
+                output,
+                "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})"
+            )
+            .ok()?;
             Some(())
         }
         // Conversion — delegate to runtime ops for formatting
