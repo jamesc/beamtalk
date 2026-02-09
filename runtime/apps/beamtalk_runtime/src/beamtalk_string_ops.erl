@@ -49,7 +49,8 @@ capitalize(<<>>) -> <<>>;
 capitalize(Str) when is_binary(Str) ->
     case string:next_grapheme(Str) of
         [First | Rest] ->
-            Upper = string:uppercase(unicode:characters_to_binary([First])),
+            Upper = unicode:characters_to_binary(
+                        string:uppercase(unicode:characters_to_binary([First]))),
             RestBin = unicode:characters_to_binary(Rest),
             <<Upper/binary, RestBin/binary>>;
         [] -> <<>>
@@ -96,12 +97,9 @@ ends_with(Str, Suffix) when is_binary(Str), is_binary(Suffix) ->
 -spec index_of(binary(), binary()) -> integer() | nil.
 index_of(_Str, <<>>) -> nil;
 index_of(Str, Sub) when is_binary(Str), is_binary(Sub) ->
-    case binary:match(Str, Sub) of
-        nomatch -> nil;
-        {BytePos, _Length} ->
-            <<Before:BytePos/binary, _/binary>> = Str,
-            string:length(Before) + 1
-    end.
+    StrGs = string:to_graphemes(Str),
+    SubGs = string:to_graphemes(Sub),
+    index_of_graphemes(StrGs, SubGs, 1).
 
 %% @doc Split string by pattern (global split).
 -spec split_on(binary(), binary()) -> [binary()].
@@ -140,6 +138,17 @@ select(Str, Block) when is_binary(Str), is_function(Block, 1) ->
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+%% @private Grapheme-aware substring search.
+-spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
+          integer() | nil.
+index_of_graphemes([], _SubGs, _Idx) ->
+    nil;
+index_of_graphemes(StrGs, SubGs, Idx) ->
+    case lists:prefix(SubGs, StrGs) of
+        true -> Idx;
+        false -> index_of_graphemes(tl(StrGs), SubGs, Idx + 1)
+    end.
 
 %% @private
 -spec get_nth_grapheme(binary(), pos_integer()) -> {ok, binary()} | error.

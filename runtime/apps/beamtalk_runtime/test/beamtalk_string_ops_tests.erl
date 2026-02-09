@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_string_ops_tests).
+-include("beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
@@ -24,13 +25,16 @@ at_emoji_test() ->
     ?assertEqual(<<"👋"/utf8>>, beamtalk_string_ops:at(<<"hi👋"/utf8>>, 3)).
 
 at_out_of_bounds_test() ->
-    ?assertError(_, beamtalk_string_ops:at(<<"hi">>, 10)).
+    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+                 beamtalk_string_ops:at(<<"hi">>, 10)).
 
 at_zero_index_test() ->
-    ?assertError(_, beamtalk_string_ops:at(<<"hi">>, 0)).
+    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+                 beamtalk_string_ops:at(<<"hi">>, 0)).
 
 at_negative_index_test() ->
-    ?assertError(_, beamtalk_string_ops:at(<<"hi">>, -1)).
+    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+                 beamtalk_string_ops:at(<<"hi">>, -1)).
 
 %%% ============================================================================
 %%% capitalize/1
@@ -209,7 +213,8 @@ each_calls_block_test() ->
 
 collect_uppercase_test() ->
     ?assertEqual([<<"H">>, <<"I">>],
-                 beamtalk_string_ops:collect(<<"hi">>, fun string:uppercase/1)).
+                 beamtalk_string_ops:collect(<<"hi">>,
+                     fun(G) -> unicode:characters_to_binary(string:uppercase(G)) end)).
 
 collect_empty_test() ->
     ?assertEqual([], beamtalk_string_ops:collect(<<>>, fun(X) -> X end)).
