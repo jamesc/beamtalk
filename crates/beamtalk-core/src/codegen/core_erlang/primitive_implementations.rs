@@ -15,6 +15,20 @@
 
 use std::fmt::Write;
 
+/// Converts a Rust string to Core Erlang binary literal format.
+///
+/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
+fn core_erlang_binary_string(s: &str) -> String {
+    if s.is_empty() {
+        return "#{}#".to_string();
+    }
+    let segments: Vec<String> = s
+        .bytes()
+        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
+        .collect();
+    format!("#{{{}}}#", segments.join(","))
+}
+
 /// Generates Core Erlang for a selector-based primitive implementation.
 ///
 /// Returns `Some(())` if a direct implementation was emitted, `None` if
@@ -43,6 +57,7 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Array" => generate_array_bif(output, selector, params),
         _ => None,
     }
 }
@@ -440,6 +455,198 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Array primitive implementations (BT-419).
+///
+/// Arrays are Erlang lists — ordered collections of elements.
+/// Direct BIF mappings for simple operations, delegation to
+/// `beamtalk_list_ops` for complex collection methods.
+#[allow(clippy::too_many_lines)]
+fn generate_array_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        // Access
+        "size" => {
+            write!(output, "call 'erlang':'length'(Self)").ok()?;
+            Some(())
+        }
+        "isEmpty" => {
+            write!(output, "call 'erlang':'=:='(Self, [])").ok()?;
+            Some(())
+        }
+        "first" => {
+            // Pattern match on list structure, error on empty
+            let hint = core_erlang_binary_string("Cannot get first element of empty list");
+            write!(
+                output,
+                "case Self of \
+                 [H | _] when 'true' -> H \
+                 [] when 'true' -> \
+                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'Array') in \
+                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'first') in \
+                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
+                   call 'erlang':'error'(Error2) \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "rest" => {
+            write!(
+                output,
+                "case Self of \
+                 [_ | T] when 'true' -> T \
+                 [] when 'true' -> [] \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "last" => {
+            let hint = core_erlang_binary_string("Cannot get last element of empty list");
+            write!(
+                output,
+                "case Self of \
+                 [] when 'true' -> \
+                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'Array') in \
+                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'last') in \
+                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
+                   call 'erlang':'error'(Error2) \
+                 _ when 'true' -> call 'lists':'last'(Self) \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "at:" => {
+            // 1-based indexing via lists:nth, with error handling
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'at'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "includes:" => {
+            write!(output, "call 'lists':'member'({p0}, Self)").ok()?;
+            Some(())
+        }
+        // Ordering
+        "sort" => {
+            write!(output, "call 'lists':'sort'(Self)").ok()?;
+            Some(())
+        }
+        "sort:" => {
+            // Block comparator — must be function/2
+            write!(output, "call 'lists':'sort'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "reversed" => {
+            write!(output, "call 'lists':'reverse'(Self)").ok()?;
+            Some(())
+        }
+        "unique" => {
+            write!(output, "call 'lists':'usort'(Self)").ok()?;
+            Some(())
+        }
+        // Search — delegate to helper for error handling
+        "detect:" => {
+            write!(output, "call 'beamtalk_list_ops':'detect'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "detect:ifNone:" => {
+            let p1 = params.get(1).map_or("_Default", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'detect_if_none'(Self, {p0}, {p1})").ok()?;
+            Some(())
+        }
+        // Iteration — delegate to helper (block evaluation)
+        "do:" => {
+            write!(output, "call 'beamtalk_list_ops':'do'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "collect:" => {
+            write!(output, "call 'lists':'map'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "select:" => {
+            write!(output, "call 'lists':'filter'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "reject:" => {
+            write!(output, "call 'beamtalk_list_ops':'reject'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "inject:into:" => {
+            let p1 = params.get(1).map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'foldl'({p1}, {p0}, Self)").ok()?;
+            Some(())
+        }
+        // Functional
+        "take:" => {
+            write!(output, "call 'lists':'sublist'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "drop:" => {
+            write!(output, "call 'beamtalk_list_ops':'drop'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "flatten" => {
+            write!(output, "call 'lists':'flatten'(Self)").ok()?;
+            Some(())
+        }
+        "flatMap:" => {
+            write!(output, "call 'lists':'flatmap'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "count:" => {
+            write!(
+                output,
+                "call 'erlang':'length'(call 'lists':'filter'({p0}, Self))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "anySatisfy:" => {
+            write!(output, "call 'lists':'any'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "allSatisfy:" => {
+            write!(output, "call 'lists':'all'({p0}, Self)").ok()?;
+            Some(())
+        }
+        // Advanced — delegate to helper for complex logic
+        "zip:" => {
+            write!(output, "call 'beamtalk_list_ops':'zip'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "groupBy:" => {
+            write!(output, "call 'beamtalk_list_ops':'group_by'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "partition:" => {
+            write!(output, "call 'beamtalk_list_ops':'partition'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "takeWhile:" => {
+            write!(output, "call 'lists':'takewhile'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "dropWhile:" => {
+            write!(output, "call 'lists':'dropwhile'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "intersperse:" => {
+            write!(output, "call 'beamtalk_list_ops':'intersperse'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "add:" => {
+            // Append element to end
+            write!(output, "call 'erlang':'++'(Self, [{p0}])").ok()?;
             Some(())
         }
         _ => None,

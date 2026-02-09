@@ -194,8 +194,8 @@ send(X, Selector, Args) when is_map(X) ->
             value_type_send(X, Class, Selector, Args)
     end;
 send(X, Selector, Args) when is_list(X) ->
-    %% List/Array dispatch
-    beamtalk_list:dispatch(Selector, Args, X);
+    %% List/Array dispatch - BT-419: migrated to compiled beamtalk_array
+    beamtalk_array:dispatch(Selector, Args, X);
 send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
@@ -263,7 +263,8 @@ responds_to(X, Selector) when is_map(X) ->
             value_type_responds_to(Class, Selector)
     end;
 responds_to(X, Selector) when is_list(X) ->
-    beamtalk_list:has_method(Selector);
+    %% BT-419: Array migrated to compiled beamtalk_array
+    beamtalk_array:has_method(Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
