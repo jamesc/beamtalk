@@ -683,17 +683,20 @@ impl CoreErlangGenerator {
                         Ok(Some(()))
                     }
                     "instVarAt:" if arguments.len() == 1 => {
-                        // Read instance variable by name
+                        // Read instance variable by name (BT-359)
                         // For actors: Read from state map via gen_server
-                        // For primitives: Intended future behavior is to return nil
-                        //                 (they have no instance vars); current
-                        //                 implementation only supports actor instances
-                        //                 (see BT-164).
+                        // For primitives/value types: Raise immutable_value error
 
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
                         let future_var = self.fresh_var("Future");
+                        let class_var = self.fresh_var("Class");
+                        let error_base = self.fresh_var("Err");
+                        let error_sel = self.fresh_var("Err");
+                        let error_hint = self.fresh_var("Err");
+                        let hint =
+                            core_erlang_binary_string("Value types have no instance variables");
 
                         write!(self.output, "let {receiver_var} = ")?;
                         self.generate_expression(receiver)?;
@@ -703,38 +706,59 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in ")?;
 
+                        // Type guard: actors are tuples, primitives/value types are not
+                        write!(
+                            self.output,
+                            "case call 'erlang':'is_tuple'({receiver_var}) of \
+                             <'true'> when 'true' -> "
+                        )?;
+
+                        // Actor path: extract pid and send async message
                         write!(
                             self.output,
                             "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
                         )?;
-
                         write!(
                             self.output,
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
-
                         write!(
                             self.output,
                             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:', [{name_var}], {future_var}) in "
                         )?;
+                        write!(self.output, "{future_var} ")?;
 
-                        write!(self.output, "{future_var}")?;
+                        // Primitive path: raise immutable_value error
+                        write!(
+                            self.output,
+                            "<_> when 'true' -> \
+                             let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
+                             let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
+                             let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:') in \
+                             let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
+                             call 'erlang':'error'({error_hint}) \
+                             end"
+                        )?;
 
                         Ok(Some(()))
                     }
                     "instVarAt:put:" if arguments.len() == 2 => {
-                        // Set instance variable by name
+                        // Set instance variable by name (BT-359)
                         // For actors: Write to state map via gen_server
-                        // For primitives: Intended future behavior is error
-                        //                 (they have no mutable instance vars); current
-                        //                 implementation only supports actor instances
-                        //                 (see BT-164).
+                        // For primitives/value types: Raise immutable_value error
 
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
                         let pid_var = self.fresh_var("Pid");
                         let future_var = self.fresh_var("Future");
+                        let class_var = self.fresh_var("Class");
+                        let error_base = self.fresh_var("Err");
+                        let error_sel = self.fresh_var("Err");
+                        let error_hint = self.fresh_var("Err");
+                        let hint = core_erlang_binary_string(
+                            "Value types are immutable. Use a method that returns a new instance instead.",
+                        );
 
                         write!(self.output, "let {receiver_var} = ")?;
                         self.generate_expression(receiver)?;
@@ -748,22 +772,39 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[1])?;
                         write!(self.output, " in ")?;
 
+                        // Type guard: actors are tuples, primitives/value types are not
+                        write!(
+                            self.output,
+                            "case call 'erlang':'is_tuple'({receiver_var}) of \
+                             <'true'> when 'true' -> "
+                        )?;
+
+                        // Actor path: extract pid and send async message
                         write!(
                             self.output,
                             "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
                         )?;
-
                         write!(
                             self.output,
                             "let {future_var} = call 'beamtalk_future':'new'() in "
                         )?;
-
                         write!(
                             self.output,
                             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:put:', [{name_var}, {value_var}], {future_var}) in "
                         )?;
+                        write!(self.output, "{future_var} ")?;
 
-                        write!(self.output, "{future_var}")?;
+                        // Primitive path: raise immutable_value error
+                        write!(
+                            self.output,
+                            "<_> when 'true' -> \
+                             let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
+                             let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
+                             let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:put:') in \
+                             let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
+                             call 'erlang':'error'({error_hint}) \
+                             end"
+                        )?;
 
                         Ok(Some(()))
                     }
