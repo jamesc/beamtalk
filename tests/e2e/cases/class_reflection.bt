@@ -4,16 +4,15 @@
 // E2E tests for Class reflection API
 //
 // Tests Beamtalk class introspection capabilities:
-// - Beamtalk classNamed: - Look up class by name
+// - Beamtalk classNamed: - Look up class by name (Beamtalk is a workspace binding)
 // - Class methods - Get list of instance methods
 // - Class class_name - Get the class name
 // - Class superclass - Get the superclass name
 // - Class module_name - Get the module name
 //
-// Class objects are returned by `Beamtalk classNamed:` and support
-// reflection messages to introspect the class definition.
+// `Beamtalk` is a workspace-injected binding — an instance of SystemDictionary
+// (ADR 0010). Class objects returned by `classNamed:` support reflection messages.
 
-// @load lib/Beamtalk.bt
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================
@@ -186,7 +185,7 @@ trueClass class_name
 // IMPLEMENTATION STATUS
 // ===========================================================================
 //
-// ✅ Beamtalk classNamed: - Returns wrapped class object
+// ✅ Beamtalk classNamed: - Returns wrapped class object (via workspace binding)
 // ✅ Class methods - Returns list of instance methods
 // ✅ Class class_name - Returns class name atom
 // ✅ Class superclass - Returns superclass name atom

@@ -79,7 +79,11 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "'module' => '{}',", self.module_name)?;
         self.write_indent()?;
-        writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
+        writeln!(
+            self.output,
+            "'superclass' => '{}',",
+            class.superclass_name()
+        )?;
         self.write_indent()?;
         writeln!(self.output, "'instance_methods' => ~{{}}~,")?;
         self.write_indent()?;

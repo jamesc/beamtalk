@@ -269,39 +269,43 @@ impl ClassHierarchy {
         let mut diagnostics = Vec::new();
 
         for class in &module.classes {
-            // Check sealed class enforcement
-            if let Some(super_info) = self.classes.get(class.superclass.name.as_str()) {
-                if !super_info.can_be_subclassed() {
-                    diagnostics.push(Diagnostic::error(
-                        format!("Cannot subclass sealed class `{}`", class.superclass.name),
-                        class.superclass.span,
-                    ));
-                    // Still register the class so downstream passes (codegen routing,
-                    // completions) can reason about it despite the error.
+            // Check sealed class enforcement (skip for root classes with no superclass)
+            if let Some(ref superclass) = class.superclass {
+                if let Some(super_info) = self.classes.get(superclass.name.as_str()) {
+                    if !super_info.can_be_subclassed() {
+                        diagnostics.push(Diagnostic::error(
+                            format!("Cannot subclass sealed class `{}`", superclass.name),
+                            superclass.span,
+                        ));
+                        // Still register the class so downstream passes (codegen routing,
+                        // completions) can reason about it despite the error.
+                    }
                 }
             }
 
             // Check sealed method override enforcement (advice methods are not overrides)
-            for method in &class.methods {
-                if method.kind != MethodKind::Primary {
-                    continue;
-                }
-                let selector = method.selector.name();
-                if let Some((sealed_class, _)) =
-                    self.find_sealed_method_in_ancestors(class.superclass.name.as_str(), &selector)
-                {
-                    diagnostics.push(Diagnostic::error(
-                        format!(
-                            "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                        ),
-                        method.span,
-                    ));
+            if let Some(ref superclass) = class.superclass {
+                for method in &class.methods {
+                    if method.kind != MethodKind::Primary {
+                        continue;
+                    }
+                    let selector = method.selector.name();
+                    if let Some((sealed_class, _)) =
+                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                    {
+                        diagnostics.push(Diagnostic::error(
+                            format!(
+                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                            ),
+                            method.span,
+                        ));
+                    }
                 }
             }
 
             let class_info = ClassInfo {
                 name: class.name.name.clone(),
-                superclass: Some(class.superclass.name.clone()),
+                superclass: class.superclass.as_ref().map(|s| s.name.clone()),
                 is_sealed: class.is_sealed,
                 is_abstract: class.is_abstract,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
@@ -576,7 +580,7 @@ mod tests {
     fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
-            superclass: Identifier::new(superclass, test_span()),
+            superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![StateDeclaration {
@@ -713,7 +717,7 @@ mod tests {
     ) -> ClassDefinition {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
-            superclass: Identifier::new(superclass, test_span()),
+            superclass: Some(Identifier::new(superclass, test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -920,7 +924,7 @@ mod tests {
     fn multiple_user_classes_in_module() {
         let base = ClassDefinition {
             name: Identifier::new("Base", test_span()),
-            superclass: Identifier::new("Actor", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -937,7 +941,7 @@ mod tests {
         };
         let derived = ClassDefinition {
             name: Identifier::new("Derived", test_span()),
-            superclass: Identifier::new("Base", test_span()),
+            superclass: Some(Identifier::new("Base", test_span())),
             is_abstract: false,
             is_sealed: false,
             state: vec![],

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ProtoObject - Root of the Beamtalk class hierarchy
+//
+// ProtoObject is the ultimate superclass of all objects. It defines the
+// minimal protocol that every object supports: identity, equality, class
+// introspection, dynamic dispatch, and error signaling.
+//
+// ProtoObject is abstract — direct instantiation is meaningless.
+// All useful objects inherit from Object (or Actor) which adds
+// instantiation, nil testing, and display protocols.
+//
+// Note: Some ProtoObject methods (==, ~=, error:, doesNotUnderstand:args:)
+// are built into the compiler dispatch and do not need @primitive declarations.
+
+abstract nil subclass: ProtoObject
+  // Identity — structural intrinsic (compiler-generated type dispatch)
+  class => @primitive classOf
+
+  // Dynamic dispatch — structural intrinsics
+  perform: selector => @primitive dynamicSend
+  perform: selector withArguments: args => @primitive dynamicSendWithArgs

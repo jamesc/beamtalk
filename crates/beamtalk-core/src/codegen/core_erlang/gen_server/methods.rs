@@ -437,7 +437,11 @@ impl CoreErlangGenerator {
 
             // Superclass
             self.write_indent()?;
-            writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
+            writeln!(
+                self.output,
+                "'superclass' => '{}',",
+                class.superclass_name()
+            )?;
 
             // BT-105: Sealing modifiers
             self.write_indent()?;
