@@ -10,11 +10,12 @@
 %%%
 %%% | Class | Superclass | Dispatch Module |
 %%% |-------|-----------|-----------------|
-%%% | Integer | Object | beamtalk_integer |
+%%% | Number | Object | (abstract) |
+%%% | Integer | Number | beamtalk_integer |
 %%% | String | Object | beamtalk_string |
 %%% | True | Object | beamtalk_true |
 %%% | False | Object | beamtalk_false |
-%%% | Float | Object | beamtalk_float |
+%%% | Float | Number | beamtalk_float |
 %%% | UndefinedObject | Object | beamtalk_undefined_object |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
@@ -74,6 +75,7 @@ init(Parent) ->
 do_init() ->
     logger:info("Registering primitive classes"),
     Results = [
+        register_number_class(),
         register_integer_class(),
         register_string_class(),
         register_true_class(),
@@ -103,6 +105,29 @@ stdlib_loop() ->
     end.
 
 %%% ============================================================================
+%%% Number Class (BT-334) — Abstract numeric superclass
+%%% ============================================================================
+
+-spec register_number_class() -> {ok, atom()} | {error, atom(), term()}.
+register_number_class() ->
+    ClassInfo = #{
+        name => 'Number',
+        module => bt_stdlib_number,
+        superclass => 'Object',
+        is_abstract => true,
+        instance_methods => #{
+            isZero => #{arity => 0},
+            isPositive => #{arity => 0},
+            isNegative => #{arity => 0},
+            sign => #{arity => 0},
+            'between:and:' => #{arity => 2}
+        },
+        class_methods => #{},
+        instance_variables => []
+    },
+    register_class('Number', ClassInfo).
+
+%%% ============================================================================
 %%% Integer Class
 %%% ============================================================================
 
@@ -111,7 +136,7 @@ register_integer_class() ->
     ClassInfo = #{
         name => 'Integer',
         module => beamtalk_integer,
-        superclass => 'Object',
+        superclass => 'Number',
         instance_methods => #{
             '+' => #{arity => 1},
             '-' => #{arity => 1},
@@ -131,9 +156,6 @@ register_integer_class() ->
             negated => #{arity => 0},
             '%' => #{arity => 1},
             '**' => #{arity => 1},
-            isZero => #{arity => 0},
-            isPositive => #{arity => 0},
-            isNegative => #{arity => 0},
             isEven => #{arity => 0},
             isOdd => #{arity => 0},
             'min:' => #{arity => 1},
@@ -353,7 +375,7 @@ register_float_class() ->
     ClassInfo = #{
         name => 'Float',
         module => beamtalk_float,
-        superclass => 'Object',
+        superclass => 'Number',
         instance_methods => #{
             '+' => #{arity => 1},
             '-' => #{arity => 1},
@@ -368,10 +390,18 @@ register_float_class() ->
             class => #{arity => 0},
             'respondsTo:' => #{arity => 1},
             asString => #{arity => 0},
+            asInteger => #{arity => 0},
             abs => #{arity => 0},
             negated => #{arity => 0},
             'min:' => #{arity => 1},
             'max:' => #{arity => 1},
+            rounded => #{arity => 0},
+            ceiling => #{arity => 0},
+            floor => #{arity => 0},
+            truncated => #{arity => 0},
+            isNaN => #{arity => 0},
+            isInfinite => #{arity => 0},
+            isZero => #{arity => 0},
             describe => #{arity => 0}
         },
         class_methods => #{},
