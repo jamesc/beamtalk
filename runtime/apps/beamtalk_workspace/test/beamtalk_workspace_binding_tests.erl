@@ -17,7 +17,8 @@
 transcript_persistent_term_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link_singleton(1000),
     try
-        ?assertEqual(Pid, persistent_term:get({beamtalk_binding, 'Transcript'}))
+        Expected = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid},
+        ?assertEqual(Expected, persistent_term:get({beamtalk_binding, 'Transcript'}))
     after
         cleanup_transcript(Pid)
     end.
@@ -33,17 +34,18 @@ transcript_registered_name_test() ->
 transcript_binding_matches_whereis_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link_singleton(1000),
     try
-        BindingPid = persistent_term:get({beamtalk_binding, 'Transcript'}),
+        Binding = persistent_term:get({beamtalk_binding, 'Transcript'}),
         RegisteredPid = whereis('Transcript'),
-        ?assertEqual(BindingPid, RegisteredPid),
-        ?assertEqual(Pid, BindingPid)
+        ?assertEqual(Pid, RegisteredPid),
+        ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, Binding)
     after
         cleanup_transcript(Pid)
     end.
 
 transcript_cleanup_on_stop_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link_singleton(1000),
-    ?assertEqual(Pid, persistent_term:get({beamtalk_binding, 'Transcript'})),
+    Expected = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid},
+    ?assertEqual(Expected, persistent_term:get({beamtalk_binding, 'Transcript'})),
     gen_server:stop(Pid),
     %% persistent_term should be erased after stop
     ?assertEqual(undefined, persistent_term:get({beamtalk_binding, 'Transcript'}, undefined)),
@@ -67,7 +69,8 @@ transcript_non_singleton_no_binding_test() ->
 sysdict_persistent_term_test() ->
     {ok, Pid} = beamtalk_system_dictionary:start_link_singleton(),
     try
-        ?assertEqual(Pid, persistent_term:get({beamtalk_binding, 'Beamtalk'}))
+        Expected = {beamtalk_object, 'SystemDictionary', beamtalk_system_dictionary, Pid},
+        ?assertEqual(Expected, persistent_term:get({beamtalk_binding, 'Beamtalk'}))
     after
         cleanup_sysdict(Pid)
     end.
@@ -83,17 +86,18 @@ sysdict_registered_name_test() ->
 sysdict_binding_matches_whereis_test() ->
     {ok, Pid} = beamtalk_system_dictionary:start_link_singleton(),
     try
-        BindingPid = persistent_term:get({beamtalk_binding, 'Beamtalk'}),
+        Binding = persistent_term:get({beamtalk_binding, 'Beamtalk'}),
         RegisteredPid = whereis('Beamtalk'),
-        ?assertEqual(BindingPid, RegisteredPid),
-        ?assertEqual(Pid, BindingPid)
+        ?assertEqual(Pid, RegisteredPid),
+        ?assertMatch({beamtalk_object, 'SystemDictionary', beamtalk_system_dictionary, Pid}, Binding)
     after
         cleanup_sysdict(Pid)
     end.
 
 sysdict_cleanup_on_stop_test() ->
     {ok, Pid} = beamtalk_system_dictionary:start_link_singleton(),
-    ?assertEqual(Pid, persistent_term:get({beamtalk_binding, 'Beamtalk'})),
+    Expected = {beamtalk_object, 'SystemDictionary', beamtalk_system_dictionary, Pid},
+    ?assertEqual(Expected, persistent_term:get({beamtalk_binding, 'Beamtalk'})),
     gen_server:stop(Pid),
     ?assertEqual(undefined, persistent_term:get({beamtalk_binding, 'Beamtalk'}, undefined)),
     ?assertEqual(undefined, whereis('Beamtalk')).

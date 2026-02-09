@@ -848,15 +848,17 @@ impl CoreErlangGenerator {
     /// Generates a workspace binding message send (BT-374 / ADR 0010).
     ///
     /// Workspace bindings (`Transcript`, `Beamtalk`) are singleton actors whose
-    /// PIDs are stored in `persistent_term`. The generated code:
+    /// `beamtalk_object` tuples are stored in `persistent_term`. The generated code:
     ///
-    /// 1. Looks up the PID: `persistent_term:get({beamtalk_binding, 'Name'})`
-    /// 2. Creates a future: `beamtalk_future:new()`
-    /// 3. Sends async message: `beamtalk_actor:async_send(Pid, Selector, Args, Future)`
-    /// 4. Returns the future
+    /// 1. Looks up binding: `persistent_term:get({beamtalk_binding, 'Name'})`
+    /// 2. Extracts PID: `element(4, Binding)`
+    /// 3. Creates a future: `beamtalk_future:new()`
+    /// 4. Sends async message: `beamtalk_actor:async_send(Pid, Selector, Args, Future)`
+    /// 5. Returns the future
     ///
     /// ```erlang
-    /// let Pid = call 'persistent_term':'get'({'beamtalk_binding', 'Transcript'}) in
+    /// let Binding = call 'persistent_term':'get'({'beamtalk_binding', 'Transcript'}) in
+    /// let Pid = call 'erlang':'element'(4, Binding) in
     /// let Future = call 'beamtalk_future':'new'() in
     /// let _ = call 'beamtalk_actor':'async_send'(Pid, 'show:', [Arg], Future) in Future
     /// ```
@@ -870,10 +872,17 @@ impl CoreErlangGenerator {
         let future_var = self.fresh_var("Future");
         let selector_atom = selector.to_erlang_atom();
 
-        // Look up binding PID from persistent_term
+        // Look up binding object from persistent_term (beamtalk_object tuple)
+        let binding_var = self.fresh_var("BindingObj");
         write!(
             self.output,
-            "let {pid_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+            "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+        )?;
+
+        // Extract PID from beamtalk_object record (4th element)
+        write!(
+            self.output,
+            "let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "
         )?;
 
         // Create future for async result
