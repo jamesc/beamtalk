@@ -194,17 +194,41 @@ Class-side state via "class declarations" in the class header. Modules are insta
 
 ## Steelman Analysis
 
-### "Just use workspace bindings for singletons (no class variables needed)"
-**For**: ADR 0010 already solves Transcript/Beamtalk. Why add complexity?
-**Against**: Workspace bindings are a deployment concern, not a language feature. Users can't create their own singletons. Factory pattern requires class variables. This limits the language to only framework-provided singletons.
+### "Skip class variables — just spawn dedicated processes for shared state"
 
-### "Use Erlang persistent_term for class variables instead of gen_server state"
-**For**: ~13ns reads, lock-free, already used for workspace bindings.
-**Against**: `persistent_term:put` triggers a global GC scan on every write. Fine for rarely-changing bindings, terrible for mutable class state. gen_server state is the standard OTP pattern for mutable state.
+**Erlang/BEAM developer**: "The whole point of BEAM is that state belongs in processes, not language-level class constructs. If you want a singleton counter, spawn a `counter_registry` gen_server. If you want shared config, use `persistent_term` or `application:get_env`. Class variables are an OO concept that fights against BEAM's process-oriented model. Every BEAM developer already knows how to manage state in processes — adding a new abstraction (class variables) is one more thing to learn with no real payoff."
 
-### "Full metaclass tower (Smalltalk-80 style)"
-**For**: Maximum compatibility with Smalltalk patterns. Class-side method inheritance works automatically.
-**Against**: Enormous complexity for BEAM. Every class needs a metaclass process. Method lookup doubles. Most users never need metaclass inheritance. We can add it later (ADR 0005 Phase 2) if needed.
+**Newcomer**: "I don't understand what 'class variable' means vs 'state'. Why are there two kinds of state? In Python I'd just use a module-level variable."
+
+**Response**: Class variables aren't about raw state management — they're about **object protocol**. The singleton pattern (`uniqueInstance`), the factory pattern (class-side `new:` override), and framework hooks (`allSubclasses`) are standard OO idioms that users from any OO language will reach for. Telling them "spawn a process instead" breaks the object metaphor that Beamtalk promises. Under the hood, class variables *are* process state (gen_server state) — we're not fighting BEAM, we're wrapping it in the right abstraction.
+
+### "Use ETS or persistent_term for class variable storage"
+
+**Erlang/BEAM developer**: "ETS gives you concurrent reads (~100ns), atomic writes, no gen_server bottleneck. `persistent_term` gives ~13ns reads for rarely-changing values. gen_server:call adds ~5-10μs per access and serializes all reads. For a language that compiles to BEAM, you should use BEAM's strengths, not add a gen_server bottleneck."
+
+**Operator**: "I can inspect ETS tables in observer. gen_server state requires attaching to the process. ETS is more observable in production."
+
+**Response**: The performance argument is real but misplaced for class variables. Class variables serve patterns like singletons (read once, cache), instance counting (low frequency), and configuration (rarely changes) — not hot-path per-message state. The gen_server approach gives us: (1) crash recovery via supervision (ETS tables die with their owner), (2) consistent mutation semantics (no race conditions), (3) identical model to actor state (less to learn). If profiling reveals a bottleneck, we can optimize specific patterns to ETS/persistent_term without changing the language semantics — the storage is an implementation detail hidden behind `classVar:`.
+
+### "Full metaclass tower (Smalltalk-80 style) instead of flat class-side methods"
+
+**Smalltalk developer**: "The metaclass hierarchy is what makes Smalltalk's class system powerful. `TestCase class >> allTestSelectors` is inherited by `MyTestCase class` automatically. Without metaclass inheritance, every framework that needs class-side hooks (SUnit, Seaside, Magritte) must reinvent method discovery. You're building half a class system. Also, in Pharo, class instance variables ARE metaclass instance variables — your `classVar:` is actually metaclass state, you're just not calling it that."
+
+**Response**: This is the strongest argument against our approach. Metaclass inheritance *is* genuinely useful for frameworks. However: (1) We can add metaclass inheritance later (ADR 0005 Phase 2) without breaking `classVar:` or `class` method syntax — the syntax works with either a flat model or a metaclass tower. (2) The metaclass tower doubles the number of processes and complicates method lookup for a feature most user code never exercises. (3) Beamtalk's primary audience is building BEAM applications, not building Smalltalk frameworks — we optimize for the common case. (4) `perform:` + `methods` already enables framework-style method discovery without metaclass inheritance.
+
+### "`classVar:` is misleading — it's NOT Smalltalk classVariableNames:"
+
+**Smalltalk developer**: "In Smalltalk, `classVariableNames:` declares variables shared across the entire class hierarchy. Your `classVar:` is actually Pharo's 'class instance variable' — per-class, not shared. Using the name `classVar:` will confuse every Smalltalk developer who expects hierarchy-wide sharing. You should call it `classInstVar:` or similar to be honest about what it does."
+
+**Newcomer**: "I assumed `classVar:` would be inherited by subclasses, like class fields in Java. The per-class behavior is surprising."
+
+**Response**: Fair naming concern. However: (1) Hierarchy-shared class variables are widely considered a design mistake — even Ruby's `@@var` is a known footgun, and Pharo documentation recommends class instance variables for nearly all use cases. (2) `classInstVar:` is jargon that only makes sense if you already understand the metaclass model. (3) The name `classVar:` communicates the right mental model for 90% of users: "a variable that belongs to the class, not to instances." We document the per-class semantics explicitly and note the Smalltalk divergence in the syntax rationale.
+
+### "Class-side methods aren't needed — just use module functions"
+
+**Erlang/BEAM developer**: "Every Beamtalk class already compiles to an Erlang module. Module functions *are* class-side methods. `Point new` already compiles to `call 'point':'new'()`. Why add `class` prefix syntax when you can just define module-level functions? The BEAM already has this concept — it's called a module."
+
+**Response**: Module functions work for the compile-time-known case (`Point new`), but fail for the dynamic case (`cls new` where cls is a variable). The `class` prefix isn't about module functions — it's about methods on the class *object* that participate in message dispatch. When you write `cls := Beamtalk classNamed: #Point. cls new`, the runtime must dispatch `new` to the class process, not to a module. The `class` prefix tells the compiler "register this method on the class process's dispatch table" rather than "generate a module function." Both paths can coexist: direct module calls as the optimization, class process dispatch as the contract.
 
 ## Alternatives Considered
 
@@ -213,14 +237,21 @@ Class-side state via "class declarations" in the class header. Modules are insta
 Object subclass: Counter
   shared: instanceCount = 0
 ```
-Rejected: "shared" is ambiguous (shared with whom?). `classVar:` is explicit about scope and familiar to Smalltalk developers.
+Rejected: "shared" is ambiguous (shared with whom? — other instances? other classes? other processes?). `classVar:` is explicit about scope and familiar to OO developers, even if its exact semantics differ from Smalltalk's `classVariableNames:`.
+
+### Alternative: `classInstVar:` (Pharo-accurate naming)
+```beamtalk
+Object subclass: TranscriptStream
+  classInstVar: uniqueInstance = nil
+```
+Rejected: Only meaningful to developers who understand the metaclass model. `classVar:` communicates the right intuition ("variable on the class") for 90% of users. The per-class (non-inherited) semantics are documented explicitly.
 
 ### Alternative: Annotation-based class methods
 ```beamtalk
 @classMethod
 uniqueInstance => ...
 ```
-Rejected: Annotations are not Smalltalk-idiomatic. The `class` prefix reads more naturally and keeps the method definition syntax consistent.
+Rejected: Annotations are not Smalltalk-idiomatic. The `class` prefix reads more naturally ("class method uniqueInstance") and keeps the method definition syntax consistent. Annotations suggest metadata, not behavior.
 
 ### Alternative: Separate class body block
 ```beamtalk
@@ -231,7 +262,12 @@ Object subclass: TranscriptStream
   classSide:
     uniqueInstance => ...
 ```
-Rejected: Adds structural complexity. Pharo's browser has two "tabs" (instance/class side), but in a text file the `class` prefix per method is clearer and avoids ordering ambiguity.
+Rejected: Adds structural complexity and ordering ambiguity (what if instance methods appear after `classSide:`?). Pharo's browser has two "tabs" (instance/class side), but in a text file the `class` prefix per method is clearer — you can freely interleave instance and class methods grouped by concern.
+
+### Alternative: Defer everything — only implement dynamic dispatch (Phase 1)
+Ship BT-221 + BT-246 without `classVar:` or `class` methods. Let users use workspace bindings for singletons and module functions for class-level behavior. Add class variables later if demand appears.
+
+This is a viable incremental approach. The risk is that Phase 1 without Phase 2-3 leaves an awkward gap: users can call `cls new` dynamically but can't define their own class-side methods or singletons. We include all phases in this ADR for design coherence, but Phase 1 can ship independently.
 
 ## Consequences
 
