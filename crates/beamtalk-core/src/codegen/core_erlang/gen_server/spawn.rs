@@ -225,6 +225,72 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// Generates the `spawn/0` error method for abstract classes (BT-105).
+    ///
+    /// Abstract classes cannot be instantiated — they must be subclassed first.
+    /// This function generates a method that throws a structured `#beamtalk_error{}`
+    /// record with `kind=instantiation_error`.
+    pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_error_method(
+        &mut self,
+    ) -> Result<()> {
+        let class_name = self.class_name();
+        writeln!(self.output, "'spawn'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawn') in"
+        )?;
+        self.write_indent()?;
+        write!(
+            self.output,
+            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
+        )?;
+        self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
+        writeln!(self.output, ") in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        self.indent -= 1;
+
+        Ok(())
+    }
+
+    /// Generates the `spawn/1` error method for abstract classes (BT-105).
+    pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_with_args_error_method(
+        &mut self,
+    ) -> Result<()> {
+        let class_name = self.class_name();
+        writeln!(self.output, "'spawn'/1 = fun (_InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:') in"
+        )?;
+        self.write_indent()?;
+        write!(
+            self.output,
+            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
+        )?;
+        self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
+        writeln!(self.output, ") in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        self.indent -= 1;
+
+        Ok(())
+    }
+
     /// Helper to generate a binary string literal in Core Erlang format.
     ///
     /// Generates: #{#<char1>(...), #<char2>(...), ...}#

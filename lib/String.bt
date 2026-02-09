@@ -64,3 +64,4 @@ sealed Object subclass: String
   select: block => @primitive 'select:'
 
   describe => self
+  printString => self

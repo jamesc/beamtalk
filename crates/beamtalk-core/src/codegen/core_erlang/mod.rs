@@ -3141,6 +3141,16 @@ end
             "Should include superclass in metadata. Got:\n{code}"
         );
 
+        // BT-105: Check sealing modifier flags
+        assert!(
+            code.contains("'is_sealed' => 'false'"),
+            "Should include is_sealed flag. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'is_abstract' => 'false'"),
+            "Should include is_abstract flag. Got:\n{code}"
+        );
+
         // Check instance_methods map
         assert!(
             code.contains("'instance_methods' => ~{"),

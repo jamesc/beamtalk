@@ -439,6 +439,20 @@ impl CoreErlangGenerator {
             self.write_indent()?;
             writeln!(self.output, "'superclass' => '{}',", class.superclass.name)?;
 
+            // BT-105: Sealing modifiers
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'is_sealed' => '{}',",
+                if class.is_sealed { "true" } else { "false" }
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "'is_abstract' => '{}',",
+                if class.is_abstract { "true" } else { "false" }
+            )?;
+
             // Instance methods
             self.write_indent()?;
             write!(self.output, "'instance_methods' => ~{{")?;

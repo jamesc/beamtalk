@@ -100,7 +100,7 @@ test-rust:
     @echo "✅ Rust tests complete"
 
 # Run E2E tests (slow - full pipeline, ~50s)
-test-e2e: _clean-daemon-state
+test-e2e: build-stdlib _clean-daemon-state
     @echo "🧪 Running E2E tests (slow - ~50s)..."
     cargo test --test e2e -- --ignored
 

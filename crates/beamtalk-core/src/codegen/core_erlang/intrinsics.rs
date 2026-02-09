@@ -11,7 +11,7 @@
 //!
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
-//! - **Object**: `isNil`, `notNil`, `respondsTo:` → Protocol methods
+//! - **Object**: `isNil`, `notNil`, `respondsTo:`, `subclassResponsibility` → Protocol methods
 //! - **Dynamic dispatch**: `perform:`, `perform:withArgs:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
@@ -513,6 +513,30 @@ impl CoreErlangGenerator {
                     )?;
                     Ok(Some(()))
                 }
+                "yourself" if arguments.is_empty() => {
+                    // Identity: just return the receiver
+                    self.generate_expression(receiver)?;
+                    Ok(Some(()))
+                }
+                "hash" if arguments.is_empty() => {
+                    // Hash using erlang:phash2/1 — works for all BEAM types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
+                    Ok(Some(()))
+                }
+                "printString" if arguments.is_empty() => {
+                    // Delegate to beamtalk_primitive:print_string/1 which handles all types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in call 'beamtalk_primitive':'print_string'({recv_var})"
+                    )?;
+                    Ok(Some(()))
+                }
                 "instVarNames" if arguments.is_empty() => {
                     // For actors: Extract instance variable names from state map
                     // For primitives: Intended future semantics is to return empty list
@@ -547,6 +571,23 @@ impl CoreErlangGenerator {
 
                     write!(self.output, "{future_var}")?;
 
+                    Ok(Some(()))
+                }
+                "subclassResponsibility" if arguments.is_empty() => {
+                    // Raise a structured beamtalk_error for abstract methods
+                    let err0 = self.fresh_temp_var("Err");
+                    let err1 = self.fresh_temp_var("Err");
+                    let err2 = self.fresh_temp_var("Err");
+                    let hint = core_erlang_binary_string(
+                        "This method is abstract and must be overridden by a subclass.",
+                    );
+                    write!(
+                        self.output,
+                        "let {err0} = call 'beamtalk_error':'new'('does_not_understand', 'Object') in \
+                         let {err1} = call 'beamtalk_error':'with_selector'({err0}, 'subclassResponsibility') in \
+                         let {err2} = call 'beamtalk_error':'with_hint'({err1}, {hint}) in \
+                         call 'erlang':'error'({err2})"
+                    )?;
                     Ok(Some(()))
                 }
                 _ => Ok(None),
@@ -732,4 +773,18 @@ impl CoreErlangGenerator {
             MessageSelector::Binary(_) => Ok(None),
         }
     }
+}
+
+/// Converts a Rust string to Core Erlang binary literal format.
+///
+/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
+fn core_erlang_binary_string(s: &str) -> String {
+    if s.is_empty() {
+        return "#{}#".to_string();
+    }
+    let segments: Vec<String> = s
+        .bytes()
+        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
+        .collect();
+    format!("#{{{}}}#", segments.join(","))
 }

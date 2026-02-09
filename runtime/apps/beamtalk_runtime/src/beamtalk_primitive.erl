@@ -42,7 +42,7 @@
 %%% See: docs/internal/design-self-as-object.md Section 3.3
 
 -module(beamtalk_primitive).
--export([class_of/1, send/3, responds_to/2, class_name_to_module/1]).
+-export([class_of/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
 
 -include("beamtalk.hrl").
 
@@ -93,6 +93,34 @@ class_of(X) when is_pid(X) -> 'Pid';
 class_of(X) when is_port(X) -> 'Port';
 class_of(X) when is_reference(X) -> 'Reference';
 class_of(_) -> 'Object'.
+
+%% @doc Return the printString representation of any value.
+%%
+%% Handles all BEAM types uniformly — used by the printString intrinsic.
+-spec print_string(term()) -> binary().
+print_string(X) when is_integer(X) ->
+    erlang:integer_to_binary(X);
+print_string(X) when is_float(X) ->
+    erlang:float_to_binary(X, [short]);
+print_string(X) when is_binary(X) ->
+    X;
+print_string(true) ->
+    <<"true">>;
+print_string(false) ->
+    <<"false">>;
+print_string(nil) ->
+    <<"nil">>;
+print_string(X) when is_atom(X) ->
+    erlang:atom_to_binary(X, utf8);
+print_string(X) when is_list(X) ->
+    iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
+print_string(#beamtalk_object{class = ClassName}) ->
+    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
+print_string(X) when is_map(X) ->
+    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
+    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
+print_string(X) ->
+    iolist_to_binary(io_lib:format("~p", [X])).
 
 %% @doc Send a message to any value (actor or primitive).
 %%

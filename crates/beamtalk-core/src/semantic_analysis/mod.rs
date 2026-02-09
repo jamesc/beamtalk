@@ -300,7 +300,148 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
     result.diagnostics.extend(analyser.result.diagnostics);
     result.block_info = analyser.result.block_info;
 
+    // Phase 4: Abstract instantiation check (BT-105)
+    check_abstract_instantiation(module, &result.class_hierarchy, &mut result.diagnostics);
+
     result
+}
+
+/// BT-105: Check for attempts to instantiate abstract classes.
+///
+/// Walks all expressions looking for `MessageSend` where the receiver is an
+/// identifier matching an abstract class and the selector is `spawn` or `spawnWith:`.
+fn check_abstract_instantiation(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for expr in &module.expressions {
+        check_abstract_in_expr(expr, hierarchy, diagnostics);
+    }
+    for class in &module.classes {
+        for method in &class.methods {
+            for expr in &method.body {
+                check_abstract_in_expr(expr, hierarchy, diagnostics);
+            }
+        }
+    }
+}
+
+/// Returns true if the selector name is an instantiation method (spawn, new, etc.)
+fn is_instantiation_selector(name: &str) -> bool {
+    matches!(name, "spawn" | "spawnWith:" | "new" | "new:")
+}
+
+fn check_abstract_in_expr(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            span,
+        } => {
+            // Check if receiver is a class reference or identifier matching an abstract class
+            let receiver_name = match receiver.as_ref() {
+                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            };
+
+            if let Some(name) = receiver_name {
+                let selector_name = selector.name();
+
+                if is_instantiation_selector(&selector_name) && hierarchy.is_abstract(name) {
+                    diagnostics.push(Diagnostic::error(
+                        format!("Cannot instantiate abstract class `{name}`. Subclass it first.",),
+                        *span,
+                    ));
+                }
+            }
+
+            // Recurse into receiver and arguments
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+            for arg in arguments {
+                check_abstract_in_expr(arg, hierarchy, diagnostics);
+            }
+        }
+        Expression::Block(block) => {
+            for e in &block.body {
+                check_abstract_in_expr(e, hierarchy, diagnostics);
+            }
+        }
+        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+
+            // BT-105: Check cascade messages for abstract class instantiation
+            let receiver_name = match receiver.as_ref() {
+                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
+                _ => None,
+            };
+            if let Some(name) = receiver_name {
+                for msg in messages {
+                    let sel = msg.selector.name();
+                    if is_instantiation_selector(&sel) && hierarchy.is_abstract(name) {
+                        diagnostics.push(Diagnostic::error(
+                            format!(
+                                "Cannot instantiate abstract class `{name}`. Subclass it first.",
+                            ),
+                            msg.span,
+                        ));
+                    }
+                }
+            }
+
+            for msg in messages {
+                for arg in &msg.arguments {
+                    check_abstract_in_expr(arg, hierarchy, diagnostics);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            check_abstract_in_expr(expression, hierarchy, diagnostics);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            check_abstract_in_expr(receiver, hierarchy, diagnostics);
+        }
+        Expression::Pipe { value, target, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+            check_abstract_in_expr(target, hierarchy, diagnostics);
+        }
+        Expression::Match { value, arms, .. } => {
+            check_abstract_in_expr(value, hierarchy, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    check_abstract_in_expr(guard, hierarchy, diagnostics);
+                }
+                check_abstract_in_expr(&arm.body, hierarchy, diagnostics);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                check_abstract_in_expr(&pair.key, hierarchy, diagnostics);
+                check_abstract_in_expr(&pair.value, hierarchy, diagnostics);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                check_abstract_in_expr(elem, hierarchy, diagnostics);
+            }
+            if let Some(t) = tail {
+                check_abstract_in_expr(t, hierarchy, diagnostics);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Internal analyser state.
@@ -2416,5 +2557,63 @@ mod tests {
             "Cascade messages should trigger symbol validation, got: {:?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn test_abstract_class_instantiation_error() {
+        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind};
+
+        // BT-105: abstract class cannot be instantiated
+        let class = ClassDefinition {
+            name: Identifier::new("Shape", test_span()),
+            superclass: Identifier::new("Actor", test_span()),
+            is_abstract: true,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Unary("area".into()),
+                parameters: vec![],
+                body: vec![Expression::Literal(Literal::Integer(42), test_span())],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                span: test_span(),
+            }],
+            span: test_span(),
+        };
+
+        // Top-level expression: Shape spawn
+        let spawn_expr = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Shape", test_span()),
+                span: test_span(),
+            }),
+            selector: MessageSelector::Unary("spawn".into()),
+            arguments: vec![],
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![spawn_expr],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+
+        let result = analyse(&module);
+
+        let abstract_errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Cannot instantiate abstract class"))
+            .collect();
+
+        assert_eq!(
+            abstract_errors.len(),
+            1,
+            "Should detect abstract class instantiation, got: {:?}",
+            result.diagnostics
+        );
+        assert!(abstract_errors[0].message.contains("Shape"));
     }
 }

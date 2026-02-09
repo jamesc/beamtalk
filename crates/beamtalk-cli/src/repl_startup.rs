@@ -1,0 +1,258 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! Shared REPL BEAM node startup configuration and runtime discovery.
+//!
+//! **DDD Context:** REPL — Startup Configuration & Runtime Discovery
+//!
+//! This module provides the canonical eval command, code-path arguments,
+//! and runtime directory discovery for starting a BEAM node with the
+//! Beamtalk REPL backend.  Both the production `beamtalk repl` command
+//! (`process.rs`) and the E2E test harness (`tests/e2e.rs`) consume
+//! these helpers so that any change to the startup sequence is
+//! automatically reflected in tests.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use miette::{Result, miette};
+
+/// Directories that must be on the BEAM code path (`-pa`) for the REPL to work.
+#[derive(Debug)]
+pub struct BeamPaths {
+    pub runtime_ebin: PathBuf,
+    pub workspace_ebin: PathBuf,
+    pub jsx_ebin: PathBuf,
+    pub stdlib_ebin: PathBuf,
+}
+
+/// Compute the standard `-pa` directories from a runtime root.
+pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
+    let build_lib_dir = runtime_dir.join("_build/default/lib");
+    BeamPaths {
+        runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
+        workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
+        jsx_ebin: build_lib_dir.join("jsx/ebin"),
+        // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
+        stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
+    }
+}
+
+/// Build the Erlang `-eval` command that starts the REPL backend.
+///
+/// The returned string is suitable for passing as `erl -eval <cmd>`.
+/// It performs the following steps:
+/// 1. Stores the port in the application environment
+/// 2. Starts the `beamtalk_workspace` OTP application (and its dependencies)
+/// 3. Starts the REPL TCP listener on the given port
+/// 4. Prints a ready message
+/// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
+pub fn build_eval_cmd(port: u16) -> String {
+    format!(
+        "{}, \
+         {{ok, _}} = beamtalk_repl:start_link({port}), \
+         io:format(\"REPL backend started on port {port}~n\"), \
+         receive stop -> ok end.",
+        startup_prelude(port),
+    )
+}
+
+/// Build the Erlang `-eval` command with an explicit node name.
+///
+/// Like [`build_eval_cmd`] but also stores the node name in the application
+/// environment before starting the workspace application.
+///
+/// The `node_name` is escaped for safe interpolation into an Erlang
+/// single-quoted atom literal.
+pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
+    let safe_name = escape_erlang_atom(node_name);
+    format!(
+        "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
+         {}, \
+         {{ok, _}} = beamtalk_repl:start_link({port}), \
+         io:format(\"REPL backend started on port {port} (node: {safe_name})~n\"), \
+         receive stop -> ok end.",
+        startup_prelude(port),
+    )
+}
+
+/// The startup prelude shared by all startup modes.
+///
+/// Sets the port in the application environment and starts the workspace
+/// OTP application.  Callers append the REPL listener start and their own
+/// shutdown logic (e.g. `receive stop -> ok end` or cover export).
+pub fn startup_prelude(port: u16) -> String {
+    format!(
+        "application:set_env(beamtalk_runtime, repl_port, {port}), \
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace)"
+    )
+}
+
+/// Escape characters that are special inside Erlang single-quoted atoms.
+fn escape_erlang_atom(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+/// Collect `-pa` paths as `OsString` arguments for passing to `Command::args`.
+///
+/// Returns alternating `["-pa", "<path>", "-pa", "<path>", ...]`.
+/// Uses `OsString` so non-UTF8 filesystem paths are handled without panicking.
+pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
+    let dirs = [
+        &paths.runtime_ebin,
+        &paths.workspace_ebin,
+        &paths.jsx_ebin,
+        &paths.stdlib_ebin,
+    ];
+    let mut args = Vec::with_capacity(dirs.len() * 2);
+    for dir in dirs {
+        args.push(OsString::from("-pa"));
+        args.push(dir.as_os_str().to_os_string());
+    }
+    args
+}
+
+// ── Runtime Discovery ──────────────────────────────────────────────
+
+/// Find the runtime directory by checking multiple possible locations.
+///
+/// # Errors
+///
+/// Returns an error if no valid runtime directory is found, or if
+/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain `rebar.config`.
+///
+/// Resolution order:
+/// 1. `BEAMTALK_RUNTIME_DIR` environment variable
+/// 2. `CARGO_MANIFEST_DIR/../../runtime` (when running via `cargo run`)
+/// 3. `./runtime` (running from repo root)
+/// 4. Relative to executable (installed location)
+/// 5. Executable's grandparent (target/debug/beamtalk → repo root)
+pub fn find_runtime_dir() -> Result<PathBuf> {
+    // Check explicit env var first
+    if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
+        let path = PathBuf::from(dir);
+        if path.join("rebar.config").exists() {
+            return Ok(path);
+        }
+        return Err(miette!(
+            "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
+        ));
+    }
+
+    // Candidates in order of preference
+    let candidates = [
+        // 1. CARGO_MANIFEST_DIR (when running via cargo run)
+        std::env::var("CARGO_MANIFEST_DIR")
+            .ok()
+            .map(|d| PathBuf::from(d).join("../../runtime")),
+        // 2. Current working directory (running from repo root)
+        Some(PathBuf::from("runtime")),
+        // 3. Relative to executable (installed location)
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk/runtime"))),
+        // 4. Executable's grandparent (target/debug/beamtalk -> repo root)
+        std::env::current_exe().ok().and_then(|exe| {
+            exe.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+                .map(|p| p.join("runtime"))
+        }),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.join("rebar.config").exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(miette!(
+        "Could not find Beamtalk runtime directory.\n\
+        Please run from the repository root or set BEAMTALK_RUNTIME_DIR."
+    ))
+}
+
+/// Check whether a directory contains compiled `.beam` files.
+pub fn has_beam_files(dir: &Path) -> bool {
+    dir.is_dir()
+        && std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+            })
+            .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_cmd_contains_required_steps() {
+        let cmd = build_eval_cmd(9000);
+        // Must set application env before starting apps
+        assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
+        // Must start the workspace OTP application
+        assert!(cmd.contains("application:ensure_all_started(beamtalk_workspace)"));
+        // Must start the REPL TCP listener
+        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+        // Must block to keep the VM alive
+        assert!(cmd.contains("receive stop -> ok end"));
+    }
+
+    #[test]
+    fn eval_cmd_with_node_includes_node_name() {
+        let cmd = build_eval_cmd_with_node(9000, "mynode");
+        assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
+        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+    }
+
+    #[test]
+    fn eval_cmd_with_node_escapes_special_chars() {
+        let cmd = build_eval_cmd_with_node(9000, "node'inject");
+        assert!(cmd.contains("node\\'inject"));
+        assert!(!cmd.contains("node'inject"));
+    }
+
+    #[test]
+    fn startup_prelude_contains_set_env_and_ensure_started() {
+        let prelude = startup_prelude(9000);
+        assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
+        assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
+        // Prelude should NOT contain the blocking receive
+        assert!(!prelude.contains("receive"));
+    }
+
+    #[test]
+    fn beam_paths_uses_correct_layout() {
+        let paths = beam_paths(Path::new("/rt"));
+        assert_eq!(
+            paths.runtime_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
+        );
+        assert_eq!(
+            paths.workspace_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin")
+        );
+        assert_eq!(
+            paths.jsx_ebin,
+            PathBuf::from("/rt/_build/default/lib/jsx/ebin")
+        );
+        assert_eq!(
+            paths.stdlib_ebin,
+            PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
+        );
+    }
+
+    #[test]
+    fn beam_pa_args_alternates_flag_and_path() {
+        let paths = beam_paths(Path::new("/rt"));
+        let args = beam_pa_args(&paths);
+        // Should be 8 elements: 4 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 8);
+        for i in (0..args.len()).step_by(2) {
+            assert_eq!(args[i], "-pa");
+        }
+    }
+}

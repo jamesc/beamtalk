@@ -16,3 +16,4 @@ sealed Object subclass: False
   isTrue => false
   isFalse => true
   describe => 'false'
+  printString => 'false'

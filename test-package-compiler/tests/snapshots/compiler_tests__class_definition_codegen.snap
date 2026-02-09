@@ -154,6 +154,8 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
             'name' => 'Counter',
             'module' => 'class_definition',
             'superclass' => 'Actor',
+            'is_sealed' => 'false',
+            'is_abstract' => 'false',
             'instance_methods' => ~{'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
             'instance_variables' => ['value'],
             'class_methods' => ~{

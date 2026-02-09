@@ -153,6 +153,8 @@ module 'error_message' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             'name' => 'TestActor',
             'module' => 'error_message',
             'superclass' => 'Actor',
+            'is_sealed' => 'false',
+            'is_abstract' => 'false',
             'instance_methods' => ~{'doError' => ~{'arity' => 0, 'is_sealed' => 'false'}~, 'errorWithVariable' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
             'instance_variables' => [],
             'class_methods' => ~{

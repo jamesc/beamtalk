@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Object protocol: printString, yourself, hash
+//
+// BT-275: These methods are part of the fundamental Object protocol
+// that every object should understand.
+
+// ===========================================================================
+// printString — string representation of any object
+// ===========================================================================
+
+// --- Integers ---
+42 printString
+// => 42
+
+0 printString
+// => 0
+
+-7 printString
+// => -7
+
+// --- Strings ---
+'hello' printString
+// => hello
+
+'' printString
+// => 
+
+// --- Booleans ---
+true printString
+// => true
+
+false printString
+// => false
+
+// --- Nil ---
+nil printString
+// => nil
+
+// ===========================================================================
+// yourself — identity method (returns receiver)
+// ===========================================================================
+
+42 yourself
+// => 42
+
+'hello' yourself
+// => hello
+
+true yourself
+// => true
+
+nil yourself
+// => nil
+
+// yourself should return the same object
+42 yourself = 42
+// => true
+
+'test' yourself = 'test'
+// => true
+
+// ===========================================================================
+// hash — hash value (integer)
+// ===========================================================================
+
+// hash returns an integer
+42 hash
+// => _
+
+// Same value should produce same hash
+42 hash = 42 hash
+// => true
+
+'hello' hash = 'hello' hash
+// => true
+
+// Different values typically produce different hashes (not guaranteed, but
+// verifying hash returns a usable integer for all types)
+'hello' hash
+// => _

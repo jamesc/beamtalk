@@ -19,9 +19,14 @@ ProtoObject subclass: Object
   ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
   ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
 
-  // Debugging — pure Beamtalk
+  // Display — pure Beamtalk / structural intrinsics
+  printString => @primitive printString
   inspect => Transcript show: self describe
   describe => 'an Object'
+
+  // Identity and hashing — structural intrinsics
+  sealed yourself => self
+  hash => @primitive hash
 
   // Reflection — structural intrinsics
   sealed respondsTo: selector => @primitive respondsTo
@@ -32,3 +37,6 @@ ProtoObject subclass: Object
   // Dynamic dispatch — structural intrinsic
   sealed perform: selector => @primitive dynamicSend
   sealed perform: selector withArgs: args => @primitive dynamicSendWithArgs
+
+  // Abstract method marker — raises error if not overridden by subclass
+  subclassResponsibility => @primitive subclassResponsibility

@@ -39,4 +39,5 @@ sealed Object subclass: Integer
   // Conversion — selector-based runtime dispatch
   asFloat => @primitive 'asFloat'
   asString => @primitive 'asString'
+  printString => @primitive 'printString'
   describe => self asString

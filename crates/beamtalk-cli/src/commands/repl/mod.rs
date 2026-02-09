@@ -64,14 +64,14 @@ const MAX_CONNECT_RETRIES: u32 = 10;
 const RETRY_DELAY_MS: u64 = 500;
 
 mod client;
-mod helpers;
+mod display;
 mod process;
 
 use client::ReplClient;
-use helpers::{find_runtime_dir, format_value, history_path, print_help, start_daemon};
+use display::{format_value, history_path, print_help};
 use process::{
-    BeamChildGuard, connect_with_retries, has_beam_files, resolve_node_name, resolve_port,
-    start_beam_node,
+    BeamChildGuard, connect_with_retries, resolve_node_name, resolve_port, start_beam_node,
+    start_daemon,
 };
 
 /// JSON response from the REPL backend.
@@ -226,16 +226,11 @@ pub fn run(
         let project_root = workspace::discovery::discover_project_root(&current_dir);
 
         // Use the same runtime paths as foreground mode
-        let runtime_dir = find_runtime_dir()?;
-        let build_lib_dir = runtime_dir.join("_build/default/lib");
-        let runtime_beam_dir = build_lib_dir.join("beamtalk_runtime/ebin");
-        let repl_beam_dir = build_lib_dir.join("beamtalk_workspace/ebin");
-        let jsx_beam_dir = build_lib_dir.join("jsx/ebin");
-        // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
-        let stdlib_beam_dir = runtime_dir.join("apps/beamtalk_stdlib/ebin");
+        let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()?;
+        let paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
 
         // Warn if stdlib is not compiled (directory may exist without .beam files)
-        if !has_beam_files(&stdlib_beam_dir) {
+        if !beamtalk_cli::repl_startup::has_beam_files(&paths.stdlib_ebin) {
             warn!(
                 "Stdlib not compiled — run `beamtalk build-stdlib` to enable stdlib classes in REPL"
             );
@@ -245,10 +240,10 @@ pub fn run(
             &project_root,
             workspace_name,
             port,
-            &runtime_beam_dir,
-            &repl_beam_dir,
-            &jsx_beam_dir,
-            &stdlib_beam_dir,
+            &paths.runtime_ebin,
+            &paths.workspace_ebin,
+            &paths.jsx_ebin,
+            &paths.stdlib_ebin,
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
         )?;
@@ -690,7 +685,7 @@ mod tests {
         // SAFETY: This test runs single-threaded and we restore the env var after.
         // The set_var/remove_var pair is scoped to just around the find_runtime_dir call.
         unsafe { std::env::set_var("BEAMTALK_RUNTIME_DIR", &temp_dir) };
-        let result = find_runtime_dir();
+        let result = beamtalk_cli::repl_startup::find_runtime_dir();
         // SAFETY: Restoring env var set earlier in this test
         unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
 
@@ -713,7 +708,7 @@ mod tests {
         // SAFETY: This test runs single-threaded and we restore the env var after.
         // The set_var/remove_var pair is scoped to just around the find_runtime_dir call.
         unsafe { std::env::set_var("BEAMTALK_RUNTIME_DIR", &temp_dir) };
-        let result = find_runtime_dir();
+        let result = beamtalk_cli::repl_startup::find_runtime_dir();
         // SAFETY: Restoring env var set earlier in this test
         unsafe { std::env::remove_var("BEAMTALK_RUNTIME_DIR") };
 

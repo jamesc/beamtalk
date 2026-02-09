@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers semantic error: unknown intrinsic name
+// Unquoted @primitive names must be in the STRUCTURAL_INTRINSICS list
+
+Object subclass: BadIntrinsic
+  badOp => @primitive unknownFoo

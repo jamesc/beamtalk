@@ -79,6 +79,9 @@ impl CoreErlangGenerator {
             format!(", {}", sealed_exports.join(", "))
         };
 
+        // BT-105: Check if class is abstract
+        let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
+
         // Module header with expanded exports per BT-29
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
         // BT-242: Add 'has_method'/1 export for reflection
@@ -111,13 +114,21 @@ impl CoreErlangGenerator {
         self.generate_start_link()?;
         writeln!(self.output)?;
 
-        // Generate spawn/0 function (class method to instantiate actors)
-        self.generate_spawn_function(module)?;
-        writeln!(self.output)?;
+        if is_abstract {
+            // BT-105: Abstract classes cannot be spawned — generate error methods
+            self.generate_abstract_spawn_error_method()?;
+            writeln!(self.output)?;
+            self.generate_abstract_spawn_with_args_error_method()?;
+            writeln!(self.output)?;
+        } else {
+            // Generate spawn/0 function (class method to instantiate actors)
+            self.generate_spawn_function(module)?;
+            writeln!(self.output)?;
 
-        // Generate spawn/1 function (class method with init args)
-        self.generate_spawn_with_args_function(module)?;
-        writeln!(self.output)?;
+            // Generate spawn/1 function (class method with init args)
+            self.generate_spawn_with_args_function(module)?;
+            writeln!(self.output)?;
+        }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
         self.generate_actor_new_error_method()?;
