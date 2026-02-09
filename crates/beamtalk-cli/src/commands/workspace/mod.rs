@@ -644,10 +644,11 @@ pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
     let workspace_id = if let Some(name) = name_or_id {
         resolve_workspace_id(name)?
     } else {
-        // Auto-detect from current directory
+        // Auto-detect: find workspace whose project_path matches current directory
         let cwd = std::env::current_dir().into_diagnostic()?;
         let project_root = discovery::discover_project_root(&cwd);
-        generate_workspace_id(&project_root)?
+        find_workspace_by_project_path(&project_root)?
+            .unwrap_or(generate_workspace_id(&project_root)?)
     };
 
     if !workspace_exists(&workspace_id)? {
@@ -687,22 +688,76 @@ pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
     })
 }
 
+/// Find a workspace by matching its stored `project_path` to the given path.
+///
+/// Scans all workspaces and compares canonicalized paths. Returns the first
+/// matching workspace ID, or `None` if no match is found.
+fn find_workspace_by_project_path(project_path: &Path) -> Result<Option<String>> {
+    let workspaces_dir = dirs::home_dir()
+        .ok_or_else(|| miette!("Could not determine home directory"))?
+        .join(".beamtalk")
+        .join("workspaces");
+
+    if !workspaces_dir.exists() {
+        return Ok(None);
+    }
+
+    let target_canon = project_path.canonicalize().ok();
+
+    let entries = fs::read_dir(&workspaces_dir).into_diagnostic()?;
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if !path.is_dir() || !path.join("metadata.json").exists() {
+            continue;
+        }
+
+        let ws_id = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        let Ok(metadata) = get_workspace_metadata(&ws_id) else {
+            continue;
+        };
+
+        // Compare canonicalized paths to handle symlinks/relative paths
+        let matches = match (&target_canon, metadata.project_path.canonicalize().ok()) {
+            (Some(a), Some(b)) => a == &b,
+            _ => project_path == metadata.project_path,
+        };
+
+        if matches {
+            return Ok(Some(ws_id));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Resolve a user-provided name or auto-generated ID to a workspace ID.
 ///
-/// Validates the input to prevent path traversal attacks, then returns it as-is.
-/// Callers handle "not found" errors via `workspace_exists()`.
+/// Validates the input using the same rules as workspace creation to ensure
+/// consistency and prevent path traversal attacks.
 fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
-    // Reject path traversal attempts and path separators
-    if name_or_id.contains("..")
-        || name_or_id.contains('/')
-        || name_or_id.contains('\\')
-        || name_or_id.contains('\0')
-    {
+    let candidate = name_or_id.trim();
+
+    if candidate.is_empty() {
+        return Err(miette!("Workspace name cannot be empty"));
+    }
+
+    // Prevent path traversal and malformed filesystem paths
+    if candidate.contains('/') || candidate.contains('\\') || candidate.contains('\0') {
         return Err(miette!(
-            "Invalid workspace name: must not contain path separators or '..'"
+            "Invalid workspace name: must not contain path separators or null bytes"
         ));
     }
-    Ok(name_or_id.to_string())
+
+    // Reuse the same validation as workspace creation (allowed charset)
+    validate_workspace_name(candidate)?;
+
+    Ok(candidate.to_string())
 }
 
 #[cfg(test)]
@@ -1134,6 +1189,9 @@ mod tests {
         assert!(resolve_workspace_id("foo/bar").is_err());
         assert!(resolve_workspace_id("foo\\bar").is_err());
         assert!(resolve_workspace_id("foo\0bar").is_err());
+        // Dots are rejected by validate_workspace_name charset
+        assert!(resolve_workspace_id("has.dot").is_err());
+        assert!(resolve_workspace_id("..").is_err());
     }
 
     #[test]
@@ -1141,5 +1199,41 @@ mod tests {
         assert!(resolve_workspace_id("my-workspace").is_ok());
         assert!(resolve_workspace_id("abc123").is_ok());
         assert!(resolve_workspace_id("test_ws-1").is_ok());
+        // Auto-generated hex hash IDs
+        assert!(resolve_workspace_id("abcdef012345").is_ok());
+    }
+
+    #[test]
+    fn test_resolve_workspace_id_trims_whitespace() {
+        let id = resolve_workspace_id("  my-workspace  ").unwrap();
+        assert_eq!(id, "my-workspace");
+    }
+
+    #[test]
+    fn test_resolve_workspace_id_rejects_empty_and_whitespace() {
+        assert!(resolve_workspace_id("").is_err());
+        assert!(resolve_workspace_id("   ").is_err());
+    }
+
+    #[test]
+    fn test_find_workspace_by_project_path() {
+        let ws = TestWorkspace::new("find_by_path");
+        let project_path = std::env::current_dir().unwrap();
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: project_path.clone(),
+            created_at: 1_000_000,
+        };
+        save_workspace_metadata(&metadata).unwrap();
+
+        let found = find_workspace_by_project_path(&project_path).unwrap();
+        assert!(found.is_some(), "Should find workspace by project path");
+        assert_eq!(found.unwrap(), ws.id);
+    }
+
+    #[test]
+    fn test_find_workspace_by_project_path_returns_none() {
+        let result = find_workspace_by_project_path(Path::new("/nonexistent/path/test")).unwrap();
+        assert!(result.is_none());
     }
 }

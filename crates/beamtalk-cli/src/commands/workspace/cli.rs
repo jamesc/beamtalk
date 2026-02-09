@@ -10,10 +10,7 @@
 use clap::Subcommand;
 use miette::Result;
 
-use super::{
-    WorkspaceStatus, create_workspace, discovery, generate_workspace_id, list_workspaces,
-    stop_workspace, workspace_status,
-};
+use super::{create_workspace, discovery, list_workspaces, stop_workspace, workspace_status};
 
 /// Workspace management subcommands.
 #[derive(Debug, Subcommand)]
@@ -75,11 +72,10 @@ fn run_list(json: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Detect current project workspace to mark it
-    let current_ws_id = std::env::current_dir()
+    // Detect current project root to mark the matching workspace
+    let current_project_root = std::env::current_dir()
         .ok()
-        .map(|cwd| discovery::discover_project_root(&cwd))
-        .and_then(|root| generate_workspace_id(&root).ok());
+        .map(|cwd| discovery::discover_project_root(&cwd));
 
     // Table header
     println!(
@@ -88,11 +84,16 @@ fn run_list(json: bool) -> Result<()> {
     );
 
     for ws in &workspaces {
-        let marker = if current_ws_id.as_deref() == Some(&ws.workspace_id) {
-            "▸"
-        } else {
-            ""
-        };
+        let is_current = current_project_root.as_ref().is_some_and(|root| {
+            // Compare canonicalized paths to handle symlinks/relative paths
+            let root_canon = root.canonicalize().ok();
+            let ws_canon = ws.project_path.canonicalize().ok();
+            match (root_canon, ws_canon) {
+                (Some(a), Some(b)) => a == b,
+                _ => root == &ws.project_path,
+            }
+        });
+        let marker = if is_current { "▸" } else { "" };
 
         let project = ws
             .project_path
@@ -132,17 +133,15 @@ fn run_status(name: Option<&str>) -> Result<()> {
         println!("PID:       {pid}");
     }
 
-    // Show uptime if running
-    if detail.status == WorkspaceStatus::Running {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let uptime_secs = now.saturating_sub(detail.created_at);
-        let hours = uptime_secs / 3600;
-        let minutes = (uptime_secs % 3600) / 60;
-        println!("Created:   {hours}h {minutes}m ago");
-    }
+    // Show workspace age (creation time, not node start time)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let age_secs = now.saturating_sub(detail.created_at);
+    let hours = age_secs / 3600;
+    let minutes = (age_secs % 3600) / 60;
+    println!("Age:       {hours}h {minutes}m");
 
     Ok(())
 }
