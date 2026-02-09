@@ -125,16 +125,14 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
-        // Special case: unary "spawn" message on a class/identifier
+        // Special case: unary "spawn" message on a ClassReference
         // This creates a new actor instance via gen_server:start_link
+        // BT-246: Only match ClassReference, not Identifier. Variables holding class
+        // objects (e.g. `cls spawn`) must go through runtime dispatch path.
         if let MessageSelector::Unary(name) = selector {
             if name == "spawn" && arguments.is_empty() {
-                // Handle both ClassReference and Identifier (for backwards compat)
-                match receiver {
-                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        return self.generate_actor_spawn(&name.name, None);
-                    }
-                    _ => {}
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, None);
                 }
             }
 
@@ -157,16 +155,14 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Special case: "spawnWith:" keyword message on a class/identifier
+        // Special case: "spawnWith:" keyword message on a ClassReference
         // This creates a new actor instance with initialization arguments
+        // BT-246: Only match ClassReference, not Identifier. Variables holding class
+        // objects (e.g. `cls spawnWith: args`) must go through runtime dispatch path.
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                // Handle both ClassReference and Identifier (for backwards compat)
-                match receiver {
-                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
-                    }
-                    _ => {}
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
                 }
             }
 

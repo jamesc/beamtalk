@@ -185,7 +185,9 @@ module_name(ClassPid) ->
 %% This distinguishes class objects from actor instances at runtime.
 -spec is_class_object(term()) -> boolean().
 is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
-    lists:suffix(" class", atom_to_list(Class));
+    ClassBin = atom_to_binary(Class, utf8),
+    Size = byte_size(ClassBin) - 6,
+    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
 is_class_object(_) ->
     false.
 
@@ -202,6 +204,16 @@ class_send(ClassPid, 'new', []) ->
     end;
 class_send(ClassPid, 'new:', [Map]) ->
     case gen_server:call(ClassPid, {new, [Map]}) of
+        {ok, Obj} -> Obj;
+        {error, Error} -> error(Error)
+    end;
+class_send(ClassPid, spawn, []) ->
+    case gen_server:call(ClassPid, {spawn, []}) of
+        {ok, Obj} -> Obj;
+        {error, Error} -> error(Error)
+    end;
+class_send(ClassPid, 'spawnWith:', [Map]) ->
+    case gen_server:call(ClassPid, {spawn, [Map]}) of
         {ok, Obj} -> Obj;
         {error, Error} -> error(Error)
     end;
@@ -460,6 +472,48 @@ init({ClassName, ClassInfo}) ->
     invalidate_subclass_flattened_tables(ClassName),
     {ok, State}.
 
+%% BT-246: Actor spawn via dynamic class dispatch.
+%% Routes spawn/spawnWith: through class_send → {spawn, Args} protocol.
+%% Separate from {new, Args} to avoid confusion with value type new.
+handle_call({spawn, Args}, _From, #class_state{
+    name = ClassName,
+    is_abstract = true
+} = State) ->
+    Selector = case Args of
+        [] -> spawn;
+        _ -> 'spawnWith:'
+    end,
+    Error0 = beamtalk_error:new(instantiation_error, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>),
+    {reply, {error, Error2}, State};
+
+handle_call({spawn, Args}, _From, #class_state{
+    name = ClassName,
+    module = Module
+} = State) ->
+    SpawnResult = case Args of
+        [] ->
+            erlang:apply(Module, spawn, []);
+        [InitMap] when is_map(InitMap) ->
+            erlang:apply(Module, spawn, [InitMap]);
+        _ ->
+            erlang:apply(Module, spawn, [])
+    end,
+    case SpawnResult of
+        {beamtalk_object, _, _, _} = Obj ->
+            {reply, {ok, Obj}, State};
+        {ok, Pid} ->
+            Obj = #beamtalk_object{
+                class = ClassName,
+                class_mod = Module,
+                pid = Pid
+            },
+            {reply, {ok, Obj}, State};
+        Error ->
+            {reply, Error, State}
+    end;
+
 handle_call({new, Args}, _From, #class_state{
     name = ClassName,
     is_abstract = true
@@ -516,40 +570,24 @@ handle_call({new, Args}, _From, #class_state{
                     {reply, Error, State}
             end;
         _ ->
-            %% Compiled class — detect value type vs actor (BT-246 / ADR 0013)
-            %% Value types export new/0 (returns tagged map directly).
-            %% Actors export spawn/1 (returns {ok, Pid}).
-            case erlang:function_exported(Module, new, 0) of
-                true ->
-                    %% Value type: call Module:new/0 or Module:new/1
-                    Result = case Args of
-                        [] ->
-                            erlang:apply(Module, new, []);
-                        [InitMap] when is_map(InitMap) ->
-                            case erlang:function_exported(Module, new, 1) of
-                                true ->
-                                    erlang:apply(Module, new, [InitMap]);
-                                false ->
-                                    erlang:apply(Module, new, [])
-                            end;
-                        _ ->
+            %% Compiled class — value type instantiation via new (BT-246 / ADR 0013)
+            %% Value types support new/new:. Actor classes should use {spawn, Args}
+            %% protocol via class_send. If 'new' is called on an actor, the
+            %% generated new/0 returns an appropriate error.
+            Result = case Args of
+                [] ->
+                    erlang:apply(Module, new, []);
+                [InitMap] when is_map(InitMap) ->
+                    case erlang:function_exported(Module, new, 1) of
+                        true ->
+                            erlang:apply(Module, new, [InitMap]);
+                        false ->
                             erlang:apply(Module, new, [])
-                    end,
-                    {reply, {ok, Result}, State};
-                false ->
-                    %% Actor class: use module's spawn function
-                    case erlang:apply(Module, spawn, [Args]) of
-                        {ok, Pid} ->
-                            Obj = #beamtalk_object{
-                                class = ClassName,
-                                class_mod = Module,
-                                pid = Pid
-                            },
-                            {reply, {ok, Obj}, State};
-                        Error ->
-                            {reply, Error, State}
-                    end
-            end
+                    end;
+                _ ->
+                    erlang:apply(Module, new, [])
+            end,
+            {reply, {ok, Result}, State}
     end;
 
 handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->

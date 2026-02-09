@@ -80,3 +80,26 @@ cls := (Beamtalk classNamed: #Point) await
 
 cls class_name
 // => Point
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — ACTORS
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Store actor class in variable and send 'spawn' dynamically
+// ---------------------------------------------------------------------------
+
+actorCls := (Beamtalk classNamed: #Counter) await
+// => _
+
+c := actorCls spawn
+// => _
+
+c increment
+// => _
+
+c increment
+// => _
+
+c getValue await
+// => 2

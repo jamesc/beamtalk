@@ -1607,7 +1607,10 @@ end
         let mut generator = CoreErlangGenerator::new("test_module");
 
         // Create AST for: Counter spawn
-        let receiver = Expression::Identifier(Identifier::new("Counter", Span::new(0, 7)));
+        let receiver = Expression::ClassReference {
+            name: Identifier::new("Counter", Span::new(0, 7)),
+            span: Span::new(0, 7),
+        };
         let selector = MessageSelector::Unary("spawn".into());
         let arguments = vec![];
 
@@ -1623,7 +1626,10 @@ end
         // Create AST for: Counter spawnWith: #{value => 10}
         // For simplicity, we'll use an integer literal as the init arg
         // (in practice this would be a map literal)
-        let receiver = Expression::Identifier(Identifier::new("Counter", Span::new(0, 7)));
+        let receiver = Expression::ClassReference {
+            name: Identifier::new("Counter", Span::new(0, 7)),
+            span: Span::new(0, 7),
+        };
         let selector =
             MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(8, 18))]);
         let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
