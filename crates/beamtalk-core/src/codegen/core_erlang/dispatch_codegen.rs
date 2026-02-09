@@ -125,16 +125,14 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
-        // Special case: unary "spawn" message on a class/identifier
+        // Special case: unary "spawn" message on a ClassReference
         // This creates a new actor instance via gen_server:start_link
+        // BT-246: Only match ClassReference, not Identifier. Variables holding class
+        // objects (e.g. `cls spawn`) must go through runtime dispatch path.
         if let MessageSelector::Unary(name) = selector {
             if name == "spawn" && arguments.is_empty() {
-                // Handle both ClassReference and Identifier (for backwards compat)
-                match receiver {
-                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        return self.generate_actor_spawn(&name.name, None);
-                    }
-                    _ => {}
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, None);
                 }
             }
 
@@ -157,16 +155,14 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Special case: "spawnWith:" keyword message on a class/identifier
+        // Special case: "spawnWith:" keyword message on a ClassReference
         // This creates a new actor instance with initialization arguments
+        // BT-246: Only match ClassReference, not Identifier. Variables holding class
+        // objects (e.g. `cls spawnWith: args`) must go through runtime dispatch path.
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                // Handle both ClassReference and Identifier (for backwards compat)
-                match receiver {
-                    Expression::ClassReference { name, .. } | Expression::Identifier(name) => {
-                        return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
-                    }
-                    _ => {}
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
                 }
             }
 
@@ -268,8 +264,41 @@ impl CoreErlangGenerator {
         // Default branch: Not a tuple
         write!(self.output, "<_> when 'true' -> 'false' end of ")?;
 
-        // Case 1: Result is true (beamtalk_object) - use async actor dispatch
+        // Case 1: Result is true (beamtalk_object) - check class object vs actor
         write!(self.output, "<'true'> when 'true' -> ")?;
+
+        // BT-246 / ADR 0013 Phase 1: Check if receiver is a class object.
+        // Class objects need synchronous dispatch via gen_server:call,
+        // not async actor dispatch. Class objects have class name ending
+        // with " class" (e.g., 'Point class').
+        let is_class_var = self.fresh_var("IsClass");
+        write!(
+            self.output,
+            "let {is_class_var} = call 'beamtalk_object_class':'is_class_object'({receiver_var}) in "
+        )?;
+        write!(self.output, "case {is_class_var} of ")?;
+
+        // Case 1a: Class object - synchronous dispatch via class_send
+        write!(self.output, "<'true'> when 'true' -> ")?;
+        let class_pid_var = self.fresh_var("ClassPid");
+        write!(
+            self.output,
+            "let {class_pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+        )?;
+        write!(
+            self.output,
+            "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+        )?;
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        write!(self.output, "]) ")?;
+
+        // Case 1b: Actor - async dispatch with futures (existing behavior)
+        write!(self.output, "<'false'> when 'true' -> ")?;
 
         // Extract PID from actor record (4th element)
         write!(
@@ -297,7 +326,8 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        write!(self.output, "], {future_var}) in {future_var} ")?; // No semicolon!
+        write!(self.output, "], {future_var}) in {future_var} ")?;
+        write!(self.output, "end ")?; // Close is_class_object case
 
         // Case 2: Primitive - use synchronous dispatch
         write!(self.output, "<'false'> when 'true' -> ")?;

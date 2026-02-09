@@ -8,7 +8,7 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
 use std::fmt::Write;
 
@@ -497,14 +497,21 @@ impl CoreErlangGenerator {
             }
             writeln!(self.output, "],")?;
 
-            // Class methods
+            // Class methods — depends on whether this is an actor or value type
             self.write_indent()?;
             writeln!(self.output, "'class_methods' => ~{{")?;
             self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
-            self.write_indent()?;
-            writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~,")?;
+            if self.context == CodeGenContext::Actor {
+                self.write_indent()?;
+                writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
+                self.write_indent()?;
+                writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~,")?;
+            } else {
+                self.write_indent()?;
+                writeln!(self.output, "'new' => ~{{'arity' => 0}}~,")?;
+                self.write_indent()?;
+                writeln!(self.output, "'new:' => ~{{'arity' => 1}}~,")?;
+            }
             self.write_indent()?;
             writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
             self.indent -= 1;

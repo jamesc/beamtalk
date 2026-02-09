@@ -257,7 +257,7 @@ class_named_known_class_atom_test_() ->
                      Result = gen_server:call(Pid, {'classNamed:', ['Counter']}),
                      
                      %% BT-374: Returns beamtalk_object tuple wrapping the class
-                     ?assertMatch({beamtalk_object, 'Counter', _, _}, Result),
+                     ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result),
                      {beamtalk_object, _, _, ClassPid} = Result,
                      ?assert(is_pid(ClassPid)),
                      ?assert(is_process_alive(ClassPid)),
@@ -282,7 +282,7 @@ class_named_known_class_binary_test_() ->
                      Result = gen_server:call(Pid, {'classNamed:', [<<"Counter">>]}),
                      
                      %% BT-374: Returns beamtalk_object tuple wrapping the class
-                     ?assertMatch({beamtalk_object, 'Counter', _, _}, Result),
+                     ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result),
                      {beamtalk_object, _, _, ClassPid} = Result,
                      ?assert(is_pid(ClassPid)),
                      ?assert(is_process_alive(ClassPid)),

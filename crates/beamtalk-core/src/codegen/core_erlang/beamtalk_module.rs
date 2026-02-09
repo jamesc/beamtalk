@@ -161,9 +161,15 @@ impl CoreErlangGenerator {
             "let ClassModName = call 'beamtalk_object_class':'module_name'(Pid) in"
         )?;
         self.write_indent()?;
+        // BT-246: Class objects use 'X class' tag for is_class_object detection
         writeln!(
             self.output,
-            "{{'beamtalk_object', ClassName, ClassModName, Pid}}"
+            "let ClassTag = call 'beamtalk_object_class':'class_object_tag'(ClassName) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', ClassTag, ClassModName, Pid}}"
         )?;
         self.indent -= 1;
         self.write_indent()?;
@@ -205,9 +211,15 @@ impl CoreErlangGenerator {
             "let ClassModName = call 'beamtalk_object_class':'module_name'(Pid) in"
         )?;
         self.write_indent()?;
+        // BT-246: Class objects use 'X class' tag for is_class_object detection
         writeln!(
             self.output,
-            "{{'beamtalk_object', ClassName, ClassModName, Pid}}"
+            "let ClassTag = call 'beamtalk_object_class':'class_object_tag'(ClassName) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'beamtalk_object', ClassTag, ClassModName, Pid}}"
         )?;
         self.indent -= 2;
         self.write_indent()?;
