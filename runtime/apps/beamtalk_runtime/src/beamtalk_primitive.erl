@@ -262,6 +262,16 @@ responds_to(_, _) ->
 %% Falls back to beamtalk_object base methods for inherited protocol.
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
 value_type_send(Self, Class, Selector, Args) ->
+    %% BT-359: Catch mutating/ivar methods on value types early
+    case is_ivar_method(Selector) of
+        {true, Hint} ->
+            IvarErr0 = beamtalk_error:new(immutable_value, Class),
+            IvarErr1 = beamtalk_error:with_selector(IvarErr0, Selector),
+            IvarErr2 = beamtalk_error:with_hint(IvarErr1, Hint),
+            error(IvarErr2);
+        false ->
+            ok
+    end,
     Module = class_name_to_module(Class),
     Arity = length(Args) + 1,  % +1 for Self parameter
     code:ensure_loaded(Module),
@@ -282,6 +292,16 @@ value_type_send(Self, Class, Selector, Args) ->
                     error(Error1)
             end
     end.
+
+%% @private Check if a selector is an instance variable method that should
+%% raise immutable_value on value types (BT-359).
+-spec is_ivar_method(atom()) -> {true, binary()} | false.
+is_ivar_method('instVarAt:put:') ->
+    {true, <<"Value types are immutable. Use a method that returns a new instance instead.">>};
+is_ivar_method('instVarAt:') ->
+    {true, <<"Value types have no instance variables">>};
+is_ivar_method(_) ->
+    false.
 
 %% @doc Check if a value type responds to a selector.
 -spec value_type_responds_to(atom(), atom()) -> boolean().
