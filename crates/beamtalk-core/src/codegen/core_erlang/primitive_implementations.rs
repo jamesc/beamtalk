@@ -42,6 +42,7 @@ pub fn generate_primitive_bif(
         "Block" => generate_block_bif(output, selector, params),
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
+        "Symbol" => generate_symbol_bif(output, selector, params),
         _ => None,
     }
 }
@@ -413,6 +414,38 @@ fn generate_exception_bif(output: &mut String, selector: &str, params: &[String]
     }
 }
 
+/// Symbol primitive implementations (BT-273).
+///
+/// Symbols are Erlang atoms — interned, immutable identifiers.
+fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Comparison
+        "=" => write_binary_bif(output, "=:=", params),
+        "~=" => write_binary_bif(output, "=/=", params),
+        // Conversion
+        "asString" => {
+            write!(output, "call 'erlang':'atom_to_binary'(Self, 'utf8')").ok()?;
+            Some(())
+        }
+        "asAtom" => {
+            // Identity — symbols are already atoms
+            write!(output, "Self").ok()?;
+            Some(())
+        }
+        // Display — delegate to runtime primitive for consistent formatting
+        "printString" => {
+            write!(output, "call 'beamtalk_primitive':'print_string'(Self)").ok()?;
+            Some(())
+        }
+        // Identity
+        "hash" => {
+            write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
 // Helper functions for generating common patterns
 
 /// Writes a binary BIF call: `call 'erlang':'op'(Self, Param0)`
@@ -571,5 +604,45 @@ mod tests {
             output,
             "call 'beamtalk_file':'writeAll:contents:'(Path, Text)"
         );
+    }
+
+    #[test]
+    fn test_symbol_as_string() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Symbol", "asString", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'atom_to_binary'(Self, 'utf8')");
+    }
+
+    #[test]
+    fn test_symbol_as_atom() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Symbol", "asAtom", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "Self");
+    }
+
+    #[test]
+    fn test_symbol_equality() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Symbol", "=", &["Other".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'=:='(Self, Other)");
+    }
+
+    #[test]
+    fn test_symbol_hash() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Symbol", "hash", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'phash2'(Self)");
+    }
+
+    #[test]
+    fn test_symbol_print_string() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "Symbol", "printString", &[]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'beamtalk_primitive':'print_string'(Self)");
     }
 }

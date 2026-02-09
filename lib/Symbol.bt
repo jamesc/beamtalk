@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Symbol — the class of atomic identifiers.
+//
+// Symbols are interned strings (Erlang atoms). They are used as method selectors,
+// class names, and general-purpose identifiers. Symbols are immutable and unique:
+// two symbols with the same name are always identical.
+//
+// Syntax: #foo, #setValue:, #+, #yourself
+
+sealed Object subclass: Symbol
+
+  // Conversion
+  asString => @primitive 'asString'
+  asAtom => @primitive 'asAtom'
+
+  // Display
+  printString => @primitive 'printString'
+  describe => @primitive 'printString'
+
+  // Comparison
+  = other => @primitive '='
+  ~= other => @primitive '~='
+
+  // Identity
+  hash => @primitive 'hash'
