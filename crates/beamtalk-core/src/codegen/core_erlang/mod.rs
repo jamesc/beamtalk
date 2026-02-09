@@ -648,7 +648,8 @@ impl CoreErlangGenerator {
             // Chain is incomplete (superclass not in hierarchy) or empty with
             // non-Object superclass. Default to actor for backward compatibility
             // (e.g. compiling subclass files independently without parent).
-            class.superclass.name.as_str() != "Object"
+            // Root classes (superclass "none") are value types, not actors.
+            !matches!(class.superclass_name(), "Object" | "none")
         } else {
             true
         }
@@ -3135,7 +3136,7 @@ end
         // Create a Counter class with instance variables and methods
         let class = ClassDefinition {
             name: Identifier::new("Counter", Span::new(0, 7)),
-            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
             is_abstract: false,
             is_sealed: false,
             state: vec![StateDeclaration {
@@ -3299,7 +3300,7 @@ end
 
         let class1 = ClassDefinition {
             name: Identifier::new("Counter", Span::new(0, 7)),
-            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
             is_abstract: false,
             is_sealed: false,
             state: vec![StateDeclaration {
@@ -3314,7 +3315,7 @@ end
 
         let class2 = ClassDefinition {
             name: Identifier::new("Logger", Span::new(0, 6)),
-            superclass: Identifier::new("Actor", Span::new(0, 5)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
             is_abstract: false,
             is_sealed: false,
             state: vec![StateDeclaration {
@@ -3395,7 +3396,7 @@ end
 
         let class = ClassDefinition {
             name: Identifier::new("Beamtalk", Span::new(0, 8)),
-            superclass: Identifier::new("Object", Span::new(0, 6)),
+            superclass: Some(Identifier::new("Object", Span::new(0, 6))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3675,7 +3676,7 @@ end
     fn test_is_actor_class_direct_actor_subclass() {
         let class = ClassDefinition {
             name: Identifier::new("Counter", Span::new(0, 0)),
-            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3696,7 +3697,7 @@ end
     fn test_is_actor_class_object_subclass_is_value_type() {
         let class = ClassDefinition {
             name: Identifier::new("Point", Span::new(0, 0)),
-            superclass: Identifier::new("Object", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Object", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3719,7 +3720,7 @@ end
         // Should still be detected as actor
         let counter = ClassDefinition {
             name: Identifier::new("Counter", Span::new(0, 0)),
-            superclass: Identifier::new("Actor", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3728,7 +3729,7 @@ end
         };
         let logging_counter = ClassDefinition {
             name: Identifier::new("LoggingCounter", Span::new(0, 0)),
-            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3768,7 +3769,7 @@ end
         // Hierarchy chain is incomplete; should default to actor (backward compat).
         let class = ClassDefinition {
             name: Identifier::new("LoggingCounter", Span::new(0, 0)),
-            superclass: Identifier::new("Counter", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3790,7 +3791,7 @@ end
         // Collection extends Object (built-in), so subclasses are value types.
         let class = ClassDefinition {
             name: Identifier::new("MyList", Span::new(0, 0)),
-            superclass: Identifier::new("Collection", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Collection", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3816,7 +3817,7 @@ end
         // (Sealed enforcement is separate; codegen should still route correctly.)
         let class = ClassDefinition {
             name: Identifier::new("MyInt", Span::new(0, 0)),
-            superclass: Identifier::new("Integer", Span::new(0, 0)),
+            superclass: Some(Identifier::new("Integer", Span::new(0, 0))),
             is_abstract: false,
             is_sealed: false,
             state: vec![],
@@ -3833,6 +3834,31 @@ end
         assert!(
             !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
             "Integer subclass should be value type (chain reaches Object)"
+        );
+    }
+
+    #[test]
+    fn test_is_actor_class_root_class_is_value_type() {
+        // Root class (superclass: None → "none") should be value type, not actor.
+        let class = ClassDefinition {
+            name: Identifier::new("ProtoObject", Span::new(0, 0)),
+            superclass: None,
+            is_abstract: true,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Root class (nil superclass) should be value type"
         );
     }
 

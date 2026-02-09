@@ -831,11 +831,11 @@ perform_unary_message_test() ->
     gen_server:stop(Counter).
 
 perform_keyword_message_test() ->
-    %% Test perform:withArgs: with keyword message
+    %% Test perform:withArguments: with keyword message
     {ok, Counter} = test_counter:start_link(5),
     
     %% obj perform: #'setValue:' withArgs: [100]  => obj setValue: 100
-    ok = gen_server:call(Counter, {'perform:withArgs:', ['setValue:', [100]]}),
+    ok = gen_server:call(Counter, {'perform:withArguments:', ['setValue:', [100]]}),
     ?assertEqual(100, gen_server:call(Counter, {getValue, []})),
     
     gen_server:stop(Counter).
@@ -851,11 +851,11 @@ perform_with_result_test() ->
     gen_server:stop(Counter).
 
 perform_withArgs_multiple_arguments_test() ->
-    %% Test perform:withArgs: with multiple arguments
+    %% Test perform:withArguments: with multiple arguments
     {ok, Actor} = test_multi_arg_actor:start_link(),
     
     %% obj perform: #'compute:plus:' withArgs: [10, 20]  => obj compute: 10 plus: 20
-    Result = gen_server:call(Actor, {'perform:withArgs:', ['compute:plus:', [10, 20]]}),
+    Result = gen_server:call(Actor, {'perform:withArguments:', ['compute:plus:', [10, 20]]}),
     ?assertEqual(30, Result),
     
     gen_server:stop(Actor).
@@ -871,12 +871,12 @@ perform_unknown_selector_test() ->
     gen_server:stop(Counter).
 
 perform_withArgs_invalid_args_type_test() ->
-    %% Test perform:withArgs: with non-list args (should error)
+    %% Test perform:withArguments: with non-list args (should error)
     {ok, Counter} = test_counter:start_link(0),
     
     %% obj perform: #increment withArgs: 42  => type error (42 is not a list)
-    Result = gen_server:call(Counter, {'perform:withArgs:', [increment, 42]}),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'perform:withArgs:'}}, Result),
+    Result = gen_server:call(Counter, {'perform:withArguments:', [increment, 42]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'perform:withArguments:'}}, Result),
     
     gen_server:stop(Counter).
 
@@ -901,11 +901,11 @@ perform_recursive_dispatch_test() ->
     {ok, Counter} = test_counter:start_link(50),
     
     %% Use perform: to call respondsTo: (a built-in reflection method)
-    Result1 = gen_server:call(Counter, {'perform:withArgs:', [respondsTo, [increment]]}),
+    Result1 = gen_server:call(Counter, {'perform:withArguments:', [respondsTo, [increment]]}),
     ?assertEqual(true, Result1),
     
     %% Use perform: to call instVarAt: (another built-in)
-    Result2 = gen_server:call(Counter, {'perform:withArgs:', [instVarAt, [value]]}),
+    Result2 = gen_server:call(Counter, {'perform:withArguments:', [instVarAt, [value]]}),
     ?assertEqual(50, Result2),
     
     gen_server:stop(Counter).

@@ -415,13 +415,13 @@ reflection_responds_to_float_test_() ->
 perform_on_integer_test() ->
     %% Test perform: on integer primitive
     %% 42 perform: #'+' withArgs: [8]  => 42 + 8  => 50
-    Result = beamtalk_integer:dispatch('perform:withArgs:', ['+', [8]], 42),
+    Result = beamtalk_integer:dispatch('perform:withArguments:', ['+', [8]], 42),
     ?assertEqual(50, Result).
 
 perform_on_string_test() ->
     %% Test perform: on string primitive
     %% "hello" perform: #'++' withArgs: [" world"]  => "hello" ++ " world"
-    Result = beamtalk_string:dispatch('perform:withArgs:', ['++', [<<" world">>]], <<"hello">>),
+    Result = beamtalk_string:dispatch('perform:withArguments:', ['++', [<<" world">>]], <<"hello">>),
     ?assertEqual(<<"hello world">>, Result).
 
 perform_on_boolean_test() ->
@@ -429,7 +429,7 @@ perform_on_boolean_test() ->
     %% true perform: #'ifTrue:ifFalse:' withArgs: [yes, no]  => yes
     YesBlock = fun() -> yes end,
     NoBlock = fun() -> no end,
-    Result = beamtalk_true:dispatch('perform:withArgs:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
+    Result = beamtalk_true:dispatch('perform:withArguments:', ['ifTrue:ifFalse:', [YesBlock, NoBlock]], true),
     ?assertEqual(yes, Result).
 
 perform_with_unary_message_on_integer_test() ->
@@ -439,10 +439,10 @@ perform_with_unary_message_on_integer_test() ->
     ?assertEqual(5, Result).
 
 perform_withArgs_invalid_args_type_on_primitive_test() ->
-    %% Test perform:withArgs: with non-list ArgList on primitive
+    %% Test perform:withArguments: with non-list ArgList on primitive
     %% Generated dispatch calls hd/tl which raises badarg for non-list args
     ?assertError(badarg,
-                 beamtalk_integer:dispatch('perform:withArgs:', ['+', 42], 10)).
+                 beamtalk_integer:dispatch('perform:withArguments:', ['+', 42], 10)).
 
 %%% ============================================================================
 %%% Value Type Dispatch Tests (BT-354)
@@ -554,6 +554,36 @@ value_type_responds_to_object_methods_test() ->
     after
         code:purge(mock_vtobj),
         code:delete(mock_vtobj)
+    end.
+
+%%% ============================================================================
+%%% BT-359: instVarAt: / instVarAt:put: on value types
+%%% ============================================================================
+
+value_type_inst_var_at_put_raises_immutable_value_test() ->
+    %% instVarAt:put: on a value type should raise immutable_value
+    Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
+    create_mock_value_type_module(mock_vt_ivar, 'MockVtIvar', []),
+    try
+        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar',
+                                       selector = 'instVarAt:put:'},
+                     beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99]))
+    after
+        code:purge(mock_vt_ivar),
+        code:delete(mock_vt_ivar)
+    end.
+
+value_type_inst_var_at_raises_immutable_value_test() ->
+    %% instVarAt: on a value type should raise immutable_value
+    Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
+    create_mock_value_type_module(mock_vt_ivar2, 'MockVtIvar2', []),
+    try
+        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar2',
+                                       selector = 'instVarAt:'},
+                     beamtalk_primitive:send(Self, 'instVarAt:', [x]))
+    after
+        code:purge(mock_vt_ivar2),
+        code:delete(mock_vt_ivar2)
     end.
 
 %%% ============================================================================

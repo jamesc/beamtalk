@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'has_method'/1]
+module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'has_method'/1, 'superclass'/0]
   attributes []
 
 'new'/0 = fun () ->
@@ -38,7 +38,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'ha
         <'perform'> when 'true' ->
             let <PerfSel> = call 'erlang':'hd'(Args) in
             call 'sealed_method_override':'dispatch'(PerfSel, [], Self)
-        <'perform:withArgs:'> when 'true' ->
+        <'perform:withArguments:'> when 'true' ->
             let <PwaSel> = call 'erlang':'hd'(Args) in
             let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
             call 'sealed_method_override':'dispatch'(PwaSel, PwaArgs, Self)
@@ -55,7 +55,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'ha
 
 
 'has_method'/1 = fun (Selector) ->
-    case call 'lists':'member'(Selector, ['class', 'respondsTo', 'instVarNames', 'instVarAt', 'instVarAt:put:', 'perform', 'perform:withArgs:', 'frozen']) of
+    case call 'lists':'member'(Selector, ['class', 'respondsTo', 'instVarNames', 'instVarAt', 'instVarAt:put:', 'perform', 'perform:withArguments:', 'frozen']) of
         <'true'> when 'true' -> 'true'
         <'false'> when 'true' ->
             case call 'beamtalk_extensions':'has'('Parent', Selector) of
@@ -64,5 +64,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'ha
             end
     end
 
+
+'superclass'/0 = fun () -> 'Object'
 
 end

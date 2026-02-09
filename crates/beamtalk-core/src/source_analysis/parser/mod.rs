@@ -1373,7 +1373,7 @@ mod tests {
         let class = &module.classes[0];
 
         assert_eq!(class.name.name, "Counter");
-        assert_eq!(class.superclass.name, "Actor");
+        assert_eq!(class.superclass.as_ref().unwrap().name, "Actor");
         assert!(!class.is_abstract);
         assert!(!class.is_sealed);
         assert_eq!(class.state.len(), 1);
@@ -1396,7 +1396,7 @@ mod tests {
         assert!(class.is_abstract);
         assert!(!class.is_sealed);
         assert_eq!(class.name.name, "Collection");
-        assert_eq!(class.superclass.name, "Actor");
+        assert_eq!(class.superclass.as_ref().unwrap().name, "Actor");
     }
 
     #[test]
@@ -1414,6 +1414,22 @@ mod tests {
         assert!(class.is_sealed);
         assert_eq!(class.name.name, "Point");
         assert_eq!(class.state.len(), 2);
+    }
+
+    #[test]
+    fn parse_root_class_nil_superclass() {
+        let module = parse_ok(
+            "abstract nil subclass: ProtoObject
+  class => @primitive classOf",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+
+        assert!(class.is_abstract);
+        assert!(class.superclass.is_none());
+        assert_eq!(class.name.name, "ProtoObject");
+        assert_eq!(class.superclass_name(), "none");
     }
 
     #[test]
