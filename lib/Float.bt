@@ -5,7 +5,7 @@
 //
 // Floats in Beamtalk are IEEE 754 double-precision (Erlang floats).
 
-sealed Object subclass: Float
+sealed Number subclass: Float
   // Binary operators — quoted selectors route through runtime dispatch
   + other => @primitive '+'
   - other => @primitive '-'
@@ -24,7 +24,25 @@ sealed Object subclass: Float
   min: other => (self < other) ifTrue: [self] ifFalse: [other]
   max: other => (self > other) ifTrue: [self] ifFalse: [other]
 
+  // Rounding
+  rounded => @primitive 'rounded'
+  ceiling => @primitive 'ceiling'
+  floor => @primitive 'floor'
+  truncated => @primitive 'truncated'
+
+  // IEEE 754 checks (always false on BEAM — no NaN/Infinity support)
+  isNaN => false
+  isInfinite => false
+
+  // Numeric protocol (from Number)
+  isZero => self = 0.0
+  isPositive => self > 0.0
+  isNegative => self < 0.0
+  sign => (self > 0.0) ifTrue: [1] ifFalse: [(self < 0.0) ifTrue: [-1] ifFalse: [0]]
+  between: min and: max => (self >= min) and: [self <= max]
+
   // Conversion
+  asInteger => @primitive 'asInteger'
   asString => @primitive 'asString'
   printString => @primitive 'printString'
   describe => self asString

@@ -262,6 +262,7 @@ impl CoreErlangGenerator {
                     // Generate: case Receiver of pattern matching for primitives + record extraction
                     let recv_var = self.fresh_temp_var("Obj");
                     let int_var = self.fresh_temp_var("I");
+                    let flt_var = self.fresh_temp_var("F");
                     let str_var = self.fresh_temp_var("S");
                     let obj_var = self.fresh_temp_var("O");
                     let map_var = self.fresh_temp_var("M");
@@ -272,6 +273,7 @@ impl CoreErlangGenerator {
                         self.output,
                         " in case {recv_var} of \
                          <{int_var}> when call 'erlang':'is_integer'({int_var}) -> 'Integer' \
+                         <{flt_var}> when call 'erlang':'is_float'({flt_var}) -> 'Float' \
                          <{str_var}> when call 'erlang':'is_binary'({str_var}) -> 'String' \
                          <'true'> when 'true' -> 'True' \
                          <'false'> when 'true' -> 'False' \

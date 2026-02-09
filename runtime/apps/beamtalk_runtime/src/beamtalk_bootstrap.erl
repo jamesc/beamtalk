@@ -115,7 +115,28 @@ init(Parent) ->
             {error, {already_started, Pid2}} -> {ok, Pid2}
         end,
         
-        %% Step 3: Create Actor class (inherits from Object class)
+        %% Step 3: Create Number class (abstract numeric superclass, inherits from Object)
+        NumberClassInfo = #{
+            name => 'Number',
+            module => undefined,
+            superclass => 'Object',
+            is_abstract => true,
+            instance_methods => #{
+                isZero => #{arity => 0},
+                isPositive => #{arity => 0},
+                isNegative => #{arity => 0},
+                sign => #{arity => 0},
+                'between:and:' => #{arity => 2}
+            },
+            class_methods => #{},
+            instance_variables => []
+        },
+        {ok, _NumberClassPid} = case beamtalk_object_class:start_link('Number', NumberClassInfo) of
+            {ok, Pid3a} -> {ok, Pid3a};
+            {error, {already_started, Pid3a}} -> {ok, Pid3a}
+        end,
+        
+        %% Step 4: Create Actor class (inherits from Object class)
         ActorClassInfo = #{
             name => 'Actor',
             module => 'Actor',

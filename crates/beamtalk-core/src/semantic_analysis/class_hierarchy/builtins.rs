@@ -113,12 +113,31 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
+    // Number (abstract, not sealed — shared numeric protocol)
+    classes.insert(
+        "Number".into(),
+        ClassInfo {
+            name: "Number".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: true,
+            state: vec![],
+            methods: vec![
+                builtin_method("isZero", 0, "Number"),
+                builtin_method("isPositive", 0, "Number"),
+                builtin_method("isNegative", 0, "Number"),
+                builtin_method("sign", 0, "Number"),
+                builtin_method("between:and:", 2, "Number"),
+            ],
+        },
+    );
+
     // Integer (sealed)
     classes.insert(
         "Integer".into(),
         ClassInfo {
             name: "Integer".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Number".into()),
             is_sealed: true,
             is_abstract: false,
             state: vec![],
@@ -141,6 +160,8 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("isOdd", 0, "Integer"),
                 builtin_method("isPositive", 0, "Integer"),
                 builtin_method("isNegative", 0, "Integer"),
+                builtin_method("sign", 0, "Integer"),
+                builtin_method("between:and:", 2, "Integer"),
                 builtin_method("min:", 1, "Integer"),
                 builtin_method("max:", 1, "Integer"),
                 builtin_method("timesRepeat:", 1, "Integer"),
@@ -157,7 +178,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Float".into(),
         ClassInfo {
             name: "Float".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Number".into()),
             is_sealed: true,
             is_abstract: false,
             state: vec![],
@@ -176,6 +197,18 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("min:", 1, "Float"),
                 builtin_method("max:", 1, "Float"),
                 builtin_method("asString", 0, "Float"),
+                builtin_method("asInteger", 0, "Float"),
+                builtin_method("rounded", 0, "Float"),
+                builtin_method("ceiling", 0, "Float"),
+                builtin_method("floor", 0, "Float"),
+                builtin_method("truncated", 0, "Float"),
+                builtin_method("isNaN", 0, "Float"),
+                builtin_method("isInfinite", 0, "Float"),
+                builtin_method("isZero", 0, "Float"),
+                builtin_method("isPositive", 0, "Float"),
+                builtin_method("isNegative", 0, "Float"),
+                builtin_method("sign", 0, "Float"),
+                builtin_method("between:and:", 2, "Float"),
             ],
         },
     );
