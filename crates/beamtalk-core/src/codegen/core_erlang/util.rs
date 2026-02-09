@@ -23,6 +23,12 @@ use std::fmt::Write;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClassIdentity {
     class_name: String,
+    /// BT-403: Whether this class is sealed (no subclasses allowed).
+    /// Enables codegen optimizations: direct dispatch for self-sends.
+    is_sealed: bool,
+    /// BT-403: Whether this class is abstract (cannot be instantiated).
+    /// Enables codegen optimization: reduced `gen_server` scaffolding.
+    is_abstract: bool,
 }
 
 impl ClassIdentity {
@@ -30,12 +36,28 @@ impl ClassIdentity {
     pub fn new(class_name: &str) -> Self {
         Self {
             class_name: class_name.to_string(),
+            is_sealed: false,
+            is_abstract: false,
+        }
+    }
+
+    /// Create from an AST class definition with sealed/abstract flags.
+    pub fn from_class_def(class_name: &str, is_sealed: bool, is_abstract: bool) -> Self {
+        Self {
+            class_name: class_name.to_string(),
+            is_sealed,
+            is_abstract,
         }
     }
 
     /// The user-facing class name (CamelCase).
     pub fn class_name(&self) -> &str {
         &self.class_name
+    }
+
+    /// Whether the class is sealed (BT-403).
+    pub fn is_sealed(&self) -> bool {
+        self.is_sealed
     }
 }
 
@@ -102,6 +124,13 @@ impl CoreErlangGenerator {
                 }
             })
             .collect()
+    }
+
+    /// Whether the current class is sealed (BT-403).
+    pub(super) fn is_class_sealed(&self) -> bool {
+        self.class_identity
+            .as_ref()
+            .is_some_and(ClassIdentity::is_sealed)
     }
 }
 
