@@ -298,13 +298,35 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// Returns `true` for known non-primitive stdlib classes that compile to
+    /// `bt_stdlib_{snake}` modules.
+    ///
+    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
+    fn is_stdlib_nonprimitive_type(class_name: &str) -> bool {
+        matches!(
+            class_name,
+            "Object"
+                | "Number"
+                | "Actor"
+                | "Array"
+                | "File"
+                | "SystemDictionary"
+                | "TranscriptStream"
+                | "Exception"
+                | "Error"
+        )
+    }
+
     /// Computes the module name for a superclass in the dispatch chain.
     ///
     /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For all other classes, applies the same naming convention
-    /// as `build_stdlib::module_name_from_path`:
+    /// delegate to). For stdlib classes, applies the naming convention from
+    /// `build_stdlib::module_name_from_path`:
     /// - Primitive types → `beamtalk_{snake_case}`
-    /// - Non-primitive types → `bt_stdlib_{snake_case}`
+    /// - Non-primitive stdlib types → `bt_stdlib_{snake_case}`
+    ///
+    /// For user-defined classes, falls back to `to_module_name(superclass)`
+    /// so that dispatch delegates to the actual compiled module.
     ///
     /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
     fn superclass_module_name(superclass: &str) -> Option<String> {
@@ -314,8 +336,11 @@ impl CoreErlangGenerator {
         let snake = super::util::to_module_name(superclass);
         if Self::is_primitive_type(superclass) {
             Some(format!("beamtalk_{snake}"))
-        } else {
+        } else if Self::is_stdlib_nonprimitive_type(superclass) {
             Some(format!("bt_stdlib_{snake}"))
+        } else {
+            // User-defined superclass: use plain module name without prefix
+            Some(snake)
         }
     }
 
