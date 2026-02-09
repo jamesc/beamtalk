@@ -848,7 +848,7 @@ impl CoreErlangGenerator {
     /// Generates a workspace binding message send (BT-374 / ADR 0010).
     ///
     /// Workspace bindings (`Transcript`, `Beamtalk`) are singleton actors whose
-    /// beamtalk_object tuples are stored in `persistent_term`. The generated code:
+    /// `beamtalk_object` tuples are stored in `persistent_term`. The generated code:
     ///
     /// 1. Looks up binding: `persistent_term:get({beamtalk_binding, 'Name'})`
     /// 2. Extracts PID: `element(4, Binding)`

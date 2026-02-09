@@ -693,9 +693,7 @@ impl CoreErlangGenerator {
             Expression::ClassReference { name, .. } => {
                 // BT-376 / ADR 0010: Workspace bindings resolve to singleton actor objects
                 // stored in persistent_term, not class objects from the registry.
-                if self.workspace_mode
-                    && dispatch_codegen::is_workspace_binding(&name.name)
-                {
+                if self.workspace_mode && dispatch_codegen::is_workspace_binding(&name.name) {
                     write!(
                         self.output,
                         "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
