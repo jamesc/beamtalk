@@ -11,13 +11,20 @@
 // All useful objects inherit from Object (or Actor) which adds
 // instantiation, nil testing, and display protocols.
 //
-// Note: Some ProtoObject methods (==, ~=, error:, doesNotUnderstand:args:)
-// are built into the compiler dispatch and do not need @primitive declarations.
+// All methods are compiler intrinsics — dispatched at the call site,
+// never through the method body. The @primitive declarations serve as
+// the canonical specification of the ProtoObject protocol.
 
 abstract nil subclass: ProtoObject
-  // Identity — structural intrinsic (compiler-generated type dispatch)
-  class => @primitive classOf
+  // Identity & equality
+  == other => @primitive '=='
+  ~= other => @primitive '~='
 
-  // Dynamic dispatch — structural intrinsics
-  perform: selector => @primitive dynamicSend
-  perform: selector withArguments: args => @primitive dynamicSendWithArgs
+  // Type introspection
+  class => @primitive 'class'
+
+  // Error handling
+  doesNotUnderstand: selector args: arguments => @primitive 'doesNotUnderstand:args:'
+
+  // Dynamic dispatch
+  perform: selector withArguments: arguments => @primitive 'perform:withArguments:'
