@@ -479,8 +479,8 @@ term_to_json_nested_list_test() ->
     ?assertEqual([<<"a">>, 1, true], Result).
 
 term_to_json_empty_list_test() ->
-    %% Empty list is a printable list in Erlang, so converts to empty binary
-    ?assertEqual(<<>>, beamtalk_repl_server:term_to_json([])).
+    %% Empty list should serialize as empty JSON array, not empty string
+    ?assertEqual([], beamtalk_repl_server:term_to_json([])).
 
 term_to_json_map_with_atom_keys_test() ->
     Result = beamtalk_repl_server:term_to_json(#{name => <<"test">>, count => 5}),

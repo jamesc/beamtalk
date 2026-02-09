@@ -38,3 +38,15 @@ sealed Number subclass: Integer
   asString => @primitive 'asString'
   printString => @primitive 'printString'
   describe => self asString
+
+  // Bitwise operations
+  bitAnd: other => @primitive 'bitAnd:'
+  bitOr: other => @primitive 'bitOr:'
+  bitXor: other => @primitive 'bitXor:'
+  bitShift: n => @primitive 'bitShift:'
+  bitNot => @primitive 'bitNot'
+
+  // Math
+  factorial => (self < 0) ifTrue: [self error: 'Factorial is undefined for negative integers'] ifFalse: [(self = 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
+  gcd: other => (other = 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
+  lcm: other => (self gcd: other) = 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
