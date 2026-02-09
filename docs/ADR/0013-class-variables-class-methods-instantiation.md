@@ -119,7 +119,19 @@ Value types and actors have **different instantiation semantics**, reflecting th
 Point new              // → #{$beamtalk_class => 'Point', x => 0, y => 0}
 Point new: #{x => 3}   // → #{$beamtalk_class => 'Point', x => 3, y => 0}
 ```
-Value types are immutable maps. `new` creates a map with default field values. `new:` merges provided arguments with defaults. There is no `initialize` hook — you can't mutate an immutable value after creation. This is the honest design: value types are **constructed**, not initialized. Validation belongs in class-side `new:` overrides (see steelman section).
+Value types are immutable maps. `new` creates a map with default field values. `new:` merges provided arguments with defaults. There is no `initialize` hook — you can't mutate an immutable value after creation. This is the honest design: value types are **constructed**, not initialized.
+
+**Strict field validation in `new:`**: The default `new:` rejects unknown fields at runtime. The compiler knows the declared `state:` fields at compile time and generates a validation check:
+
+```beamtalk
+Point new: #{x => 3, y => 4}     // ✅ OK — x and y are declared fields
+Point new: #{x => 3, z => 99}    // ❌ Error: "Unknown field 'z' for Point. Valid fields: x, y"
+Point new: #{x => 'hello'}       // ✅ OK at construction (no types yet — future type system can add this)
+```
+
+**Implementation**: The generated `new/1` function extracts the known field names from the class definition and checks `maps:keys(Args) -- KnownFields`. Any extra keys produce a `beamtalk_error` with kind `unknown_field` and a hint listing valid fields. This is zero-cost for `new/0` (no args to validate) and ~1μs for `new:` (one `maps:keys` call). Class-side `new:` overrides bypass this check — if you override `class new:`, you own validation.
+
+This catches the most common construction bug (typos in field names) without requiring a type system. A future type system can add value-type checking on top — the field-name check is orthogonal and immediately useful.
 
 **Actors** (Actor subclasses) — spawn + initialize:
 ```beamtalk
@@ -138,6 +150,8 @@ Counter spawn              // → starts gen_server, calls initialize, returns #
 Counter spawnWith: #{value => 5} // → starts gen_server with overrides, calls initialize
 Counter new                // → Error: "Use spawn instead of new for actors"
 ```
+
+The same strict field validation from `new:` applies to `spawnWith:` — unknown fields are rejected at runtime before the gen_server starts.
 
 **The `spawn` → `initialize` chain:**
 
@@ -363,7 +377,7 @@ For Phase 1, correctness matters more than throughput. The patterns driving this
 
 **Newcomer**: "In Python I'd raise `ValueError` in `__init__`. In Java I'd throw from the constructor. Where do I put my validation logic?"
 
-**Response**: Class-side `new:` can be overridden to validate before constructing:
+**Response**: The default `new:` already rejects unknown fields (see Decision section 3). For type-level validation, class-side `new:` can be overridden:
 
 ```beamtalk
 Object subclass: Point
@@ -376,7 +390,7 @@ Object subclass: Point
     super new: args
 ```
 
-This is actually *cleaner* than `initialize`-based validation: the object is never created in an invalid state. With `initialize`, the object exists briefly in a pre-validation state (`basicNew` returns it, `initialize` validates it) — a window where invariants don't hold. With class-side `new:`, validation happens *before* construction. The interface already supports this pattern; it just needs documentation and examples showing idiomatic validation.
+Field-name validation is the default (catches typos). Type validation is opt-in per class (catches wrong types). This is actually *cleaner* than `initialize`-based validation: the object is never created in an invalid state. With `initialize`, the object exists briefly in a pre-validation state (`basicNew` returns it, `initialize` validates it) — a window where invariants don't hold. With class-side `new:`, validation happens *before* construction. A future type system can automate the type-checking layer — the field-name check is orthogonal and immediately useful.
 
 ## Alternatives Considered
 
@@ -426,6 +440,7 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 - Dynamic class dispatch makes classes true first-class objects.
 - Builds on existing gen_server infrastructure — `build_flattened_methods` reused for class-side table.
 - `classVar:` is simple to parse (same pattern as `state:`).
+- Strict field validation in default `new:`/`spawnWith:` catches typos immediately — no type system required. The compiler already knows the fields; we just check them.
 - Honest split: value types are constructed (`new`/`new:`), actors are initialized (`spawn`). No pretending immutable maps support mutation hooks.
 
 ### Negative
@@ -445,8 +460,9 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 ### Phase 1: `new` for Value Types + Dynamic Dispatch (BT-221)
 **Parser**: No changes needed — `Point new` already parses.
 **Codegen**: When receiver is not a `ClassReference`, emit `gen_server:call(ClassPid, {Selector, Args})` instead of `beamtalk_primitive:send`. Note: The class process currently uses mixed message formats — `{new, Args}` and `{method, Selector}` use tuple messages, while `methods`, `superclass`, and `class_name` use bare atoms. The codegen must match these existing formats. A future cleanup issue should standardize the class process to use the `{Selector, Args}` protocol consistently (like other actors).
+**Codegen — field validation**: Generated `new/1` and `spawn/1` validate argument keys against declared `state:` fields. Unknown keys produce a `beamtalk_error` with kind `unknown_field`, listing valid fields in the hint. This is compile-time-generated validation (field names are known from the AST), executed at runtime (~1μs per construction).
 **Runtime**: `beamtalk_object_class` handles `{new, Args}` in `handle_call`, but currently delegates to `Module:spawn/1` (actor-style). For value types, a new `handle_call` clause is needed that constructs an immutable map via `Module:new/0` or `Module:new/1`.
-**Test**: `cls := (Beamtalk classNamed: #Point) await. cls new` works end-to-end.
+**Test**: `cls := (Beamtalk classNamed: #Point) await. cls new` works end-to-end. `Point new: #{z => 1}` raises `unknown_field` error.
 
 ### Phase 2: Class-Side Methods, Inheritance, and Actor `initialize` (BT-246)
 **Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`). No parser changes needed for `initialize` — it's a regular instance method with a well-known name.
@@ -488,6 +504,31 @@ Object subclass: Counter
 **Why this approach**: (1) No new syntax — reuses existing `self class` message + chained send. (2) Makes the cost visible — it's clearly a message send, not a field access. (3) No variable shadowing — instance vars and class vars have distinct access patterns. (4) Works polymorphically — `self class` resolves to the actual runtime class.
 
 **Performance note**: `self class instanceCount` involves two dispatches (get class, then get var). For hot paths, cache the value in a local: `count := self class instanceCount`. In practice, instance-side class var access is rare — most class var usage is in class-side methods where `self.varName` works directly.
+
+### LSP and Tooling Integration
+
+Each phase should include corresponding language service updates. Features users can't discover through autocomplete won't get used.
+
+**Phase 1 (Dynamic dispatch)**:
+- **Hover**: On class objects (`cls` after `classNamed:`), show type as `Class(Point)` with link to class definition.
+- **Diagnostics**: Warn on `ActorSubclass new` at compile time (not just runtime error).
+
+**Phase 2 (Class-side methods + initialize)**:
+- **Completions**: Inside class body after `class` prefix, offer method name completions. On class objects, offer class-side method selectors (from `flattened_class_methods`).
+- **Go to definition**: `class uniqueInstance =>` navigates to its definition. `super new` in class-side methods navigates to parent's class-side `new`.
+- **Hover on `self`**: Show `self: Counter` in instance methods, `self: Counter class` in class-side methods. This is critical — two kinds of `self` requires tooling to disambiguate at a glance.
+- **Document symbols**: Class-side methods appear in outline with a distinct icon or `(class)` suffix.
+
+**Phase 3 (Virtual metaclasses)**:
+- **Completions**: On `x class` result, offer metaclass protocol (`methods`, `superclass`, `class`).
+
+**Phase 4–5 (Class variables)**:
+- **Completions**: `classVar:` declarations appear in completion after `state:`. In class-side methods, `self.` offers class variable names alongside class-side method accessors.
+- **Rename**: Renaming a `classVar:` declaration updates all `self.varName` references in class-side methods and `self class varName` references in instance methods.
+- **Diagnostics**: Accessing `self.classVarName` from an instance method should warn ("Did you mean `self class classVarName`?").
+
+**Field validation (all phases)**:
+- **Diagnostics**: For `Point new: #{z => 1}`, report "Unknown field 'z' for Point" at compile time when the class definition is known. This is a static analysis win — the compiler already has the field list.
 
 ## Parser Note: `class` Keyword Disambiguation
 
