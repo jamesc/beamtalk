@@ -162,9 +162,27 @@ cls methods                           // → gen_server:call(ClassPid, methods)
 1. **Optimized path** (compile-time known class): `Point new` → `call 'point':'new'()` (direct module call, zero overhead). This is what works today.
 2. **Dynamic path** (runtime class object): `cls new` → `gen_server:call(ClassPid, {new, Args})`. The class process handles the message and calls the module function internally.
 
+**Future optimization**: The dynamic path can be made ~10x faster for methods that don't access class variables. The `#beamtalk_object{}` record already carries the module name — extract it and use `apply(Module, Selector, Args)` (~0.5μs) instead of routing through the class gen_server (~5-10μs). The gen_server path is only needed when the method accesses class variable state. This is a codegen optimization pass that requires no language-level changes.
+
 The class process (`beamtalk_object_class.erl`) already handles `new` in `handle_call` — the gap is only in **codegen** not generating the dynamic dispatch path.
 
-### 5. Virtual Metaclasses
+### 5. `super` in Class-Side Methods
+
+Class-side `super` walks the **class-side** inheritance chain, not the instance-side chain:
+
+```beamtalk
+Object subclass: TranscriptStream
+  classVar: uniqueInstance = nil
+
+  class new => self error: 'Use uniqueInstance instead'
+  class uniqueInstance =>
+    self.uniqueInstance ifNil: [self.uniqueInstance := super new].  // calls Object's class-side new
+    self.uniqueInstance
+```
+
+`super new` in a class-side method dispatches to the parent class's `flattened_class_methods` table — the same mechanism as instance-side `super`, but using the class-side method table. The codegen generates `gen_server:call(ClassPid, {super_class_send, Selector, Args, DefiningClass})`, and the class process looks up the method in the parent's class-side table.
+
+### 6. Virtual Metaclasses
 
 Smalltalk developers expect `Point class` to return a metaclass object that responds to messages. We achieve full Smalltalk metaclass API compatibility with **zero extra processes** using virtual metaclasses.
 
@@ -382,12 +400,36 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 **Test**: Singleton pattern with class variable storage.
 
 ### Phase 5: Instance-Side Access to Class Variables
-**Design decision**: How instances read class variables. Options:
-- `self class varName` — explicit, verbose
-- `ClassName varName` — requires compile-time class knowledge  
-- Implicit lookup — Smalltalk-style, searches class then instance variables
 
-Deferred to implementation — pick simplest option that works.
+**Recommended approach**: `self class varName` — explicit message send to the class object.
+
+```beamtalk
+Object subclass: Counter
+  classVar: instanceCount = 0
+  state: value = 0
+  
+  class new =>
+    self.instanceCount := self.instanceCount + 1.
+    super new
+  
+  getInstanceCount => self class instanceCount   // explicit class var access
+```
+
+**Why this approach**: (1) No new syntax — reuses existing `self class` message + chained send. (2) Makes the cost visible — it's clearly a message send, not a field access. (3) No variable shadowing — instance vars and class vars have distinct access patterns. (4) Works polymorphically — `self class` resolves to the actual runtime class.
+
+**Performance note**: `self class instanceCount` involves two dispatches (get class, then get var). For hot paths, cache the value in a local: `count := self class instanceCount`. In practice, instance-side class var access is rare — most class var usage is in class-side methods where `self.varName` works directly.
+
+## Parser Note: `class` Keyword Disambiguation
+
+The `class` token appears in two contexts:
+1. **Method definition prefix**: `class uniqueInstance => ...` (at declaration level)
+2. **Unary message**: `self class` or `x class` (in expressions)
+
+The parser distinguishes these by context: at the class body's declaration level, `class` followed by an identifier and `=>` is a class-side method definition. Inside an expression (method body, block, REPL), `class` is a unary message. 
+
+**Edge cases to handle**:
+- `class class => ...` — a class-side method named `class`. Legal but discouraged; parser matches `class <ident> =>` pattern.
+- `class => ...` — instance method named `class` (no prefix, overrides the intrinsic). The parser sees `<ident> =>` without `class` prefix.
 
 ## Migration Path
 
