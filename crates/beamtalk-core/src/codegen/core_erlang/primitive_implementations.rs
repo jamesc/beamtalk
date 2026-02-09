@@ -39,8 +39,9 @@ pub fn generate_primitive_bif(
         "Integer" => generate_integer_bif(output, selector, params),
         "Float" => generate_float_bif(output, selector, params),
         "String" => generate_string_bif(output, selector, params),
-        "Block" => generate_block_bif(output, selector),
+        "Block" => generate_block_bif(output, selector, params),
         "File" => generate_file_bif(output, selector, params),
+        "Exception" => generate_exception_bif(output, selector, params),
         _ => None,
     }
 }
@@ -248,7 +249,8 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
 }
 
 /// Block primitive implementations.
-fn generate_block_bif(output: &mut String, selector: &str) -> Option<()> {
+fn generate_block_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    let _ = params; // Block BIFs don't use params currently
     match selector {
         "arity" => {
             // erlang:fun_info(Self, arity) returns {arity, N}
@@ -260,6 +262,8 @@ fn generate_block_bif(output: &mut String, selector: &str) -> Option<()> {
             .ok()?;
             Some(())
         }
+        // on:do: and ensure: are structural intrinsics handled at the call site
+        // (see control_flow/exception_handling.rs), not here.
         _ => None,
     }
 }
@@ -284,6 +288,82 @@ fn generate_file_bif(output: &mut String, selector: &str, params: &[String]) -> 
             write!(
                 output,
                 "call 'beamtalk_file':'writeAll:contents:'({p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Exception primitive implementations (BT-338).
+///
+/// Exception field access delegates to `beamtalk_exception_handler` runtime module.
+/// This avoids naming conflict: compiled Exception.bt produces `beamtalk_exception`,
+/// while the handler module provides the actual implementation.
+fn generate_exception_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "message" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('message', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "hint" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('hint', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "kind" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('kind', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "selector" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('selector', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "errorClass" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('errorClass', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "printString" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('printString', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "signal" => {
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'dispatch'('signal', [], Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        "signal:" => {
+            let p0 = params.first().map_or("_Msg", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_exception_handler':'signal_message'({p0})"
             )
             .ok()?;
             Some(())
