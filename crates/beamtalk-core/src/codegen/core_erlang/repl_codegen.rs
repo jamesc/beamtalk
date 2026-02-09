@@ -39,9 +39,12 @@ impl CoreErlangGenerator {
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
     pub(super) fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
+        // Save previous state so generator can be reused across REPL and non-REPL contexts
+        let previous_is_repl_mode = self.is_repl_mode;
+
         // BT-213: Set context to Repl for this module
         self.context = CodeGenContext::Repl;
-        self.is_repl_mode = true; // Also set legacy flag for compatibility
+        self.is_repl_mode = true;
         // BT-374 / ADR 0010: REPL runs in workspace context, bindings are available
         self.workspace_mode = true;
 
@@ -58,11 +61,6 @@ impl CoreErlangGenerator {
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
-
-        // BT-153: Set REPL mode so mutations to local variables update bindings
-        // Save the previous value so generator can be reused
-        let previous_is_repl_mode = self.is_repl_mode;
-        self.is_repl_mode = true;
 
         // Alias State to Bindings for identifier fallback lookup
         self.write_indent()?;
