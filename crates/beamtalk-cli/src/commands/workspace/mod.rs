@@ -43,6 +43,7 @@
 //! beamtalk repl                         # Auto-detect/create workspace
 //! ```
 
+pub mod cli;
 pub mod discovery;
 
 use std::fs;
@@ -201,14 +202,12 @@ pub fn save_workspace_cookie(workspace_id: &str, cookie: &str) -> Result<()> {
 }
 
 /// Read workspace cookie.
-#[allow(dead_code)] // Used in future phases
 pub fn read_workspace_cookie(workspace_id: &str) -> Result<String> {
     let cookie_path = workspace_dir(workspace_id)?.join("cookie");
     fs::read_to_string(cookie_path).into_diagnostic()
 }
 
 /// Get node info for a workspace.
-#[allow(dead_code)] // Used in future phases
 pub fn get_node_info(workspace_id: &str) -> Result<Option<NodeInfo>> {
     let node_info_path = workspace_dir(workspace_id)?.join("node.info");
 
@@ -222,7 +221,6 @@ pub fn get_node_info(workspace_id: &str) -> Result<Option<NodeInfo>> {
 }
 
 /// Save node info for a workspace.
-#[allow(dead_code)] // Used in future phases
 pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
     let node_info_path = workspace_dir(workspace_id)?.join("node.info");
     let content = serde_json::to_string_pretty(info).into_diagnostic()?;
@@ -231,7 +229,6 @@ pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
 }
 
 /// Check if a BEAM node is actually running (handle stale node.info files).
-#[allow(dead_code)] // Used in future phases
 pub fn is_node_running(info: &NodeInfo) -> bool {
     // Check if PID exists and is a BEAM process
     #[cfg(unix)]
@@ -267,7 +264,6 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 }
 
 /// Clean up stale node.info file.
-#[allow(dead_code)] // Used in future phases
 pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
     let node_info_path = workspace_dir(workspace_id)?.join("node.info");
     if node_info_path.exists() {
@@ -277,7 +273,6 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
 }
 
 /// Create a new workspace.
-#[allow(dead_code)] // Used in future phases
 pub fn create_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,
@@ -316,7 +311,6 @@ pub fn create_workspace(
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
-#[allow(dead_code)] // Used in Phase 3
 #[allow(clippy::too_many_arguments)]
 pub fn start_detached_node(
     workspace_id: &str,
@@ -439,7 +433,6 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<u32> {
 
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
-#[allow(dead_code)] // Used in Phase 3
 #[allow(clippy::too_many_arguments)]
 pub fn get_or_start_workspace(
     project_path: &Path,
@@ -478,6 +471,238 @@ pub fn get_or_start_workspace(
         max_idle_seconds,
     )?;
     Ok((node_info, true, workspace_id)) // New node started
+}
+
+/// Summary of a workspace for listing purposes.
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceSummary {
+    pub workspace_id: String,
+    pub project_path: PathBuf,
+    pub status: WorkspaceStatus,
+    pub port: Option<u16>,
+    pub pid: Option<u32>,
+    pub created_at: u64,
+}
+
+/// Running status of a workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceStatus {
+    Running,
+    Stopped,
+}
+
+impl std::fmt::Display for WorkspaceStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Running => write!(f, "running"),
+            Self::Stopped => write!(f, "stopped"),
+        }
+    }
+}
+
+/// List all workspaces found in `~/.beamtalk/workspaces/`.
+pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
+    let workspaces_dir = dirs::home_dir()
+        .ok_or_else(|| miette!("Could not determine home directory"))?
+        .join(".beamtalk")
+        .join("workspaces");
+
+    if !workspaces_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut summaries = Vec::new();
+
+    let entries = fs::read_dir(&workspaces_dir).into_diagnostic()?;
+    for entry in entries {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+
+        let metadata_path = path.join("metadata.json");
+        if !metadata_path.exists() {
+            continue;
+        }
+
+        let workspace_id = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        let Ok(metadata) = get_workspace_metadata(&workspace_id) else {
+            continue;
+        };
+
+        let (status, port, pid) = match get_node_info(&workspace_id) {
+            Ok(Some(info)) => {
+                if is_node_running(&info) {
+                    (WorkspaceStatus::Running, Some(info.port), Some(info.pid))
+                } else {
+                    // Stale node.info — clean it up
+                    let _ = cleanup_stale_node_info(&workspace_id);
+                    (WorkspaceStatus::Stopped, None, None)
+                }
+            }
+            _ => (WorkspaceStatus::Stopped, None, None),
+        };
+
+        summaries.push(WorkspaceSummary {
+            workspace_id,
+            project_path: metadata.project_path,
+            status,
+            port,
+            pid,
+            created_at: metadata.created_at,
+        });
+    }
+
+    // Sort by workspace_id for stable output
+    summaries.sort_unstable_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
+
+    Ok(summaries)
+}
+
+/// Stop a workspace by name or ID.
+///
+/// Attempts graceful shutdown by killing the BEAM process PID.
+/// Cleans up `node.info` after stopping.
+pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
+    // Resolve workspace ID
+    let workspace_id = resolve_workspace_id(name_or_id)?;
+
+    if !workspace_exists(&workspace_id)? {
+        return Err(miette!("Workspace '{name_or_id}' does not exist"));
+    }
+
+    let node_info = get_node_info(&workspace_id)?;
+
+    match node_info {
+        Some(info) if is_node_running(&info) => {
+            if !force {
+                eprintln!(
+                    "Stopping workspace '{}' (PID {})...",
+                    workspace_id, info.pid
+                );
+            }
+
+            // Kill the BEAM process
+            #[cfg(unix)]
+            {
+                let signal = if force { "KILL" } else { "TERM" };
+                let status = Command::new("kill")
+                    .args([&format!("-{signal}"), &info.pid.to_string()])
+                    .status()
+                    .into_diagnostic()?;
+
+                if !status.success() {
+                    return Err(miette!(
+                        "Failed to stop workspace '{}' (PID {})",
+                        workspace_id,
+                        info.pid
+                    ));
+                }
+            }
+
+            #[cfg(not(unix))]
+            {
+                return Err(miette!(
+                    "Stopping workspaces is only supported on Unix systems"
+                ));
+            }
+
+            // Clean up node.info
+            cleanup_stale_node_info(&workspace_id)?;
+
+            println!("Workspace '{workspace_id}' stopped");
+            Ok(())
+        }
+        _ => Err(miette!("Workspace '{}' is not running", workspace_id)),
+    }
+}
+
+/// Detailed status information for a workspace.
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceDetail {
+    pub workspace_id: String,
+    pub project_path: PathBuf,
+    pub status: WorkspaceStatus,
+    pub created_at: u64,
+    pub node_name: Option<String>,
+    pub port: Option<u16>,
+    pub pid: Option<u32>,
+}
+
+/// Get detailed status for a workspace.
+///
+/// If `name_or_id` is `None`, attempts to find the workspace for the current directory.
+pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
+    let workspace_id = if let Some(name) = name_or_id {
+        resolve_workspace_id(name)?
+    } else {
+        // Auto-detect from current directory
+        let cwd = std::env::current_dir().into_diagnostic()?;
+        let project_root = discovery::discover_project_root(&cwd);
+        generate_workspace_id(&project_root)?
+    };
+
+    if !workspace_exists(&workspace_id)? {
+        return Err(miette!(
+            "Workspace '{}' does not exist. Use 'beamtalk workspace list' to see available workspaces.",
+            workspace_id
+        ));
+    }
+
+    let metadata = get_workspace_metadata(&workspace_id)?;
+
+    let (status, node_name, port, pid) = match get_node_info(&workspace_id) {
+        Ok(Some(info)) => {
+            if is_node_running(&info) {
+                (
+                    WorkspaceStatus::Running,
+                    Some(info.node_name),
+                    Some(info.port),
+                    Some(info.pid),
+                )
+            } else {
+                let _ = cleanup_stale_node_info(&workspace_id);
+                (WorkspaceStatus::Stopped, None, None, None)
+            }
+        }
+        _ => (WorkspaceStatus::Stopped, None, None, None),
+    };
+
+    Ok(WorkspaceDetail {
+        workspace_id,
+        project_path: metadata.project_path,
+        status,
+        created_at: metadata.created_at,
+        node_name,
+        port,
+        pid,
+    })
+}
+
+/// Resolve a user-provided name or auto-generated ID to a workspace ID.
+///
+/// Validates the input to prevent path traversal attacks, then returns it as-is.
+/// Callers handle "not found" errors via `workspace_exists()`.
+fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
+    // Reject path traversal attempts and path separators
+    if name_or_id.contains("..")
+        || name_or_id.contains('/')
+        || name_or_id.contains('\\')
+        || name_or_id.contains('\0')
+    {
+        return Err(miette!(
+            "Invalid workspace name: must not contain path separators or '..'"
+        ));
+    }
+    Ok(name_or_id.to_string())
 }
 
 #[cfg(test)]
@@ -783,5 +1008,138 @@ mod tests {
             pid: u32::MAX, // Very unlikely to be a real PID
         };
         assert!(!is_node_running(&info));
+    }
+
+    #[test]
+    fn test_list_workspaces_returns_created_workspace() {
+        let ws = TestWorkspace::new("list_test");
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: PathBuf::from("/tmp/list-test-project"),
+            created_at: 2_000_000,
+        };
+        save_workspace_metadata(&metadata).unwrap();
+
+        let workspaces = list_workspaces().unwrap();
+        let found = workspaces.iter().find(|w| w.workspace_id == ws.id);
+        assert!(found.is_some(), "Should find the created workspace");
+
+        let ws_summary = found.unwrap();
+        assert_eq!(
+            ws_summary.project_path,
+            PathBuf::from("/tmp/list-test-project")
+        );
+        assert_eq!(ws_summary.status, WorkspaceStatus::Stopped);
+        assert!(ws_summary.port.is_none());
+    }
+
+    #[test]
+    fn test_list_workspaces_empty_when_no_workspaces_dir() {
+        // list_workspaces handles missing ~/.beamtalk/workspaces/ gracefully
+        let result = list_workspaces();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_list_workspaces_sorted_by_id() {
+        let ws_b = TestWorkspace::new("list_sort_b");
+        let ws_a = TestWorkspace::new("list_sort_a");
+
+        for ws in [&ws_a, &ws_b] {
+            let metadata = WorkspaceMetadata {
+                workspace_id: ws.id.clone(),
+                project_path: PathBuf::from("/tmp/sort-test"),
+                created_at: 1_000_000,
+            };
+            save_workspace_metadata(&metadata).unwrap();
+        }
+
+        let workspaces = list_workspaces().unwrap();
+        let ids: Vec<&str> = workspaces
+            .iter()
+            .filter(|w| w.workspace_id.starts_with("list_sort_"))
+            .map(|w| w.workspace_id.as_str())
+            .collect();
+
+        let mut sorted_ids = ids.clone();
+        sorted_ids.sort_unstable();
+        assert_eq!(ids, sorted_ids, "Workspaces should be sorted by ID");
+    }
+
+    #[test]
+    fn test_stop_workspace_fails_for_nonexistent() {
+        let result = stop_workspace("nonexistent_stop_test_ws", false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stop_workspace_fails_when_not_running() {
+        let ws = TestWorkspace::new("stop_not_running");
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: PathBuf::from("/tmp/stop-test"),
+            created_at: 1_000_000,
+        };
+        save_workspace_metadata(&metadata).unwrap();
+
+        let result = stop_workspace(&ws.id, false);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("is not running"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_workspace_status_returns_details() {
+        let ws = TestWorkspace::new("status_test");
+        let metadata = WorkspaceMetadata {
+            workspace_id: ws.id.clone(),
+            project_path: PathBuf::from("/tmp/status-test"),
+            created_at: 3_000_000,
+        };
+        save_workspace_metadata(&metadata).unwrap();
+
+        let detail = workspace_status(Some(&ws.id)).unwrap();
+        assert_eq!(detail.workspace_id, ws.id);
+        assert_eq!(detail.project_path, PathBuf::from("/tmp/status-test"));
+        assert_eq!(detail.status, WorkspaceStatus::Stopped);
+        assert!(detail.node_name.is_none());
+        assert!(detail.port.is_none());
+        assert!(detail.pid.is_none());
+    }
+
+    #[test]
+    fn test_workspace_status_fails_for_nonexistent() {
+        let result = workspace_status(Some("nonexistent_status_test_ws"));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("does not exist"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_workspace_status_display() {
+        assert_eq!(WorkspaceStatus::Running.to_string(), "running");
+        assert_eq!(WorkspaceStatus::Stopped.to_string(), "stopped");
+    }
+
+    #[test]
+    fn test_resolve_workspace_id_passthrough() {
+        let id = resolve_workspace_id("my-workspace").unwrap();
+        assert_eq!(id, "my-workspace");
+    }
+
+    #[test]
+    fn test_resolve_workspace_id_rejects_path_traversal() {
+        assert!(resolve_workspace_id("../../etc").is_err());
+        assert!(resolve_workspace_id("../secret").is_err());
+        assert!(resolve_workspace_id("foo/bar").is_err());
+        assert!(resolve_workspace_id("foo\\bar").is_err());
+        assert!(resolve_workspace_id("foo\0bar").is_err());
+    }
+
+    #[test]
+    fn test_resolve_workspace_id_allows_valid_names() {
+        assert!(resolve_workspace_id("my-workspace").is_ok());
+        assert!(resolve_workspace_id("abc123").is_ok());
+        assert!(resolve_workspace_id("test_ws-1").is_ok());
     }
 }
