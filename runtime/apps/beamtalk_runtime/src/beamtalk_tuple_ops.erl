@@ -6,29 +6,29 @@
 %%% This module provides runtime support for Tuple methods that require
 %%% complex pattern matching or error handling logic. The Tuple class
 %%% is now compiled from lib/Tuple.bt (BT-417), but delegates complex
-%%% methods to this runtime module.
+%%% methods to this runtime operations module.
 %%%
-%%% ## Supported Methods (via delegation from compiled code)
+%%% ## Supported Functions
 %%%
-%%% | Selector | Args | Description |
+%%% | Function | Args | Description |
 %%% |----------|------|-------------|
-%%% | `unwrap` | []   | Extract value or raise error |
-%%% | `unwrapOr:` | [Default] | Extract value or return default |
-%%% | `unwrapOrElse:` | [Block] | Extract value or evaluate block |
-%%% | `asString` | [] | Convert to string |
+%%% | `unwrap/1` | Tuple | Extract value or raise error |
+%%% | `unwrap_or/2` | Tuple, Default | Extract value or return default |
+%%% | `unwrap_or_else/2` | Tuple, Block | Extract value or evaluate block |
+%%% | `as_string/1` | Tuple | Convert to string |
 %%%
 %%% ## Usage Examples
 %%%
 %%% ```erlang
 %%% %% Unwrapping
-%%% beamtalk_tuple:dispatch('unwrap', [], {ok, 42}). % => 42
-%%% beamtalk_tuple:dispatch('unwrapOr:', [default], {error, reason}). % => default
+%%% beamtalk_tuple_ops:unwrap({ok, 42}). % => 42
+%%% beamtalk_tuple_ops:unwrap_or({error, reason}, default). % => default
 %%% ```
 %%%
 %%% See: BT-417, ADR 0007
 
--module(beamtalk_tuple).
--export([dispatch/3]).
+-module(beamtalk_tuple_ops).
+-export([unwrap/1, unwrap_or/2, unwrap_or_else/2, as_string/1]).
 
 -include("beamtalk.hrl").
 
@@ -36,57 +36,48 @@
 %%% Public API
 %%% ============================================================================
 
-%% @doc Dispatch helper methods for tuple operations.
-%%
-%% This function is called from compiled Tuple.bt code via @primitive
-%% delegation for methods that require complex runtime logic.
--spec dispatch(atom(), list(), tuple()) -> term().
-
-%% Unwrapping - extracts value from {ok, Value} or raises error from {error, Reason}
-dispatch('unwrap', [], {ok, Value}) -> Value;
-dispatch('unwrap', [], {error, Reason}) -> 
+%% @doc Extract value from {ok, Value} or raise error from {error, Reason}.
+-spec unwrap(tuple()) -> term().
+unwrap({ok, Value}) -> Value;
+unwrap({error, Reason}) -> 
     Error0 = beamtalk_error:new(type_error, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Called unwrap on an error tuple">>),
     Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
     error(Error3);
-dispatch('unwrap', [], _Tuple) ->
+unwrap(_Tuple) ->
     %% Invalid pattern (not {ok, _} or {error, _})
     Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
     Error = beamtalk_error:with_hint(Error1, <<"unwrap requires {ok, Value} or {error, Reason} tuple">>),
-    error(Error);
+    error(Error).
 
-%% Unwrap with default - returns Value from {ok, Value} or Default otherwise
-dispatch('unwrapOr:', [Default], {ok, Value}) -> Value;
-dispatch('unwrapOr:', [Default], _) -> Default;
+%% @doc Return Value from {ok, Value} or Default otherwise.
+-spec unwrap_or(tuple(), term()) -> term().
+unwrap_or({ok, Value}, _Default) -> Value;
+unwrap_or(_Tuple, Default) -> Default.
 
-%% Unwrap with block - returns Value from {ok, Value} or evaluates block
-dispatch('unwrapOrElse:', [Block], {ok, Value}) when is_function(Block, 0) ->
+%% @doc Return Value from {ok, Value} or evaluate block.
+-spec unwrap_or_else(tuple(), function()) -> term().
+unwrap_or_else({ok, Value}, _Block) when is_function(_Block, 0) ->
     Value;
-dispatch('unwrapOrElse:', [Block], _Tuple) when is_function(Block, 0) ->
+unwrap_or_else(_Tuple, Block) when is_function(Block, 0) ->
     Block();
-dispatch('unwrapOrElse:', [_NotABlock], _Tuple) ->
+unwrap_or_else(_Tuple, _NotABlock) ->
     %% Type error: Block must be a function
     Error0 = beamtalk_error:new(type_error, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'unwrapOrElse:'),
     Error = beamtalk_error:with_hint(Error1, <<"Argument must be a block (0-arity function)">>),
-    error(Error);
+    error(Error).
 
-%% Conversion
-dispatch('asString', [], X) ->
+%% @doc Convert tuple to string representation.
+-spec as_string(tuple()) -> binary().
+as_string(X) ->
     %% Convert tuple to string representation
     Elements = tuple_to_list(X),
     ElementStrs = [format_element(E) || E <- Elements],
     Joined = lists:join(<<", ">>, ElementStrs),
-    iolist_to_binary([<<"{">>, Joined, <<"}">>]);
-
-%% Unknown selector
-dispatch(Selector, _Args, _Tuple) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error = beamtalk_error:with_hint(Error1, <<"Method should be handled by compiled Tuple class">>),
-    error(Error).
+    iolist_to_binary([<<"{">>, Joined, <<"}">>]).
 
 %%% ============================================================================
 %%% Internal Functions

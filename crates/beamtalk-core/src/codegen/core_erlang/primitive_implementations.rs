@@ -481,24 +481,24 @@ fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) ->
             .ok()?;
             Some(())
         }
-        // Unwrapping — delegate to runtime for error handling
-        "unwrap" | "unwrapOr:" | "unwrapOrElse:" => {
-            // These methods have complex error handling logic, delegate to runtime
-            let args_str = if params.is_empty() {
-                "[]".to_string()
-            } else {
-                format!("[{}]", params.join(", "))
-            };
-            write!(
-                output,
-                "call 'beamtalk_tuple':'dispatch'('{selector}', {args_str}, Self)"
-            )
-            .ok()?;
+        // Unwrapping — delegate to runtime ops for error handling
+        "unwrap" => {
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap'(Self)").ok()?;
             Some(())
         }
-        // Conversion — delegate to runtime for formatting
+        "unwrapOr:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "unwrapOrElse:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Conversion — delegate to runtime ops for formatting
         "asString" => {
-            write!(output, "call 'beamtalk_tuple':'dispatch'('asString', [], Self)").ok()?;
+            write!(output, "call 'beamtalk_tuple_ops':'as_string'(Self)").ok()?;
             Some(())
         }
         _ => None,
