@@ -65,6 +65,9 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "futureAwait",
     "futureAwaitTimeout",
     "futureAwaitForever",
+    // Exception handling
+    "onDo",
+    "ensure",
 ];
 
 /// Validates all `@primitive` usages in a module.

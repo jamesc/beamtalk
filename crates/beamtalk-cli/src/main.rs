@@ -106,6 +106,12 @@ enum Command {
         #[command(subcommand)]
         action: commands::daemon::DaemonAction,
     },
+
+    /// Manage workspaces (list, stop, status, create)
+    Workspace {
+        #[command(subcommand)]
+        action: commands::workspace::cli::WorkspaceCommand,
+    },
 }
 
 fn main() -> Result<()> {
@@ -173,6 +179,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Daemon { action } => commands::daemon::run(action),
+        Command::Workspace { action } => commands::workspace::cli::run(action),
     };
 
     // Exit with appropriate code
