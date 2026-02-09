@@ -9,18 +9,15 @@
 //! similar to `tail -f` on a log file. Uses the existing REPL TCP protocol
 //! to poll the `TranscriptStream` actor's ring buffer.
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::io::{ErrorKind, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
 
+use crate::commands::protocol::{self, ProtocolClient};
 use crate::commands::workspace;
-
-/// Connection timeout in milliseconds.
-const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Polling interval for transcript updates in milliseconds.
 const POLL_INTERVAL_MS: u64 = 500;
@@ -108,7 +105,6 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
 /// Print a transcript entry as plain text.
 /// Returns false if stdout is broken (pipe closed), signaling the caller to exit.
 fn print_entry(entry: &str) -> bool {
-    use std::io::ErrorKind;
     // Entries may contain newline characters; print as-is for faithful output
     print!("{entry}");
     // Flush to ensure output appears immediately; exit on broken pipe
@@ -120,63 +116,26 @@ fn print_entry(entry: &str) -> bool {
     true
 }
 
-/// Minimal TCP client for transcript polling (reuses REPL JSON protocol).
+/// Transcript-specific client wrapping the shared protocol transport.
 struct TranscriptClient {
-    stream: TcpStream,
-    reader: BufReader<TcpStream>,
-    msg_counter: u64,
+    inner: ProtocolClient,
 }
 
 impl TranscriptClient {
     fn connect(port: u16) -> Result<Self> {
-        let addr = format!("127.0.0.1:{port}");
-        let stream = TcpStream::connect_timeout(
-            &addr.parse().into_diagnostic()?,
-            Duration::from_millis(CONNECT_TIMEOUT_MS),
-        )
-        .map_err(|e| miette!("Failed to connect to workspace at {addr}: {e}"))?;
-
-        // Set read timeout so polling doesn't block forever if workspace hangs
-        stream
-            .set_read_timeout(Some(Duration::from_millis(READ_TIMEOUT_MS)))
-            .into_diagnostic()?;
-
-        let reader_stream = stream.try_clone().into_diagnostic()?;
-        let reader = BufReader::new(reader_stream);
-
-        Ok(Self {
-            stream,
-            reader,
-            msg_counter: 1,
-        })
-    }
-
-    fn next_msg_id(&mut self) -> String {
-        let n = self.msg_counter;
-        self.msg_counter += 1;
-        format!("msg-{n:03}")
+        let inner = ProtocolClient::connect(port, Some(Duration::from_millis(READ_TIMEOUT_MS)))?;
+        Ok(Self { inner })
     }
 
     /// Fetch recent transcript entries via eval.
     fn fetch_recent(&mut self) -> Result<Vec<String>> {
-        let id = self.next_msg_id();
         let request = serde_json::json!({
             "op": "eval",
-            "id": id,
+            "id": protocol::next_msg_id(),
             "code": "Transcript recent"
         });
 
-        let request_str = serde_json::to_string(&request).into_diagnostic()?;
-        writeln!(self.stream, "{request_str}").into_diagnostic()?;
-        self.stream.flush().into_diagnostic()?;
-
-        let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .into_diagnostic()?;
-
-        let response: serde_json::Value = serde_json::from_str(&response_line)
-            .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {response_line}"))?;
+        let response = self.inner.send_raw(&request)?;
 
         // Check for error
         if let Some(error) = response.get("error").and_then(|e| e.as_str()) {
