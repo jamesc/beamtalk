@@ -19,7 +19,7 @@ ADR 0005 committed to "full Smalltalk metaclass model as the target" with classe
 1. **Class variables not wired end-to-end**: Classes can't hold shared state (e.g., `UniqueInstance` for singletons) via the language today. While `#class_state{}` already includes a `class_variables` field in the runtime, there is no syntax, parser/codegen support, or get/set handling wired up to expose it.
 2. **Class-side methods not exposed to the language**: There is no syntax to define methods on the class (vs. on instances), and the parser/codegen/runtime dispatch path for `class_methods` is not implemented, so all methods in a `.bt` file are effectively instance methods only.
 3. **No dynamic class dispatch**: `cls := Point. cls new` fails — the compiler only generates direct module calls for `ClassReference` AST nodes, not for variables holding class objects.
-4. **No `initialize` hook**: `new` returns a map with defaults; there's no post-creation initialization protocol.
+4. **No `initialize` hook for actors**: `spawn` starts the gen_server and returns immediately. There's no post-spawn initialization method where actors can set up derived state (e.g., open connections, subscribe to topics).
 
 ### Motivating use cases
 
@@ -119,16 +119,47 @@ Value types and actors have **different instantiation semantics**, reflecting th
 Point new              // → #{$beamtalk_class => 'Point', x => 0, y => 0}
 Point new: #{x => 3}   // → #{$beamtalk_class => 'Point', x => 3, y => 0}
 ```
-Value types are immutable maps. `new` creates a map with default field values. `new:` merges provided arguments with defaults. There is no `initialize` hook — you can't mutate an immutable value after creation. This is the honest design: value types are **constructed**, not initialized.
+Value types are immutable maps. `new` creates a map with default field values. `new:` merges provided arguments with defaults. There is no `initialize` hook — you can't mutate an immutable value after creation. This is the honest design: value types are **constructed**, not initialized. Validation belongs in class-side `new:` overrides (see steelman section).
 
-**Actors** (Actor subclasses) — initialization via gen_server:
+**Actors** (Actor subclasses) — spawn + initialize:
 ```beamtalk
-Counter spawn              // → starts gen_server, returns #beamtalk_object{}
-Counter spawnWith: #{n => 5} // → starts gen_server with initial state
+Actor subclass: Counter
+  state: value = 0
+  state: connections = nil
+
+  initialize =>
+    self.connections := Dictionary new
+
+  increment => self.value := self.value + 1
+```
+
+```beamtalk
+Counter spawn              // → starts gen_server, calls initialize, returns #beamtalk_object{}
+Counter spawnWith: #{value => 5} // → starts gen_server with overrides, calls initialize
 Counter new                // → Error: "Use spawn instead of new for actors"
 ```
 
-Actors use `spawn`/`spawnWith:` (already implemented). The gen_server `init/1` callback serves as the initialization hook. The `new` error is already implemented (codegen generates `beamtalk_error` with hint).
+**The `spawn` → `initialize` chain:**
+
+1. `Counter spawn` → codegen generates `gen_server:start_link(counter, #{}, [])` → `init/1` builds default state map → gen_server is fully started
+2. Codegen immediately sends `gen_server:call(Pid, {initialize, []})` as the **first message** to the new process
+3. `initialize` runs as a normal instance method — `self` is the new actor, full messaging capability (can send messages to other actors, await futures, etc.)
+4. Returns `#beamtalk_object{}` to the caller
+
+**Why first-message, not inside `init/1`?** The gen_server `init/1` callback runs during process startup — the process isn't fully registered yet. If `initialize` tried to send a message back to itself or to another actor that messages it back, it would deadlock. By running `initialize` as the first message *after* the process is alive, actors have full concurrency capabilities during initialization. This is the BEAM-natural approach.
+
+**Default `initialize`**: If no `initialize` method is defined, the codegen skips the post-spawn call — `spawn` returns immediately after `gen_server:start_link`. This preserves backward compatibility with existing actors.
+
+**`initialize` with arguments** (via `spawnWith:`):
+```beamtalk
+Actor subclass: Server
+  state: port = 8080
+  state: socket = nil
+
+  initialize =>
+    self.socket := Socket listen: self.port
+```
+`Server spawnWith: #{port => 9090}` merges `#{port => 9090}` into defaults (during `init/1`), then `initialize` runs with the merged state — so `self.port` is `9090`.
 
 **Overriding `new` on the class side** (for singletons, factories):
 ```beamtalk
@@ -141,7 +172,7 @@ Object subclass: TranscriptStream
     self.uniqueInstance
 ```
 
-Class-side `new` can be overridden via the `class` prefix. `super new` calls the default constructor. This enables singletons, object pools, and factory patterns without an `initialize` hook.
+Class-side `new` can be overridden via the `class` prefix. `super new` calls the default constructor. This enables singletons, object pools, and factory patterns.
 
 **Why no `initialize` for value types?**
 
@@ -259,7 +290,7 @@ Class-side state via "class declarations" in the class header. Modules are insta
 ### Smalltalk Developer
 - Will expect `classVariableNames:` shared across hierarchy — we use per-class variables instead (Pharo class instance variable semantics). This is actually what they want for singletons.
 - `class uniqueInstance` instead of defining on `TranscriptStream class` — minor syntax difference.
-- For actor-backed classes, the `new → basicNew → initialize` chain is identical; value types only support `new`/`basicNew` and do not have `initialize`.
+- For actor-backed classes, `spawn` → `initialize` replaces the `new → basicNew → initialize` chain — same user-facing pattern (define `initialize` to set up your object), different mechanics (first message after spawn, not allocation hook). Value types only support `new`/`new:` and do not have `initialize`.
 
 ### Erlang/BEAM Developer
 - Class variables stored in gen_server state is natural OTP.
@@ -401,7 +432,6 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 - Value types not having `initialize` is a divergence from Smalltalk that will surprise Smalltalkers expecting `new → basicNew → initialize` everywhere. Mitigation: class-side `new:` override provides pre-construction validation, which is arguably better (object never exists in invalid state).
 
 ### Neutral
-- Does not change actor instantiation (`spawn` stays unchanged).
 - Virtual metaclasses replace ADR 0005 Phase 2 — no separate metaclass work needed later.
 - Value types and actors have different construction models (`new`/`new:` vs `spawn`/`spawnWith:`), matching their existing semantic split.
 - Class variable state is lost if the class process crashes and restarts (standard OTP behavior). For singletons and caches, lazy re-initialization on next access is the correct pattern. If persistent class variable state is needed, the `classVar:` interface supports adding optional persistence (mnesia, dets) as an implementation detail.
@@ -414,12 +444,13 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 **Runtime**: `beamtalk_object_class` handles `{new, Args}` in `handle_call`, but currently delegates to `Module:spawn/1` (actor-style). For value types, a new `handle_call` clause is needed that constructs an immutable map via `Module:new/0` or `Module:new/1`.
 **Test**: `cls := (Beamtalk classNamed: #Point) await. cls new` works end-to-end.
 
-### Phase 2: Class-Side Methods with Inheritance (BT-246)
-**Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`).
+### Phase 2: Class-Side Methods, Inheritance, and Actor `initialize` (BT-246)
+**Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`). No parser changes needed for `initialize` — it's a regular instance method with a well-known name.
 **AST**: Add `class_methods: Vec<MethodDefinition>` to `ClassDefinition`.
-**Codegen**: Generate class-side methods registered via `beamtalk_object_class` during class bootstrap.
+**Codegen — class-side methods**: Generate class-side methods registered via `beamtalk_object_class` during class bootstrap.
+**Codegen — actor `initialize`**: If a class defines an `initialize` method, `spawn/0` and `spawn/1` codegen emits `gen_server:call(Pid, {initialize, []})` as the first message after `gen_server:start_link` succeeds. If no `initialize` is defined, `spawn` returns immediately (backward compatible). Detection is compile-time via the method table.
 **Runtime**: Add `class_methods` and `flattened_class_methods` fields to `#class_state{}`. Reuse `build_flattened_methods` for class-side table. Route class-side message sends to the class process via `gen_server:call`, dispatching through `flattened_class_methods`.
-**Test**: `TranscriptStream uniqueInstance` returns singleton. `MyTest allTestSelectors` inherits from `TestCase`.
+**Test**: `TranscriptStream uniqueInstance` returns singleton. `MyTest allTestSelectors` inherits from `TestCase`. Actor with `initialize` sets up derived state after spawn.
 
 ### Phase 3: Virtual Metaclasses
 **Codegen**: Change `class` intrinsic to return `#beamtalk_object{class='X class', pid=ClassPid}` instead of an atom.
