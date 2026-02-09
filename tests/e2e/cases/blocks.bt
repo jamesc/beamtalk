@@ -88,3 +88,18 @@ addFive := makeAdder value: 5
 
 addFive value: 10
 // => 15
+// ===========================================================================
+// BLOCK - valueWithArguments:
+// ===========================================================================
+
+// Block with array of arguments
+[:x :y | x + y] valueWithArguments: #(3, 4)
+// => 7
+
+// Zero-arg block
+[42] valueWithArguments: #()
+// => 42
+
+// Single-arg block
+[:x | x * 2] valueWithArguments: #(5)
+// => 10
