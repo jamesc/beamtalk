@@ -491,7 +491,11 @@ mod tests {
         let chain = h.superclass_chain("Integer");
         assert_eq!(
             chain,
-            vec![EcoString::from("Object"), EcoString::from("ProtoObject"),]
+            vec![
+                EcoString::from("Number"),
+                EcoString::from("Object"),
+                EcoString::from("ProtoObject"),
+            ]
         );
     }
 

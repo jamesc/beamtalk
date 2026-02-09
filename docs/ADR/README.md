@@ -39,6 +39,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Accepted | 2026-02-07 |
 | [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Proposed | 2026-02-07 |
 | [0012](0012-list-literal-syntax.md) | Collection Literal Syntax and the `#` Data Literal System | Accepted | 2026-02-08 |
+| [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Proposed | 2026-02-09 |
 
 ## Creating New ADRs
 
