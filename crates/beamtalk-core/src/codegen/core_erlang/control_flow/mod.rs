@@ -23,6 +23,7 @@
 //! - [`counted_loops`] — Counted loop constructs
 
 mod counted_loops;
+mod exception_handling;
 mod list_ops;
 mod while_loops;
 
