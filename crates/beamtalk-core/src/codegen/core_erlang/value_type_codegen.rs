@@ -115,6 +115,9 @@ impl CoreErlangGenerator {
             exports.push("'has_method'/1".to_string());
         }
 
+        // All classes export superclass/0 for reflection
+        exports.push("'superclass'/0".to_string());
+
         // Module header
         writeln!(
             self.output,
@@ -150,6 +153,17 @@ impl CoreErlangGenerator {
             self.generate_primitive_has_method(class)?;
             writeln!(self.output)?;
         }
+
+        // Generate superclass/0 for reflection
+        let superclass_atom = class
+            .superclass
+            .as_ref()
+            .map_or("nil", |s| s.name.as_str());
+        writeln!(
+            self.output,
+            "'superclass'/0 = fun () -> '{superclass_atom}'"
+        )?;
+        writeln!(self.output)?;
 
         // Module end
         writeln!(self.output, "end")?;

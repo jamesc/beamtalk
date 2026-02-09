@@ -29,7 +29,7 @@ impl CoreErlangGenerator {
         // Module header with class method exports + registration
         writeln!(
             self.output,
-            "module '{}' ['allClasses'/0, 'classNamed:'/1, 'globals'/0, 'register_class'/0]",
+            "module '{}' ['allClasses'/0, 'classNamed:'/1, 'globals'/0, 'register_class'/0, 'superclass'/0]",
             self.module_name
         )?;
         writeln!(
@@ -52,6 +52,18 @@ impl CoreErlangGenerator {
 
         // Generate globals/0 - returns global namespace dictionary
         self.generate_beamtalk_globals()?;
+        writeln!(self.output)?;
+
+        // Generate superclass/0 for reflection
+        let superclass_atom = class
+            .superclass
+            .as_ref()
+            .map_or("nil", |s| s.name.as_str());
+        writeln!(
+            self.output,
+            "'superclass'/0 = fun () -> '{superclass_atom}'"
+        )?;
+        writeln!(self.output)?;
 
         // Module end
         writeln!(self.output, "end")?;
@@ -94,7 +106,9 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "'classNamed:' => ~{{'arity' => 1}}~,")?;
         self.write_indent()?;
-        writeln!(self.output, "'globals' => ~{{'arity' => 0}}~")?;
+        writeln!(self.output, "'globals' => ~{{'arity' => 0}}~,")?;
+        self.write_indent()?;
+        writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "}}~,")?;

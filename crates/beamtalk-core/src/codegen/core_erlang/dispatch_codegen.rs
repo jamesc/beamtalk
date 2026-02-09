@@ -711,15 +711,29 @@ impl CoreErlangGenerator {
 /// Resolves the module name for class method dispatch.
 ///
 /// Most classes use `to_module_name()` (`CamelCase` → `snake_case`), but some
-/// class names produce module names that conflict with Erlang stdlib modules.
-/// These use the `beamtalk_` prefix matching their runtime implementation.
+/// class names produce module names that conflict with Erlang stdlib modules
+/// (use `beamtalk_` prefix), and non-primitive stdlib classes compiled from
+/// `lib/*.bt` use the `bt_stdlib_` prefix.
 fn class_method_module_name(class_name: &str) -> String {
     let module = to_module_name(class_name);
     if is_erlang_stdlib_module(&module) {
         format!("beamtalk_{module}")
+    } else if is_bt_stdlib_class(class_name) {
+        format!("bt_stdlib_{module}")
     } else {
         module
     }
+}
+
+/// Returns true if the class is a non-primitive stdlib class compiled from `lib/*.bt`.
+///
+/// These classes are compiled by `build_stdlib` with a `bt_stdlib_` prefix
+/// to distinguish them from user-defined classes.
+fn is_bt_stdlib_class(class_name: &str) -> bool {
+    matches!(
+        class_name,
+        "ProtoObject" | "Object" | "Actor" | "Array" | "SystemDictionary" | "TranscriptStream"
+    )
 }
 
 /// Returns true if the given name conflicts with a well-known Erlang/OTP module.
@@ -762,5 +776,16 @@ mod tests {
         assert!(!is_erlang_stdlib_module("transcript"));
         assert!(!is_erlang_stdlib_module("counter"));
         assert!(!is_erlang_stdlib_module("beamtalk_file"));
+    }
+
+    #[test]
+    fn test_class_method_module_name_bt_stdlib() {
+        assert_eq!(
+            class_method_module_name("ProtoObject"),
+            "bt_stdlib_proto_object"
+        );
+        assert_eq!(class_method_module_name("Object"), "bt_stdlib_object");
+        assert_eq!(class_method_module_name("Actor"), "bt_stdlib_actor");
+        assert_eq!(class_method_module_name("Array"), "bt_stdlib_array");
     }
 }

@@ -173,14 +173,16 @@ a ~= c
 //
 // All classes (Actor, Object, etc.) should inherit from ProtoObject
 // Method lookup should terminate at ProtoObject
-//
-// TODO: Requires `superclass` message support
-//
-// Actor superclass
-// // => ProtoObject
-//
-// ProtoObject superclass
-// // => nil
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Actor class has superclass
+Counter superclass
+// => Actor
+
+// Root class has no superclass
+ProtoObject superclass
+// => nil
 
 // ===========================================================================
 // IMPLEMENTATION STATUS
@@ -193,4 +195,4 @@ a ~= c
 // ✅ Compiler support for `perform:withArguments:`
 // ✅ Runtime dispatch for ProtoObject methods
 // ✅ Actor identity (== / ~=) tests
-// ⏳ Inheritance chain tests (needs `superclass` message)
+// ✅ Inheritance chain (superclass) tests

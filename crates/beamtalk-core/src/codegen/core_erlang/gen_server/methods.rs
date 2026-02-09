@@ -498,7 +498,9 @@ impl CoreErlangGenerator {
             self.write_indent()?;
             writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
             self.write_indent()?;
-            writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~")?;
+            writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~,")?;
+            self.write_indent()?;
+            writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
             self.indent -= 1;
             self.write_indent()?;
             writeln!(self.output, "}}~,")?;
