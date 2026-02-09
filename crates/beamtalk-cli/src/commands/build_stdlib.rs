@@ -7,7 +7,8 @@
 //!
 //! Compiles all `lib/*.bt` files through the normal pipeline with `--stdlib-mode`
 //! and outputs `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-//! Supports incremental rebuilds by comparing source and output timestamps.
+//! Always performs a full rebuild since source file mtime does not reflect
+//! compiler or codegen changes.
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
@@ -27,7 +28,7 @@ const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
 ///
 /// Finds all `.bt` files in `lib/`, compiles them with stdlib mode enabled,
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
-/// Skips files whose `.beam` output is newer than the `.bt` source.
+/// Always performs a full rebuild to ensure correctness after compiler changes.
 #[instrument(skip_all)]
 pub fn build_stdlib() -> Result<()> {
     info!("Starting stdlib build");
@@ -54,20 +55,7 @@ pub fn build_stdlib() -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
 
-    // Partition into files that need compilation vs up-to-date
-    let (to_compile, skipped) = partition_by_freshness(&source_files, &ebin_dir);
-
-    if to_compile.is_empty() {
-        println!(
-            "Built 0 stdlib modules ({} skipped, up-to-date)",
-            skipped.len()
-        );
-        // Still regenerate .app file to ensure consistency
-        generate_app_file(&ebin_dir, &source_files)?;
-        return Ok(());
-    }
-
-    println!("Compiling {} stdlib module(s)...", to_compile.len());
+    println!("Compiling {} stdlib module(s)...", source_files.len());
 
     // Create a temporary directory for .core files
     let temp_dir = tempfile::tempdir()
@@ -96,7 +84,7 @@ pub fn build_stdlib() -> Result<()> {
 
     // Compile each .bt file to .core (files are independent, no ordering required)
     let mut core_files = Vec::new();
-    for source_file in &to_compile {
+    for source_file in &source_files {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
 
@@ -111,14 +99,9 @@ pub fn build_stdlib() -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
-    // Generate beamtalk_stdlib.app with all modules (compiled + skipped)
     generate_app_file(&ebin_dir, &source_files)?;
 
-    println!(
-        "Built {} stdlib modules ({} skipped, up-to-date)",
-        to_compile.len(),
-        skipped.len()
-    );
+    println!("Built {} stdlib modules", source_files.len());
 
     Ok(())
 }
@@ -142,51 +125,6 @@ fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
     files.sort();
     Ok(files)
-}
-
-/// Partition source files into those that need compilation and those that are up-to-date.
-///
-/// A file is considered up-to-date if its corresponding `.beam` file exists
-/// and has a modification time newer than the source `.bt` file.
-fn partition_by_freshness(
-    source_files: &[Utf8PathBuf],
-    ebin_dir: &Utf8Path,
-) -> (Vec<Utf8PathBuf>, Vec<Utf8PathBuf>) {
-    let mut to_compile = Vec::new();
-    let mut skipped = Vec::new();
-
-    for source in source_files {
-        let Ok(module_name) = module_name_from_path(source) else {
-            // If we can't determine the module name, compile it and let it fail properly
-            to_compile.push(source.clone());
-            continue;
-        };
-
-        let beam_file = ebin_dir.join(format!("{module_name}.beam"));
-
-        if is_up_to_date(source, &beam_file) {
-            debug!("Skipping up-to-date: {}", source);
-            skipped.push(source.clone());
-        } else {
-            to_compile.push(source.clone());
-        }
-    }
-
-    (to_compile, skipped)
-}
-
-/// Check if a `.beam` file is newer than its `.bt` source.
-fn is_up_to_date(source: &Utf8Path, beam: &Utf8Path) -> bool {
-    let Ok(source_mtime) = fs::metadata(source).and_then(|m| m.modified()) else {
-        return false;
-    };
-
-    let Ok(beam_mtime) = fs::metadata(beam).and_then(|m| m.modified()) else {
-        return false;
-    };
-
-    // Treat equal mtimes as stale to avoid missed rebuilds on coarse filesystems.
-    beam_mtime > source_mtime
 }
 
 /// Extract the module name from a `.bt` file path.
@@ -284,15 +222,8 @@ fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use filetime::FileTime;
     use std::fs;
     use tempfile::TempDir;
-
-    /// Set a file's mtime to a specific Unix timestamp (seconds).
-    fn set_mtime(path: &Utf8Path, secs: i64) {
-        let ft = FileTime::from_unix_time(secs, 0);
-        filetime::set_file_mtime(path.as_std_path(), ft).unwrap();
-    }
 
     #[test]
     fn test_find_stdlib_files() {
@@ -359,96 +290,6 @@ mod tests {
     fn test_module_name_from_path_invalid() {
         let path = Utf8PathBuf::from("lib/my-module.bt");
         assert!(module_name_from_path(&path).is_err());
-    }
-
-    #[test]
-    fn test_is_up_to_date_no_beam() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let source = lib_dir.join("test.bt");
-        let beam = lib_dir.join("test.beam");
-
-        fs::write(&source, "// test").unwrap();
-
-        assert!(!is_up_to_date(&source, &beam));
-    }
-
-    #[test]
-    fn test_is_up_to_date_beam_newer() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let source = lib_dir.join("test.bt");
-        let beam = lib_dir.join("test.beam");
-
-        fs::write(&source, "// test").unwrap();
-        fs::write(&beam, "fake beam").unwrap();
-        set_mtime(&source, 1000);
-        set_mtime(&beam, 2000);
-
-        assert!(is_up_to_date(&source, &beam));
-    }
-
-    #[test]
-    fn test_is_up_to_date_source_newer() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let source = lib_dir.join("test.bt");
-        let beam = lib_dir.join("test.beam");
-
-        fs::write(&beam, "fake beam").unwrap();
-        fs::write(&source, "// updated").unwrap();
-        set_mtime(&beam, 1000);
-        set_mtime(&source, 2000);
-
-        assert!(!is_up_to_date(&source, &beam));
-    }
-
-    #[test]
-    fn test_is_up_to_date_equal_mtimes_is_stale() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let source = lib_dir.join("test.bt");
-        let beam = lib_dir.join("test.beam");
-
-        fs::write(&source, "// test").unwrap();
-        fs::write(&beam, "fake beam").unwrap();
-        set_mtime(&source, 1000);
-        set_mtime(&beam, 1000);
-
-        // Equal mtimes treated as stale to avoid missed rebuilds on coarse filesystems
-        assert!(!is_up_to_date(&source, &beam));
-    }
-
-    #[test]
-    fn test_partition_by_freshness() {
-        let temp = TempDir::new().unwrap();
-        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let ebin_dir = lib_dir.join("ebin");
-        fs::create_dir_all(&ebin_dir).unwrap();
-
-        let file_a = lib_dir.join("Alpha.bt");
-        let file_b = lib_dir.join("Beta.bt");
-
-        fs::write(&file_a, "// alpha").unwrap();
-        fs::write(&file_b, "// beta").unwrap();
-
-        // Make bt_stdlib_alpha.beam newer than Alpha.bt
-        let beam_a = ebin_dir.join("bt_stdlib_alpha.beam");
-        fs::write(&beam_a, "fake").unwrap();
-        set_mtime(&file_a, 1000);
-        set_mtime(&Utf8PathBuf::from(beam_a.as_str()), 2000);
-
-        let sources = vec![file_a, file_b];
-        let (to_compile, skipped) = partition_by_freshness(&sources, &ebin_dir);
-
-        assert_eq!(to_compile.len(), 1);
-        assert_eq!(skipped.len(), 1);
-        assert!(to_compile[0].as_str().contains("Beta"));
-        assert!(skipped[0].as_str().contains("Alpha"));
     }
 
     #[test]
