@@ -186,8 +186,8 @@ pub enum CommentKind {
 pub struct ClassDefinition {
     /// The class name (e.g., `Counter`).
     pub name: Identifier,
-    /// The superclass name (e.g., `Actor`).
-    pub superclass: Identifier,
+    /// The superclass name (e.g., `Actor`). `None` for root classes (`ProtoObject`).
+    pub superclass: Option<Identifier>,
     /// Whether this is an abstract class (cannot be instantiated).
     pub is_abstract: bool,
     /// Whether this is a sealed class (cannot be subclassed).
@@ -212,7 +212,7 @@ impl ClassDefinition {
     ) -> Self {
         Self {
             name,
-            superclass,
+            superclass: Some(superclass),
             is_abstract: false,
             is_sealed: false,
             state,
@@ -225,7 +225,7 @@ impl ClassDefinition {
     #[must_use]
     pub fn with_modifiers(
         name: Identifier,
-        superclass: Identifier,
+        superclass: Option<Identifier>,
         is_abstract: bool,
         is_sealed: bool,
         state: Vec<StateDeclaration>,
@@ -241,6 +241,12 @@ impl ClassDefinition {
             methods,
             span,
         }
+    }
+
+    /// Returns the superclass name, or `"none"` for root classes.
+    #[must_use]
+    pub fn superclass_name(&self) -> &str {
+        self.superclass.as_ref().map_or("none", |s| s.name.as_str())
     }
 }
 
@@ -1632,7 +1638,7 @@ mod tests {
         let class = ClassDefinition::new(name, superclass, state, methods, Span::new(0, 78));
 
         assert_eq!(class.name.name, "Counter");
-        assert_eq!(class.superclass.name, "Actor");
+        assert_eq!(class.superclass.as_ref().unwrap().name, "Actor");
         assert_eq!(class.state.len(), 1);
         assert_eq!(class.methods.len(), 1);
     }

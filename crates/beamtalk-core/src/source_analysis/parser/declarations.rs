@@ -53,15 +53,22 @@ impl Parser {
             }
         }
 
-        // Parse superclass name
-        let superclass = self.parse_identifier("Expected superclass name");
+        // Parse superclass name — `nil` means root class (no superclass)
+        let superclass_id = self.parse_identifier("Expected superclass name");
+        let superclass = if superclass_id.name == "nil" {
+            None
+        } else {
+            Some(superclass_id)
+        };
 
         // Expect `subclass:` keyword
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "subclass:") {
             self.error("Expected 'subclass:' keyword");
-            return ClassDefinition::new(
+            return ClassDefinition::with_modifiers(
                 Identifier::new("Error", start),
                 superclass,
+                is_abstract,
+                is_sealed,
                 Vec::new(),
                 Vec::new(),
                 start,

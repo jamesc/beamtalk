@@ -312,4 +312,32 @@ impl CoreErlangGenerator {
         write!(self.output, "}}#")?;
         Ok(())
     }
+
+    /// Generates the `superclass/0` class method for reflection.
+    ///
+    /// Returns the superclass name as an atom, or `'nil'` for root classes.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'superclass'/0 = fun () -> 'Actor'
+    /// ```
+    pub(in crate::codegen::core_erlang) fn generate_superclass_function(
+        &mut self,
+        module: &Module,
+    ) -> Result<()> {
+        let superclass_atom = module
+            .classes
+            .first()
+            .and_then(|c| c.superclass.as_ref())
+            .map_or("nil", |s| s.name.as_str());
+
+        writeln!(
+            self.output,
+            "'superclass'/0 = fun () -> '{superclass_atom}'"
+        )?;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
 }

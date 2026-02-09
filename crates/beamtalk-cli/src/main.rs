@@ -90,6 +90,17 @@ enum Command {
         path: String,
     },
 
+    /// Stream Transcript output from a running workspace
+    Transcript {
+        /// Explicit workspace name (default: auto-detect from current directory)
+        #[arg(long)]
+        workspace: Option<String>,
+
+        /// Display last N entries from ring buffer on connect
+        #[arg(long)]
+        recent: Option<usize>,
+    },
+
     /// Manage the compiler daemon
     Daemon {
         #[command(subcommand)]
@@ -153,6 +164,9 @@ fn main() -> Result<()> {
             persistent,
             timeout,
         ),
+        Command::Transcript { workspace, recent } => {
+            commands::transcript::run(workspace.as_deref(), recent)
+        }
         Command::Check { path } => {
             println!("Checking: {path}");
             println!("(Not yet implemented)");
