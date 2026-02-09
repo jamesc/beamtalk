@@ -59,11 +59,6 @@ impl ClassIdentity {
     pub fn is_sealed(&self) -> bool {
         self.is_sealed
     }
-
-    /// Whether the class is abstract (BT-403).
-    pub fn is_abstract(&self) -> bool {
-        self.is_abstract
-    }
 }
 
 impl CoreErlangGenerator {
@@ -136,13 +131,6 @@ impl CoreErlangGenerator {
         self.class_identity
             .as_ref()
             .is_some_and(ClassIdentity::is_sealed)
-    }
-
-    /// Whether the current class is abstract (BT-403).
-    pub(super) fn is_class_abstract(&self) -> bool {
-        self.class_identity
-            .as_ref()
-            .is_some_and(ClassIdentity::is_abstract)
     }
 }
 

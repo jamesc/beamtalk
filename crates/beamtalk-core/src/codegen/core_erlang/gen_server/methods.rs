@@ -516,21 +516,7 @@ impl CoreErlangGenerator {
                 write!(self.output, "'{}' => ", method.selector.name())?;
                 self.generate_binary_string(&source_str)?;
             }
-            writeln!(self.output, "}}~,")?;
-
-            // BT-403: Sealed/abstract class flags for runtime enforcement
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_sealed' => '{}',",
-                if class.is_sealed { "true" } else { "false" }
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_abstract' => '{}'",
-                if class.is_abstract { "true" } else { "false" }
-            )?;
+            writeln!(self.output, "}}~")?;
 
             self.indent -= 1;
             self.write_indent()?;

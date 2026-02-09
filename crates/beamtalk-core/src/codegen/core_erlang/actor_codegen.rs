@@ -33,51 +33,13 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
-        // BT-295: Set class identity for @primitive codegen
-        // BT-403: Include sealed/abstract flags for codegen optimization
-        if let Some(class) = module.classes.first() {
-            self.class_identity = Some(ClassIdentity::from_class_def(
-                &class.name.name,
-                class.is_sealed,
-                class.is_abstract,
-            ));
-
-            // BT-403: Collect sealed method selectors for direct-call optimization.
-            // In sealed class: all primary methods are eligible.
-            // In non-sealed class: only explicitly sealed methods.
-            self.sealed_method_selectors.clear();
-            for method in &class.methods {
-                if method.kind == MethodKind::Primary && (class.is_sealed || method.is_sealed) {
-                    self.sealed_method_selectors
-                        .insert(method.selector.name().to_string());
-                }
-            }
-        }
+        self.setup_class_identity(module);
 
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
-        let is_abstract = self.is_class_abstract();
 
         // BT-403: Build sealed method exports
-        let sealed_exports: Vec<String> = self
-            .sealed_method_selectors
-            .iter()
-            .map(|sel| {
-                let arity = module.classes.first().map_or(0, |c| {
-                    c.methods
-                        .iter()
-                        .find(|m| m.selector.name() == sel.as_str())
-                        .map_or(0, |m| m.selector.arity())
-                });
-                // Standalone function takes Args list, Self, State = 3 params
-                format!("'__sealed_{sel}'/{}", arity + 2)
-            })
-            .collect();
-        let sealed_export_str = if sealed_exports.is_empty() {
-            String::new()
-        } else {
-            format!(", {}", sealed_exports.join(", "))
-        };
+        let sealed_export_str = self.build_sealed_export_str(module);
 
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
@@ -195,6 +157,56 @@ impl CoreErlangGenerator {
         writeln!(self.output, "end")?;
 
         Ok(())
+    }
+
+    /// Sets up class identity and sealed method selectors from the module's class definition.
+    /// BT-295: Set class identity for @primitive codegen.
+    /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
+    fn setup_class_identity(&mut self, module: &Module) {
+        if let Some(class) = module.classes.first() {
+            self.class_identity = Some(ClassIdentity::from_class_def(
+                &class.name.name,
+                class.is_sealed,
+                class.is_abstract,
+            ));
+
+            // Collect sealed method selectors for direct-call optimization.
+            // Only sealed classes benefit: the dispatch fast path checks is_class_sealed().
+            self.sealed_method_selectors.clear();
+            if class.is_sealed {
+                for method in &class.methods {
+                    if method.kind == MethodKind::Primary {
+                        self.sealed_method_selectors
+                            .insert(method.selector.name().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Builds the export string for sealed method standalone functions (BT-403).
+    fn build_sealed_export_str(&self, module: &Module) -> String {
+        // Sort selectors for deterministic output across builds
+        let mut selectors: Vec<&String> = self.sealed_method_selectors.iter().collect();
+        selectors.sort();
+        let sealed_exports: Vec<String> = selectors
+            .iter()
+            .map(|sel| {
+                let arity = module.classes.first().map_or(0, |c| {
+                    c.methods
+                        .iter()
+                        .find(|m| m.selector.name() == sel.as_str())
+                        .map_or(0, |m| m.selector.arity())
+                });
+                // Standalone function takes Args + Self + State params
+                format!("'__sealed_{sel}'/{}", arity + 2)
+            })
+            .collect();
+        if sealed_exports.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", sealed_exports.join(", "))
+        }
     }
 
     /// Generates minimal `gen_server` callbacks for abstract classes (BT-403).

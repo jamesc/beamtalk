@@ -118,9 +118,7 @@ module 'abstract_class_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
                 'spawn' => ~{'arity' => 0}~,
                 'spawnWith:' => ~{'arity' => 1}~
             }~,
-            'method_source' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']])}#}~,
-            'is_sealed' => 'false',
-            'is_abstract' => 'true'
+            'method_source' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']])}#}~
         }~) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
