@@ -72,7 +72,9 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
         // --recent N: display last N entries and continue streaming
         let start = buffer.len().saturating_sub(n);
         for entry in &buffer[start..] {
-            print_entry(entry);
+            if !print_entry(entry) {
+                return Ok(());
+            }
         }
     }
 
@@ -94,7 +96,9 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
 
         let new_entries = cursor.update(&buffer);
         for entry in &new_entries {
-            print_entry(entry);
+            if !print_entry(entry) {
+                return Ok(());
+            }
         }
     }
 
@@ -102,11 +106,18 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
 }
 
 /// Print a transcript entry as plain text.
-fn print_entry(entry: &str) {
+/// Returns false if stdout is broken (pipe closed), signaling the caller to exit.
+fn print_entry(entry: &str) -> bool {
+    use std::io::ErrorKind;
     // Entries may contain newline characters; print as-is for faithful output
     print!("{entry}");
-    // Flush to ensure output appears immediately
-    let _ = std::io::stdout().flush();
+    // Flush to ensure output appears immediately; exit on broken pipe
+    if let Err(e) = std::io::stdout().flush() {
+        if e.kind() == ErrorKind::BrokenPipe {
+            return false;
+        }
+    }
+    true
 }
 
 /// Minimal TCP client for transcript polling (reuses REPL JSON protocol).
@@ -164,7 +175,8 @@ impl TranscriptClient {
             .read_line(&mut response_line)
             .into_diagnostic()?;
 
-        let response: serde_json::Value = serde_json::from_str(&response_line).into_diagnostic()?;
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {response_line}"))?;
 
         // Check for error
         if let Some(error) = response.get("error").and_then(|e| e.as_str()) {
@@ -194,7 +206,7 @@ impl TranscriptClient {
 
 /// Tracks the transcript buffer state to detect new entries.
 struct TranscriptCursor {
-    /// The last few entries we've seen, used as a fingerprint for overlap detection.
+    /// Snapshot of the last buffer we've seen, used as a fingerprint for overlap detection.
     last_entries: Vec<String>,
 }
 
