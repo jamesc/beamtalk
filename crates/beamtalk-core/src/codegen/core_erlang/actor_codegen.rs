@@ -11,7 +11,7 @@
 
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::Module;
+use crate::ast::{MethodKind, Module};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -33,13 +33,13 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
-        // BT-295: Set class identity for @primitive codegen
-        if let Some(class) = module.classes.first() {
-            self.class_identity = Some(ClassIdentity::new(&class.name.name));
-        }
+        self.setup_class_identity(module);
 
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
+
+        // BT-403: Build sealed method exports
+        let sealed_export_str = self.build_sealed_export_str(module);
 
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
@@ -55,7 +55,7 @@ impl CoreErlangGenerator {
         if has_classes {
             writeln!(
                 self.output,
-                "module '{}' [{base_exports}, 'register_class'/0]",
+                "module '{}' [{base_exports}{sealed_export_str}, 'register_class'/0]",
                 self.module_name
             )?;
             writeln!(
@@ -66,7 +66,7 @@ impl CoreErlangGenerator {
         } else {
             writeln!(
                 self.output,
-                "module '{}' [{base_exports}]",
+                "module '{}' [{base_exports}{sealed_export_str}]",
                 self.module_name
             )?;
             writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
@@ -107,25 +107,34 @@ impl CoreErlangGenerator {
         self.generate_init_function(module)?;
         writeln!(self.output)?;
 
-        // Generate handle_cast/2 function with error handling
-        self.generate_handle_cast()?;
-        writeln!(self.output)?;
+        // BT-403: Abstract classes skip gen_server callback scaffolding.
+        // These callbacks are only needed for instantiable actors that receive messages.
+        if is_abstract {
+            // BT-403: Abstract classes need minimal gen_server callbacks
+            // (required by gen_server behaviour but will never be called)
+            self.generate_abstract_callbacks()?;
+            writeln!(self.output)?;
+        } else {
+            // Generate handle_cast/2 function with error handling
+            self.generate_handle_cast()?;
+            writeln!(self.output)?;
 
-        // Generate handle_call/3 function with error handling
-        self.generate_handle_call()?;
-        writeln!(self.output)?;
+            // Generate handle_call/3 function with error handling
+            self.generate_handle_call()?;
+            writeln!(self.output)?;
 
-        // Generate code_change/3 function
-        self.generate_code_change()?;
-        writeln!(self.output)?;
+            // Generate code_change/3 function
+            self.generate_code_change()?;
+            writeln!(self.output)?;
 
-        // Generate terminate/2 function (per BT-29)
-        self.generate_terminate(module)?;
-        writeln!(self.output)?;
+            // Generate terminate/2 function (per BT-29)
+            self.generate_terminate(module)?;
+            writeln!(self.output)?;
 
-        // Generate safe_dispatch/3 with error isolation (per BT-29)
-        self.generate_safe_dispatch()?;
-        writeln!(self.output)?;
+            // Generate safe_dispatch/3 with error isolation (per BT-29)
+            self.generate_safe_dispatch()?;
+            writeln!(self.output)?;
+        }
 
         // Generate dispatch function with DNU fallback
         self.generate_dispatch(module)?;
@@ -138,6 +147,11 @@ impl CoreErlangGenerator {
         // Generate has_method/1 for reflection (BT-242)
         self.generate_has_method(module)?;
 
+        // BT-403: Generate sealed method standalone functions
+        if !self.sealed_method_selectors.is_empty() {
+            self.generate_sealed_method_functions(module)?;
+        }
+
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
             writeln!(self.output)?;
@@ -146,6 +160,169 @@ impl CoreErlangGenerator {
 
         // Module end
         writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Sets up class identity and sealed method selectors from the module's class definition.
+    /// BT-295: Set class identity for @primitive codegen.
+    /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
+    fn setup_class_identity(&mut self, module: &Module) {
+        if let Some(class) = module.classes.first() {
+            self.class_identity = Some(ClassIdentity::from_class_def(
+                &class.name.name,
+                class.is_sealed,
+                class.is_abstract,
+            ));
+
+            // Collect sealed method selectors for direct-call optimization.
+            // Only sealed classes benefit: the dispatch fast path checks is_class_sealed().
+            self.sealed_method_selectors.clear();
+            if class.is_sealed {
+                for method in &class.methods {
+                    if method.kind == MethodKind::Primary {
+                        self.sealed_method_selectors
+                            .insert(method.selector.name().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Builds the export string for sealed method standalone functions (BT-403).
+    fn build_sealed_export_str(&self, module: &Module) -> String {
+        // Sort selectors for deterministic output across builds
+        let mut selectors: Vec<&String> = self.sealed_method_selectors.iter().collect();
+        selectors.sort();
+        let sealed_exports: Vec<String> = selectors
+            .iter()
+            .map(|sel| {
+                let arity = module.classes.first().map_or(0, |c| {
+                    c.methods
+                        .iter()
+                        .find(|m| m.selector.name() == sel.as_str())
+                        .map_or(0, |m| m.selector.arity())
+                });
+                // Standalone function takes Args + Self + State params
+                format!("'__sealed_{sel}'/{}", arity + 2)
+            })
+            .collect();
+        if sealed_exports.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", sealed_exports.join(", "))
+        }
+    }
+
+    /// Generates minimal `gen_server` callbacks for abstract classes (BT-403).
+    ///
+    /// Abstract classes can't be instantiated, so these callbacks will never
+    /// be called. But `gen_server` behaviour requires them to be exported.
+    fn generate_abstract_callbacks(&mut self) -> Result<()> {
+        // handle_cast - never called for abstract classes
+        writeln!(
+            self.output,
+            "'handle_cast'/2 = fun (_Msg, State) -> {{'noreply', State}}"
+        )?;
+        writeln!(self.output)?;
+
+        // handle_call - never called for abstract classes
+        writeln!(
+            self.output,
+            "'handle_call'/3 = fun (_Msg, _From, State) -> {{'reply', 'nil', State}}"
+        )?;
+        writeln!(self.output)?;
+
+        // code_change
+        writeln!(
+            self.output,
+            "'code_change'/3 = fun (_OldVsn, State, _Extra) -> {{'ok', State}}"
+        )?;
+        writeln!(self.output)?;
+
+        // terminate
+        writeln!(self.output, "'terminate'/2 = fun (_Reason, _State) -> 'ok'")?;
+        writeln!(self.output)?;
+
+        // safe_dispatch - abstract classes use dispatch directly (no error isolation needed)
+        writeln!(
+            self.output,
+            "'safe_dispatch'/3 = fun (Selector, Args, State) ->"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Self = call 'beamtalk_actor':'make_self'(State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{}':'dispatch'(Selector, Args, Self, State)",
+            self.module_name
+        )?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates standalone functions for sealed methods (BT-403).
+    ///
+    /// Each sealed method gets a `'__sealed_{selector}'/N` function that
+    /// can be called directly from self-sends, bypassing both `safe_dispatch/3`
+    /// and the `dispatch/4` case selector matching.
+    fn generate_sealed_method_functions(&mut self, module: &Module) -> Result<()> {
+        let Some(class) = module.classes.first() else {
+            return Ok(());
+        };
+
+        for method in &class.methods {
+            if method.kind != MethodKind::Primary {
+                continue;
+            }
+            let selector_name = method.selector.name().to_string();
+            if !self.sealed_method_selectors.contains(&selector_name) {
+                continue;
+            }
+
+            writeln!(self.output)?;
+
+            // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
+            let arity = method.selector.arity() + 2; // + Self + State
+            writeln!(self.output, "'__sealed_{selector_name}'/{arity}  = fun (",)?;
+
+            // Reset state version for this method
+            self.reset_state_version();
+            self.push_scope();
+            self.current_method_params.clear();
+
+            // Generate parameter list and populate current_method_params
+            // (needed for @primitive codegen which reads current_method_params)
+            let mut params = Vec::new();
+            for param in &method.parameters {
+                let var_name = self.fresh_var(&param.name);
+                self.current_method_params.push(var_name.clone());
+                params.push(var_name);
+            }
+
+            // Parameters, then Self, then State
+            let mut all_params: Vec<String> = params.clone();
+            all_params.push("Self".to_string());
+            all_params.push("State".to_string());
+            write!(self.output, "{}", all_params.join(", "))?;
+            writeln!(self.output, ") ->")?;
+
+            self.indent += 1;
+            self.write_indent()?;
+
+            // Generate method body with reply tuple (reuse existing codegen)
+            self.generate_method_definition_body_with_reply(method)?;
+            writeln!(self.output)?;
+
+            self.indent -= 1;
+            self.pop_scope();
+        }
 
         Ok(())
     }

@@ -33,7 +33,7 @@
 -include("beamtalk.hrl").
 
 %% API
--export([start_link/0, start_link/1, spawn/0, spawn/1]).
+-export([start_link/0, start_link/1, start_link_singleton/1, spawn/0, spawn/1]).
 -export([has_method/1]).
 
 %% gen_server callbacks
@@ -46,10 +46,11 @@
 -type max_buffer() :: pos_integer().
 
 -record(state, {
-    buffer      :: queue:queue(binary()),
-    buffer_size :: non_neg_integer(),
-    max_buffer  :: max_buffer(),
-    subscribers :: #{pid() => reference()}
+    buffer       :: queue:queue(binary()),
+    buffer_size  :: non_neg_integer(),
+    max_buffer   :: max_buffer(),
+    subscribers  :: #{pid() => reference()},
+    is_singleton :: boolean()
 }).
 
 -type state() :: #state{}.
@@ -67,6 +68,12 @@ start_link() ->
 -spec start_link(max_buffer()) -> {ok, pid()} | {error, term()}.
 start_link(MaxBuffer) ->
     gen_server:start_link(?MODULE, [MaxBuffer], []).
+
+%% @doc Start a linked, named TranscriptStream singleton for workspace use.
+%% Registers as 'Transcript' via register/2 and persistent_term binding.
+-spec start_link_singleton(max_buffer()) -> {ok, pid()} | {error, term()}.
+start_link_singleton(MaxBuffer) ->
+    gen_server:start_link({local, 'Transcript'}, ?MODULE, [{singleton, MaxBuffer}], []).
 
 %% @doc Spawn an unlinked TranscriptStream with default buffer size.
 -spec spawn() -> {ok, pid()} | {error, term()}.
@@ -93,13 +100,24 @@ has_method(_)            -> false.
 %%% ============================================================================
 
 %% @private
--spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
+-spec init([max_buffer()] | [{singleton, max_buffer()}]) -> {ok, state()} | {stop, term()}.
+init([{singleton, MaxBuffer}]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
+    %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
+    persistent_term:put({beamtalk_binding, 'Transcript'}, self()),
+    {ok, #state{
+        buffer       = queue:new(),
+        buffer_size  = 0,
+        max_buffer   = MaxBuffer,
+        subscribers  = #{},
+        is_singleton = true
+    }};
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
     {ok, #state{
-        buffer      = queue:new(),
-        buffer_size = 0,
-        max_buffer  = MaxBuffer,
-        subscribers = #{}
+        buffer       = queue:new(),
+        buffer_size  = 0,
+        max_buffer   = MaxBuffer,
+        subscribers  = #{},
+        is_singleton = false
     }};
 init([MaxBuffer]) ->
     {stop, {invalid_max_buffer, MaxBuffer}}.
@@ -122,6 +140,32 @@ handle_call(Request, _From, State) ->
 
 %% @private
 -spec handle_cast(term(), state()) -> {noreply, state()}.
+%% Actor protocol: {Selector, Args, FuturePid} from beamtalk_actor:async_send/4
+handle_cast({'show:', [Value], FuturePid}, State) when is_pid(FuturePid) ->
+    Text = to_string(Value),
+    State1 = buffer_text(Text, State),
+    push_to_subscribers(Text, State1),
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, State1};
+handle_cast({cr, [], FuturePid}, State) when is_pid(FuturePid) ->
+    Text = <<"\n">>,
+    State1 = buffer_text(Text, State),
+    push_to_subscribers(Text, State1),
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, State1};
+handle_cast({recent, [], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, queue:to_list(State#state.buffer)),
+    {noreply, State};
+handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, State#state{buffer = queue:new(), buffer_size = 0}};
+handle_cast({subscribe, [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, add_subscriber(Pid, State)};
+handle_cast({'unsubscribe:', [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, remove_subscriber(Pid, State)};
+%% Legacy format (direct gen_server:cast without Future)
 handle_cast({'show:', Value}, State) ->
     Text = to_string(Value),
     State1 = buffer_text(Text, State),
@@ -136,6 +180,13 @@ handle_cast({subscribe, Pid}, State) ->
     {noreply, add_subscriber(Pid, State)};
 handle_cast({unsubscribe, Pid}, State) ->
     {noreply, remove_subscriber(Pid, State)};
+%% Actor protocol catch-all: reject Future for unknown selectors
+handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
+    Error0 = beamtalk_error:new(does_not_understand, 'Transcript'),
+    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe:">>),
+    beamtalk_future:reject(FuturePid, Error2),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -148,6 +199,10 @@ handle_info(_Info, State) ->
 
 %% @private
 -spec terminate(term(), state()) -> ok.
+terminate(_Reason, #state{is_singleton = true}) ->
+    %% Clean up workspace binding on shutdown
+    persistent_term:erase({beamtalk_binding, 'Transcript'}),
+    ok;
 terminate(_Reason, _State) ->
     ok.
 

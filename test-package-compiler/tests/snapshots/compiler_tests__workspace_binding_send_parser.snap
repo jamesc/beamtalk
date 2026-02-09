@@ -1,0 +1,113 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Greeter",
+                span: Span {
+                    start: 164,
+                    end: 171,
+                },
+            },
+            superclass: Identifier {
+                name: "Actor",
+                span: Span {
+                    start: 148,
+                    end: 153,
+                },
+            },
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "greet",
+                    ),
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: ClassReference {
+                                name: Identifier {
+                                    name: "Transcript",
+                                    span: Span {
+                                        start: 183,
+                                        end: 193,
+                                    },
+                                },
+                                span: Span {
+                                    start: 183,
+                                    end: 193,
+                                },
+                            },
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "show:",
+                                        span: Span {
+                                            start: 194,
+                                            end: 199,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    String(
+                                        "Hello, World!",
+                                    ),
+                                    Span {
+                                        start: 200,
+                                        end: 215,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 183,
+                                end: 215,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 174,
+                        end: 215,
+                    },
+                },
+            ],
+            span: Span {
+                start: 148,
+                end: 215,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 148,
+        end: 215,
+    },
+    leading_comments: [
+        Comment {
+            content: "// BT-374: Workspace binding dispatch via persistent_term.",
+            span: Span {
+                start: 148,
+                end: 153,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Transcript is a workspace binding — generates persistent_term lookup + actor send.",
+            span: Span {
+                start: 148,
+                end: 153,
+            },
+            kind: Line,
+        },
+    ],
+}

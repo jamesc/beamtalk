@@ -297,6 +297,7 @@ fn handle_compile(
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: params.stdlib_mode,
         allow_primitives: false,
+        workspace_mode: false,
     };
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
@@ -347,9 +348,13 @@ fn handle_compile(
             file_path.file_stem().unwrap_or("module").to_string()
         };
 
-        let core = beamtalk_core::erlang::generate_with_name_and_source(
+        // BT-374 / ADR 0010: :load compiles modules for workspace context,
+        // so workspace bindings (Transcript, Beamtalk) generate persistent_term
+        // lookups instead of direct module calls.
+        let core = beamtalk_core::erlang::generate_with_workspace_and_source(
             &module,
             &module_name,
+            true, // workspace_mode — :load runs in REPL workspace context
             Some(&source),
         )
         .ok();

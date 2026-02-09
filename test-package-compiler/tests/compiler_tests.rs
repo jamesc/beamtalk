@@ -14,7 +14,7 @@
 //! Additionally, a compilation test verifies the generated Core Erlang
 //! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
 
-use beamtalk_core::erlang::generate_with_name;
+use beamtalk_core::erlang::generate_with_workspace;
 use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::Utf8PathBuf;
@@ -79,6 +79,10 @@ fn test_codegen_snapshot(case_name: &str) {
 /// Helper function to generate Core Erlang from a test case.
 ///
 /// Returns a tuple of (module_name, core_erlang_code).
+///
+/// BT-374: Uses workspace mode so test cases referencing workspace bindings
+/// (`Transcript`, `Beamtalk`) compile to `persistent_term` lookup + actor send.
+/// Batch mode error handling is tested via dedicated test cases.
 fn generate_core_erlang(case_name: &str) -> (String, String) {
     let source = read_test_case(case_name);
     let tokens = lex_with_eof(&source);
@@ -86,7 +90,7 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
 
     // Generate Core Erlang with a module name derived from the test case
     let module_name = case_name.replace('-', "_");
-    let core_erlang = generate_with_name(&module, &module_name)
+    let core_erlang = beamtalk_core::erlang::generate_with_workspace(&module, &module_name, true)
         .unwrap_or_else(|e| panic!("Codegen failed for '{}': {}", case_name, e));
 
     (module_name, core_erlang)
@@ -173,3 +177,75 @@ fn test_semantic_snapshot(case_name: &str) {
 
 // Test cases will be generated here by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
+
+/// BT-374: Workspace bindings in batch mode produce a clear compile error.
+#[test]
+fn test_workspace_binding_batch_mode_error() {
+    let source = "Actor subclass: Greeter\n  greet => Transcript show: 'Hello'";
+    let tokens = lex_with_eof(source);
+    let (module, _) = parse(tokens);
+
+    // Batch mode (workspace_mode = false) should produce an error
+    let result = generate_with_workspace(&module, "test_batch", false);
+    assert!(
+        result.is_err(),
+        "Expected error for workspace binding in batch mode"
+    );
+
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Transcript is a workspace binding"),
+        "Error should mention binding name, got: {msg}"
+    );
+    assert!(
+        msg.contains("batch compilation"),
+        "Error should mention batch compilation, got: {msg}"
+    );
+}
+
+/// BT-374: Non-binding ClassReferences are unchanged in batch mode.
+#[test]
+fn test_non_binding_class_unchanged_in_batch_mode() {
+    let source = "Actor subclass: Foo\n  run => Counter spawn";
+    let tokens = lex_with_eof(source);
+    let (module, _) = parse(tokens);
+
+    // Batch mode should work fine for non-binding classes
+    let result = generate_with_workspace(&module, "test_batch", false);
+    assert!(
+        result.is_ok(),
+        "Counter spawn should work in batch mode: {:?}",
+        result.err()
+    );
+
+    let code = result.unwrap();
+    assert!(
+        code.contains("call 'counter':'spawn'()"),
+        "Should generate direct module call for Counter, got:\n{code}"
+    );
+}
+
+/// BT-374: Workspace binding in workspace mode generates persistent_term lookup.
+#[test]
+fn test_workspace_binding_generates_persistent_term() {
+    let source = "Actor subclass: Greeter\n  greet => Transcript show: 'Hello'";
+    let tokens = lex_with_eof(source);
+    let (module, _) = parse(tokens);
+
+    let core_erlang = generate_with_workspace(&module, "test_ws", true)
+        .expect("Should succeed in workspace mode");
+
+    assert!(
+        core_erlang.contains("persistent_term"),
+        "Should generate persistent_term lookup, got:\n{core_erlang}"
+    );
+    assert!(
+        core_erlang.contains("beamtalk_binding"),
+        "Should reference beamtalk_binding key, got:\n{core_erlang}"
+    );
+    assert!(
+        core_erlang.contains("async_send"),
+        "Should use async actor send, got:\n{core_erlang}"
+    );
+}

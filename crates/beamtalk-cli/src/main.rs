@@ -131,6 +131,7 @@ fn main() -> Result<()> {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
                 allow_primitives,
+                workspace_mode: false,
             };
             commands::build::build(&path, &options)
         }

@@ -444,6 +444,7 @@ pub fn write_core_erlang_with_bindings(
     output_path: &Utf8Path,
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     source_text: Option<&str>,
+    workspace_mode: bool,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -457,6 +458,7 @@ pub fn write_core_erlang_with_bindings(
         module_name,
         bindings.clone(),
         source_text,
+        workspace_mode,
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -567,8 +569,16 @@ pub fn compile_source_with_bindings(
     debug!("Parsed successfully: {}", source_path);
 
     // Generate Core Erlang (with source text for CompiledMethod introspection BT-101, and bindings BT-295)
-    write_core_erlang_with_bindings(&module, module_name, core_output, bindings, Some(&source))
-        .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
+    // BT-374: Pass workspace_mode for workspace binding dispatch
+    write_core_erlang_with_bindings(
+        &module,
+        module_name,
+        core_output,
+        bindings,
+        Some(&source),
+        options.workspace_mode,
+    )
+    .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 
     debug!("Generated Core Erlang: {}", core_output);
     Ok(())

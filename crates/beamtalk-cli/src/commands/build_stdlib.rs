@@ -80,6 +80,7 @@ pub fn build_stdlib() -> Result<()> {
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: true,
         allow_primitives: false,
+        workspace_mode: false,
     };
 
     // BT-295 / ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.

@@ -1,0 +1,5 @@
+// BT-374: Workspace binding cascade dispatch.
+// Cascade messages to a workspace binding should use persistent_term PID lookup.
+
+Actor subclass: Logger
+  run => Transcript show: 'Hello'; cr; show: 'World'

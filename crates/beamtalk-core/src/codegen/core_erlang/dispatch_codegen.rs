@@ -36,6 +36,17 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, util::to_
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
+/// BT-374 / ADR 0010: Compile-time known workspace binding names.
+///
+/// These names resolve to workspace singletons via `persistent_term` rather than
+/// direct module function calls. The set is static — dynamic bindings are out of scope.
+const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk"];
+
+/// Returns true if the given class name is a workspace binding (ADR 0010).
+pub(super) fn is_workspace_binding(name: &str) -> bool {
+    WORKSPACE_BINDING_NAMES.contains(&name)
+}
+
 impl CoreErlangGenerator {
     /// Generates code for a message send.
     ///
@@ -170,10 +181,20 @@ impl CoreErlangGenerator {
             }
         }
 
-        // BT-215: Class-level message sends (e.g., Beamtalk allClasses, Point new)
-        // For now, generate direct function calls to class methods
-        // Future: Full metaclass dispatch through class objects
+        // BT-374 / ADR 0010: Workspace binding dispatch.
+        // Check if ClassReference is a workspace binding before falling through to
+        // direct module function calls. Workspace bindings use persistent_term lookup.
+        // BT-215: Class-level message sends (e.g., Point new, Counter spawn)
+        // For non-binding classes, generate direct function calls to class methods.
         if let Expression::ClassReference { name, .. } = receiver {
+            if is_workspace_binding(&name.name) {
+                if self.workspace_mode {
+                    return self.generate_workspace_binding_send(&name.name, selector, arguments);
+                }
+                return Err(CodeGenError::WorkspaceBindingInBatchMode {
+                    name: name.name.to_string(),
+                });
+            }
             return self.generate_class_method_call(&name.name, selector, arguments);
         }
 
@@ -305,10 +326,26 @@ impl CoreErlangGenerator {
     /// the result is a value (not a Future), enabling recursive algorithms like
     /// factorial and fibonacci to work correctly.
     ///
-    /// # Generated Code
+    /// # Sealed Class Optimization (BT-403)
+    ///
+    /// For sealed classes, we skip the `safe_dispatch/3` try/catch overhead and
+    /// call `dispatch/4` directly. Since sealed classes have all methods known at
+    /// compile time, the error isolation overhead is unnecessary.
+    ///
+    /// # Generated Code (normal)
     ///
     /// ```erlang
     /// case call 'module':'safe_dispatch'('selector', [Args], State) of
+    ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
+    /// end
+    /// ```
+    ///
+    /// # Generated Code (sealed class)
+    ///
+    /// ```erlang
+    /// let Self = call 'beamtalk_actor':'make_self'(State) in
+    /// case call 'module':'dispatch'('selector', [Args], Self, State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
     ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
     /// end
@@ -318,6 +355,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
+        // BT-403: Sealed class optimization — skip safe_dispatch try/catch
+        if self.is_class_sealed() {
+            return self.generate_sealed_self_dispatch(selector, arguments);
+        }
+
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
@@ -352,6 +394,137 @@ impl CoreErlangGenerator {
         )?;
 
         // Error: re-raise for proper error propagation
+        write!(
+            self.output,
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+        )?;
+
+        write!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates optimized self-dispatch for sealed classes (BT-403).
+    ///
+    /// Two levels of optimization:
+    /// 1. **Known sealed method**: Direct function call to `__sealed_{selector}`,
+    ///    bypassing both `safe_dispatch/3` and `dispatch/4` case matching.
+    /// 2. **Unknown method** (inherited): Direct `dispatch/4` call, skipping
+    ///    only the `safe_dispatch/3` try/catch overhead.
+    fn generate_sealed_self_dispatch(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let selector_name = selector.name().to_string();
+
+        // Level 1: Direct call to standalone sealed method function
+        if self.sealed_method_selectors.contains(&selector_name) {
+            return self.generate_direct_sealed_call(&selector_name, arguments);
+        }
+
+        // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
+        let selector_atom = selector.to_erlang_atom();
+        let result_var = self.fresh_var("SealedResult");
+        let error_var = self.fresh_var("SealedError");
+        let self_var = self.fresh_temp_var("SealedSelf");
+
+        let current_state = if self.in_loop_body {
+            "StateAcc".to_string()
+        } else {
+            self.state_threading.current_var()
+        };
+
+        // Create Self object reference for dispatch/4
+        write!(
+            self.output,
+            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+        )?;
+
+        // Call dispatch/4 directly (skip safe_dispatch try/catch)
+        write!(
+            self.output,
+            "case call '{}':'dispatch'('{selector_atom}', [",
+            self.module_name
+        )?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "], {self_var}, {current_state}) of ")?;
+
+        // Success: extract result value
+        write!(
+            self.output,
+            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
+        )?;
+
+        // Error: re-raise for proper error propagation
+        write!(
+            self.output,
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+        )?;
+
+        write!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates a direct call to a sealed method's standalone function (BT-403).
+    ///
+    /// This is the most optimized self-dispatch path: calls `__sealed_{selector}`
+    /// directly, bypassing `safe_dispatch`, dispatch, and case selector matching.
+    fn generate_direct_sealed_call(
+        &mut self,
+        selector_name: &str,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let result_var = self.fresh_var("SealedResult");
+        let error_var = self.fresh_var("SealedError");
+        let self_var = self.fresh_temp_var("SealedSelf");
+
+        let current_state = if self.in_loop_body {
+            "StateAcc".to_string()
+        } else {
+            self.state_threading.current_var()
+        };
+
+        // Create Self for method body access
+        write!(
+            self.output,
+            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+        )?;
+
+        // Direct call to sealed method function: __sealed_{selector}(args..., Self, State)
+        write!(
+            self.output,
+            "case call '{}':'__sealed_{selector_name}'(",
+            self.module_name
+        )?;
+
+        // Arguments, then Self, then State
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        if !arguments.is_empty() {
+            write!(self.output, ", ")?;
+        }
+        write!(self.output, "{self_var}, {current_state}) of ")?;
+
+        // Success: extract result value
+        write!(
+            self.output,
+            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
+        )?;
+
+        // Error: re-raise
         write!(
             self.output,
             "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
@@ -669,6 +842,61 @@ impl CoreErlangGenerator {
         )?;
         self.generate_expression(&arguments[0])?;
         write!(self.output, ")")?;
+        Ok(())
+    }
+
+    /// Generates a workspace binding message send (BT-374 / ADR 0010).
+    ///
+    /// Workspace bindings (`Transcript`, `Beamtalk`) are singleton actors whose
+    /// PIDs are stored in `persistent_term`. The generated code:
+    ///
+    /// 1. Looks up the PID: `persistent_term:get({beamtalk_binding, 'Name'})`
+    /// 2. Creates a future: `beamtalk_future:new()`
+    /// 3. Sends async message: `beamtalk_actor:async_send(Pid, Selector, Args, Future)`
+    /// 4. Returns the future
+    ///
+    /// ```erlang
+    /// let Pid = call 'persistent_term':'get'({'beamtalk_binding', 'Transcript'}) in
+    /// let Future = call 'beamtalk_future':'new'() in
+    /// let _ = call 'beamtalk_actor':'async_send'(Pid, 'show:', [Arg], Future) in Future
+    /// ```
+    pub(super) fn generate_workspace_binding_send(
+        &mut self,
+        binding_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let pid_var = self.fresh_var("BindingPid");
+        let future_var = self.fresh_var("Future");
+        let selector_atom = selector.to_erlang_atom();
+
+        // Look up binding PID from persistent_term
+        write!(
+            self.output,
+            "let {pid_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+        )?;
+
+        // Create future for async result
+        write!(
+            self.output,
+            "let {future_var} = call 'beamtalk_future':'new'() in "
+        )?;
+
+        // Send async message via beamtalk_actor:async_send
+        write!(
+            self.output,
+            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
+        )?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "], {future_var}) in {future_var}")?;
+
         Ok(())
     }
 

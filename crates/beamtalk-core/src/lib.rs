@@ -38,7 +38,7 @@ pub mod prelude {
 /// Compiler options controlling semantic analysis and code generation.
 ///
 /// These flags control how the compiler handles stdlib-specific features
-/// like `@primitive` pragmas (ADR 0007).
+/// like `@primitive` pragmas (ADR 0007) and workspace bindings (ADR 0010).
 #[derive(Debug, Clone, Default)]
 pub struct CompilerOptions {
     /// When true, the module being compiled is part of the standard library.
@@ -48,4 +48,10 @@ pub struct CompilerOptions {
     /// When true, allows `@primitive` pragmas in non-stdlib code.
     /// Emits a warning instead of an error.
     pub allow_primitives: bool,
+
+    /// BT-374 / ADR 0010: Whether workspace bindings (`Transcript`, `Beamtalk`)
+    /// are available. When true, workspace binding class references generate
+    /// `persistent_term` lookup + async actor send. When false (batch compile),
+    /// workspace binding names produce a compile error.
+    pub workspace_mode: bool,
 }
