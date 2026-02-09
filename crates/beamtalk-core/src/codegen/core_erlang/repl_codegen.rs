@@ -39,7 +39,7 @@ impl CoreErlangGenerator {
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
     pub(super) fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
-        // Save previous state so generator can be reused across REPL and non-REPL contexts
+        // Save previous is_repl_mode so it can be restored after generation
         let previous_is_repl_mode = self.is_repl_mode;
 
         // BT-213: Set context to Repl for this module
