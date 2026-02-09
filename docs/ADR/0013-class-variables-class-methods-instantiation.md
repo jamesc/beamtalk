@@ -373,13 +373,13 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 
 ## Implementation
 
-### Phase 1: `new` for Value Types + Dynamic Dispatch (BT-221 + BT-246)
+### Phase 1: `new` for Value Types + Dynamic Dispatch (BT-221)
 **Parser**: No changes needed — `Point new` already parses.
 **Codegen**: When receiver is not a `ClassReference`, emit `gen_server:call(ClassPid, {Selector, Args})` instead of `beamtalk_primitive:send`. The class process already handles `new` in `handle_call`.
 **Runtime**: `beamtalk_object_class` already implements `new/1`, `new/2`, `methods/1`, `superclass/1`.
 **Test**: `cls := Beamtalk classNamed: #Point. cls new` works end-to-end.
 
-### Phase 2: Class-Side Methods with Inheritance (BT-246 continued)
+### Phase 2: Class-Side Methods with Inheritance (BT-246)
 **Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`).
 **AST**: Add `class_methods: Vec<MethodDefinition>` to `ClassDefinition`.
 **Codegen**: Generate class-side methods registered via `beamtalk_object_class` during class bootstrap.
