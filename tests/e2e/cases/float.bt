@@ -227,6 +227,19 @@
 3.14 between: 1.0 and: 5.0
 // => true
 
+// respondsTo: inherited methods (from Number via superclass chain)
+42 respondsTo: #sign
+// => true
+
+42 respondsTo: #'between:and:'
+// => true
+
+3.14 respondsTo: #sign
+// => true
+
+3.14 respondsTo: #'between:and:'
+// => true
+
 // Integer class
 42 class
 // => Integer
