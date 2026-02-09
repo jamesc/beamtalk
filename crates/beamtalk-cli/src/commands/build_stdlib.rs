@@ -55,6 +55,9 @@ pub fn build_stdlib() -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to create ebin directory '{ebin_dir}'"))?;
 
+    // Clean stale .beam files from previous builds (e.g. renamed/removed .bt sources)
+    clean_ebin_dir(&ebin_dir)?;
+
     println!("Compiling {} stdlib module(s)...", source_files.len());
 
     // Create a temporary directory for .core files
@@ -103,6 +106,27 @@ pub fn build_stdlib() -> Result<()> {
 
     println!("Built {} stdlib modules", source_files.len());
 
+    Ok(())
+}
+
+/// Remove all `.beam` and `.app` files from the ebin directory.
+///
+/// Ensures no stale artifacts remain from renamed or removed `.bt` sources.
+fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
+    for entry in fs::read_dir(ebin_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read ebin directory '{ebin_dir}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if let Some(ext) = path.extension() {
+            if ext == "beam" || ext == "app" {
+                fs::remove_file(&path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to remove '{}'", path.display()))?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -290,6 +314,22 @@ mod tests {
     fn test_module_name_from_path_invalid() {
         let path = Utf8PathBuf::from("lib/my-module.bt");
         assert!(module_name_from_path(&path).is_err());
+    }
+
+    #[test]
+    fn test_clean_ebin_dir() {
+        let temp = TempDir::new().unwrap();
+        let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        fs::write(ebin_dir.join("beamtalk_integer.beam"), "fake").unwrap();
+        fs::write(ebin_dir.join("beamtalk_stdlib.app"), "fake").unwrap();
+        fs::write(ebin_dir.join("keep_me.txt"), "keep").unwrap();
+
+        clean_ebin_dir(&ebin_dir).unwrap();
+
+        assert!(!ebin_dir.join("beamtalk_integer.beam").exists());
+        assert!(!ebin_dir.join("beamtalk_stdlib.app").exists());
+        assert!(ebin_dir.join("keep_me.txt").exists());
     }
 
     #[test]
