@@ -115,6 +115,9 @@ impl CoreErlangGenerator {
             exports.push("'has_method'/1".to_string());
         }
 
+        // All classes export superclass/0 for reflection
+        exports.push("'superclass'/0".to_string());
+
         // Module header
         writeln!(
             self.output,
@@ -150,6 +153,14 @@ impl CoreErlangGenerator {
             self.generate_primitive_has_method(class)?;
             writeln!(self.output)?;
         }
+
+        // Generate superclass/0 for reflection
+        let superclass_atom = class.superclass.as_ref().map_or("nil", |s| s.name.as_str());
+        writeln!(
+            self.output,
+            "'superclass'/0 = fun () -> '{superclass_atom}'"
+        )?;
+        writeln!(self.output)?;
 
         // Module end
         writeln!(self.output, "end")?;
@@ -310,7 +321,7 @@ impl CoreErlangGenerator {
     ///
     /// This routes selectors to individual method functions, provides reflection
     /// methods (class, respondsTo:, instVarNames, instVarAt:, instVarAt:put:,
-    /// perform:, perform:withArgs:), checks the extension registry for unknown
+    /// perform:, perform:withArguments:), checks the extension registry for unknown
     /// selectors, and raises structured `#beamtalk_error{}` for `does_not_understand`.
     #[allow(clippy::too_many_lines)]
     fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
@@ -431,9 +442,9 @@ impl CoreErlangGenerator {
         )?;
         self.indent -= 1;
 
-        // perform:withArgs: — recursive dispatch with args
+        // perform:withArguments: — recursive dispatch with args
         self.write_indent()?;
-        writeln!(self.output, "<'perform:withArgs:'> when 'true' ->")?;
+        writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "let <PwaSel> = call 'erlang':'hd'(Args) in")?;
@@ -560,7 +571,7 @@ impl CoreErlangGenerator {
             "'instVarAt'".to_string(),
             "'instVarAt:put:'".to_string(),
             "'perform'".to_string(),
-            "'perform:withArgs:'".to_string(),
+            "'perform:withArguments:'".to_string(),
         ];
 
         // Include default asString if dispatch/3 generates one

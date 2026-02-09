@@ -13,13 +13,15 @@ Module {
                     end: 175,
                 },
             },
-            superclass: Identifier {
-                name: "Actor",
-                span: Span {
-                    start: 154,
-                    end: 159,
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 154,
+                        end: 159,
+                    },
                 },
-            },
+            ),
             is_abstract: true,
             is_sealed: false,
             state: [],

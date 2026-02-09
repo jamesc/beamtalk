@@ -13,13 +13,15 @@ Module {
                     end: 226,
                 },
             },
-            superclass: Identifier {
-                name: "Object",
-                span: Span {
-                    start: 203,
-                    end: 209,
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 203,
+                        end: 209,
+                    },
                 },
-            },
+            ),
             is_abstract: false,
             is_sealed: false,
             state: [],
@@ -62,13 +64,15 @@ Module {
                     end: 279,
                 },
             },
-            superclass: Identifier {
-                name: "Object",
-                span: Span {
-                    start: 250,
-                    end: 256,
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 250,
+                        end: 256,
+                    },
                 },
-            },
+            ),
             is_abstract: false,
             is_sealed: false,
             state: [],
@@ -111,13 +115,15 @@ Module {
                     end: 318,
                 },
             },
-            superclass: Identifier {
-                name: "Parent",
-                span: Span {
-                    start: 296,
-                    end: 302,
+            superclass: Some(
+                Identifier {
+                    name: "Parent",
+                    span: Span {
+                        start: 296,
+                        end: 302,
+                    },
                 },
-            },
+            ),
             is_abstract: false,
             is_sealed: false,
             state: [],

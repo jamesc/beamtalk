@@ -588,7 +588,7 @@ fn extract_class_names(module: &beamtalk_core::ast::Module) -> Vec<ClassInfo> {
         .iter()
         .map(|class| ClassInfo {
             name: class.name.name.to_string(),
-            superclass: class.superclass.name.to_string(),
+            superclass: class.superclass_name().to_string(),
         })
         .collect()
 }

@@ -13,13 +13,15 @@ Module {
                     end: 202,
                 },
             },
-            superclass: Identifier {
-                name: "Integer",
-                span: Span {
-                    start: 179,
-                    end: 186,
+            superclass: Some(
+                Identifier {
+                    name: "Integer",
+                    span: Span {
+                        start: 179,
+                        end: 186,
+                    },
                 },
-            },
+            ),
             is_abstract: false,
             is_sealed: false,
             state: [],

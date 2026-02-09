@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1]
+module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'superclass'/0]
   attributes []
 
 'new'/0 = fun () ->
@@ -16,5 +16,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1]
 
 'frozen'/1= fun (Self) ->
 42
+
+'superclass'/0 = fun () -> 'Object'
 
 end

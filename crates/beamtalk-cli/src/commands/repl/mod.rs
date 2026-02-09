@@ -54,9 +54,6 @@ use tracing::warn;
 use crate::commands::workspace;
 use crate::paths::is_daemon_running;
 
-/// Connection timeout in milliseconds.
-const CONNECT_TIMEOUT_MS: u64 = 5000;
-
 /// Maximum retries when connecting to REPL backend.
 const MAX_CONNECT_RETRIES: u32 = 10;
 
@@ -172,15 +169,6 @@ struct SessionInfo {
     id: String,
     #[allow(dead_code)]
     created_at: Option<i64>,
-}
-
-/// Counter for generating unique message IDs.
-static MSG_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-/// Generate a unique message ID.
-fn next_msg_id() -> String {
-    let n = MSG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("msg-{n:03}")
 }
 
 #[expect(
