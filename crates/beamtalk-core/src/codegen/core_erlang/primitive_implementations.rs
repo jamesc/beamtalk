@@ -408,18 +408,9 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
             write!(output, "Self").ok()?;
             Some(())
         }
-        // Display — printString includes # prefix
+        // Display — delegate to runtime primitive for consistent formatting
         "printString" => {
-            // Core Erlang binary literal for "#" (ASCII 35)
-            write!(
-                output,
-                "let <SymName> = call 'erlang':'atom_to_binary'(Self, 'utf8') in \
-                 let <HashBin> = \
-                 #{{#<35>(8,1,'integer',['unsigned'|['big']])}}# in \
-                 let <IoList> = [HashBin | [SymName | []]] in \
-                 call 'erlang':'iolist_to_binary'(IoList)"
-            )
-            .ok()?;
+            write!(output, "call 'beamtalk_primitive':'print_string'(Self)").ok()?;
             Some(())
         }
         // Identity
@@ -628,7 +619,6 @@ mod tests {
         let mut output = String::new();
         let result = generate_primitive_bif(&mut output, "Symbol", "printString", &[]);
         assert!(result.is_some());
-        assert!(output.contains("atom_to_binary"));
-        assert!(output.contains('#'));
+        assert_eq!(output, "call 'beamtalk_primitive':'print_string'(Self)");
     }
 }
