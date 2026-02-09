@@ -197,8 +197,12 @@ handle_cast({allClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
 handle_cast({'classNamed:', [ClassName], FuturePid}, State) when is_pid(FuturePid) ->
-    Result = handle_class_named(ClassName),
-    beamtalk_future:resolve(FuturePid, Result),
+    case handle_class_named(ClassName) of
+        {error, Err} ->
+            beamtalk_future:reject(FuturePid, Err);
+        Result ->
+            beamtalk_future:resolve(FuturePid, Result)
+    end,
     {noreply, State};
 handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = handle_globals(),

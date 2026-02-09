@@ -153,6 +153,18 @@ handle_cast({cr, [], FuturePid}, State) when is_pid(FuturePid) ->
     push_to_subscribers(Text, State1),
     beamtalk_future:resolve(FuturePid, nil),
     {noreply, State1};
+handle_cast({recent, [], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, queue:to_list(State#state.buffer)),
+    {noreply, State};
+handle_cast({clear, [], FuturePid}, State) when is_pid(FuturePid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, State#state{buffer = queue:new(), buffer_size = 0}};
+handle_cast({subscribe, [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, add_subscriber(Pid, State)};
+handle_cast({'unsubscribe:', [Pid], FuturePid}, State) when is_pid(FuturePid), is_pid(Pid) ->
+    beamtalk_future:resolve(FuturePid, nil),
+    {noreply, remove_subscriber(Pid, State)};
 %% Legacy format (direct gen_server:cast without Future)
 handle_cast({'show:', Value}, State) ->
     Text = to_string(Value),
@@ -172,7 +184,7 @@ handle_cast({unsubscribe, Pid}, State) ->
 handle_cast({UnknownSelector, _Args, FuturePid}, State) when is_pid(FuturePid), is_atom(UnknownSelector) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Transcript'),
     Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr">>),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe:">>),
     beamtalk_future:reject(FuturePid, Error2),
     {noreply, State};
 handle_cast(_Msg, State) ->
