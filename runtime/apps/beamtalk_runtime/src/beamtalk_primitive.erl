@@ -117,8 +117,14 @@ print_string(X) when is_list(X) ->
 print_string(#beamtalk_object{class = ClassName}) ->
     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
 print_string(X) when is_map(X) ->
-    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
-    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
+    case beamtalk_tagged_map:class_of(X) of
+        'Exception' ->
+            %% BT-338: Format exceptions nicely
+            beamtalk_exception_handler:dispatch('printString', [], X);
+        _ ->
+            ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
+            iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+    end;
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
 
@@ -175,6 +181,9 @@ send(X, Selector, Args) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
             beamtalk_compiled_method:dispatch(Selector, Args, X);
+        'Exception' ->
+            %% BT-338: Exception value type - direct dispatch
+            beamtalk_exception_handler:dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary)
             beamtalk_map:dispatch(Selector, Args, X);
@@ -240,6 +249,9 @@ responds_to(X, Selector) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
             beamtalk_compiled_method:has_method(Selector);
+        'Exception' ->
+            %% BT-338: Exception value type
+            beamtalk_exception_handler:has_method(Selector);
         undefined ->
             beamtalk_map:has_method(Selector);
         Class ->

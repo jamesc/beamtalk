@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Exception - Base class for all exceptions
+//
+// Wraps #beamtalk_error{} records as first-class Beamtalk objects.
+// Exception objects are value types (tagged maps), not actors.
+//
+// Usage:
+//   [1 / 0] on: Exception do: [:e | e message]
+//   Exception signal: 'something went wrong'
+
+sealed Object subclass: Exception
+  // Field access — expose #beamtalk_error{} fields
+  message => @primitive 'message'
+  hint => @primitive 'hint'
+  kind => @primitive 'kind'
+  selector => @primitive 'selector'
+  errorClass => @primitive 'errorClass'
+
+  // Display
+  printString => @primitive 'printString'
+  describe => self printString
+
+  // Raising
+  signal => @primitive 'signal'
+  signal: msg => @primitive 'signal:'

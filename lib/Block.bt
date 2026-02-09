@@ -19,7 +19,7 @@ sealed Object subclass: Block
   repeat => @primitive repeat
 
   // Exception handling — selector-based
-  on: errorBlock => @primitive 'on:'
+  on: exClass do: handler => @primitive 'on:do:'
   ensure: cleanupBlock => @primitive 'ensure:'
 
   // Reflection
