@@ -543,10 +543,17 @@ impl CoreErlangGenerator {
             )?;
         } else {
             // Root of hierarchy — raise does_not_understand
+            // Use runtime class_of(Self) to get the *receiver's* actual class,
+            // not the module where the error is raised (which may be a superclass).
             self.write_indent()?;
             writeln!(
                 self.output,
-                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', '{class_name}') in"
+                "let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in"
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in"
             )?;
             self.write_indent()?;
             writeln!(
