@@ -95,3 +95,63 @@
 // Division producing whole number float
 10 / 2
 // => 5.0
+
+// ===========================================================================
+// MODULO (BT-408)
+// ===========================================================================
+
+// Basic modulo
+10 % 3
+// => 1
+
+// Modulo with no remainder
+9 % 3
+// => 0
+
+// Modulo with zero dividend
+0 % 5
+// => 0
+
+// ===========================================================================
+// COMPARISON OPERATORS (BT-408)
+// ===========================================================================
+
+// Less than or equal (true - equal)
+5 <= 5
+// => true
+
+// Less than or equal (true - less)
+3 <= 5
+// => true
+
+// Less than or equal (false)
+7 <= 5
+// => false
+
+// Greater than or equal (true - equal)
+5 >= 5
+// => true
+
+// Greater than or equal (true - greater)
+7 >= 5
+// => true
+
+// Greater than or equal (false)
+3 >= 5
+// => false
+
+// ===========================================================================
+// INTEGER CONVERSION (BT-408)
+// ===========================================================================
+
+// asString
+42 asString
+// => 42
+
+// asFloat
+42 asFloat
+// => 42.0
+
+// asFloat with negative
+-5 asFloat
+// => -5.0

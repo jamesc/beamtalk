@@ -3930,4 +3930,32 @@ end
         let code = result.unwrap();
         assert!(code.contains("module 'point'"));
     }
+
+    #[test]
+    fn test_generate_repl_list_reject() {
+        // BT-408: reject: must generate valid Core Erlang with properly bound wrapper fun
+        // The wrapper fun must be bound via `let` — not inlined in the call args,
+        // because Core Erlang lambdas don't use `end` and can't be inlined in calls.
+        let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let expr = &module.expressions[0];
+        let code = generate_repl_expression(expr, "test_reject_repl").expect("codegen should work");
+
+        // Wrapper fun must be bound to a variable, not inlined in filter call
+        assert!(
+            code.contains("call 'lists':'filter'("),
+            "Should use lists:filter. Got:\n{code}"
+        );
+        assert!(
+            code.contains("call 'erlang':'not'("),
+            "Should negate predicate. Got:\n{code}"
+        );
+        // Verify the fun is let-bound (not inlined) — the filter call arg must be a temp var
+        // e.g. "call 'lists':'filter'(_temp4," not "call 'lists':'filter'(fun (X)"
+        assert!(
+            !code.contains("'filter'(fun"),
+            "Wrapper fun must be let-bound, not inlined in filter call. Got:\n{code}"
+        );
+    }
 }

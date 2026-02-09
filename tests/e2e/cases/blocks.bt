@@ -88,3 +88,31 @@ addFive := makeAdder value: 5
 
 addFive value: 10
 // => 15
+
+// ===========================================================================
+// BLOCK ARITY (BT-408)
+// ===========================================================================
+
+// Zero-argument block arity
+[42] arity
+// => 0
+
+// One-argument block arity
+[:x | x + 1] arity
+// => 1
+
+// Two-argument block arity
+[:x :y | x + y] arity
+// => 2
+
+// Three-argument block arity
+[:x :y :z | x + y + z] arity
+// => 3
+
+// ===========================================================================
+// WHILEFALSE: (BT-408)
+// ===========================================================================
+
+// whileFalse: with true condition (returns immediately)
+[true] whileFalse: [42]
+// => nil
