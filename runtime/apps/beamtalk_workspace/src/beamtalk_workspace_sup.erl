@@ -77,7 +77,7 @@ init(Config) ->
         },
         
         %% Singleton actors — workspace bindings (ADR 0010 Phase 2)
-        %% Must start after beamtalk_stdlib (guaranteed by OTP app dependency)
+        %% These assume beamtalk_stdlib has already been started elsewhere in the system.
         %% Each registers itself in init/1: persistent_term + register/2
         #{
             id => beamtalk_transcript_stream,

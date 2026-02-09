@@ -5,7 +5,7 @@
 %%%
 %%% Tests that TranscriptStream and SystemDictionary singletons
 %%% register themselves in persistent_term and via register/2 when
-%%% started by the workspace supervisor.
+%%% started via their singleton start functions.
 
 -module(beamtalk_workspace_binding_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -113,10 +113,7 @@ sysdict_non_singleton_no_binding_test() ->
 %%====================================================================
 
 cleanup_transcript(Pid) ->
-    gen_server:stop(Pid),
-    %% Wait for cleanup
-    timer:sleep(10).
+    gen_server:stop(Pid).
 
 cleanup_sysdict(Pid) ->
-    gen_server:stop(Pid),
-    timer:sleep(10).
+    gen_server:stop(Pid).
