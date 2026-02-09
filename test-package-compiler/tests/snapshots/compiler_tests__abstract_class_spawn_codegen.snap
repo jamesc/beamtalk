@@ -43,52 +43,17 @@ module 'abstract_class_spawn' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handl
     in {'ok', FinalState}
 
 
-'handle_cast'/2 = fun (Msg, State) ->
-    case Msg of
-        <{Selector, Args, FuturePid}> when 'true' ->
-            case call 'abstract_class_spawn':'safe_dispatch'(Selector, Args, State) of
-                <{'reply', Result, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
-                    in {'noreply', NewState}
-                <{'error', Error, NewState}> when 'true' ->
-                    let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
-                    in {'noreply', NewState}
-            end
-    end
+'handle_cast'/2 = fun (_Msg, State) -> {'noreply', State}
 
+'handle_call'/3 = fun (_Msg, _From, State) -> {'reply', 'nil', State}
 
-'handle_call'/3 = fun (Msg, _From, State) ->
-    case Msg of
-        <{Selector, Args}> when 'true' ->
-            case call 'abstract_class_spawn':'safe_dispatch'(Selector, Args, State) of
-                <{'reply', Result, NewState}> when 'true' ->
-                    {'reply', {'ok', Result}, NewState}
-                <{'error', Error, NewState}> when 'true' ->
-                    {'reply', {'error', Error}, NewState}
-            end
-    end
+'code_change'/3 = fun (_OldVsn, State, _Extra) -> {'ok', State}
 
-
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    %% TODO: Add state migration logic
-    {'ok', State}
-
-
-'terminate'/2 = fun (Reason, State) ->
-    %% Call terminate method if defined (Flavors pattern)
-    let Self = call 'beamtalk_actor':'make_self'(State) in
-    case call 'abstract_class_spawn':'dispatch'('terminate', [Reason], Self, State) of
-        <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
-        <_TermOther> when 'true' -> 'ok'
-    end
-
+'terminate'/2 = fun (_Reason, _State) -> 'ok'
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     let Self = call 'beamtalk_actor':'make_self'(State) in
-    try call 'abstract_class_spawn':'dispatch'(Selector, Args, Self, State)
-    of Result -> Result
-    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
+    call 'abstract_class_spawn':'dispatch'(Selector, Args, Self, State)
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->

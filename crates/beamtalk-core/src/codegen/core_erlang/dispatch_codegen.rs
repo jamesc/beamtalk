@@ -305,10 +305,26 @@ impl CoreErlangGenerator {
     /// the result is a value (not a Future), enabling recursive algorithms like
     /// factorial and fibonacci to work correctly.
     ///
-    /// # Generated Code
+    /// # Sealed Class Optimization (BT-403)
+    ///
+    /// For sealed classes, we skip the `safe_dispatch/3` try/catch overhead and
+    /// call `dispatch/4` directly. Since sealed classes have all methods known at
+    /// compile time, the error isolation overhead is unnecessary.
+    ///
+    /// # Generated Code (normal)
     ///
     /// ```erlang
     /// case call 'module':'safe_dispatch'('selector', [Args], State) of
+    ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
+    /// end
+    /// ```
+    ///
+    /// # Generated Code (sealed class)
+    ///
+    /// ```erlang
+    /// let Self = call 'beamtalk_actor':'make_self'(State) in
+    /// case call 'module':'dispatch'('selector', [Args], Self, State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
     ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
     /// end
@@ -318,6 +334,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
+        // BT-403: Sealed class optimization — skip safe_dispatch try/catch
+        if self.is_class_sealed() {
+            return self.generate_sealed_self_dispatch(selector, arguments);
+        }
+
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
@@ -352,6 +373,137 @@ impl CoreErlangGenerator {
         )?;
 
         // Error: re-raise for proper error propagation
+        write!(
+            self.output,
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+        )?;
+
+        write!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates optimized self-dispatch for sealed classes (BT-403).
+    ///
+    /// Two levels of optimization:
+    /// 1. **Known sealed method**: Direct function call to `__sealed_{selector}`,
+    ///    bypassing both `safe_dispatch/3` and `dispatch/4` case matching.
+    /// 2. **Unknown method** (inherited): Direct `dispatch/4` call, skipping
+    ///    only the `safe_dispatch/3` try/catch overhead.
+    fn generate_sealed_self_dispatch(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let selector_name = selector.name().to_string();
+
+        // Level 1: Direct call to standalone sealed method function
+        if self.sealed_method_selectors.contains(&selector_name) {
+            return self.generate_direct_sealed_call(&selector_name, arguments);
+        }
+
+        // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
+        let selector_atom = selector.to_erlang_atom();
+        let result_var = self.fresh_var("SealedResult");
+        let error_var = self.fresh_var("SealedError");
+        let self_var = self.fresh_temp_var("SealedSelf");
+
+        let current_state = if self.in_loop_body {
+            "StateAcc".to_string()
+        } else {
+            self.state_threading.current_var()
+        };
+
+        // Create Self object reference for dispatch/4
+        write!(
+            self.output,
+            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+        )?;
+
+        // Call dispatch/4 directly (skip safe_dispatch try/catch)
+        write!(
+            self.output,
+            "case call '{}':'dispatch'('{selector_atom}', [",
+            self.module_name
+        )?;
+
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+
+        write!(self.output, "], {self_var}, {current_state}) of ")?;
+
+        // Success: extract result value
+        write!(
+            self.output,
+            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
+        )?;
+
+        // Error: re-raise for proper error propagation
+        write!(
+            self.output,
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+        )?;
+
+        write!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates a direct call to a sealed method's standalone function (BT-403).
+    ///
+    /// This is the most optimized self-dispatch path: calls `__sealed_{selector}`
+    /// directly, bypassing `safe_dispatch`, dispatch, and case selector matching.
+    fn generate_direct_sealed_call(
+        &mut self,
+        selector_name: &str,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        let result_var = self.fresh_var("SealedResult");
+        let error_var = self.fresh_var("SealedError");
+        let self_var = self.fresh_temp_var("SealedSelf");
+
+        let current_state = if self.in_loop_body {
+            "StateAcc".to_string()
+        } else {
+            self.state_threading.current_var()
+        };
+
+        // Create Self for method body access
+        write!(
+            self.output,
+            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+        )?;
+
+        // Direct call to sealed method function: __sealed_{selector}(args..., Self, State)
+        write!(
+            self.output,
+            "case call '{}':'__sealed_{selector_name}'(",
+            self.module_name
+        )?;
+
+        // Arguments, then Self, then State
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        if !arguments.is_empty() {
+            write!(self.output, ", ")?;
+        }
+        write!(self.output, "{self_var}, {current_state}) of ")?;
+
+        // Success: extract result value
+        write!(
+            self.output,
+            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
+        )?;
+
+        // Error: re-raise
         write!(
             self.output,
             "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
