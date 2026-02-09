@@ -308,6 +308,41 @@ Class-side state via "class declarations" in the class header. Modules are insta
 
 **Response**: Module functions work for the compile-time-known case (`Point new`), but fail for the dynamic case (`cls new` where cls is a variable). The `class` prefix isn't about module functions — it's about methods on the class *object* that participate in message dispatch. When you write `cls := Beamtalk classNamed: #Point. cls new`, the runtime must dispatch `new` to the class process, not to a module. The `class` prefix tells the compiler "register this method on the class process's dispatch table" rather than "generate a module function." Both paths can coexist: direct module calls as the optimization, class process dispatch as the contract.
 
+### "The class process is a serialization bottleneck for class-side dispatch"
+
+**Erlang/BEAM developer**: "Every class-side message — `new`, `methods`, user-defined class methods, class variable reads — serializes through a single gen_server mailbox. If 1000 actors concurrently call `MyFactory create`, they queue up behind one process. You've turned every class into a single-threaded bottleneck. In Erlang, we'd use ETS for reads and gen_server only for coordinated writes — you're using gen_server for *everything*."
+
+**Performance-focused developer**: "Instance dispatch goes directly to the actor's gen_server or a static module function — O(1), no class process involved. But class-side dispatch always hits the class process. You've created an asymmetry where instance methods are fast and class methods are slow. Under load, `Point new` (compiled path) is ~0.5μs but `cls new` (dynamic path) is ~5-10μs and can't scale horizontally."
+
+**Response**: This is a real architectural constraint, and we accept it deliberately for Phase 1. The key insight is that the *interface* (`class` prefix, `classVar:`, `cls new`) is independent of the *dispatch mechanism*. Three optimization paths are available without changing the language:
+
+1. **Read-only fast path**: Class-side methods that don't mutate class variables can be compiled to direct `apply(Module, Selector, Args)` calls — the `#beamtalk_object{}` record already carries the module name. This makes read-only class methods as fast as instance dispatch (~0.5μs). The gen_server path is only needed when class variable state is involved.
+2. **ETS-backed reads**: Class variables can be mirrored to an ETS table for concurrent reads, with writes going through the gen_server for consistency. The `classVar:` syntax and `self.varName` access pattern don't change.
+3. **Process pool**: For truly hot class-side methods (factories under load), the class process can delegate to a pool of workers. Again, no language-level change.
+
+For Phase 1, correctness matters more than throughput. The patterns driving this ADR (singletons, REPL introspection, factory patterns) are low-frequency operations. If profiling reveals a bottleneck in a specific class, we optimize that class's dispatch — the interface is the contract, the implementation is the optimization.
+
+### "Value types with `new` have no way to validate constructor arguments"
+
+**Smalltalk developer**: "`Point new: #{x => 'hello'}` silently creates a broken Point with a string where a number should be. Without `initialize`, there's no hook to validate arguments, enforce invariants, or reject bad input. Every OO language needs a constructor validation story. Immutable objects are *more* important to validate, not less — you can't fix them after creation."
+
+**Newcomer**: "In Python I'd raise `ValueError` in `__init__`. In Java I'd throw from the constructor. Where do I put my validation logic?"
+
+**Response**: Class-side `new:` can be overridden to validate before constructing:
+
+```beamtalk
+Object subclass: Point
+  state: x = 0
+  state: y = 0
+
+  class new: args =>
+    (args at: #x) isNumber ifFalse: [self error: 'x must be a number'].
+    (args at: #y) isNumber ifFalse: [self error: 'y must be a number'].
+    super new: args
+```
+
+This is actually *cleaner* than `initialize`-based validation: the object is never created in an invalid state. With `initialize`, the object exists briefly in a pre-validation state (`basicNew` returns it, `initialize` validates it) — a window where invariants don't hold. With class-side `new:`, validation happens *before* construction. The interface already supports this pattern; it just needs documentation and examples showing idiomatic validation.
+
 ## Alternatives Considered
 
 ### Alternative: `shared:` instead of `classVar:`
@@ -359,15 +394,17 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 - Honest split: value types are constructed (`new`/`new:`), actors are initialized (`spawn`). No pretending immutable maps support mutation hooks.
 
 ### Negative
-- Class variable access from instance methods needs to call the class process (`gen_server:call`), adding ~1μs latency per access. This is acceptable for the patterns class variables serve (configuration, caching, singletons) but not for hot-path per-message state.
+- Class variable access from instance methods requires two gen_server calls (`self class` → get class object, then `varName` → get variable), adding ~10-20μs total. From class-side methods, access is a single gen_server call (~5-10μs). This is acceptable for the patterns class variables serve (configuration, caching, singletons) but not for hot-path per-message state. Future optimization: compile-time-known class pids can reduce instance-side access to one call; ETS-backed reads can eliminate gen_server overhead entirely — without changing the `classVar:` interface.
+- Class-side dispatch serializes through a single gen_server per class, creating a throughput ceiling for high-frequency class-side operations (e.g., factory `new` under load). The interface is independent of the dispatch mechanism, so optimization (direct module calls, ETS reads, process pools) can be applied without language changes.
 - Two kinds of `self` (class-side vs instance-side) could confuse newcomers, though the `class` prefix makes context clear.
 - Parser, AST, codegen, and runtime all need changes — medium-sized cross-cutting feature.
-- Value types not having `initialize` is a divergence from Smalltalk that will surprise Smalltalkers expecting `new → basicNew → initialize` everywhere.
+- Value types not having `initialize` is a divergence from Smalltalk that will surprise Smalltalkers expecting `new → basicNew → initialize` everywhere. Mitigation: class-side `new:` override provides pre-construction validation, which is arguably better (object never exists in invalid state).
 
 ### Neutral
 - Does not change actor instantiation (`spawn` stays unchanged).
 - Virtual metaclasses replace ADR 0005 Phase 2 — no separate metaclass work needed later.
 - Value types and actors have different construction models (`new`/`new:` vs `spawn`/`spawnWith:`), matching their existing semantic split.
+- Class variable state is lost if the class process crashes and restarts (standard OTP behavior). For singletons and caches, lazy re-initialization on next access is the correct pattern. If persistent class variable state is needed, the `classVar:` interface supports adding optional persistence (mnesia, dets) as an implementation detail.
 
 ## Implementation
 
