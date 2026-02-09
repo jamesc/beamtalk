@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+sealed Object subclass: Dictionary
+
+// Class
+class => @primitive 'class'
+
+// Collection protocol
+keys => @primitive 'keys'
+values => @primitive 'values'
+size => @primitive 'size'
+
+// Access
+at: key => @primitive 'at:'
+at: key ifAbsent: block => @primitive 'at:ifAbsent:'
+at: key put: value => @primitive 'at:put:'
+
+// Predicates
+includesKey: key => @primitive 'includesKey:'
+
+// Operations
+removeKey: key => @primitive 'removeKey:'
+merge: otherDict => @primitive 'merge:'
+
+// Iteration
+keysAndValuesDo: block => @primitive 'keysAndValuesDo:'

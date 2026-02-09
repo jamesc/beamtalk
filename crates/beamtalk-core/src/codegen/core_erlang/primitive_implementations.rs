@@ -43,6 +43,7 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Dictionary" => generate_dictionary_bif(output, selector, params),
         _ => None,
     }
 }
@@ -440,6 +441,83 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Dictionary primitive implementations.
+fn generate_dictionary_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Class identity
+        "class" => {
+            write!(output, "'Dictionary'").ok()?;
+            Some(())
+        }
+        // Collection protocol
+        "keys" => {
+            write!(output, "call 'maps':'keys'(Self)").ok()?;
+            Some(())
+        }
+        "values" => {
+            write!(output, "call 'maps':'values'(Self)").ok()?;
+            Some(())
+        }
+        "size" => {
+            write!(output, "call 'maps':'size'(Self)").ok()?;
+            Some(())
+        }
+        // Access
+        "at:" => {
+            let key = params.first()?;
+            write!(output, "call 'maps':'get'({key}, Self)").ok()?;
+            Some(())
+        }
+        "at:ifAbsent:" => {
+            let key = params.first()?;
+            let block = params.get(1)?;
+            write!(
+                output,
+                "case call 'maps':'find'({key}, Self) of \
+                 <{{'ok', Value}}> when 'true' -> Value \
+                 <'error'> when 'true' -> call {block}() \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "at:put:" => {
+            let key = params.first()?;
+            let value = params.get(1)?;
+            write!(output, "call 'maps':'put'({key}, {value}, Self)").ok()?;
+            Some(())
+        }
+        // Predicates
+        "includesKey:" => {
+            let key = params.first()?;
+            write!(output, "call 'maps':'is_key'({key}, Self)").ok()?;
+            Some(())
+        }
+        // Operations
+        "removeKey:" => {
+            let key = params.first()?;
+            write!(output, "call 'maps':'remove'({key}, Self)").ok()?;
+            Some(())
+        }
+        "merge:" => {
+            let other = params.first()?;
+            write!(output, "call 'maps':'merge'(Self, {other})").ok()?;
+            Some(())
+        }
+        // Iteration
+        "keysAndValuesDo:" => {
+            let block = params.first()?;
+            write!(
+                output,
+                "let <_Ignore> = call 'maps':'foreach'({block}, Self) in 'nil'"
+            )
+            .ok()?;
             Some(())
         }
         _ => None,
