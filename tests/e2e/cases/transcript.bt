@@ -2,20 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for Transcript class
-// Transcript is the standard I/O object for writing to stdout.
-// show: prints a value, cr prints a newline. Both return nil.
+// Transcript is a workspace-bound actor for writing to stdout.
+// show: prints a value, cr prints a newline.
+// BT-374: Workspace bindings dispatch via persistent_term + async send,
+// so all sends return a Future (not nil).
 
 // ===========================================================================
 // BASIC OUTPUT
 // ===========================================================================
 
-// show: prints a string and returns nil
+// show: prints a string (returns Future from async send)
 Transcript show: 'Hello'
-// => nil
+// => _
 
-// cr prints a newline and returns nil
+// cr prints a newline (returns Future from async send)
 Transcript cr
-// => nil
+// => _
 
 // ===========================================================================
 // SHOW: WITH DIFFERENT TYPES
@@ -23,15 +25,15 @@ Transcript cr
 
 // show: with an integer
 Transcript show: 42
-// => nil
+// => _
 
 // show: with a boolean
 Transcript show: true
-// => nil
+// => _
 
 // show: with nil
 Transcript show: nil
-// => nil
+// => _
 
 // ===========================================================================
 // CASCADE (SEMICOLON CHAINING)
@@ -41,6 +43,6 @@ Transcript show: nil
 // requires metaclass dispatch which is not yet implemented.
 // Use separate statements instead:
 Transcript show: 'Hello'
-// => nil
+// => _
 Transcript cr
-// => nil
+// => _

@@ -256,12 +256,14 @@ class_named_known_class_atom_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', ['Counter']}),
                      
-                     %% Should return a pid
-                     ?assert(is_pid(Result)),
-                     ?assert(is_process_alive(Result)),
+                     %% BT-374: Returns beamtalk_object tuple wrapping the class
+                     ?assertMatch({beamtalk_object, 'Counter', _, _}, Result),
+                     {beamtalk_object, _, _, ClassPid} = Result,
+                     ?assert(is_pid(ClassPid)),
+                     ?assert(is_process_alive(ClassPid)),
                      
                      %% Verify it's the Counter class
-                     ClassName = beamtalk_object_class:class_name(Result),
+                     ClassName = beamtalk_object_class:class_name(ClassPid),
                      ?assertEqual('Counter', ClassName),
                      
                      gen_server:stop(Pid)
@@ -279,12 +281,14 @@ class_named_known_class_binary_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', [<<"Counter">>]}),
                      
-                     %% Should return a pid
-                     ?assert(is_pid(Result)),
-                     ?assert(is_process_alive(Result)),
+                     %% BT-374: Returns beamtalk_object tuple wrapping the class
+                     ?assertMatch({beamtalk_object, 'Counter', _, _}, Result),
+                     {beamtalk_object, _, _, ClassPid} = Result,
+                     ?assert(is_pid(ClassPid)),
+                     ?assert(is_process_alive(ClassPid)),
                      
                      %% Verify it's the Counter class
-                     ClassName = beamtalk_object_class:class_name(Result),
+                     ClassName = beamtalk_object_class:class_name(ClassPid),
                      ?assertEqual('Counter', ClassName),
                      
                      gen_server:stop(Pid)
@@ -302,8 +306,8 @@ class_named_unknown_class_atom_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', ['UnknownClass']}),
                      
-                     %% Should return a structured error
-                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+                     %% BT-374: Returns nil for unknown classes
+                     ?assertEqual(nil, Result),
                      
                      gen_server:stop(Pid)
                  end)
@@ -320,8 +324,8 @@ class_named_unknown_class_binary_test_() ->
                      {ok, Pid} = beamtalk_system_dictionary:start_link(),
                      Result = gen_server:call(Pid, {'classNamed:', [<<"UnknownClass">>]}),
                      
-                     %% Should return a structured error (binary doesn't exist as atom)
-                     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
+                     %% BT-374: Returns nil for unknown classes (binary doesn't exist as atom)
+                     ?assertEqual(nil, Result),
                      
                      gen_server:stop(Pid)
                  end)

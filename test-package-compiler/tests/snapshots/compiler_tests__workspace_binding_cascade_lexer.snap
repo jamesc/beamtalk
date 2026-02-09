@@ -1,0 +1,18 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 130, end: 135 }, leading_trivia: [LineComment("// BT-374: Workspace binding cascade dispatch."), Whitespace("\n"), LineComment("// Cascade messages to a workspace binding should use persistent_term PID lookup."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 136, end: 145 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Logger"), span: Span { start: 146, end: 152 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("run"), span: Span { start: 155, end: 158 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 159, end: 161 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Transcript"), span: Span { start: 162, end: 172 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("show:"), span: Span { start: 173, end: 178 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello"), span: Span { start: 179, end: 186 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 186, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("cr"), span: Span { start: 188, end: 190 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 190, end: 191 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("show:"), span: Span { start: 192, end: 197 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("World"), span: Span { start: 198, end: 205 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 206, end: 206 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

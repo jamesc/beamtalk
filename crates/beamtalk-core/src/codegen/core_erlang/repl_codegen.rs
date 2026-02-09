@@ -42,6 +42,8 @@ impl CoreErlangGenerator {
         // BT-213: Set context to Repl for this module
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true; // Also set legacy flag for compatibility
+        // BT-374 / ADR 0010: REPL runs in workspace context, bindings are available
+        self.workspace_mode = true;
 
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;

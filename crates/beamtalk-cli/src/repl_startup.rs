@@ -84,7 +84,9 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
 pub fn startup_prelude(port: u16) -> String {
     format!(
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
-         {{ok, _}} = application:ensure_all_started(beamtalk_workspace)"
+         {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         _ = beamtalk_transcript_stream:start_link_singleton(1000), \
+         _ = beamtalk_system_dictionary:start_link_singleton()"
     )
 }
 
@@ -220,6 +222,9 @@ mod tests {
         let prelude = startup_prelude(9000);
         assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
+        // Must start workspace singletons (ADR 0010 — workspace bindings)
+        assert!(prelude.contains("beamtalk_transcript_stream:start_link_singleton"));
+        assert!(prelude.contains("beamtalk_system_dictionary:start_link_singleton"));
         // Prelude should NOT contain the blocking receive
         assert!(!prelude.contains("receive"));
     }

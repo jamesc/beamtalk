@@ -1,0 +1,13 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 148, end: 153 }, leading_trivia: [LineComment("// BT-374: Workspace binding dispatch via persistent_term."), Whitespace("\n"), LineComment("// Transcript is a workspace binding — generates persistent_term lookup + actor send."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 154, end: 163 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Greeter"), span: Span { start: 164, end: 171 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("greet"), span: Span { start: 174, end: 179 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 180, end: 182 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Transcript"), span: Span { start: 183, end: 193 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("show:"), span: Span { start: 194, end: 199 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello, World!"), span: Span { start: 200, end: 215 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 216, end: 216 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
