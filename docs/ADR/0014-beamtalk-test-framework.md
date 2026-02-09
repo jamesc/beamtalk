@@ -206,6 +206,32 @@ Transcript class
 | REPL commands (`:load`, `:quit`, `:help`) | E2E (needs REPL) |
 | CLI commands (`beamtalk build`, `beamtalk test`) | E2E / integration test |
 
+### Bootstrap Constraint: Why Both Phases Are Needed
+
+SUnit-style TestCase classes (Phase 2) cannot be used to test the stdlib primitives they depend on — this creates a circular dependency:
+
+```
+TestCase (stdlib class)
+  └── depends on: Object, Integer (comparisons), String (error messages)
+
+Integer tests
+  └── depends on: TestCase
+  └── ...which depends on: Integer  ← circular!
+```
+
+In Pharo/Squeak this doesn't matter because everything lives in the image with no compilation order. But Beamtalk has separate compilation with OTP app dependencies, so the build order matters.
+
+**Resolution:** Phase 1 expression tests (`// =>`) have zero framework dependencies — they compile directly to EUnit with no Beamtalk class imports. This makes them the correct tool for testing stdlib primitives. Phase 2 TestCase classes are for user-level code (actors, application logic) where setUp/tearDown and rich assertions justify the dependency.
+
+| Layer | Test with | Why |
+|-------|-----------|-----|
+| Primitives (Integer, String, Float, Boolean) | Phase 1 (`// =>`) | No framework dependency — avoids bootstrap circularity |
+| Stdlib classes (Array, Block, Dictionary) | Phase 1 (`// =>`) | Same reason — these are below TestCase in the dependency chain |
+| User classes and actors | Phase 2 (TestCase) | setUp/tearDown, fixtures, rich assertions |
+| Complex integration scenarios | Phase 2 (TestCase) | State management, test grouping |
+
+This is not a limitation — it's actually the right tool for each job. Stdlib tests are mostly "does `1 + 2` equal `3`?" which is exactly what expression tests excel at.
+
 ## Prior Art
 
 ### SUnit (Pharo/Squeak Smalltalk)
