@@ -112,6 +112,18 @@ impl CoreErlangGenerator {
                         Ok(Some(()))
                     }
 
+                    // `on:do:` - exception handling (try/catch with class matching)
+                    "on:do:" if arguments.len() == 2 => {
+                        self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(()))
+                    }
+
+                    // `ensure:` - cleanup (try/after via try/catch + re-raise)
+                    "ensure:" => {
+                        self.generate_ensure(receiver, &arguments[0])?;
+                        Ok(Some(()))
+                    }
+
                     // Not a block evaluation message
                     _ => Ok(None),
                 }

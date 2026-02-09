@@ -18,9 +18,9 @@ sealed Object subclass: Block
   whileFalse: bodyBlock => @primitive whileFalse
   repeat => @primitive repeat
 
-  // Exception handling — selector-based
-  on: exClass do: handler => @primitive 'on:do:'
-  ensure: cleanupBlock => @primitive 'ensure:'
+  // Exception handling — structural intrinsics (try/catch, try/after)
+  on: exClass do: handler => @primitive onDo
+  ensure: cleanupBlock => @primitive ensure
 
   // Reflection
   arity => @primitive 'arity'

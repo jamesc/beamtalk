@@ -712,7 +712,7 @@ impl CoreErlangGenerator {
                     "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
                     name.name
                 )?;
-                write!(self.output, "<'undefined'> when 'true' -> 'nil'; ")?;
+                write!(self.output, "<'undefined'> when 'true' -> 'nil' ")?;
                 write!(self.output, "<{class_pid_var}> when 'true' -> ")?;
                 write!(
                     self.output,

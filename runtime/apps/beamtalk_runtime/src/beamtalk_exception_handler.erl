@@ -1,11 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Exception handling for Beamtalk.
+%%% @doc Exception handling runtime support for Beamtalk.
 %%%
-%%% Provides exception wrapping, block exception handling (on:do:, ensure:),
-%%% and Exception object field access. Wraps `#beamtalk_error{}` records as
-%%% Exception value type objects (tagged maps).
+%%% Provides exception wrapping, class matching, and Exception object field
+%%% access. Wraps `#beamtalk_error{}' records as Exception value type objects
+%%% (tagged maps). Called by compiler-generated try/catch code.
 %%%
 %%% **DDD Context:** Runtime — Error Handling
 %%%
@@ -17,71 +17,51 @@
 %%% }
 %%% ```
 %%%
-%%% ## Block Exception Handling
-%%%
-%%% ```beamtalk
-%%% [1 / 0] on: Exception do: [:e | e message]
-%%% [resource open] ensure: [resource close]
-%%% ```
+%%% The compiler generates inline Core Erlang try/catch for `on:do:` and
+%%% `ensure:` (structural intrinsics). This module provides the runtime
+%%% helpers called by that generated code: `wrap/1` and `matches_class/2`.
 
 -module(beamtalk_exception_handler).
 -include("beamtalk.hrl").
 
 -export([
-    on_do/3,
-    ensure/2,
     wrap/1,
+    matches_class/2,
     dispatch/3,
     has_method/1,
     signal/1,
     signal_message/1
 ]).
 
-%% @doc Execute a block with exception handling.
+%% @doc Check if an error matches the requested exception class.
 %%
-%% Wraps block evaluation in try/catch. If a `#beamtalk_error{}` is raised,
-%% wraps it as an Exception object and passes to the handler block.
-%%
-%% Usage: `[expr] on: Exception do: [:e | e message]`
-%%
-%% The ExClass parameter is reserved for future exception class matching.
-%% Currently catches all `#beamtalk_error{}` exceptions.
--spec on_do(function(), atom() | map(), function()) -> term().
-on_do(Block, _ExClass, Handler) when is_function(Block, 0), is_function(Handler, 1) ->
-    try Block() of
-        Result -> Result
-    catch
-        error:#beamtalk_error{} = Error ->
-            ExObj = wrap(Error),
-            Handler(ExObj);
-        error:Reason ->
-            %% Wrap non-beamtalk errors (e.g., badarith, badmatch)
-            GenError = #beamtalk_error{
-                kind = runtime_error,
-                class = 'Exception',
-                selector = undefined,
-                message = iolist_to_binary(io_lib:format("~p", [Reason])),
-                hint = undefined,
-                details = #{reason => Reason}
-            },
-            ExObj = wrap(GenError),
-            Handler(ExObj)
-    end.
+%% - nil → match all (no filter)
+%% - Exception class object → match all (root of hierarchy)
+%% - Error class object → match all (subclass of Exception)
+%% - Other class object → match by error kind atom
+%% - Atom → match by error kind directly
+-spec matches_class(term(), #beamtalk_error{}) -> boolean().
+matches_class(nil, _Error) ->
+    true;
+matches_class({beamtalk_object, ClassName, _, _}, Error) ->
+    matches_class_name(ClassName, Error);
+matches_class(ClassName, Error) when is_atom(ClassName) ->
+    matches_class_name(ClassName, Error);
+matches_class(_Other, _Error) ->
+    %% Unknown filter type — catch all for safety
+    true.
 
-%% @doc Execute a block with guaranteed cleanup.
-%%
-%% Wraps block evaluation in try/after. The cleanup block always runs,
-%% regardless of whether an exception occurred.
-%%
-%% Note: If the cleanup block raises, its error replaces the original error.
-%% This matches standard Erlang try/after semantics.
-%%
-%% Usage: `[resource open] ensure: [resource close]`
--spec ensure(function(), function()) -> term().
-ensure(Block, CleanupBlock) when is_function(Block, 0), is_function(CleanupBlock, 0) ->
-    try Block()
-    after CleanupBlock()
-    end.
+%% @private Match by class name atom.
+-spec matches_class_name(atom(), #beamtalk_error{}) -> boolean().
+matches_class_name('Exception class', _Error) -> true;
+matches_class_name('Exception', _Error) -> true;
+matches_class_name('Error class', _Error) -> true;
+matches_class_name('Error', _Error) -> true;
+matches_class_name(ClassName, #beamtalk_error{kind = Kind}) ->
+    Kind =:= ClassName;
+matches_class_name(_ClassName, _RawError) ->
+    %% Raw Erlang errors don't have a kind field — can't match custom classes
+    false.
 
 %% @doc Wrap a `#beamtalk_error{}` record as an Exception tagged map.
 -spec wrap(#beamtalk_error{} | term()) -> map().

@@ -10,7 +10,7 @@
 //   [1 / 0] on: Exception do: [:e | e message]
 //   Exception signal: 'something went wrong'
 
-sealed Object subclass: Exception
+Object subclass: Exception
   // Field access — expose #beamtalk_error{} fields
   message => @primitive 'message'
   hint => @primitive 'hint'

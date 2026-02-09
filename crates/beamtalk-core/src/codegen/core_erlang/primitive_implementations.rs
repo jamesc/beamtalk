@@ -250,6 +250,7 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
 
 /// Block primitive implementations.
 fn generate_block_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    let _ = params; // Block BIFs don't use params currently
     match selector {
         "arity" => {
             // erlang:fun_info(Self, arity) returns {arity, N}
@@ -261,27 +262,8 @@ fn generate_block_bif(output: &mut String, selector: &str, params: &[String]) ->
             .ok()?;
             Some(())
         }
-        "on:do:" => {
-            // Block exception handling: [expr] on: ExClass do: [:e | handler]
-            let p0 = params.first().map_or("_ExClass", String::as_str);
-            let p1 = params.get(1).map_or("_Handler", String::as_str);
-            write!(
-                output,
-                "call 'beamtalk_exception_handler':'on_do'(Self, {p0}, {p1})"
-            )
-            .ok()?;
-            Some(())
-        }
-        "ensure:" => {
-            // Block cleanup: [expr] ensure: [cleanup]
-            let p0 = params.first().map_or("_Cleanup", String::as_str);
-            write!(
-                output,
-                "call 'beamtalk_exception_handler':'ensure'(Self, {p0})"
-            )
-            .ok()?;
-            Some(())
-        }
+        // on:do: and ensure: are structural intrinsics handled at the call site
+        // (see control_flow/exception_handling.rs), not here.
         _ => None,
     }
 }

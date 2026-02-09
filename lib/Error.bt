@@ -6,5 +6,5 @@
 // Subclass of Exception for errors that cannot be resumed.
 // Maps to Erlang's error class in try/catch.
 
-sealed Exception subclass: Error
+Exception subclass: Error
   describe => 'an Error'
