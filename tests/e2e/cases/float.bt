@@ -1,0 +1,245 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Float class and Number hierarchy
+
+// ===========================================================================
+// FLOAT LITERALS
+// ===========================================================================
+
+// Basic float literal
+3.14
+// => 3.14
+
+// Float class identity
+3.14 class
+// => Float
+
+// Negative float
+-2.5
+// => -2.5
+
+// ===========================================================================
+// FLOAT ARITHMETIC
+// ===========================================================================
+
+// Float addition
+1.5 + 2.5
+// => 4.0
+
+// Float subtraction
+5.5 - 2.3
+// => 3.2
+
+// Float multiplication
+2.5 * 4.0
+// => 10.0
+
+// Float division
+10.0 / 3.0
+// => 3.3333333333333335
+
+// ===========================================================================
+// MIXED ARITHMETIC (Integer + Float)
+// ===========================================================================
+
+// Integer + Float
+3 + 2.5
+// => 5.5
+
+// Float + Integer
+2.5 + 3
+// => 5.5
+
+// Integer * Float
+3 * 2.5
+// => 7.5
+
+// Integer / Integer (always returns float)
+10 / 3
+// => 3.3333333333333335
+
+// ===========================================================================
+// FLOAT COMPARISON
+// ===========================================================================
+
+// Float equality
+3.14 = 3.14
+// => true
+
+// Float equality (false case)
+3.14 = 2.71
+// => false
+
+// Float less than
+2.5 < 3.5
+// => true
+
+// Float greater than
+3.5 > 2.5
+// => true
+
+// ===========================================================================
+// ROUNDING METHODS
+// ===========================================================================
+
+// rounded — round to nearest integer
+3.14 rounded
+// => 3
+
+3.75 rounded
+// => 4
+
+// ceiling — smallest integer >= value
+3.14 ceiling
+// => 4
+
+// floor — largest integer <= value
+3.75 floor
+// => 3
+
+// truncated — toward zero
+3.75 truncated
+// => 3
+
+-3.75 truncated
+// => -3
+
+// Negative rounding edge cases
+-3.14 rounded
+// => -3
+
+-3.75 rounded
+// => -4
+
+-3.14 ceiling
+// => -3
+
+-3.75 floor
+// => -4
+
+// ===========================================================================
+// NUMERIC OPERATIONS (inherited from Number)
+// ===========================================================================
+
+// isZero
+0.0 isZero
+// => true
+
+3.14 isZero
+// => false
+
+// isPositive
+3.14 isPositive
+// => true
+
+-2.5 isPositive
+// => false
+
+// isNegative
+-2.5 isNegative
+// => true
+
+3.14 isNegative
+// => false
+
+// negated
+3.14 negated
+// => -3.14
+
+// abs
+-3.14 abs
+// => 3.14
+
+// min: max:
+3.14 min: 2.71
+// => 2.71
+
+3.14 max: 2.71
+// => 3.14
+
+// ===========================================================================
+// CONVERSION
+// ===========================================================================
+
+// asInteger (truncates)
+3.75 asInteger
+// => 3
+
+// asString
+3.14 asString
+// => 3.14
+
+// ===========================================================================
+// IEEE 754 CHECKS (always false on BEAM)
+// ===========================================================================
+
+3.14 isNaN
+// => false
+
+3.14 isInfinite
+// => false
+
+// ===========================================================================
+// INTEGER NUMERIC OPERATIONS (inherited from Number)
+// ===========================================================================
+
+// Integer isZero
+0 isZero
+// => true
+
+5 isZero
+// => false
+
+// Integer isPositive
+5 isPositive
+// => true
+
+// Integer isNegative
+-3 isNegative
+// => true
+
+// Integer sign
+5 sign
+// => 1
+
+-3 sign
+// => -1
+
+0 sign
+// => 0
+
+// Integer between:and:
+5 between: 1 and: 10
+// => true
+
+15 between: 1 and: 10
+// => false
+
+// Float sign
+3.14 sign
+// => 1
+
+-2.5 sign
+// => -1
+
+// Float between:and:
+3.14 between: 1.0 and: 5.0
+// => true
+
+// respondsTo: inherited methods (from Number via superclass chain)
+42 respondsTo: #sign
+// => true
+
+42 respondsTo: #'between:and:'
+// => true
+
+3.14 respondsTo: #sign
+// => true
+
+3.14 respondsTo: #'between:and:'
+// => true
+
+// Integer class
+42 class
+// => Integer

@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Number - Abstract superclass for numeric types
+//
+// Provides shared numeric protocol for Integer and Float.
+// Cannot be instantiated directly — subclass Integer or Float instead.
+
+abstract Object subclass: Number
+  // Shared numeric protocol — subclasses implement +, -, *, /, =, <, >, <=, >=
+
+  // Testing
+  isZero => self = 0
+  isPositive => self > 0
+  isNegative => self < 0
+
+  // Sign
+  sign => (self > 0) ifTrue: [1] ifFalse: [(self < 0) ifTrue: [-1] ifFalse: [0]]
+
+  // Range
+  between: min and: max => (self >= min) and: [self <= max]

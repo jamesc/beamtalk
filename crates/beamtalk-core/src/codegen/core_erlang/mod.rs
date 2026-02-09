@@ -691,9 +691,24 @@ impl CoreErlangGenerator {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
             Expression::ClassReference { name, .. } => {
+                // BT-376 / ADR 0010: Workspace bindings resolve to singleton actor objects
+                // stored in persistent_term, not class objects from the registry.
+                if dispatch_codegen::is_workspace_binding(&name.name) {
+                    if self.workspace_mode {
+                        write!(
+                            self.output,
+                            "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
+                            name.name
+                        )?;
+                        return Ok(());
+                    }
+                    return Err(CodeGenError::WorkspaceBindingInBatchMode {
+                        name: name.name.to_string(),
+                    });
+                }
+
                 // BT-215: Standalone class references resolve to class objects
                 // Wrap the class PID in a beamtalk_object record for uniform dispatch
-                // Pattern matches generate_beamtalk_class_named (lines 915-922)
                 //
                 // Generate a case expression to handle undefined classes gracefully:
                 //   case call 'beamtalk_object_class':'whereis_class'('Point') of
@@ -702,8 +717,6 @@ impl CoreErlangGenerator {
                 //       let ClassModName = call 'beamtalk_object_class':'module_name'(ClassPid) in
                 //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
                 //   end
-                //
-                // This matches the pattern in generate_beamtalk_class_named (lines 906-923).
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
 
@@ -3935,5 +3948,33 @@ end
         assert!(result.is_ok());
         let code = result.unwrap();
         assert!(code.contains("module 'point'"));
+    }
+
+    #[test]
+    fn test_generate_repl_list_reject() {
+        // BT-408: reject: must generate valid Core Erlang with properly bound wrapper fun
+        // The wrapper fun must be bound via `let` — not inlined in the call args,
+        // because Core Erlang lambdas don't use `end` and can't be inlined in calls.
+        let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let expr = &module.expressions[0];
+        let code = generate_repl_expression(expr, "test_reject_repl").expect("codegen should work");
+
+        // Wrapper fun must be bound to a variable, not inlined in filter call
+        assert!(
+            code.contains("call 'lists':'filter'("),
+            "Should use lists:filter. Got:\n{code}"
+        );
+        assert!(
+            code.contains("call 'erlang':'not'("),
+            "Should negate predicate. Got:\n{code}"
+        );
+        // Verify the fun is let-bound (not inlined) — the filter call arg must be a temp var
+        // e.g. "call 'lists':'filter'(_temp4," not "call 'lists':'filter'(fun (X)"
+        assert!(
+            !code.contains("'filter'(fun"),
+            "Wrapper fun must be let-bound, not inlined in filter call. Got:\n{code}"
+        );
     }
 }

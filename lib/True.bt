@@ -13,6 +13,7 @@ sealed Object subclass: True
   and: aBlock => aBlock value
   or: aBlock => self
   not => false
+  xor: other => other not
   isTrue => true
   isFalse => false
   describe => 'true'

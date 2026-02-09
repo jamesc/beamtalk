@@ -161,7 +161,9 @@ impl CoreErlangGenerator {
         body: &Expression,
     ) -> Result<()> {
         // list reject: is opposite of filter - we need to negate the predicate
-        // Generate: lists:filter(fun(X) -> not (Body(X)) end, List)
+        // Generate: let List = ... in let Body = ... in
+        //           let Wrapper = fun(X) -> not Body(X) in
+        //           lists:filter(Wrapper, List)
 
         write!(self.output, "let ")?;
         let list_var = self.fresh_temp_var("temp");
@@ -173,12 +175,18 @@ impl CoreErlangGenerator {
         write!(self.output, "{body_var} = ")?;
         self.generate_expression(body)?;
 
-        write!(self.output, " in call 'lists':'filter'(")?;
+        // Bind the negation wrapper to a variable (Core Erlang requires this)
+        write!(self.output, " in let ")?;
+        let wrapper_var = self.fresh_temp_var("temp");
         write!(
             self.output,
-            "fun (X) -> call 'erlang':'not'(apply {body_var} (X)) end"
+            "{wrapper_var} = fun (X) -> call 'erlang':'not'(apply {body_var} (X))"
         )?;
-        write!(self.output, ", {list_var})")?;
+
+        write!(
+            self.output,
+            " in call 'lists':'filter'({wrapper_var}, {list_var})"
+        )?;
 
         Ok(())
     }

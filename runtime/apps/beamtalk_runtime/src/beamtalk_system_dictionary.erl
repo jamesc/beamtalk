@@ -134,7 +134,8 @@ init(Opts) ->
     
     %% Singleton path: register persistent_term binding for codegen lookup (~13ns)
     case IsSingleton of
-        true -> persistent_term:put({beamtalk_binding, 'Beamtalk'}, self());
+        true -> persistent_term:put({beamtalk_binding, 'Beamtalk'},
+                    {beamtalk_object, 'SystemDictionary', beamtalk_system_dictionary, self()});
         false -> ok
     end,
     
