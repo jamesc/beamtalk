@@ -1,7 +1,7 @@
 # ADR 0014: Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests
 
 ## Status
-Proposed (2026-02-10)
+Proposed (2026-02-09)
 
 ## Context
 
@@ -70,11 +70,11 @@ Reuse the existing `// =>` assertion format but compile test files directly to E
 // => 'hello world'
 ```
 
-**What changes:** The compiler parses `// =>` comments as test assertions at compile time and generates EUnit test functions:
+**What changes:** The compiler parses `// =>` comments as test assertions at compile time. The `beamtalk test` command then generates a thin EUnit wrapper in Erlang source that calls the compiled BEAM modules:
 
 ```erlang
-%% Generated from test/integer_test.bt
--module(integer_test).
+%% Generated EUnit wrapper for test/integer_test.bt
+-module(integer_test_tests).
 -include_lib("eunit/include/eunit.hrl").
 
 line_3_test() ->
@@ -89,6 +89,8 @@ line_10_test() ->
 line_13_test() ->
     ?assertEqual(<<"hello world">>, beamtalk_string:dispatch(<<"hello">>, ',', [<<" world">>])).
 ```
+
+Note: The wrapper is generated Erlang source (`.erl`), not Core Erlang. This lets us use EUnit's `?assertEqual` macros directly. The actual Beamtalk expressions compile through the normal Core Erlang pipeline; the wrapper just calls the compiled dispatch functions.
 
 **CLI command:**
 ```bash
@@ -110,6 +112,8 @@ Running tests...
 - No REPL daemon needed
 - Existing test files work with minimal changes
 - Tests with `@load` directives or workspace bindings remain E2E (need REPL)
+
+**Stateful tests:** Tests that use variables across expressions (e.g., `counter := Counter spawn` then `counter increment`) compile to a single EUnit test function with sequential statements, preserving variable bindings. Each test file becomes one EUnit test with internal assertions. This matches EUnit's fixture pattern.
 
 **REPL session:**
 ```
