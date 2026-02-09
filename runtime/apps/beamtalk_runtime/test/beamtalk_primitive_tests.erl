@@ -557,6 +557,36 @@ value_type_responds_to_object_methods_test() ->
     end.
 
 %%% ============================================================================
+%%% BT-359: instVarAt: / instVarAt:put: on value types
+%%% ============================================================================
+
+value_type_inst_var_at_put_raises_immutable_value_test() ->
+    %% instVarAt:put: on a value type should raise immutable_value
+    Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
+    create_mock_value_type_module(mock_vt_ivar, 'MockVtIvar', []),
+    try
+        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar',
+                                       selector = 'instVarAt:put:'},
+                     beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99]))
+    after
+        code:purge(mock_vt_ivar),
+        code:delete(mock_vt_ivar)
+    end.
+
+value_type_inst_var_at_raises_immutable_value_test() ->
+    %% instVarAt: on a value type should raise immutable_value
+    Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
+    create_mock_value_type_module(mock_vt_ivar2, 'MockVtIvar2', []),
+    try
+        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar2',
+                                       selector = 'instVarAt:'},
+                     beamtalk_primitive:send(Self, 'instVarAt:', [x]))
+    after
+        code:purge(mock_vt_ivar2),
+        code:delete(mock_vt_ivar2)
+    end.
+
+%%% ============================================================================
 %%% Test Helpers
 %%% ============================================================================
 
