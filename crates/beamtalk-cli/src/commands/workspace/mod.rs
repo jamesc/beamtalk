@@ -121,13 +121,15 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
     }
 }
 
+/// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
+fn workspaces_base_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
+    Ok(home.join(".beamtalk").join("workspaces"))
+}
+
 /// Get the workspace directory for a given ID.
 pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
-    let beamtalk_dir = dirs::home_dir()
-        .ok_or_else(|| miette!("Could not determine home directory"))?
-        .join(".beamtalk");
-
-    Ok(beamtalk_dir.join("workspaces").join(workspace_id))
+    Ok(workspaces_base_dir()?.join(workspace_id))
 }
 
 /// Check if a workspace exists.
@@ -503,10 +505,7 @@ impl std::fmt::Display for WorkspaceStatus {
 
 /// List all workspaces found in `~/.beamtalk/workspaces/`.
 pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
-    let workspaces_dir = dirs::home_dir()
-        .ok_or_else(|| miette!("Could not determine home directory"))?
-        .join(".beamtalk")
-        .join("workspaces");
+    let workspaces_dir = workspaces_base_dir()?;
 
     if !workspaces_dir.exists() {
         return Ok(Vec::new());
@@ -567,6 +566,37 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     Ok(summaries)
 }
 
+/// Poll until a process exits or timeout is reached.
+///
+/// Uses `kill -0` to check process liveness without sending a signal.
+/// Returns `Ok(())` if the process exits within `timeout_secs`, or an error
+/// suggesting `--force` if it doesn't.
+#[cfg(unix)]
+fn wait_for_process_exit(pid: u32, timeout_secs: u64) -> Result<()> {
+    let interval = Duration::from_millis(100);
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+    while std::time::Instant::now() < deadline {
+        let status = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        match status {
+            Ok(s) if !s.success() => return Ok(()), // Process no longer exists
+            Err(_) => return Ok(()),                // kill command failed = process gone
+            _ => std::thread::sleep(interval),
+        }
+    }
+
+    Err(miette!(
+        "Process {} did not exit within {}s. Try --force to send SIGKILL.",
+        pid,
+        timeout_secs
+    ))
+}
+
 /// Stop a workspace by name or ID.
 ///
 /// Attempts graceful shutdown by killing the BEAM process PID.
@@ -606,6 +636,9 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                         info.pid
                     ));
                 }
+
+                // Wait for process to actually exit before cleaning up
+                wait_for_process_exit(info.pid, if force { 2 } else { 5 })?;
             }
 
             #[cfg(not(unix))]
@@ -615,7 +648,7 @@ pub fn stop_workspace(name_or_id: &str, force: bool) -> Result<()> {
                 ));
             }
 
-            // Clean up node.info
+            // Clean up node.info only after process has exited
             cleanup_stale_node_info(&workspace_id)?;
 
             println!("Workspace '{workspace_id}' stopped");
@@ -693,10 +726,7 @@ pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
 /// Scans all workspaces and compares canonicalized paths. Returns the first
 /// matching workspace ID, or `None` if no match is found.
 fn find_workspace_by_project_path(project_path: &Path) -> Result<Option<String>> {
-    let workspaces_dir = dirs::home_dir()
-        .ok_or_else(|| miette!("Could not determine home directory"))?
-        .join(".beamtalk")
-        .join("workspaces");
+    let workspaces_dir = workspaces_base_dir()?;
 
     if !workspaces_dir.exists() {
         return Ok(None);
