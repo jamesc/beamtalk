@@ -305,7 +305,14 @@ impl CoreErlangGenerator {
     fn is_primitive_type(class_name: &str) -> bool {
         matches!(
             class_name,
-            "Integer" | "Float" | "String" | "True" | "False" | "UndefinedObject" | "Block"
+            "Integer"
+                | "Float"
+                | "String"
+                | "True"
+                | "False"
+                | "UndefinedObject"
+                | "Block"
+                | "Symbol"
         )
     }
 
