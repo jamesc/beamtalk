@@ -18,7 +18,7 @@ sealed Object subclass: Block
   whileFalse: bodyBlock => @primitive whileFalse
   repeat => @primitive repeat
 
-  // Exception handling — selector-based
+  // Exception handling — selector-based (NOT YET IMPLEMENTED — no runtime handler)
   on: errorBlock => @primitive 'on:'
   ensure: cleanupBlock => @primitive 'ensure:'
 
