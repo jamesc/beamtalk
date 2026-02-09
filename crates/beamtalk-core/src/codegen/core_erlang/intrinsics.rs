@@ -706,14 +706,21 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in ")?;
 
-                        // Type guard: actors are tuples, primitives/value types are not
+                        // Type guard: full beamtalk_object check (is_tuple + size==4 + tag)
+                        // Same pattern as perform:withArguments: intrinsic
                         write!(
                             self.output,
-                            "case call 'erlang':'is_tuple'({receiver_var}) of \
-                             <'true'> when 'true' -> "
+                            "case case call 'erlang':'is_tuple'({receiver_var}) of \
+                             <'true'> when 'true' -> \
+                             case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
+                             <'true'> when 'true' -> \
+                             call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
+                             <_> when 'true' -> 'false' end \
+                             <_> when 'true' -> 'false' end of "
                         )?;
 
                         // Actor path: extract pid and send async message
+                        write!(self.output, "<'true'> when 'true' -> ")?;
                         write!(
                             self.output,
                             "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
@@ -772,14 +779,21 @@ impl CoreErlangGenerator {
                         self.generate_expression(&arguments[1])?;
                         write!(self.output, " in ")?;
 
-                        // Type guard: actors are tuples, primitives/value types are not
+                        // Type guard: full beamtalk_object check (is_tuple + size==4 + tag)
+                        // Same pattern as perform:withArguments: intrinsic
                         write!(
                             self.output,
-                            "case call 'erlang':'is_tuple'({receiver_var}) of \
-                             <'true'> when 'true' -> "
+                            "case case call 'erlang':'is_tuple'({receiver_var}) of \
+                             <'true'> when 'true' -> \
+                             case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
+                             <'true'> when 'true' -> \
+                             call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
+                             <_> when 'true' -> 'false' end \
+                             <_> when 'true' -> 'false' end of "
                         )?;
 
                         // Actor path: extract pid and send async message
+                        write!(self.output, "<'true'> when 'true' -> ")?;
                         write!(
                             self.output,
                             "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
