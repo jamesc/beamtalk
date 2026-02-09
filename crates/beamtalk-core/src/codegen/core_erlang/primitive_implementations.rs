@@ -525,11 +525,7 @@ fn generate_array_bif(output: &mut String, selector: &str, params: &[String]) ->
         }
         "at:" => {
             // 1-based indexing via lists:nth, with error handling
-            write!(
-                output,
-                "call 'beamtalk_list_ops':'at'(Self, {p0})"
-            )
-            .ok()?;
+            write!(output, "call 'beamtalk_list_ops':'at'(Self, {p0})").ok()?;
             Some(())
         }
         "includes:" => {
@@ -561,7 +557,11 @@ fn generate_array_bif(output: &mut String, selector: &str, params: &[String]) ->
         }
         "detect:ifNone:" => {
             let p1 = params.get(1).map_or("_Default", String::as_str);
-            write!(output, "call 'beamtalk_list_ops':'detect_if_none'(Self, {p0}, {p1})").ok()?;
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'detect_if_none'(Self, {p0}, {p1})"
+            )
+            .ok()?;
             Some(())
         }
         // Iteration — delegate to helper (block evaluation)
