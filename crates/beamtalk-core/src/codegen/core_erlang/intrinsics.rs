@@ -274,7 +274,9 @@ impl CoreErlangGenerator {
                     // Generate: case Receiver of pattern matching for primitives + record extraction
                     let recv_var = self.fresh_temp_var("Obj");
                     let int_var = self.fresh_temp_var("I");
+                    let float_var = self.fresh_temp_var("F");
                     let str_var = self.fresh_temp_var("S");
+                    let atom_var = self.fresh_temp_var("A");
                     let obj_var = self.fresh_temp_var("O");
                     let map_var = self.fresh_temp_var("M");
 
@@ -284,12 +286,14 @@ impl CoreErlangGenerator {
                         self.output,
                         " in case {recv_var} of \
                          <{int_var}> when call 'erlang':'is_integer'({int_var}) -> 'Integer' \
+                         <{float_var}> when call 'erlang':'is_float'({float_var}) -> 'Float' \
                          <{str_var}> when call 'erlang':'is_binary'({str_var}) -> 'String' \
                          <'true'> when 'true' -> 'True' \
                          <'false'> when 'true' -> 'False' \
                          <'nil'> when 'true' -> 'Nil' \
+                         <{atom_var}> when call 'erlang':'is_atom'({atom_var}) -> 'Symbol' \
                          <{map_var}> when call 'erlang':'is_map'({map_var}) -> call 'beamtalk_primitive':'class_of'({map_var}) \
-                         <{obj_var}> when 'true' -> call 'erlang':'element'(2, {obj_var}) \
+                         <{obj_var}> when 'true' -> call 'beamtalk_primitive':'class_of'({obj_var}) \
                          end"
                     )?;
                     Ok(Some(()))

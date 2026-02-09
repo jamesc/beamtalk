@@ -1,0 +1,64 @@
+// Symbol primitive tests (BT-273)
+// Symbols are atoms — interned identifiers used as selectors and names.
+
+// Class
+#foo class
+// => Symbol
+
+// Equality
+#foo = #foo
+// => true
+
+#foo = #bar
+// => false
+
+// Inequality
+#foo ~= #bar
+// => true
+
+#foo ~= #foo
+// => false
+
+// asString — returns name without # prefix
+#hello asString
+// => hello
+
+// printString — includes # prefix
+#hello printString
+// => #hello
+
+// describe — same as printString
+#world describe
+// => #world
+
+// asAtom — identity (symbols are atoms)
+#test asAtom
+// => test
+
+// hash — returns consistent integer
+#foo hash = #foo hash
+// => true
+
+// respondsTo:
+#foo respondsTo: #class
+// => true
+
+#foo respondsTo: #asString
+// => true
+
+#foo respondsTo: #nonExistentMethod
+// => false
+
+// Keyword symbols
+#setValue: class
+// => Symbol
+
+#setValue: asString
+// => setValue:
+
+// Operator symbols
+#+ class
+// => Symbol
+
+#+ asString
+// => +

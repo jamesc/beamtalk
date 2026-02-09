@@ -111,7 +111,7 @@ print_string(false) ->
 print_string(nil) ->
     <<"nil">>;
 print_string(X) when is_atom(X) ->
-    erlang:atom_to_binary(X, utf8);
+    iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
@@ -159,6 +159,8 @@ send(X, Selector, Args) when X =:= false ->
     beamtalk_false:dispatch(Selector, Args, X);
 send(nil, Selector, Args) ->
     beamtalk_undefined_object:dispatch(Selector, Args, nil);
+send(X, Selector, Args) when is_atom(X) ->
+    beamtalk_symbol:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_function(X) ->
     beamtalk_block:dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_tuple(X) ->
@@ -230,6 +232,8 @@ responds_to(X, Selector) when X =:= false ->
     beamtalk_false:has_method(Selector);
 responds_to(nil, Selector) ->
     beamtalk_undefined_object:has_method(Selector);
+responds_to(X, Selector) when is_atom(X) ->
+    beamtalk_symbol:has_method(Selector);
 responds_to(X, Selector) when is_function(X) ->
     beamtalk_block:has_method(Selector);
 responds_to(X, Selector) when is_tuple(X) ->
