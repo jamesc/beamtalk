@@ -18,8 +18,7 @@
 %%% | UndefinedObject | Object | beamtalk_undefined_object |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
-%%% | Beamtalk | Object | beamtalk_stdlib |
-%%% | Transcript | Object | transcript |
+%%% | Beamtalk | Actor | beamtalk_system_dictionary |
 %%% | File | Object | beamtalk_file |
 %%%
 %%% ## Usage
@@ -83,7 +82,6 @@ do_init() ->
         register_tuple_class(),
         register_beamtalk_class(),
         register_float_class(),
-        register_transcript_class(),
         register_file_class()
     ],
     %% Log any failures but don't crash
@@ -325,14 +323,15 @@ register_tuple_class() ->
 
 %%% ============================================================================
 %%% Beamtalk Global Class (System Reflection)
+%%% BT-376: Points to beamtalk_system_dictionary actor module (ADR 0010)
 %%% ============================================================================
 
 -spec register_beamtalk_class() -> {ok, atom()} | {error, atom(), term()}.
 register_beamtalk_class() ->
     ClassInfo = #{
         name => 'Beamtalk',
-        module => beamtalk_stdlib,  %% Methods implemented in this module
-        superclass => 'Object',
+        module => beamtalk_system_dictionary,
+        superclass => 'Actor',
         instance_methods => #{},
         class_methods => #{
             allClasses => #{arity => 0},
@@ -378,25 +377,6 @@ register_float_class() ->
         instance_variables => []
     },
     register_class('Float', ClassInfo).
-
-%%% ============================================================================
-%%% Transcript Class (Standard I/O)
-%%% ============================================================================
-
--spec register_transcript_class() -> {ok, atom()} | {error, atom(), term()}.
-register_transcript_class() ->
-    ClassInfo = #{
-        name => 'Transcript',
-        module => transcript,
-        superclass => 'Object',
-        instance_methods => #{},
-        class_methods => #{
-            'show:' => #{arity => 1},
-            cr => #{arity => 0}
-        },
-        instance_variables => []
-    },
-    register_class('Transcript', ClassInfo).
 
 %%% ============================================================================
 %%% File Class (BT-336)
