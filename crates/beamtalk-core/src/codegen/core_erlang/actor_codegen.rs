@@ -292,10 +292,12 @@ impl CoreErlangGenerator {
             self.push_scope();
             self.current_method_params.clear();
 
-            // Generate parameter list
+            // Generate parameter list and populate current_method_params
+            // (needed for @primitive codegen which reads current_method_params)
             let mut params = Vec::new();
             for param in &method.parameters {
                 let var_name = self.fresh_var(&param.name);
+                self.current_method_params.push(var_name.clone());
                 params.push(var_name);
             }
 

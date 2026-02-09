@@ -22,3 +22,6 @@ sealed Actor subclass: SealedCounter
 
   // Sealed method with parameter (tests argument passing in direct call)
   addAmount: amount => self.value := self.value + amount
+
+  // Pure self-send: calls getValue internally (tests __sealed_getValue direct call)
+  getValuePlusTen => (self getValue) + 10

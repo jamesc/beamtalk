@@ -41,6 +41,10 @@ c decrement await
 (c addAmount: 10) await
 // => 11
 
+// Internal self-send: getValuePlusTen calls self getValue (tests __sealed_* direct call)
+c getValuePlusTen await
+// => 21
+
 // Final state verification
 c getValue await
 // => 11
