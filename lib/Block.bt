@@ -24,5 +24,6 @@ sealed Object subclass: Block
 
   // Reflection
   arity => @primitive 'arity'
+  valueWithArguments: args => @primitive 'valueWithArguments:'
 
   describe => 'a Block'

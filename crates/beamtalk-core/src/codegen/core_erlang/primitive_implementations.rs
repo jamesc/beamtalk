@@ -72,6 +72,26 @@ fn generate_integer_bif(output: &mut String, selector: &str, params: &[String]) 
             write!(output, "call 'erlang':'float'(Self)").ok()?;
             Some(())
         }
+        // Bitwise operations
+        "bitAnd:" => write_binary_bif(output, "band", params),
+        "bitOr:" => write_binary_bif(output, "bor", params),
+        "bitXor:" => write_binary_bif(output, "bxor", params),
+        "bitShift:" => {
+            // Positive N shifts left, negative shifts right
+            let p0 = params.first()?;
+            write!(
+                output,
+                "case call 'erlang':'>='({p0}, 0) of \
+                 'true' when 'true' -> call 'erlang':'bsl'(Self, {p0}) \
+                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, {p0})) end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "bitNot" => {
+            write!(output, "call 'erlang':'bnot'(Self)").ok()?;
+            Some(())
+        }
         _ => None,
     }
 }
@@ -268,7 +288,6 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
 
 /// Block primitive implementations.
 fn generate_block_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
-    let _ = params; // Block BIFs don't use params currently
     match selector {
         "arity" => {
             // erlang:fun_info(Self, arity) returns {arity, N}
@@ -278,6 +297,11 @@ fn generate_block_bif(output: &mut String, selector: &str, params: &[String]) ->
                  call 'erlang':'element'(2, ArityTuple)"
             )
             .ok()?;
+            Some(())
+        }
+        "valueWithArguments:" => {
+            let p0 = params.first().map_or("_Args", String::as_str);
+            write!(output, "call 'erlang':'apply'(Self, {p0})").ok()?;
             Some(())
         }
         // on:do: and ensure: are structural intrinsics handled at the call site

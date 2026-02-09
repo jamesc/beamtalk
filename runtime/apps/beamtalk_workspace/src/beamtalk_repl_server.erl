@@ -673,12 +673,16 @@ term_to_json(Value) when is_atom(Value) ->
 term_to_json(Value) when is_binary(Value) ->
     Value;
 term_to_json(Value) when is_list(Value) ->
-    %% Could be a string or a list
-    case io_lib:printable_list(Value) of
-        true ->
-            list_to_binary(Value);
-        false ->
-            [term_to_json(E) || E <- Value]
+    %% Empty list should serialize as empty array, not empty string
+    case Value of
+        [] -> [];
+        _ ->
+            case io_lib:printable_list(Value) of
+                true ->
+                    list_to_binary(Value);
+                false ->
+                    [term_to_json(E) || E <- Value]
+            end
     end;
 term_to_json(Value) when is_pid(Value) ->
     %% Check if this is a Future process

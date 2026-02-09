@@ -111,3 +111,23 @@ true not not
 // Double negation of false
 false not not
 // => false
+
+// ===========================================================================
+// BOOLEAN OPERATIONS - xor:
+// ===========================================================================
+
+// true xor: true => false
+true xor: true
+// => false
+
+// true xor: false => true
+true xor: false
+// => true
+
+// false xor: true => true
+false xor: true
+// => true
+
+// false xor: false => false
+false xor: false
+// => false
