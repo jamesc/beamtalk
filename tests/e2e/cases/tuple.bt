@@ -1,0 +1,25 @@
+// Tuple primitive tests (BT-417)
+// Tuples are Erlang tuples — immutable fixed-size collections,
+// particularly useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+
+// ⚠️ NOTE: Beamtalk does not currently have tuple literal syntax.
+// Tuples are only accessible via Erlang interop or FFI calls.
+// Once tuple literals are added (e.g., {a, b, c} syntax), this file should be expanded
+// with comprehensive E2E tests for all Tuple methods.
+//
+// For now, Tuple functionality is tested via:
+// 1. Erlang runtime unit tests (runtime/apps/beamtalk_runtime/test/beamtalk_primitive_tests.erl)
+// 2. Manual REPL testing with Erlang interop
+//
+// Planned tests (when tuple literals are available):
+// - Size: {}, {a}, {a, b, c}
+// - Access: at: (1-based indexing)
+// - Pattern matching: isOk, isError
+// - Unwrapping: unwrap, unwrapOr:, unwrapOrElse:
+// - String conversion: asString
+// - Reflection: class, respondsTo:
+
+// Placeholder to satisfy E2E test parser
+1 + 1
+// => 2
+

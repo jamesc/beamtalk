@@ -43,6 +43,7 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Tuple" => generate_tuple_bif(output, selector, params),
         _ => None,
     }
 }
@@ -440,6 +441,64 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Tuple primitive implementations (BT-417).
+///
+/// Tuples are Erlang tuples — immutable fixed-size collections, particularly
+/// useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Size
+        "size" => {
+            write!(output, "call 'erlang':'tuple_size'(Self)").ok()?;
+            Some(())
+        }
+        // Access (1-based indexing)
+        "at:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'erlang':'element'({p0}, Self)").ok()?;
+            Some(())
+        }
+        // Pattern matching for Erlang result types
+        "isOk" => {
+            write!(
+                output,
+                "case Self of <{{'ok', _Value}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "isError" => {
+            write!(
+                output,
+                "case Self of <{{'error', _Reason}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        // Unwrapping — delegate to runtime for error handling
+        "unwrap" | "unwrapOr:" | "unwrapOrElse:" => {
+            // These methods have complex error handling logic, delegate to runtime
+            let args_str = if params.is_empty() {
+                "[]".to_string()
+            } else {
+                format!("[{}]", params.join(", "))
+            };
+            write!(
+                output,
+                "call 'beamtalk_tuple':'dispatch'('{selector}', {args_str}, Self)"
+            )
+            .ok()?;
+            Some(())
+        }
+        // Conversion — delegate to runtime for formatting
+        "asString" => {
+            write!(output, "call 'beamtalk_tuple':'dispatch'('asString', [], Self)").ok()?;
             Some(())
         }
         _ => None,
