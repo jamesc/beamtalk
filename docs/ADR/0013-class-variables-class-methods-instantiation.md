@@ -95,32 +95,57 @@ Object subclass: TranscriptStream
 - `self.uniqueInstance` accesses a class variable.
 - Class-side methods are stored in the class process and dispatched via `gen_server:call`.
 - Class-side `new` can be overridden (e.g., to prevent direct instantiation).
+- **Class-side methods are inherited** through the superclass chain, just like instance methods. If `Object` defines `class new`, all subclasses inherit it. A subclass can override with its own `class new`.
 
-### 3. Instantiation Protocol: new → basicNew → initialize
-
-**Chain**:
-```
-ClassName new        →  ClassName basicNew initialize
-ClassName new: args  →  ClassName basicNew initialize: args
-```
-
-- **`basicNew`**: Allocates the object (creates map with default field values for value types, or starts gen_server for actors). This is the primitive — users rarely override it.
-- **`initialize`**: Post-creation hook. Default implementation returns `self`. Users override to set up invariants.
-- **`new`**: The public API. Default implementation calls `basicNew initialize`. Can be overridden for singletons, factories, or to raise errors.
-
-**For value types** (Object subclasses):
+**Inheritance example**:
 ```beamtalk
-Point new            // → Point basicNew initialize → #{$beamtalk_class => 'Point', x => 0, y => 0}
-Point new: #{x => 3} // → Point basicNew initialize: #{x => 3} → #{$beamtalk_class => 'Point', x => 3, y => 0}
+Object subclass: TestCase
+  class allTestSelectors =>
+    self methods select: [:m | m startsWith: 'test']
+
+Object subclass: MyTest
+  // Inherits allTestSelectors from TestCase — no need to redefine
+  testAddition => self assert: (1 + 1) equals: 2
 ```
 
-**For actors** (Actor subclasses):
+**Implementation**: The existing `build_flattened_methods` machinery in `beamtalk_object_class.erl` already walks the superclass chain to pre-compute inherited method tables (O(1) lookup at dispatch time, with cascading invalidation when a parent class changes). Class-side methods reuse this same infrastructure — a `flattened_class_methods` table alongside the existing `flattened_methods` table. No metaclass processes needed; the class gen_server handles both instance-side and class-side dispatch.
+
+### 3. Instantiation Protocol
+
+Value types and actors have **different instantiation semantics**, reflecting the fundamental difference between immutable values and stateful processes.
+
+**Value types** (Object subclasses) — construction, not initialization:
 ```beamtalk
-Counter spawn        // Unchanged — actors use spawn, not new
-Counter new          // → Error: "Use spawn instead of new for actors"
+Point new              // → #{$beamtalk_class => 'Point', x => 0, y => 0}
+Point new: #{x => 3}   // → #{$beamtalk_class => 'Point', x => 3, y => 0}
+```
+Value types are immutable maps. `new` creates a map with default field values. `new:` merges provided arguments with defaults. There is no `initialize` hook — you can't mutate an immutable value after creation. This is the honest design: value types are **constructed**, not initialized.
+
+**Actors** (Actor subclasses) — initialization via gen_server:
+```beamtalk
+Counter spawn              // → starts gen_server, returns #beamtalk_object{}
+Counter spawnWith: #{n => 5} // → starts gen_server with initial state
+Counter new                // → Error: "Use spawn instead of new for actors"
 ```
 
-The actor `new` error is already implemented (codegen generates `beamtalk_error` with hint).
+Actors use `spawn`/`spawnWith:` (already implemented). The gen_server `init/1` callback serves as the initialization hook. The `new` error is already implemented (codegen generates `beamtalk_error` with hint).
+
+**Overriding `new` on the class side** (for singletons, factories):
+```beamtalk
+Object subclass: TranscriptStream
+  classVar: uniqueInstance = nil
+  
+  class new => self error: 'Use uniqueInstance instead'
+  class uniqueInstance =>
+    self.uniqueInstance ifNil: [self.uniqueInstance := super new].
+    self.uniqueInstance
+```
+
+Class-side `new` can be overridden via the `class` prefix. `super new` calls the default constructor. This enables singletons, object pools, and factory patterns without an `initialize` hook.
+
+**Why no `initialize` for value types?**
+
+In Smalltalk, `new → basicNew → initialize` works because `initialize` mutates the freshly allocated object. Beamtalk value types are immutable maps — `self.x := 5` inside `initialize` would be meaningless (or would require `initialize` to use functional-update semantics that differ from every other method). Rather than create a confusing special case, we accept that value types and actors have different construction models — just as they already have different instantiation syntax (`new` vs `spawn`).
 
 ### 4. Dynamic Class Dispatch
 
@@ -139,6 +164,43 @@ cls methods                           // → gen_server:call(ClassPid, methods)
 
 The class process (`beamtalk_object_class.erl`) already handles `new` in `handle_call` — the gap is only in **codegen** not generating the dynamic dispatch path.
 
+### 5. Virtual Metaclasses
+
+Smalltalk developers expect `Point class` to return a metaclass object that responds to messages. We achieve full Smalltalk metaclass API compatibility with **zero extra processes** using virtual metaclasses.
+
+**The trick**: The `#beamtalk_object{}` record is `{beamtalk_object, Class, ClassMod, Pid}`. The same class pid can be wrapped with different `Class` names to distinguish instance-side vs class-side dispatch:
+
+```beamtalk
+Point                   // → {beamtalk_object, 'Class', point, ClassPid}   (class reference)
+Point class             // → {beamtalk_object, 'Point class', point, ClassPid}  (metaclass reference — SAME pid)
+```
+
+When the class process receives a message, it checks the `Class` field in the `#beamtalk_object{}`:
+- **`'Class'` or class name**: dispatch through `flattened_class_methods` (class-side protocol — `new`, `uniqueInstance`, user-defined class methods)
+- **`'X class'` (metaclass)**: dispatch through metaclass protocol (`methods` returns class-side selectors, `superclass` returns parent metaclass, `class` returns `'Metaclass'`)
+
+**Full Smalltalk API**:
+```beamtalk
+Point class                    // → {beamtalk_object, 'Point class', point, ClassPid}
+Point class methods            // → class-side method selectors
+Point class superclass         // → 'Object class' (metaclass of parent)
+Point class class              // → 'Metaclass'
+Point class allTestSelectors   // → inherited class-side method works
+```
+
+**What this gives us**:
+- `x class` returns a real object, not an atom — you can send messages to it
+- Class-side method lookup via `flattened_class_methods` with inheritance
+- `superclass` on the metaclass mirrors the instance-side hierarchy
+- Compatible with Smalltalk reflection idioms
+
+**What this does NOT give us** (deliberate simplification):
+- No `Metaclass` instances — `Metaclass` is a fixed class, not user-extensible
+- No `Point class class class` infinite tower — terminates at `Metaclass`
+- No per-metaclass state (metaclass instance variables) — class variables serve this role
+
+This covers ~95% of Smalltalk metaclass usage. The remaining 5% (custom metaclasses, metaclass mixins) is esoteric and can be added later if needed.
+
 ## Prior Art
 
 ### Smalltalk-80 / Pharo
@@ -147,11 +209,11 @@ The class process (`beamtalk_object_class.erl`) already handles `new` in `handle
 
 **Class-side methods** are defined on the metaclass. Every class `Foo` has a metaclass `Foo class`. Method lookup on the class side walks `Foo class → FooSuper class → ... → Class → Behavior → Object`.
 
-**Instantiation**: `new → basicNew → initialize` chain. `basicNew` is a primitive that allocates memory. `initialize` is a hook.
+**Instantiation**: `new → basicNew → initialize` chain. `basicNew` is a primitive that allocates memory. `initialize` is a hook that mutates the fresh object.
 
-**What we adopt**: The `new → basicNew → initialize` chain, class-side method concept, and class instance variables (not shared class variables).
+**What we adopt**: Class-side method inheritance, class instance variables (not shared class variables), and `new` as the public constructor API.
 
-**What we adapt**: No metaclass tower. Class-side methods live on the class gen_server process directly. Simpler model that works well on BEAM.
+**What we adapt**: No metaclass *processes* — virtual metaclasses via the same class gen_server process with dual dispatch tables. No `initialize` for value types (they're immutable maps, not mutable heap objects). Metaclass tower terminates at `Metaclass` (no infinite regression).
 
 ### Erlang/OTP
 
@@ -210,11 +272,11 @@ Class-side state via "class declarations" in the class header. Modules are insta
 
 **Response**: The performance argument is real but misplaced for class variables. Class variables serve patterns like singletons (read once, cache), instance counting (low frequency), and configuration (rarely changes) — not hot-path per-message state. The gen_server approach gives us: (1) crash recovery via supervision (ETS tables die with their owner), (2) consistent mutation semantics (no race conditions), (3) identical model to actor state (less to learn). If profiling reveals a bottleneck, we can optimize specific patterns to ETS/persistent_term without changing the language semantics — the storage is an implementation detail hidden behind `classVar:`.
 
-### "Full metaclass tower (Smalltalk-80 style) instead of flat class-side methods"
+### "Full metaclass tower (Smalltalk-80 style) instead of virtual metaclasses"
 
-**Smalltalk developer**: "The metaclass hierarchy is what makes Smalltalk's class system powerful. `TestCase class >> allTestSelectors` is inherited by `MyTestCase class` automatically. Without metaclass inheritance, every framework that needs class-side hooks (SUnit, Seaside, Magritte) must reinvent method discovery. You're building half a class system. Also, in Pharo, class instance variables ARE metaclass instance variables — your `classVar:` is actually metaclass state, you're just not calling it that."
+**Smalltalk developer**: "Virtual metaclasses are clever but they're a lie. `Point class` doesn't return a real metaclass object — it returns the same pid with a different tag. You can't add metaclass-specific instance variables. You can't define methods on individual metaclasses independently. In Pharo, I can do `Point class addInstVarNamed: 'cache'` to add a class instance variable dynamically. Your virtual metaclasses can't do that. You're at 95% compatibility, but the 5% you're missing is exactly the 5% that metaprogramming frameworks need."
 
-**Response**: This is the strongest argument against our approach. Metaclass inheritance *is* genuinely useful for frameworks. However: (1) We can add metaclass inheritance later (ADR 0005 Phase 2) without breaking `classVar:` or `class` method syntax — the syntax works with either a flat model or a metaclass tower. (2) The metaclass tower doubles the number of processes and complicates method lookup for a feature most user code never exercises. (3) Beamtalk's primary audience is building BEAM applications, not building Smalltalk frameworks — we optimize for the common case. (4) `perform:` + `methods` already enables framework-style method discovery without metaclass inheritance.
+**Response**: This is the strongest remaining argument. The 5% gap (custom metaclass state, per-metaclass method definitions, metaclass mixins) does matter for advanced frameworks. However: (1) The virtual metaclass approach is forward-compatible — if we later need real metaclass processes, the syntax (`class` prefix, `classVar:`) and the API (`Point class methods`, `Point class superclass`) don't change. Only the runtime implementation changes. (2) Zero extra processes means zero extra supervision complexity, zero extra memory, and zero extra failure modes. (3) The 95% we cover handles SUnit, singleton, factory, and REPL introspection — the use cases driving this ADR. We can promote virtual metaclasses to real metaclass processes later if the 5% gap becomes a blocker.
 
 ### "`classVar:` is misleading — it's NOT Smalltalk classVariableNames:"
 
@@ -273,20 +335,23 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 
 ### Positive
 - Enables singleton pattern, factory pattern, and REPL class introspection.
-- `new → basicNew → initialize` gives users control over object construction.
+- Virtual metaclasses give ~95% Smalltalk metaclass compatibility with zero extra processes.
+- Class-side method inheritance enables framework patterns (SUnit, Seaside-style).
 - Dynamic class dispatch makes classes true first-class objects.
-- Builds on existing gen_server infrastructure — minimal new runtime concepts.
+- Builds on existing gen_server infrastructure — `build_flattened_methods` reused for class-side table.
 - `classVar:` is simple to parse (same pattern as `state:`).
+- Honest split: value types are constructed (`new`/`new:`), actors are initialized (`spawn`). No pretending immutable maps support mutation hooks.
 
 ### Negative
 - Class variable access from instance methods needs to call the class process (`gen_server:call`), adding ~1μs latency per access. This is acceptable for the patterns class variables serve (configuration, caching, singletons) but not for hot-path per-message state.
 - Two kinds of `self` (class-side vs instance-side) could confuse newcomers, though the `class` prefix makes context clear.
 - Parser, AST, codegen, and runtime all need changes — medium-sized cross-cutting feature.
+- Value types not having `initialize` is a divergence from Smalltalk that will surprise Smalltalkers expecting `new → basicNew → initialize` everywhere.
 
 ### Neutral
-- Does not introduce metaclass hierarchy (deferred to ADR 0005 Phase 2).
-- Compatible with future metaclass addition — class-side methods would move from class gen_server to metaclass process.
 - Does not change actor instantiation (`spawn` stays unchanged).
+- Virtual metaclasses replace ADR 0005 Phase 2 — no separate metaclass work needed later.
+- Value types and actors have different construction models (`new`/`new:` vs `spawn`/`spawnWith:`), matching their existing semantic split.
 
 ## Implementation
 
@@ -296,20 +361,27 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 **Runtime**: `beamtalk_object_class` already implements `new/1`, `new/2`, `methods/1`, `superclass/1`.
 **Test**: `cls := Beamtalk classNamed: #Point. cls new` works end-to-end.
 
-### Phase 2: Class-Side Methods + `initialize` (BT-246 continued)
+### Phase 2: Class-Side Methods with Inheritance (BT-246 continued)
 **Parser**: Add `class` prefix token to method definitions. Store separately in AST (`class_methods: Vec<MethodDefinition>`).
-**Codegen**: Generate class-side methods as `handle_call` handlers in the class module (or register them via `beamtalk_object_class:put_method/3`).
-**Runtime**: Route class-side message sends to the class process via `gen_server:call`.
-**Test**: `TranscriptStream uniqueInstance` returns singleton.
+**AST**: Add `class_methods: Vec<MethodDefinition>` to `ClassDefinition`.
+**Codegen**: Generate class-side methods registered via `beamtalk_object_class` during class bootstrap.
+**Runtime**: Add `class_methods` and `flattened_class_methods` fields to `#class_state{}`. Reuse `build_flattened_methods` for class-side table. Route class-side message sends to the class process via `gen_server:call`, dispatching through `flattened_class_methods`.
+**Test**: `TranscriptStream uniqueInstance` returns singleton. `MyTest allTestSelectors` inherits from `TestCase`.
 
-### Phase 3: Class Variables
+### Phase 3: Virtual Metaclasses
+**Codegen**: Change `class` intrinsic to return `#beamtalk_object{class='X class', pid=ClassPid}` instead of an atom.
+**Runtime**: Class process checks `Class` field to distinguish class-side vs metaclass-side dispatch. Metaclass `superclass` returns parent's metaclass name. Metaclass `class` returns `'Metaclass'`.
+**Bootstrap**: Register `Metaclass` class in bootstrap (~50 lines).
+**Test**: `Point class methods` returns class-side selectors. `Point class superclass` returns `'Object class'`. `Point class class` returns `'Metaclass'`.
+
+### Phase 4: Class Variables
 **Parser**: Add `classVar:` declaration (same as `state:` but different AST node).
 **AST**: Add `class_variables: Vec<StateDeclaration>` to `ClassDefinition`.
 **Codegen**: Initialize class variables in the class gen_server `init/1`. Generate `gen_server:call` for class variable access from class-side methods.
 **Runtime**: Add `class_vars` field to `#class_state{}`. Handle `{get_class_var, Name}` and `{set_class_var, Name, Value}` in `handle_call`.
 **Test**: Singleton pattern with class variable storage.
 
-### Phase 4: Instance-Side Access to Class Variables
+### Phase 5: Instance-Side Access to Class Variables
 **Design decision**: How instances read class variables. Options:
 - `self class varName` — explicit, verbose
 - `ClassName varName` — requires compile-time class knowledge  
