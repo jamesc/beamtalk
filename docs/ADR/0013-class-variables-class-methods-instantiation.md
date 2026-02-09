@@ -150,6 +150,8 @@ Counter new                // → Error: "Use spawn instead of new for actors"
 
 **Default `initialize`**: If no `initialize` method is defined, the codegen skips the post-spawn call — `spawn` returns immediately after `gen_server:start_link`. This preserves backward compatibility with existing actors.
 
+**`initialize` inheritance**: `initialize` is a regular instance method, so normal `super` dispatch applies. If `LoggingCounter` extends `Counter` and both define `initialize`, `LoggingCounter`'s `initialize` should call `super initialize` to run the parent's initialization. This follows the same pattern as Smalltalk and other OO languages.
+
 **`initialize` with arguments** (via `spawnWith:`):
 ```beamtalk
 Actor subclass: Server
@@ -172,7 +174,9 @@ Object subclass: TranscriptStream
     self.uniqueInstance
 ```
 
-Class-side `new` can be overridden via the `class` prefix. `super new` calls the default constructor. This enables singletons, object pools, and factory patterns.
+Class-side `new` can be overridden via the `class` prefix. `super new` calls the parent class's class-side `new`, which by default constructs a value type instance (immutable map) or spawns an actor (gen_server process). This enables singletons, object pools, and factory patterns.
+
+**Default class-side `new`**: Every class inherits a default `class new` from `Object` (for value types) or `Actor` (for actors). Object's default `class new` constructs an immutable map with default field values. Actor's default `class new` raises an error ("Use spawn instead"). These defaults can be overridden per-class.
 
 **Why no `initialize` for value types?**
 
@@ -218,8 +222,8 @@ Smalltalk developers expect `Point class` to return a metaclass object that resp
 **The trick**: The `#beamtalk_object{}` record is `{beamtalk_object, Class, ClassMod, Pid}`. The same class pid can be wrapped with different `Class` names to distinguish instance-side vs class-side dispatch:
 
 ```beamtalk
-Point                   // → {beamtalk_object, 'Class', point, ClassPid}   (class reference)
-Point class             // → {beamtalk_object, 'Point class', point, ClassPid}  (metaclass reference — SAME pid)
+cls := (Beamtalk classNamed: #Point) await  // → {beamtalk_object, 'Point', point, ClassPid}  (class object)
+cls class                                    // → {beamtalk_object, 'Point class', point, ClassPid}  (metaclass — SAME pid)
 ```
 
 When the class process receives a message, it checks the `Class` field in the `#beamtalk_object{}`:
@@ -228,11 +232,11 @@ When the class process receives a message, it checks the `Class` field in the `#
 
 **Full Smalltalk API**:
 ```beamtalk
-Point class                    // → {beamtalk_object, 'Point class', point, ClassPid}
-Point class methods            // → class-side method selectors
-Point class superclass         // → 'Object class' (metaclass of parent)
-Point class class              // → 'Metaclass'
-Point class allTestSelectors   // → inherited class-side method works
+cls := (Beamtalk classNamed: #Point) await
+cls class                          // → {beamtalk_object, 'Point class', point, ClassPid}
+cls class methods                  // → class-side method selectors
+cls class superclass               // → 'Object class' (metaclass of parent)
+cls class class                    // → 'Metaclass'
 ```
 
 **What this gives us**:
@@ -260,7 +264,7 @@ This covers ~95% of Smalltalk metaclass usage. The remaining 5% (custom metaclas
 
 **What we adopt**: Class-side method inheritance, class instance variables (not shared class variables), and `new` as the public constructor API.
 
-**What we adapt**: No metaclass *processes* — virtual metaclasses via the same class gen_server process with dual dispatch tables. No `initialize` for value types (they're immutable maps, not mutable heap objects). Metaclass tower terminates at `Metaclass` (no infinite regression).
+**What we adapt**: No metaclass *processes* — virtual metaclasses via the same class gen_server process with dual dispatch tables. No `initialize` for value types (they're immutable maps, not mutable heap objects). Actor `initialize` runs as a first-message-after-spawn rather than an allocation hook. Metaclass tower terminates at `Metaclass` (no infinite regression).
 
 ### Erlang/OTP
 
@@ -453,10 +457,10 @@ This is a viable incremental approach. The risk is that Phase 1 without Phase 2-
 **Test**: `TranscriptStream uniqueInstance` returns singleton. `MyTest allTestSelectors` inherits from `TestCase`. Actor with `initialize` sets up derived state after spawn.
 
 ### Phase 3: Virtual Metaclasses
-**Codegen**: Change `class` intrinsic to return `#beamtalk_object{class='X class', pid=ClassPid}` instead of an atom.
+**Codegen**: Change `class` intrinsic to return `#beamtalk_object{class='X class', class_mod=Mod, pid=ClassPid}` instead of an atom. For actors, the class pid is already available (element 4 of `#beamtalk_object{}`). For value types (primitives, maps), look up the class process via `beamtalk_object_class:whereis_class(ClassName)`.
 **Runtime**: Class process checks `Class` field to distinguish class-side vs metaclass-side dispatch. Metaclass `superclass` returns parent's metaclass name. Metaclass `class` returns `'Metaclass'`.
 **Bootstrap**: Register `Metaclass` class in bootstrap (~50 lines).
-**Test**: `Point class methods` returns class-side selectors. `Point class superclass` returns `'Object class'`. `Point class class` returns `'Metaclass'`.
+**Test**: `p := Point new. p class methods` returns class-side selectors. `p class superclass` returns `'Object class'`. `p class class` returns `'Metaclass'`.
 
 ### Phase 4: Class Variables
 **Parser**: Add `classVar:` declaration (same as `state:` but different AST node).
