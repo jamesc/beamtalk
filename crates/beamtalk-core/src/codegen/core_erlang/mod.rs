@@ -648,7 +648,8 @@ impl CoreErlangGenerator {
             // Chain is incomplete (superclass not in hierarchy) or empty with
             // non-Object superclass. Default to actor for backward compatibility
             // (e.g. compiling subclass files independently without parent).
-            class.superclass_name() != "Object"
+            // Root classes (superclass "none") are value types, not actors.
+            !matches!(class.superclass_name(), "Object" | "none")
         } else {
             true
         }
@@ -3833,6 +3834,31 @@ end
         assert!(
             !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
             "Integer subclass should be value type (chain reaches Object)"
+        );
+    }
+
+    #[test]
+    fn test_is_actor_class_root_class_is_value_type() {
+        // Root class (superclass: None → "none") should be value type, not actor.
+        let class = ClassDefinition {
+            name: Identifier::new("ProtoObject", Span::new(0, 0)),
+            superclass: None,
+            is_abstract: true,
+            is_sealed: false,
+            state: vec![],
+            methods: vec![],
+            span: Span::new(0, 0),
+        };
+        let module = Module {
+            classes: vec![class],
+            expressions: vec![],
+            span: Span::new(0, 0),
+            leading_comments: vec![],
+        };
+        let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
+        assert!(
+            !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
+            "Root class (nil superclass) should be value type"
         );
     }
 

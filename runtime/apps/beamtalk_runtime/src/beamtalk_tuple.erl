@@ -73,7 +73,7 @@ has_method(Selector) ->
 is_builtin('class') -> true;
 is_builtin('respondsTo') -> true;
 is_builtin('perform') -> true;
-is_builtin('perform:withArgs:') -> true;
+is_builtin('perform:withArguments:') -> true;
 is_builtin('size') -> true;
 is_builtin('at:') -> true;
 is_builtin('isOk') -> true;
@@ -102,14 +102,14 @@ builtin_dispatch('respondsTo', [Selector], _X) when is_atom(Selector) ->
 %% Dynamic message send
 builtin_dispatch('perform', [TargetSelector], X) when is_atom(TargetSelector) ->
     builtin_dispatch(TargetSelector, [], X);
-builtin_dispatch('perform:withArgs:', [TargetSelector, ArgList], X) 
+builtin_dispatch('perform:withArguments:', [TargetSelector, ArgList], X) 
   when is_atom(TargetSelector), is_list(ArgList) ->
     builtin_dispatch(TargetSelector, ArgList, X);
-builtin_dispatch('perform:withArgs:', [_TargetSelector, ArgList], _X)
+builtin_dispatch('perform:withArguments:', [_TargetSelector, ArgList], _X)
   when not is_list(ArgList) ->
     %% Type error: ArgList must be a list (consistent with actor behavior)
     Error0 = beamtalk_error:new(type_error, 'Tuple'),
-    Error = beamtalk_error:with_selector(Error0, 'perform:withArgs:'),
+    Error = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
     error(Error);
 
 
