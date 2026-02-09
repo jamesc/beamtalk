@@ -294,7 +294,9 @@ handle_class_named(ClassName) when is_atom(ClassName) ->
             nil;
         Pid when is_pid(Pid) ->
             ModuleName = beamtalk_object_class:module_name(Pid),
-            {beamtalk_object, ClassName, ModuleName, Pid}
+            %% BT-246: Use class object tag for is_class_object detection
+            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
     end;
 handle_class_named(_ClassName) ->
     Error0 = beamtalk_error:new(type_error, 'SystemDictionary'),

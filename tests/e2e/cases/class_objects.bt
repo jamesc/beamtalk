@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for first-class class objects (BT-246 / ADR 0013 Phase 1)
+//
+// Tests dynamic class dispatch: storing class objects in variables
+// and sending messages to them at runtime, rather than only supporting
+// literal class references like `Point new`.
+//
+// Key principle from ADR 0013: "runtime dispatch is the contract,
+// direct calls are the optimization."
+
+// @load lib/SystemDictionary.bt
+// @load tests/e2e/fixtures/point.bt
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — VALUE TYPES
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Store class in variable and send 'new' dynamically
+// ---------------------------------------------------------------------------
+
+cls := (Beamtalk classNamed: #Point) await
+// => _
+
+cls new
+// => {"$beamtalk_class":"Point","x":0,"y":0}
+
+// ---------------------------------------------------------------------------
+// Dynamic new: with initialization arguments
+// NOTE: Map literal with identifier keys (#{x => 3}) has parse issues (BT-213).
+// Using symbol keys (#x) once supported, or skipping for now.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Dynamic dispatch returns usable value (not a future)
+// ---------------------------------------------------------------------------
+
+cls := (Beamtalk classNamed: #Point) await
+// => _
+
+p := cls new
+// => _
+
+p getX
+// => 0
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH — REFLECTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Dynamic methods call
+// ---------------------------------------------------------------------------
+
+cls := (Beamtalk classNamed: #Point) await
+// => _
+
+cls methods
+// => _
+
+// ---------------------------------------------------------------------------
+// Dynamic superclass call
+// ---------------------------------------------------------------------------
+
+cls := (Beamtalk classNamed: #Point) await
+// => _
+
+cls superclass
+// => Object
+
+// ---------------------------------------------------------------------------
+// Dynamic class_name call
+// ---------------------------------------------------------------------------
+
+cls := (Beamtalk classNamed: #Point) await
+// => _
+
+cls class_name
+// => Point

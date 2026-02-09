@@ -118,6 +118,9 @@ impl CoreErlangGenerator {
         // All classes export superclass/0 for reflection
         exports.push("'superclass'/0".to_string());
 
+        // BT-246: Value types register with class system for dynamic dispatch
+        exports.push("'register_class'/0".to_string());
+
         // Module header
         writeln!(
             self.output,
@@ -125,7 +128,11 @@ impl CoreErlangGenerator {
             self.module_name,
             exports.join(", ")
         )?;
-        writeln!(self.output, "  attributes []")?;
+        // BT-246: on_load registers the class process
+        writeln!(
+            self.output,
+            "  attributes ['on_load' = [{{'register_class', 0}}]]"
+        )?;
         writeln!(self.output)?;
 
         // Generate new/0 - creates instance with default field values
@@ -160,6 +167,10 @@ impl CoreErlangGenerator {
             self.output,
             "'superclass'/0 = fun () -> '{superclass_atom}'"
         )?;
+        writeln!(self.output)?;
+
+        // BT-246: Register value type class with the class system for dynamic dispatch
+        self.generate_register_class(module)?;
         writeln!(self.output)?;
 
         // Module end

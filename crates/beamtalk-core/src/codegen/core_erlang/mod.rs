@@ -3453,10 +3453,10 @@ end
             "Should call beamtalk_class:all_classes. Got:\n{code}"
         );
 
-        // Should wrap results in #beamtalk_object{} records
+        // Should wrap results in #beamtalk_object{} records with class_object_tag
         assert!(
-            code.contains("{'beamtalk_object', ClassName, ClassModName, Pid}"),
-            "Should wrap in beamtalk_object records. Got:\n{code}"
+            code.contains("{'beamtalk_object', ClassTag, ClassModName, Pid}"),
+            "Should wrap in beamtalk_object records with ClassTag. Got:\n{code}"
         );
 
         // Should implement classNamed: to call whereis_class

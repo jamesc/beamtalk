@@ -79,7 +79,10 @@
     super_dispatch/3,
     class_name/1,
     module_name/1,
-    create_subclass/3
+    create_subclass/3,
+    is_class_object/1,
+    class_send/3,
+    class_object_tag/1
 ]).
 
 %% gen_server callbacks
@@ -175,6 +178,56 @@ class_name(ClassPid) ->
 -spec module_name(pid()) -> atom().
 module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
+
+%% @doc Check if a value is a class object (BT-246).
+%%
+%% Class objects are beamtalk_object records whose class name ends with " class".
+%% This distinguishes class objects from actor instances at runtime.
+-spec is_class_object(term()) -> boolean().
+is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
+    lists:suffix(" class", atom_to_list(Class));
+is_class_object(_) ->
+    false.
+
+%% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
+%%
+%% Dispatches messages to the class gen_server, translating the Beamtalk
+%% message protocol ({Selector, Args}) to the class process message format.
+%% Unwraps {ok, Value} / {error, Error} results for seamless integration.
+-spec class_send(pid(), atom(), list()) -> term().
+class_send(ClassPid, 'new', []) ->
+    case gen_server:call(ClassPid, {new, []}) of
+        {ok, Obj} -> Obj;
+        {error, Error} -> error(Error)
+    end;
+class_send(ClassPid, 'new:', [Map]) ->
+    case gen_server:call(ClassPid, {new, [Map]}) of
+        {ok, Obj} -> Obj;
+        {error, Error} -> error(Error)
+    end;
+class_send(ClassPid, methods, []) ->
+    gen_server:call(ClassPid, methods);
+class_send(ClassPid, superclass, []) ->
+    gen_server:call(ClassPid, superclass);
+class_send(ClassPid, class_name, []) ->
+    gen_server:call(ClassPid, class_name);
+class_send(ClassPid, module_name, []) ->
+    gen_server:call(ClassPid, module_name);
+class_send(ClassPid, Selector, _Args) ->
+    ClassName = gen_server:call(ClassPid, class_name),
+    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
+    error(Error2).
+
+%% @doc Convert a class name atom to a class object tag (BT-246).
+%%
+%% Appends " class" to the atom, e.g. 'Point' -> 'Point class'.
+%% Used by codegen to create class object records with the right tag
+%% for is_class_object/1 detection.
+-spec class_object_tag(atom()) -> atom().
+class_object_tag(ClassName) when is_atom(ClassName) ->
+    list_to_atom(atom_to_list(ClassName) ++ " class").
 
 %% @doc Get a compiled method object.
 %%
@@ -463,18 +516,39 @@ handle_call({new, Args}, _From, #class_state{
                     {reply, Error, State}
             end;
         _ ->
-            %% Compiled class - use module's spawn function
-            case erlang:apply(Module, spawn, [Args]) of
-                {ok, Pid} ->
-                    %% Wrap in beamtalk_object record for consistency
-                    Obj = #beamtalk_object{
-                        class = ClassName,
-                        class_mod = Module,
-                        pid = Pid
-                    },
-                    {reply, {ok, Obj}, State};
-                Error ->
-                    {reply, Error, State}
+            %% Compiled class — detect value type vs actor (BT-246 / ADR 0013)
+            %% Value types export new/0 (returns tagged map directly).
+            %% Actors export spawn/1 (returns {ok, Pid}).
+            case erlang:function_exported(Module, new, 0) of
+                true ->
+                    %% Value type: call Module:new/0 or Module:new/1
+                    Result = case Args of
+                        [] ->
+                            erlang:apply(Module, new, []);
+                        [InitMap] when is_map(InitMap) ->
+                            case erlang:function_exported(Module, new, 1) of
+                                true ->
+                                    erlang:apply(Module, new, [InitMap]);
+                                false ->
+                                    erlang:apply(Module, new, [])
+                            end;
+                        _ ->
+                            erlang:apply(Module, new, [])
+                    end,
+                    {reply, {ok, Result}, State};
+                false ->
+                    %% Actor class: use module's spawn function
+                    case erlang:apply(Module, spawn, [Args]) of
+                        {ok, Pid} ->
+                            Obj = #beamtalk_object{
+                                class = ClassName,
+                                class_mod = Module,
+                                pid = Pid
+                            },
+                            {reply, {ok, Obj}, State};
+                        Error ->
+                            {reply, Error, State}
+                    end
             end
     end;
 

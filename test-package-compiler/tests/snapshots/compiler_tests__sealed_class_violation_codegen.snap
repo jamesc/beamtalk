@@ -2,8 +2,8 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'superclass'/0]
-  attributes []
+module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'superclass'/0, 'register_class'/0]
+  attributes ['on_load' = [{'register_class', 0}]]
 
 'new'/0 = fun () ->
     ~{'$beamtalk_class' => 'MyInt'}~
@@ -18,5 +18,32 @@ module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'superclass'/0]
 call 'erlang':'*'(Self, 2)
 
 'superclass'/0 = fun () -> 'Integer'
+
+'register_class'/0 = fun () ->
+    try
+        let _Reg0 = case call 'beamtalk_object_class':'start_link'('MyInt', ~{
+            'name' => 'MyInt',
+            'module' => 'sealed_class_violation',
+            'superclass' => 'Integer',
+            'is_sealed' => 'false',
+            'is_abstract' => 'false',
+            'instance_methods' => ~{'doubled' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
+            'instance_variables' => [],
+            'class_methods' => ~{
+                'new' => ~{'arity' => 0}~,
+                'new:' => ~{'arity' => 1}~,
+                'superclass' => ~{'arity' => 0}~
+            }~,
+            'method_source' => ~{'doubled' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#}~
+        }~) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'
+            <{'error', _Reason0}> when 'true' -> 'ok'
+        end
+
+        in 'ok'
+    of RegResult -> RegResult
+    catch <CatchType, CatchError, CatchStack> -> 'ok'
+
 
 end
