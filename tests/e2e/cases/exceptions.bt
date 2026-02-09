@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for exception handling (BT-338)
+// Tests Block on:do:, ensure:, and Exception object inspection.
+
+// ===========================================================================
+// BLOCK on:do: — BASIC EXCEPTION CATCHING
+// ===========================================================================
+
+// Catch division by zero with Exception class
+[1 / 0] on: Exception do: [:e | 42]
+// => 42
+
+// No exception — returns block value normally
+[3 + 4] on: Exception do: [:e | 0]
+// => 7
+
+// Catch does_not_understand error
+[42 nonExistentMethod] on: Exception do: [:e | 99]
+// => 99
+
+// nil as ExClass — catch all (backwards compat)
+[1 / 0] on: nil do: [:e | 'nil catches all']
+// => nil catches all
+
+// ===========================================================================
+// EXCEPTION OBJECT FIELD ACCESS
+// ===========================================================================
+
+// Access exception message from caught error
+[1 / 0] on: Exception do: [:e | e message]
+// => _
+
+// Access exception kind from caught error
+[42 noSuchMethod] on: Exception do: [:e | e kind]
+// => does_not_understand
+
+// Access exception class from does_not_understand
+[42 noSuchMethod] on: Exception do: [:e | e errorClass]
+// => Integer
+
+// Access exception selector from does_not_understand
+[42 noSuchMethod] on: Exception do: [:e | e selector]
+// => noSuchMethod
+
+// Exception printString returns formatted error
+[42 noSuchMethod] on: Exception do: [:e | e printString]
+// => _
+
+// Exception hint — nil when no hint available
+[1 / 0] on: Exception do: [:e | e hint]
+// => _
+
+// ===========================================================================
+// BLOCK ensure: — CLEANUP HANDLING
+// ===========================================================================
+
+// ensure: returns block value when no error
+[42] ensure: [nil]
+// => 42
+
+// ensure: runs cleanup even when block succeeds
+[3 + 4] ensure: [1 + 1]
+// => 7
+
+// ensure: re-raises error after running cleanup
+// (wrap in on:do: to catch the re-raised error)
+[[1 / 0] ensure: [nil]] on: Exception do: [:e | 99]
+// => 99
+
+// ===========================================================================
+// NESTED EXCEPTION HANDLING
+// ===========================================================================
+
+// Nested on:do: — inner handler catches
+[[1 / 0] on: Exception do: [:e | 42]] on: Exception do: [:e | 0]
+// => 42
+
+// Handler can return any type
+[1 / 0] on: Exception do: [:e | 'caught an error']
+// => caught an error

@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Error - Non-resumable exceptions
+//
+// Subclass of Exception for errors that cannot be resumed.
+// Maps to Erlang's error class in try/catch.
+
+Exception subclass: Error
+  describe => 'an Error'
