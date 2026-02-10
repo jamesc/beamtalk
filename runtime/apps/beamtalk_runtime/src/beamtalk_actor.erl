@@ -66,6 +66,25 @@
 %%% - If not found, calls doesNotUnderstand handler if defined
 %%% - If no doesNotUnderstand handler, returns {error, {unknown_message, Selector}, State}
 %%%
+%%% ## Spawn Architecture (BT-411)
+%%%
+%%% There are multiple paths that create actor processes. All user-facing
+%%% paths call `Module:spawn/0` or `Module:spawn/1`, which handles the
+%%% initialize protocol (calling the actor's `initialize` method after
+%%% gen_server:start_link succeeds).
+%%%
+%%% | Path | Entry | Context | Initialize? |
+%%% |------|-------|---------|-------------|
+%%% | Module:spawn/0,1 | gen_server:start_link + gen_server:call(init) | Batch/tests | Yes |
+%%% | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
+%%% | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
+%%% | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
+%%%
+%%% Key invariant: generated code MUST call Module:spawn(), never
+%%% gen_server:start_link directly, to ensure initialize runs.
+%%% The `register_spawned/4` function handles REPL actor registry
+%%% integration as a separate concern after spawn completes.
+%%%
 %%% ## Code Hot Reload
 %%%
 %%% The code_change/3 callback supports state migration during hot reload.
@@ -126,7 +145,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4, register_spawned/4]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3]).
@@ -211,6 +230,31 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
+    end.
+
+%% @doc Register an already-spawned actor with the REPL actor registry.
+%% Called by generated REPL code after Module:spawn() returns.
+%% This separates spawn lifecycle (handled by Module:spawn) from
+%% REPL tracking (handled here).
+-spec register_spawned(pid(), pid(), atom(), module()) -> ok.
+register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
+    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+        {ok, CallbackMod} ->
+            try
+                CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
+            catch
+                Kind:Reason ->
+                    logger:warning("Actor spawn callback failed", #{
+                        callback => CallbackMod,
+                        kind => Kind,
+                        reason => Reason,
+                        actor_pid => ActorPid,
+                        class => ClassName
+                    }),
+                    ok
+            end;
+        undefined ->
+            ok
     end.
 
 %%% Message Send Helpers

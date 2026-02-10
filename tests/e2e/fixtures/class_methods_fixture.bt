@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for class methods E2E tests
+
+Object subclass: Calculator
+
+  class defaultValue => 42
+
+  class add: a to: b => a + b

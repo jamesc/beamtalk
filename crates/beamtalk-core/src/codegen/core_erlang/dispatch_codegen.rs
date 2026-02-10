@@ -759,8 +759,9 @@ impl CoreErlangGenerator {
     /// Generates code for actor spawn with conditional REPL registry integration.
     ///
     /// When spawning an actor in the REPL, check for `__repl_actor_registry__` in
-    /// bindings and use `beamtalk_actor:spawn_with_registry` to register it. In
-    /// non-REPL contexts (regular code, tests), fall back to normal `module:spawn`.
+    /// bindings and register the spawned actor. In all cases, the module's own
+    /// `spawn/0` or `spawn/1` is called (which handles initialize protocol).
+    /// In non-REPL contexts (regular code, tests), fall back to normal `module:spawn`.
     ///
     /// # Arguments
     ///
@@ -774,12 +775,10 @@ impl CoreErlangGenerator {
     ///   <'undefined'> when 'true' ->
     ///     call 'counter':'spawn'()
     ///   <RegistryPid> when 'true' ->
-    ///     case call 'beamtalk_actor':'spawn_with_registry'(RegistryPid, 'counter', ~{}~, 'Counter') of
-    ///       <{'ok', Pid}> when 'true' ->
-    ///         {'beamtalk_object', 'Counter', 'counter', Pid}
-    ///       <{'error', Reason}> when 'true' ->
-    ///         call 'erlang':'error'({'spawn_failed', Reason})
-    ///     end
+    ///     let SpawnResult = call 'counter':'spawn'() in
+    ///     let {'beamtalk_object', _, _, SpawnPid} = SpawnResult in
+    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'counter') in
+    ///     SpawnResult
     /// end
     /// ```
     ///
@@ -814,38 +813,30 @@ impl CoreErlangGenerator {
             }
             write!(self.output, ") ")?;
 
-            // Pattern 2: Registry present - call spawn_with_registry and wrap result
+            // Pattern 2: Registry present - call Module:spawn() then register
+            // Module:spawn() handles initialize protocol and returns #beamtalk_object{}.
+            // We extract the Pid and register with the REPL actor registry.
             write!(self.output, "<RegistryPid> when 'true' -> ")?;
             write!(
                 self.output,
-                "case call 'beamtalk_actor':'spawn_with_registry'(RegistryPid, '{module_name}', "
+                "let SpawnResult = call '{module_name}':'spawn'("
             )?;
-
-            // Args - use empty map if no init args (consistent with spawn/0)
             if let Some(args) = init_args {
                 self.generate_expression(args)?;
-            } else {
-                write!(self.output, "~{{}}~")?;
             }
+            write!(self.output, ") in ")?;
 
-            // Class name for display
-            write!(self.output, ", '{class_name}') of ")?;
-
-            // Wrap the {ok, Pid} result in #beamtalk_object{} record
-            write!(self.output, "<{{'ok', Pid}}> when 'true' -> ")?;
+            // Extract Pid (4th element) from #beamtalk_object{class, mod, pid} tuple
             write!(
                 self.output,
-                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}} "
+                "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in "
             )?;
-
-            // Handle error case
-            write!(self.output, "<{{'error', Reason}}> when 'true' -> ")?;
             write!(
                 self.output,
-                "call 'erlang':'error'({{'spawn_failed', Reason}}) "
+                "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, '{class_name}', '{module_name}') in "
             )?;
+            write!(self.output, "SpawnResult ")?;
 
-            write!(self.output, "end ")?; // end inner case
             write!(self.output, "end")?; // end outer case
         } else {
             // Non-REPL context (normal compilation) - direct module spawn call
@@ -965,10 +956,20 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        let module_name = class_method_module_name(class_name);
-        let method_name = selector.to_erlang_atom();
+        let selector_atom = selector.to_erlang_atom();
+        let class_pid_var = self.fresh_var("ClassPid");
 
-        write!(self.output, "call '{module_name}':'{method_name}'(")?;
+        // Look up the class process by name and dispatch via class_send/3.
+        // This handles both built-in class methods (new, methods, superclass)
+        // and user-defined class methods (BT-411).
+        write!(
+            self.output,
+            "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+        )?;
+        write!(
+            self.output,
+            "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+        )?;
 
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
@@ -977,115 +978,13 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        write!(self.output, ")")?;
+        write!(self.output, "])")?;
 
         Ok(())
     }
 }
 
-/// Resolves the module name for class method dispatch.
-///
-/// Most classes use `to_module_name()` (`CamelCase` → `snake_case`), but some
-/// class names produce module names that conflict with Erlang stdlib modules
-/// (use `beamtalk_` prefix), primitive stdlib classes compiled from `lib/*.bt`
-/// also use `beamtalk_` prefix, and non-primitive stdlib classes use `bt_stdlib_`.
-fn class_method_module_name(class_name: &str) -> String {
-    let module = to_module_name(class_name);
-    if is_erlang_stdlib_module(&module) || is_primitive_stdlib_class(class_name) {
-        format!("beamtalk_{module}")
-    } else if is_bt_stdlib_class(class_name) {
-        format!("bt_stdlib_{module}")
-    } else {
-        module
-    }
-}
-
-/// Returns true if the class is a non-primitive stdlib class compiled from `lib/*.bt`.
-///
-/// These classes are compiled by `build_stdlib` with a `bt_stdlib_` prefix
-/// to distinguish them from user-defined classes.
-fn is_bt_stdlib_class(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "ProtoObject" | "Object" | "Actor" | "SystemDictionary" | "TranscriptStream"
-    )
-}
-
-/// Returns true if the class is a primitive stdlib class compiled from `lib/*.bt`.
-///
-/// Primitive stdlib classes use `beamtalk_` prefix (e.g., `Set` → `beamtalk_set`).
-/// These class names don't conflict with Erlang stdlib modules but still need
-/// the prefix for class-level method dispatch (e.g., `Set new`, `Set fromList:`).
-///
-/// NOTE: Must stay in sync with `build_stdlib::is_primitive_type()` and
-/// `value_type_codegen::is_primitive_type()`.
-fn is_primitive_stdlib_class(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "Integer"
-            | "Float"
-            | "String"
-            | "True"
-            | "False"
-            | "UndefinedObject"
-            | "Block"
-            | "Symbol"
-            | "List"
-            | "Dictionary"
-            | "Set"
-    )
-}
-
-/// Returns true if the given name conflicts with a well-known Erlang/OTP module.
-///
-/// When a Beamtalk class name (e.g., `File`) converts to an Erlang stdlib module
-/// name (e.g., `file`), we must prefix with `beamtalk_` to avoid collisions.
-fn is_erlang_stdlib_module(name: &str) -> bool {
-    matches!(
-        name,
-        "file" | "io" | "lists" | "maps" | "math" | "timer" | "os" | "net" | "code" | "error"
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_class_method_module_name_no_conflict() {
-        assert_eq!(class_method_module_name("Transcript"), "transcript");
-        assert_eq!(class_method_module_name("Counter"), "counter");
-        assert_eq!(
-            class_method_module_name("MyCounterActor"),
-            "my_counter_actor"
-        );
-    }
-
-    #[test]
-    fn test_class_method_module_name_erlang_conflict() {
-        assert_eq!(class_method_module_name("File"), "beamtalk_file");
-        assert_eq!(class_method_module_name("Io"), "beamtalk_io");
-        assert_eq!(class_method_module_name("Timer"), "beamtalk_timer");
-    }
-
-    #[test]
-    fn test_is_erlang_stdlib_module() {
-        assert!(is_erlang_stdlib_module("file"));
-        assert!(is_erlang_stdlib_module("io"));
-        assert!(is_erlang_stdlib_module("lists"));
-        assert!(!is_erlang_stdlib_module("transcript"));
-        assert!(!is_erlang_stdlib_module("counter"));
-        assert!(!is_erlang_stdlib_module("beamtalk_file"));
-    }
-
-    #[test]
-    fn test_class_method_module_name_bt_stdlib() {
-        assert_eq!(
-            class_method_module_name("ProtoObject"),
-            "bt_stdlib_proto_object"
-        );
-        assert_eq!(class_method_module_name("Object"), "bt_stdlib_object");
-        assert_eq!(class_method_module_name("Actor"), "bt_stdlib_actor");
-        assert_eq!(class_method_module_name("Array"), "array");
-    }
-}
+// NOTE: class_method_module_name and related helpers (is_primitive_stdlib_class,
+// is_bt_stdlib_class, is_erlang_stdlib_module) were removed in BT-411.
+// Class dispatch now goes through runtime class_send/3 instead of
+// compile-time module name resolution.

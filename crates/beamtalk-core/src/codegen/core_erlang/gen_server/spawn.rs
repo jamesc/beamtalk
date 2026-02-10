@@ -34,8 +34,14 @@ impl CoreErlangGenerator {
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
-        _module: &Module,
+        module: &Module,
     ) -> Result<()> {
+        // BT-411: Check if class defines an initialize method
+        let has_initialize = module
+            .classes
+            .first()
+            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+
         writeln!(self.output, "'spawn'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -50,14 +56,18 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        // Return #beamtalk_object{} record instead of raw pid
-        // Record syntax in Core Erlang: {RecordTag, Field1, Field2, ...}
         let class_name = self.class_name();
-        writeln!(
-            self.output,
-            "{{'beamtalk_object', '{}', '{}', Pid}}",
-            class_name, self.module_name
-        )?;
+
+        if has_initialize {
+            self.generate_spawn_initialize_block(&class_name)?;
+        } else {
+            writeln!(
+                self.output,
+                "{{'beamtalk_object', '{}', '{}', Pid}}",
+                class_name, self.module_name
+            )?;
+        }
+
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
@@ -73,6 +83,36 @@ impl CoreErlangGenerator {
         self.indent -= 1;
         writeln!(self.output)?;
 
+        Ok(())
+    }
+
+    /// Generates the initialize-with-cleanup block for spawn functions (BT-425).
+    ///
+    /// Wraps the `initialize` call in a try-catch. If initialize fails,
+    /// stops the spawned process before re-raising the error to prevent leaks.
+    fn generate_spawn_initialize_block(&mut self, class_name: &str) -> Result<()> {
+        let module_name = self.module_name.clone();
+        // Build the object first
+        writeln!(
+            self.output,
+            "let _Obj = {{'beamtalk_object', '{class_name}', '{module_name}', Pid}} in",
+        )?;
+        self.write_indent()?;
+        // Core Erlang try: simple variable patterns in of/catch (no <> or guards)
+        writeln!(
+            self.output,
+            "try call 'gen_server':'call'(Pid, {{'initialize', []}})"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "of _InitOk -> _Obj")?;
+        self.write_indent()?;
+        writeln!(self.output, "catch <_InitClass, _InitErr, _InitStack> ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let _Stop = call 'gen_server':'stop'(Pid) in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(_InitErr)")?;
+        self.indent -= 1;
         Ok(())
     }
 
@@ -97,8 +137,14 @@ impl CoreErlangGenerator {
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
-        _module: &Module,
+        module: &Module,
     ) -> Result<()> {
+        // BT-411: Check if class defines an initialize method
+        let has_initialize = module
+            .classes
+            .first()
+            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+
         writeln!(self.output, "'spawn'/1 = fun (InitArgs) ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -112,13 +158,18 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        // Return #beamtalk_object{} record instead of raw pid
         let class_name = self.class_name();
-        writeln!(
-            self.output,
-            "{{'beamtalk_object', '{}', '{}', Pid}}",
-            class_name, self.module_name
-        )?;
+
+        if has_initialize {
+            self.generate_spawn_initialize_block(&class_name)?;
+        } else {
+            writeln!(
+                self.output,
+                "{{'beamtalk_object', '{}', '{}', Pid}}",
+                class_name, self.module_name
+            )?;
+        }
+
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;

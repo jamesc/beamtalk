@@ -1900,6 +1900,7 @@ mod tests {
             is_sealed: false,
             state: vec![state_decl],
             methods: vec![get_value_method],
+            class_methods: vec![],
             span: test_span(),
         };
 
@@ -2267,6 +2268,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         };
 
@@ -2299,6 +2301,7 @@ mod tests {
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: test_span(),
         };
 
@@ -2579,6 +2582,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         };
 

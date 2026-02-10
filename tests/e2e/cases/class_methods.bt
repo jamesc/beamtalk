@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for class-side methods (BT-411 / ADR 0013 Phase 2)
+//
+// Tests defining and calling class methods using the `class` prefix.
+// Class methods run on the class process, not instances.
+
+// @load tests/e2e/fixtures/class_methods_fixture.bt
+
+// ===========================================================================
+// BASIC CLASS METHOD DISPATCH
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Unary class method on literal class receiver
+// ---------------------------------------------------------------------------
+
+Calculator defaultValue
+// => 42
+
+// ---------------------------------------------------------------------------
+// Keyword class method on literal class receiver
+// ---------------------------------------------------------------------------
+
+Calculator add: 3 to: 7
+// => 10
+
+// ===========================================================================
+// DYNAMIC CLASS DISPATCH WITH CLASS METHODS
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Store class in variable, call class method dynamically
+// ---------------------------------------------------------------------------
+
+// @load lib/SystemDictionary.bt
+
+cls := (Beamtalk classNamed: #Calculator) await
+// => _
+
+cls defaultValue
+// => 42
+
+cls add: 10 to: 20
+// => 30

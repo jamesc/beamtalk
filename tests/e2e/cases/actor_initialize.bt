@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for actor initialize protocol (BT-411 / ADR 0013 Phase 2)
+//
+// Tests that actor classes with an `initialize` method have it
+// automatically called after spawn.
+
+// @load tests/e2e/fixtures/actor_initialize_fixture.bt
+
+// ===========================================================================
+// ACTOR INITIALIZE — BASIC
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor with initialize: derived state set after spawn
+// ---------------------------------------------------------------------------
+
+c := InitCounter spawn
+// => _
+
+c getValue
+// => 100
+
+// ===========================================================================
+// BACKWARD COMPATIBILITY — NO INITIALIZE
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Actor without initialize works as before
+// ---------------------------------------------------------------------------
+
+// @load tests/e2e/fixtures/counter.bt
+
+c2 := Counter spawn
+// => _
+
+c2 increment
+// => 1
+
+c2 getValue
+// => 1

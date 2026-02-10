@@ -150,7 +150,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start_link'('Logger', ~{
+        let _Reg0 = case call 'beamtalk_object_class':'start'('Logger', ~{
             'name' => 'Logger',
             'module' => 'workspace_binding_cascade',
             'superclass' => 'Actor',

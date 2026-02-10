@@ -116,6 +116,14 @@ impl CoreErlangGenerator {
         // BT-246: Value types register with class system for dynamic dispatch
         exports.push("'register_class'/0".to_string());
 
+        // BT-411: Class method exports
+        for method in &class.class_methods {
+            if method.kind == MethodKind::Primary {
+                let arity = method.parameters.len() + 1; // +1 for ClassSelf
+                exports.push(format!("'class_{}'/{arity}", method.selector.name()));
+            }
+        }
+
         // Module header
         writeln!(
             self.output,
@@ -162,6 +170,12 @@ impl CoreErlangGenerator {
             "'superclass'/0 = fun () -> '{superclass_atom}'"
         )?;
         writeln!(self.output)?;
+
+        // BT-411: Generate class-side method functions
+        if !class.class_methods.is_empty() {
+            self.generate_class_method_functions(class)?;
+            writeln!(self.output)?;
+        }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
         self.generate_register_class(module)?;

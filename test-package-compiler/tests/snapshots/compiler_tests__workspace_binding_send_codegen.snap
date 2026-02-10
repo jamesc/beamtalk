@@ -150,7 +150,7 @@ module 'workspace_binding_send' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start_link'('Greeter', ~{
+        let _Reg0 = case call 'beamtalk_object_class':'start'('Greeter', ~{
             'name' => 'Greeter',
             'module' => 'workspace_binding_send',
             'superclass' => 'Actor',

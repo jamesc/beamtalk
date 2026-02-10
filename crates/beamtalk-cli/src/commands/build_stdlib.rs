@@ -87,9 +87,14 @@ pub fn build_stdlib() -> Result<()> {
 
     // Compile each .bt file to .core (files are independent, no ordering required)
     let mut core_files = Vec::new();
+    let mut class_metadata = Vec::new();
     for source_file in &source_files {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
+
+        // Extract class metadata (class_name, superclass) before compilation
+        let meta = extract_class_metadata(source_file, &module_name)?;
+        class_metadata.push(meta);
 
         compile_stdlib_file(source_file, &module_name, &core_file, &options, &bindings)?;
         core_files.push(core_file);
@@ -102,7 +107,12 @@ pub fn build_stdlib() -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
-    generate_app_file(&ebin_dir, &source_files)?;
+    generate_app_file(&ebin_dir, &source_files, &class_metadata)?;
+    // Also update .app.src so rebar3 picks up the classes env
+    let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
+    if app_src_dir.exists() {
+        generate_app_src_file(&app_src_dir, &class_metadata)?;
+    }
 
     println!("Built {} stdlib modules", source_files.len());
 
@@ -219,10 +229,47 @@ fn compile_stdlib_file(
     compile_source_with_bindings(path, module_name, core_file, options, bindings)
 }
 
+/// Metadata for a single stdlib class, used to generate the load-order file.
+#[allow(clippy::struct_field_names)]
+struct ClassMeta {
+    module_name: String,
+    class_name: String,
+    superclass_name: String,
+}
+
+/// Extract class metadata from a `.bt` source file.
+///
+/// Parses just enough to get the class name and superclass. Each stdlib
+/// file contains exactly one class definition.
+fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMeta> {
+    let source = fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{path}'"))?;
+
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    let class = module
+        .classes
+        .first()
+        .ok_or_else(|| miette::miette!("No class definition in '{path}'"))?;
+
+    Ok(ClassMeta {
+        module_name: module_name.to_string(),
+        class_name: class.name.name.to_string(),
+        superclass_name: class.superclass_name().to_string(),
+    })
+}
+
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
 ///
-/// Lists all modules derived from the source files.
-fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Result<()> {
+/// Lists all modules and embeds class hierarchy metadata in the `env` section.
+/// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
+fn generate_app_file(
+    ebin_dir: &Utf8Path,
+    source_files: &[Utf8PathBuf],
+    class_metadata: &[ClassMeta],
+) -> Result<()> {
     let module_names: Vec<String> = source_files
         .iter()
         .map(|f| module_name_from_path(f))
@@ -234,6 +281,20 @@ fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Resul
         .collect::<Vec<_>>()
         .join(", ");
 
+    // Generate class hierarchy entries for env
+    let classes_list = class_metadata
+        .iter()
+        .map(|m| {
+            format!(
+                "{{'{module}', '{class}', '{super}'}}",
+                module = m.module_name,
+                class = m.class_name,
+                super = m.superclass_name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n                    ");
+
     let app_content = format!(
         "{{application, beamtalk_stdlib, [\n\
          \x20   {{description, \"Beamtalk Standard Library - compiled from lib/*.bt\"}},\n\
@@ -241,7 +302,9 @@ fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Resul
          \x20   {{modules, [{modules_list}]}},\n\
          \x20   {{registered, []}},\n\
          \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
-         \x20   {{env, []}}\n\
+         \x20   {{env, [\n\
+         \x20       {{classes, [{classes_list}]}}\n\
+         \x20   ]}}\n\
          ]}}.\n"
     );
 
@@ -251,6 +314,46 @@ fn generate_app_file(ebin_dir: &Utf8Path, source_files: &[Utf8PathBuf]) -> Resul
         .wrap_err_with(|| format!("Failed to write '{app_file}'"))?;
 
     debug!("Generated {}", app_file);
+    Ok(())
+}
+
+/// Generate/update the `.app.src` file so rebar3 picks up the classes metadata.
+///
+/// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
+/// the `{classes, [...]}` env for the runtime to read via `application:get_env`.
+fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Result<()> {
+    let classes_list = class_metadata
+        .iter()
+        .map(|m| {
+            format!(
+                "{{'{module}', '{class}', '{super}'}}",
+                module = m.module_name,
+                class = m.class_name,
+                super = m.superclass_name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n        ");
+
+    let app_src_content = format!(
+        "{{application, beamtalk_stdlib, [\n\
+         \x20   {{description, \"Beamtalk Standard Library - compiled from lib/*.bt\"}},\n\
+         \x20   {{vsn, \"0.1.0\"}},\n\
+         \x20   {{modules, []}},\n\
+         \x20   {{registered, []}},\n\
+         \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
+         \x20   {{env, [\n\
+         \x20       {{classes, [{classes_list}]}}\n\
+         \x20   ]}}\n\
+         ]}}.\n"
+    );
+
+    let app_src_file = src_dir.join("beamtalk_stdlib.app.src");
+    fs::write(&app_src_file, &app_src_content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write '{app_src_file}'"))?;
+
+    debug!("Generated {}", app_src_file);
     Ok(())
 }
 
@@ -353,7 +456,7 @@ mod tests {
             Utf8PathBuf::from("lib/String.bt"),
         ];
 
-        generate_app_file(&ebin_dir, &source_files).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[]).unwrap();
 
         let app_file = ebin_dir.join("beamtalk_stdlib.app");
         assert!(app_file.exists());
@@ -369,7 +472,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let ebin_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
-        generate_app_file(&ebin_dir, &[]).unwrap();
+        generate_app_file(&ebin_dir, &[], &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
@@ -385,7 +488,7 @@ mod tests {
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
-        let result = generate_app_file(&ebin_dir, &source_files);
+        let result = generate_app_file(&ebin_dir, &source_files, &[]);
         assert!(result.is_err());
     }
 }
