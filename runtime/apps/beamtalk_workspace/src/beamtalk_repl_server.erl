@@ -375,9 +375,31 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
     end;
 
 handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
-    Loaded = code:all_loaded(),
-    Modules = [atom_to_binary(Mod, utf8) || {Mod, _File} <- Loaded],
-    beamtalk_repl_protocol:encode_modules(Modules, Msg, fun term_to_json/1);
+    ClassPids = try beamtalk_object_class:all_classes()
+                catch _:_ -> [] end,
+    ModulesWithInfo = lists:filtermap(
+        fun(Pid) ->
+            try
+                Name = beamtalk_object_class:class_name(Pid),
+                ModName = beamtalk_object_class:module_name(Pid),
+                SourceFile = case code:is_loaded(ModName) of
+                    {file, F} when is_list(F) -> F;
+                    _ -> "loaded"
+                end,
+                Info = #{
+                    name => atom_to_binary(Name, utf8),
+                    source_file => SourceFile,
+                    actor_count => 0,
+                    load_time => 0,
+                    time_ago => "n/a"
+                },
+                {true, {Name, Info}}
+            catch _:_ -> false
+            end
+        end,
+        ClassPids
+    ),
+    beamtalk_repl_protocol:encode_modules(ModulesWithInfo, Msg, fun term_to_json/1);
 
 handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
