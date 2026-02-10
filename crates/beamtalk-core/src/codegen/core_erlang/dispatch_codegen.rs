@@ -60,7 +60,7 @@ impl CoreErlangGenerator {
     /// 1. **Super sends** → `generate_super_send`
     /// 2. **Binary operators** → `generate_binary_op` (synchronous Erlang ops)
     /// 3. **`ProtoObject` messages** → `try_generate_protoobject_message` (synchronous)
-    /// 4. **Object messages** → `try_generate_object_message` (synchronous)
+    /// 4. **Object messages** → `try_generate_object_message` → delegates to nil protocol, error signaling, object identity, object reflection
     /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
     /// 6. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
     /// 7. **Await messages** → Blocking future resolution
