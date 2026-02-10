@@ -379,16 +379,23 @@ pub fn run_tests(path: &str) -> Result<()> {
     let mut all_core_files = Vec::new();
     let mut all_erl_files = Vec::new();
 
+    let mut all_fixture_modules = Vec::new();
+
     for test_file in &test_files {
         let result = compile_single_test_file(test_file, &build_dir)?;
         all_core_files.extend(result.core_files);
         all_erl_files.push(result.erl_file);
+        all_fixture_modules.extend(result.fixture_modules);
         compiled_files.push(CompiledTestFile {
             source_file: test_file.clone(),
             module_name: result.test_module_name,
             assertion_count: result.test_count,
         });
     }
+
+    // Deduplicate fixture modules
+    all_fixture_modules.sort();
+    all_fixture_modules.dedup();
 
     // Phase 2: Batch compile all .core → .beam
     if !all_core_files.is_empty() {
@@ -409,7 +416,7 @@ pub fn run_tests(path: &str) -> Result<()> {
 
     let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
 
-    let eunit_result = run_all_eunit_tests(&test_module_names, &build_dir)?;
+    let eunit_result = run_all_eunit_tests(&test_module_names, &all_fixture_modules, &build_dir)?;
 
     // Phase 5: Report results per file
     let mut total_passed = 0;
@@ -471,6 +478,8 @@ struct CompilationResult {
     erl_file: Utf8PathBuf,
     /// Number of test assertions.
     test_count: usize,
+    /// Fixture module names from `@load` directives (need `code:ensure_loaded`).
+    fixture_modules: Vec<String>,
 }
 
 /// Compile a single `.bt` test file into Core Erlang modules + `EUnit` wrapper.
@@ -498,7 +507,8 @@ fn compile_single_test_file(
         );
     }
 
-    // Compile @load fixtures
+    // Compile @load fixtures and collect module names
+    let mut fixture_modules = Vec::new();
     for load_path in &parsed.load_files {
         let fixture_path = Utf8PathBuf::from(load_path);
         if !fixture_path.exists() {
@@ -509,6 +519,11 @@ fn compile_single_test_file(
             );
         }
         compile_fixture(&fixture_path, build_dir)?;
+        // Track fixture module name for code:ensure_loaded at runtime
+        if let Some(stem) = fixture_path.file_stem() {
+            let module_name = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+            fixture_modules.push(module_name);
+        }
     }
 
     let file_stem = test_file
@@ -578,6 +593,7 @@ fn compile_single_test_file(
         core_files,
         erl_file,
         test_count: parsed.cases.len(),
+        fixture_modules,
     })
 }
 
@@ -651,6 +667,7 @@ fn cover_fragments(
 
 fn run_all_eunit_tests(
     test_module_names: &[&str],
+    fixture_modules: &[String],
     build_dir: &Utf8Path,
 ) -> Result<EunitBatchResult> {
     debug!(
@@ -672,9 +689,25 @@ fn run_all_eunit_tests(
 
     let (cover_preamble, cover_epilogue) = cover_fragments(&beam_paths, &runtime_dir);
 
+    // Build fixture loading commands (ensure_loaded triggers on_load → class registration)
+    let fixture_load_cmd = if fixture_modules.is_empty() {
+        String::new()
+    } else {
+        fixture_modules
+            .iter()
+            .map(|m| format!("code:ensure_loaded('{m}')"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            + ", "
+    };
+
     let eval_cmd = format!(
         "{cover_preamble}\
          beamtalk_extensions:init(), \
+         pg:start_link(), \
+         beamtalk_bootstrap:start_link(), \
+         beamtalk_stdlib:init(), \
+         {fixture_load_cmd}\
          Modules = [{module_list}], \
          Failed = lists:foldl(fun(M, Acc) -> \
            case eunit:test(M, []) of \
