@@ -749,8 +749,8 @@ impl Parser {
 
         // Parse elements
         loop {
-            // Parse element expression (unary only - stops at `,`, `|`, `)`)
-            let elem = self.parse_unary_message();
+            // Parse element expression (binary to support operators like `->` in elements)
+            let elem = self.parse_binary_message();
             elements.push(elem);
 
             // Check for cons operator `|`

@@ -95,6 +95,24 @@ impl CoreErlangGenerator {
                     location: format!("{receiver:?}"),
                 });
             }
+
+            // BT-335: Association creation via `->` binary message
+            if op.as_str() == "->" {
+                if arguments.len() != 1 {
+                    return Err(CodeGenError::Internal(
+                        "-> operator must have exactly one argument".to_string(),
+                    ));
+                }
+                write!(
+                    self.output,
+                    "~{{'$beamtalk_class' => 'Association', 'key' => "
+                )?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ", 'value' => ")?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "}}~")?;
+                return Ok(());
+            }
             return self.generate_binary_op(op, receiver, arguments);
         }
 

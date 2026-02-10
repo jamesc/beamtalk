@@ -329,6 +329,7 @@ impl CoreErlangGenerator {
                 | "Number"
                 | "Actor"
                 | "File"
+                | "Association"
                 | "SystemDictionary"
                 | "TranscriptStream"
                 | "Exception"
