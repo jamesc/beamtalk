@@ -61,3 +61,27 @@
 // each: returns nil
 'hi' each: [:ch | nil]
 // => nil
+
+// BT-416: collect: - map over graphemes (returns list)
+'hi' collect: [:ch | ch uppercase]
+// => ["H","I"]
+
+'abc' collect: [:ch | ch uppercase]
+// => ["A","B","C"]
+
+// BT-416: select: - filter graphemes (returns string)
+'hello' select: [:ch | ch ~= 'l']
+// => heo
+
+'abcd' select: [:ch | ch < 'c']
+// => ab
+
+// BT-416: collect:/select: on string variables (not just literals)
+s := 'hello'
+// => _
+
+s collect: [:ch | ch uppercase]
+// => ["H","E","L","L","O"]
+
+s select: [:ch | ch > 'h']
+// => llo
