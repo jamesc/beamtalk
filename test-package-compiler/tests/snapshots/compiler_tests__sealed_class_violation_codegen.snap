@@ -69,7 +69,7 @@ call 'erlang':'*'(Self, 2)
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start_link'('MyInt', ~{
+        let _Reg0 = case call 'beamtalk_object_class':'start'('MyInt', ~{
             'name' => 'MyInt',
             'module' => 'sealed_class_violation',
             'superclass' => 'Integer',

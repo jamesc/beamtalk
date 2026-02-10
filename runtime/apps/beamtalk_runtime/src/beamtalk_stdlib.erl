@@ -86,6 +86,11 @@ do_init() ->
         register_float_class(),
         register_file_class()
     ],
+    %% BT-411: Load compiled stdlib modules that register via on_load.
+    %% Modules compiled from lib/*.bt (by build-stdlib) self-register through
+    %% on_load → register_class. Since the beamtalk_stdlib OTP app isn't
+    %% started as a dependency, we explicitly load them here.
+    load_compiled_stdlib_modules(),
     %% Register classes for workspace globals (singletons like Beamtalk, Transcript).
     %% Each module exports class_info/0 as the single source of truth for its metadata.
     GlobalResults = register_workspace_globals(),
@@ -400,15 +405,71 @@ register_file_class() ->
         name => 'File',
         module => beamtalk_file,
         superclass => 'Object',
-        instance_methods => #{},
-        class_methods => #{
+        %% BT-411: File methods are instance methods (called via dispatch),
+        %% not class methods. The original version had these swapped.
+        instance_methods => #{
             'exists:' => #{arity => 1},
             'readAll:' => #{arity => 1},
             'writeAll:contents:' => #{arity => 2}
         },
+        class_methods => #{},
         instance_variables => []
     },
     register_class('File', ClassInfo).
+
+%%% ============================================================================
+%%% Compiled Stdlib Module Loading (BT-411)
+%%% ============================================================================
+
+%% @doc Load compiled stdlib modules that register via on_load.
+%%
+%% All compiled stdlib modules (from lib/*.bt via build-stdlib) register
+%% their class processes via on_load → register_class/0. Since the
+%% beamtalk_stdlib OTP app isn't a dependency of beamtalk_runtime, we
+%% explicitly load every compiled module here.
+%%
+%% For classes that also have hand-written register_*_class() above
+%% (Integer, Float, etc.), the on_load register_class will harmlessly
+%% get {already_started, _}.
+-spec load_compiled_stdlib_modules() -> ok.
+load_compiled_stdlib_modules() ->
+    %% Primitive types (beamtalk_* prefix — replace hand-written dispatch modules)
+    PrimitiveModules = [
+        beamtalk_block,
+        beamtalk_dictionary,
+        beamtalk_false,
+        beamtalk_float,
+        beamtalk_integer,
+        beamtalk_list,
+        beamtalk_set,
+        beamtalk_string,
+        beamtalk_symbol,
+        beamtalk_true,
+        beamtalk_tuple,
+        beamtalk_undefined_object
+    ],
+    %% Non-primitive types (bt_stdlib_* prefix)
+    StdlibModules = [
+        bt_stdlib_actor,
+        bt_stdlib_association,
+        bt_stdlib_error,
+        bt_stdlib_exception,
+        bt_stdlib_file,
+        bt_stdlib_number,
+        bt_stdlib_object,
+        bt_stdlib_proto_object,
+        bt_stdlib_system_dictionary,
+        bt_stdlib_transcript_stream
+    ],
+    lists:foreach(fun(Mod) ->
+        case code:ensure_loaded(Mod) of
+            {module, Mod} ->
+                logger:debug("Loaded compiled stdlib module", #{module => Mod});
+            {error, Reason} ->
+                logger:warning("Failed to load compiled stdlib module",
+                               #{module => Mod, reason => Reason})
+        end
+    end, PrimitiveModules ++ StdlibModules).
 
 %%% ============================================================================
 %%% Helper Functions

@@ -59,6 +59,7 @@
 
 %% API
 -export([
+    start/2,
     start_link/1,
     start_link/2,
     whereis_class/1,
@@ -124,6 +125,16 @@
 %%====================================================================
 %% API
 %%====================================================================
+
+%% @doc Start a class process (unlinked) for on_load registration.
+%%
+%% Uses gen_server:start (no link) so the class process survives after
+%% the on_load caller exits. Class processes are long-lived singletons
+%% that must persist independently of whoever loaded the module.
+-spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
+start(ClassName, ClassInfo) ->
+    RegName = registry_name(ClassName),
+    gen_server:start({local, RegName}, ?MODULE, {ClassName, ClassInfo}, []).
 
 %% @doc Start a class process with full options.
 -spec start_link(class_name(), map()) -> {ok, pid()} | {error, term()}.
@@ -221,7 +232,10 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 class_send(ClassPid, methods, []) ->
     gen_server:call(ClassPid, methods);
 class_send(ClassPid, superclass, []) ->
-    gen_server:call(ClassPid, superclass);
+    case gen_server:call(ClassPid, superclass) of
+        none -> nil;  % Beamtalk nil, not Erlang 'none'
+        Super -> Super
+    end;
 class_send(ClassPid, class_name, []) ->
     gen_server:call(ClassPid, class_name);
 class_send(ClassPid, module_name, []) ->

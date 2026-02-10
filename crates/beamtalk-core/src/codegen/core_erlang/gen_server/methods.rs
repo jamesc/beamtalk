@@ -375,19 +375,22 @@ impl CoreErlangGenerator {
     /// Generates the `register_class/0` function for class registration.
     ///
     /// This function is called automatically via `-on_load` when the module loads.
-    /// It registers the class with `beamtalk_class:start_link/2`, making the class
-    /// available as a first-class object for reflection and metaprogramming.
+    /// It registers the class with `beamtalk_object_class:start/2` (unlinked), making
+    /// the class available as a first-class object for reflection and metaprogramming.
     ///
-    /// The function is defensive - if `beamtalk_class` is not available (e.g., during
-    /// early module loading), it returns `ok` to allow the module to load. Classes can
-    /// be registered later via explicit calls if needed.
+    /// Uses `start` (not `start_link`) so the class process survives after the
+    /// `on_load` caller exits. Class processes are long-lived singletons that must
+    /// persist independently of whoever loaded the module.
+    ///
+    /// The function is defensive - if `beamtalk_object_class` is not available (e.g.,
+    /// during early module loading), it returns `ok` to allow the module to load.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         case call 'beamtalk_object_class':'start_link'('Counter', ~{...}~) of
+    ///         case call 'beamtalk_object_class':'start'('Counter', ~{...}~) of
     ///             <{'ok', _Pid}> when 'true' -> 'ok'
     ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
     ///             <{'error', _Reason}> when 'true' -> 'ok'
@@ -421,7 +424,7 @@ impl CoreErlangGenerator {
             }
             write!(
                 self.output,
-                "let _Reg{} = case call 'beamtalk_object_class':'start_link'('{}', ~{{",
+                "let _Reg{} = case call 'beamtalk_object_class':'start'('{}', ~{{",
                 i, class.name.name
             )?;
             writeln!(self.output)?;

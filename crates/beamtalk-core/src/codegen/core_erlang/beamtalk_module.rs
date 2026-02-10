@@ -80,7 +80,7 @@ impl CoreErlangGenerator {
 
         writeln!(
             self.output,
-            "case call 'beamtalk_object_class':'start_link'('{class_name}', ~{{"
+            "case call 'beamtalk_object_class':'start'('{class_name}', ~{{"
         )?;
         self.indent += 1;
         self.write_indent()?;

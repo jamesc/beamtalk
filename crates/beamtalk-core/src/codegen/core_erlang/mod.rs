@@ -3224,10 +3224,10 @@ end
             "Should generate register_class function. Got:\n{code}"
         );
 
-        // Check that it calls beamtalk_class:start_link
+        // Check that it calls beamtalk_object_class:start (unlinked)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
-            "Should call beamtalk_class:start_link with class name. Got:\n{code}"
+            code.contains("call 'beamtalk_object_class':'start'('Counter',"),
+            "Should call beamtalk_object_class:start with class name. Got:\n{code}"
         );
 
         // Check metadata fields
@@ -3376,7 +3376,7 @@ end
 
         // Should register first class (Counter)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
+            code.contains("call 'beamtalk_object_class':'start'('Counter',"),
             "Should register Counter class. Got:\n{code}"
         );
         assert!(
@@ -3390,7 +3390,7 @@ end
 
         // Should register second class (Logger)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Logger',"),
+            code.contains("call 'beamtalk_object_class':'start'('Logger',"),
             "Should register Logger class. Got:\n{code}"
         );
         assert!(
@@ -3564,7 +3564,7 @@ end
             "Non-binding class should NOT use persistent_term. Got:\n{code2}"
         );
 
-        // Test 3: ClassReference spawn in REPL uses class_send (BT-411)
+        // Test 3: ClassReference spawn in REPL uses generate_actor_spawn with registry
         let expr3 = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("InitCounter", Span::new(0, 11)),
@@ -3578,11 +3578,11 @@ end
         let code3 = generate_repl_expression(&expr3, "repl_eval3")
             .expect("codegen should succeed for spawn");
 
-        // BT-411: In REPL mode, spawn on ClassReference goes through class_send
-        // to use the correct module name from the class registry
+        // Spawn on ClassReference uses generate_actor_spawn which calls
+        // Module:spawn() with REPL registry integration
         assert!(
-            code3.contains("class_send") && code3.contains("whereis_class"),
-            "REPL spawn should use class_send for correct module resolution. Got:\n{code3}"
+            code3.contains("'initcounter':'spawn'") || code3.contains("register_spawned"),
+            "REPL spawn should use direct module spawn (with optional registry). Got:\n{code3}"
         );
     }
 

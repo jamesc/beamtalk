@@ -126,7 +126,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4, register_spawned/4]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3]).
@@ -211,6 +211,31 @@ spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
+    end.
+
+%% @doc Register an already-spawned actor with the REPL actor registry.
+%% Called by generated REPL code after Module:spawn() returns.
+%% This separates spawn lifecycle (handled by Module:spawn) from
+%% REPL tracking (handled here).
+-spec register_spawned(pid(), pid(), atom(), module()) -> ok.
+register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
+    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+        {ok, CallbackMod} ->
+            try
+                CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
+            catch
+                Kind:Reason ->
+                    logger:warning("Actor spawn callback failed", #{
+                        callback => CallbackMod,
+                        kind => Kind,
+                        reason => Reason,
+                        actor_pid => ActorPid,
+                        class => ClassName
+                    }),
+                    ok
+            end;
+        undefined ->
+            ok
     end.
 
 %%% Message Send Helpers
