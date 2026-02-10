@@ -66,6 +66,25 @@
 %%% - If not found, calls doesNotUnderstand handler if defined
 %%% - If no doesNotUnderstand handler, returns {error, {unknown_message, Selector}, State}
 %%%
+%%% ## Spawn Architecture (BT-411)
+%%%
+%%% There are multiple paths that create actor processes. All user-facing
+%%% paths call `Module:spawn/0` or `Module:spawn/1`, which handles the
+%%% initialize protocol (calling the actor's `initialize` method after
+%%% gen_server:start_link succeeds).
+%%%
+%%% | Path | Entry | Context | Initialize? |
+%%% |------|-------|---------|-------------|
+%%% | Module:spawn/0,1 | gen_server:start_link + gen_server:call(init) | Batch/tests | Yes |
+%%% | REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
+%%% | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
+%%% | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
+%%%
+%%% Key invariant: generated code MUST call Module:spawn(), never
+%%% gen_server:start_link directly, to ensure initialize runs.
+%%% The `register_spawned/4` function handles REPL actor registry
+%%% integration as a separate concern after spawn completes.
+%%%
 %%% ## Code Hot Reload
 %%%
 %%% The code_change/3 callback supports state migration during hot reload.
