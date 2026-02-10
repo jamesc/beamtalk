@@ -31,8 +31,8 @@ cargo build --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo test --all-targets
-just test-stdlib         # Compiled language feature tests (~5s)
-just test-e2e            # REPL integration tests (~50s)
+just test-stdlib         # Compiled language feature tests (fast, ~14s)
+just test-e2e            # REPL integration tests (slower, ~50s)
 ```
 
 ### Code Coverage
@@ -139,7 +139,7 @@ Standard Rust `#[test]` functions colocated with the code they test.
 
 **Count:** ~200 tests
 
-**Example** ([erlang.rs](../crates/beamtalk-core/src/erlang.rs)):
+**Example** ([erlang.rs](../../crates/beamtalk-core/src/erlang.rs)):
 ```rust
 #[test]
 fn test_generate_literal_integer() {
@@ -450,13 +450,13 @@ undefined_var
 // => ERROR: Undefined variable
 ```
 
-See [tests/e2e/README.md](../tests/e2e/README.md) for full documentation.
+See [tests/e2e/README.md](../../tests/e2e/README.md) for full documentation.
 
 ---
 
 ## CI Pipeline
 
-The [CI workflow](../.github/workflows/ci.yml) runs on every PR:
+The [CI workflow](../../.github/workflows/ci.yml) runs on every PR:
 
 ```bash
 just ci
@@ -464,7 +464,7 @@ just ci
 #   just build           # Build Rust + Erlang
 #   just lint            # Clippy + fmt-check + dialyzer
 #   just test            # Rust unit tests + runtime EUnit
-#   just test-stdlib     # Compiled language feature tests (~5s)
+#   just test-stdlib     # Compiled language feature tests (~14s)
 #   just test-e2e        # REPL integration tests (~50s)
 ```
 
@@ -478,7 +478,7 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
        ╱    ╲       REPL/workspace integration — slow (~50s)
       ╱──────╲
      ╱        ╲     Stdlib Tests (~32 files, ~654 assertions)
-    ╱          ╲    Compiled language features — fast (~5s)
+    ╱          ╲    Compiled language features — fast (~14s)
    ╱────────────╲
   ╱              ╲  Rust + Erlang Unit Tests (~600+ tests)
  ╱                ╲ Parser, codegen, runtime modules — fast (~10s)
@@ -490,7 +490,7 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 | Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
 | Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
 | Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
-| **Stdlib tests** | **~654 assertions** | **~5s** | **Language features (compiled)** |
+| **Stdlib tests** | **~654 assertions** | **~14s** | **Language features (compiled)** |
 | E2E tests | ~23 files | ~50s | REPL/workspace integration |
 
 ---
@@ -821,7 +821,7 @@ just fuzz 5  # 5 seconds
 
 ## Performance Testing (Future)
 
-From [AGENTS.md](../AGENTS.md), targets for tooling responsiveness:
+From [AGENTS.md](../../AGENTS.md), targets for tooling responsiveness:
 
 | Operation | Target |
 |-----------|--------|
@@ -837,8 +837,8 @@ Performance regression tests are planned but not yet implemented.
 ## References
 
 - [ADR 0014: Beamtalk Test Framework](../ADR/0014-beamtalk-test-framework.md) - Architecture decision for the three-layer test strategy
-- [test-package-compiler/README.md](../test-package-compiler/README.md) - Snapshot test details
-- [tests/e2e/README.md](../tests/e2e/README.md) - E2E test framework details
-- [runtime/README.md](../runtime/README.md) - Erlang runtime test details
-- [AGENTS.md](../AGENTS.md) - Development guidelines
+- [test-package-compiler/README.md](../../test-package-compiler/README.md) - Snapshot test details
+- [tests/e2e/README.md](../../tests/e2e/README.md) - E2E test framework details
+- [runtime/README.md](../../runtime/README.md) - Erlang runtime test details
+- [AGENTS.md](../../AGENTS.md) - Development guidelines
 - [insta documentation](https://insta.rs/) - Snapshot testing framework

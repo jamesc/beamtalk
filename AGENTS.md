@@ -1501,7 +1501,7 @@ runtime/
 tests/
 ├── stdlib/                # Compiled language feature tests (ADR 0014)
 │   ├── arithmetic.bt      # ~32 test files, ~654 assertions
-│   ├── blocks.bt          # Run via `just test-stdlib` (~5s)
+│   ├── blocks.bt          # Run via `just test-stdlib`
 │   └── ...
 └── e2e/
     ├── cases/             # REPL integration tests (~23 files)
@@ -1554,7 +1554,7 @@ beamtalk_stdlib (compiled stdlib)
 **Location:** `tests/stdlib/*.bt` (~32 files, ~654 assertions)
 - **Pure language feature tests** compiled directly to EUnit (no REPL needed)
 - Uses same `// =>` assertion format as E2E tests
-- Runs via `just test-stdlib` (~5s vs ~50s for E2E)
+- Runs via `just test-stdlib` (fast, ~14s vs ~50s for E2E)
 - Tests arithmetic, strings, blocks, closures, collections, object protocol, etc.
 - Supports `@load` directives for fixture-dependent tests (actors, sealed classes)
 - **Use this for any new test that doesn't need REPL/workspace features**
@@ -1616,7 +1616,7 @@ just --list                  # See all available commands
 # Common development commands
 just build                   # Build Rust + Erlang runtime
 just test                    # Run fast tests (~10s)
-just test-stdlib             # Compiled language feature tests (~5s)
+just test-stdlib             # Compiled language feature tests (~14s)
 just test-e2e                # Run E2E tests (~50s)
 just ci                      # Run all CI checks
 
