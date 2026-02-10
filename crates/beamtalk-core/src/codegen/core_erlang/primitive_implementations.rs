@@ -43,6 +43,7 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Tuple" => generate_tuple_bif(output, selector, params),
         "List" => generate_list_bif(output, selector, params),
         "Dictionary" => generate_dictionary_bif(output, selector, params),
         "Object" => generate_object_bif(output, selector, params),
@@ -444,6 +445,63 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Tuple primitive implementations (BT-417).
+///
+/// Tuples are Erlang tuples — immutable fixed-size collections, particularly
+/// useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "size" => {
+            write!(output, "call 'erlang':'tuple_size'(Self)").ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'at'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "isOk" => {
+            write!(
+                output,
+                "case Self of <{{'ok', _Value}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "isError" => {
+            write!(
+                output,
+                "case Self of <{{'error', _Reason}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "unwrap" => {
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap'(Self)").ok()?;
+            Some(())
+        }
+        "unwrapOr:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "unwrapOrElse:" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "asString" => {
+            write!(output, "call 'beamtalk_tuple_ops':'as_string'(Self)").ok()?;
             Some(())
         }
         _ => None,

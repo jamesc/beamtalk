@@ -313,6 +313,7 @@ impl CoreErlangGenerator {
                 | "UndefinedObject"
                 | "Block"
                 | "Symbol"
+                | "Tuple"
                 | "List"
                 | "Dictionary"
         )

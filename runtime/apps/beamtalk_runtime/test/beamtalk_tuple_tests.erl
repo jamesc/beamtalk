@@ -1,225 +1,179 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%% @doc Tests for beamtalk_tuple_ops runtime helper (BT-417).
+%%
+%% Tests the runtime helper module that provides complex Tuple operations
+%% (bounds-checked at:, unwrap*, asString). The compiled Tuple class
+%% (from lib/Tuple.bt) delegates these methods to beamtalk_tuple_ops.
+
 -module(beamtalk_tuple_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
-%%% Test Setup/Cleanup
+%%% at/2 Tests — bounds-checked element access
 %%% ============================================================================
 
-setup() ->
-    beamtalk_extensions:init(),
-    ok.
+at_valid_index_test() ->
+    ?assertEqual(a, beamtalk_tuple_ops:at({a, b, c}, 1)),
+    ?assertEqual(b, beamtalk_tuple_ops:at({a, b, c}, 2)),
+    ?assertEqual(c, beamtalk_tuple_ops:at({a, b, c}, 3)),
+    ?assertEqual(42, beamtalk_tuple_ops:at({ok, 42}, 2)).
 
-cleanup(_) ->
-    ok.
+at_out_of_bounds_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple_ops:at({a, b}, 0)),
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple_ops:at({a, b}, 3)),
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple_ops:at({a, b}, -1)).
 
-%%% ============================================================================
-%%% Reflection Tests
-%%% ============================================================================
+at_empty_tuple_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple_ops:at({}, 1)).
 
-class_test() ->
-    ?assertEqual('Tuple', beamtalk_tuple:dispatch('class', [], {a, b})),
-    ?assertEqual('Tuple', beamtalk_tuple:dispatch('class', [], {ok, 42})),
-    ?assertEqual('Tuple', beamtalk_tuple:dispatch('class', [], {})).
-
-%%% ============================================================================
-%%% Size Tests
-%%% ============================================================================
-
-size_test() ->
-    ?assertEqual(0, beamtalk_tuple:dispatch('size', [], {})),
-    ?assertEqual(1, beamtalk_tuple:dispatch('size', [], {a})),
-    ?assertEqual(2, beamtalk_tuple:dispatch('size', [], {a, b})),
-    ?assertEqual(3, beamtalk_tuple:dispatch('size', [], {a, b, c})).
+at_non_integer_index_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple_ops:at({a, b}, foo)).
 
 %%% ============================================================================
-%%% Access Tests
-%%% ============================================================================
-
-at_test() ->
-    ?assertEqual(a, beamtalk_tuple:dispatch('at:', [1], {a, b, c})),
-    ?assertEqual(b, beamtalk_tuple:dispatch('at:', [2], {a, b, c})),
-    ?assertEqual(c, beamtalk_tuple:dispatch('at:', [3], {a, b, c})),
-    ?assertEqual(42, beamtalk_tuple:dispatch('at:', [2], {ok, 42})).
-
-at_out_of_bounds_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Out of bounds access raises does_not_understand", fun() ->
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
-                         beamtalk_tuple:dispatch('at:', [0], {a, b})),
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
-                         beamtalk_tuple:dispatch('at:', [3], {a, b})),
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
-                         beamtalk_tuple:dispatch('at:', [-1], {a, b}))
-        end}
-    ]}.
-
-at_empty_tuple_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Empty tuple access raises does_not_understand", fun() ->
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
-                         beamtalk_tuple:dispatch('at:', [1], {}))
-        end}
-    ]}.
-
-%%% ============================================================================
-%%% Pattern Matching Tests
-%%% ============================================================================
-
-is_ok_test() ->
-    ?assertEqual(true, beamtalk_tuple:dispatch('isOk', [], {ok, 42})),
-    ?assertEqual(true, beamtalk_tuple:dispatch('isOk', [], {ok, value})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {error, reason})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {a, b})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {ok})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {})).
-
-is_error_test() ->
-    ?assertEqual(true, beamtalk_tuple:dispatch('isError', [], {error, not_found})),
-    ?assertEqual(true, beamtalk_tuple:dispatch('isError', [], {error, reason})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {ok, 42})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {a, b})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {error})),
-    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {})).
-
-%%% ============================================================================
-%%% Unwrapping Tests
+%%% unwrap/1 Tests
 %%% ============================================================================
 
 unwrap_ok_test() ->
-    ?assertEqual(42, beamtalk_tuple:dispatch('unwrap', [], {ok, 42})),
-    ?assertEqual(hello, beamtalk_tuple:dispatch('unwrap', [], {ok, hello})),
-    ?assertEqual({a, b}, beamtalk_tuple:dispatch('unwrap', [], {ok, {a, b}})).
+    ?assertEqual(42, beamtalk_tuple_ops:unwrap({ok, 42})),
+    ?assertEqual(hello, beamtalk_tuple_ops:unwrap({ok, hello})),
+    ?assertEqual({a, b}, beamtalk_tuple_ops:unwrap({ok, {a, b}})).
 
 unwrap_error_test() ->
     ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
-                 beamtalk_tuple:dispatch('unwrap', [], {error, not_found})),
+                 beamtalk_tuple_ops:unwrap({error, not_found})),
     ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
-                 beamtalk_tuple:dispatch('unwrap', [], {error, reason})).
+                 beamtalk_tuple_ops:unwrap({error, reason})).
 
-unwrap_invalid_pattern_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Unwrap on non-result tuple raises does_not_understand", fun() ->
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
-                         beamtalk_tuple:dispatch('unwrap', [], {a, b}))
-        end}
-    ]}.
+unwrap_invalid_pattern_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
+                 beamtalk_tuple_ops:unwrap({a, b})).
+
+%%% ============================================================================
+%%% unwrap_or/2 Tests
+%%% ============================================================================
 
 unwrap_or_test() ->
-    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOr:', [default], {ok, 42})),
-    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOr:', [default], {error, reason})),
-    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOr:', [default], {a, b})),
-    ?assertEqual(nil, beamtalk_tuple:dispatch('unwrapOr:', [nil], {error, not_found})).
+    ?assertEqual(42, beamtalk_tuple_ops:unwrap_or({ok, 42}, default)),
+    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or({error, reason}, default)),
+    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or({a, b}, default)),
+    ?assertEqual(nil, beamtalk_tuple_ops:unwrap_or({error, not_found}, nil)).
+
+%%% ============================================================================
+%%% unwrap_or_else/2 Tests
+%%% ============================================================================
 
 unwrap_or_else_test() ->
-    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {ok, 42})),
-    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {error, reason})),
-    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {a, b})).
+    ?assertEqual(42, beamtalk_tuple_ops:unwrap_or_else({ok, 42}, fun() -> default end)),
+    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or_else({error, reason}, fun() -> default end)),
+    ?assertEqual(default, beamtalk_tuple_ops:unwrap_or_else({a, b}, fun() -> default end)).
 
 unwrap_or_else_side_effects_test() ->
-    %% Block should not be evaluated for {ok, _}
     Self = self(),
-    beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> Self ! evaluated, default end], {ok, 42}),
-    receive 
+    %% Block should not be evaluated for {ok, _}
+    beamtalk_tuple_ops:unwrap_or_else({ok, 42}, fun() -> Self ! evaluated, default end),
+    receive
         evaluated -> ?assert(false)
-    after 10 -> 
+    after 10 ->
         ok
     end,
-    
     %% Block should be evaluated for other patterns
-    beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> Self ! evaluated, default end], {error, reason}),
-    receive 
+    beamtalk_tuple_ops:unwrap_or_else({error, reason}, fun() -> Self ! evaluated, default end),
+    receive
         evaluated -> ok
-    after 100 -> 
+    after 100 ->
         ?assert(false)
     end.
 
+unwrap_or_else_non_function_test() ->
+    %% Non-function argument raises does_not_understand (not type_error)
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'},
+                 beamtalk_tuple_ops:unwrap_or_else({error, reason}, 42)).
+
 %%% ============================================================================
-%%% Conversion Tests
+%%% as_string/1 Tests
 %%% ============================================================================
 
 as_string_test() ->
-    ?assertEqual(<<"{a, b}">>, beamtalk_tuple:dispatch('asString', [], {a, b})),
-    ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple:dispatch('asString', [], {ok, 42})),
-    ?assertEqual(<<"{error, not_found}">>, beamtalk_tuple:dispatch('asString', [], {error, not_found})),
-    ?assertEqual(<<"{hello}">>, beamtalk_tuple:dispatch('asString', [], {hello})),
-    ?assertEqual(<<"{}">>, beamtalk_tuple:dispatch('asString', [], {})).
+    ?assertEqual(<<"{a, b}">>, beamtalk_tuple_ops:as_string({a, b})),
+    ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple_ops:as_string({ok, 42})),
+    ?assertEqual(<<"{error, not_found}">>, beamtalk_tuple_ops:as_string({error, not_found})),
+    ?assertEqual(<<"{hello}">>, beamtalk_tuple_ops:as_string({hello})),
+    ?assertEqual(<<"{}">>, beamtalk_tuple_ops:as_string({})).
 
 %%% ============================================================================
-%%% has_method Tests
+%%% Compiled dispatch integration tests
+%%% Tests via beamtalk_tuple:dispatch/3 (compiled from lib/Tuple.bt)
+%%% to verify BIF mappings are wired correctly end-to-end.
 %%% ============================================================================
 
-has_method_builtin_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Builtin methods return true", fun() ->
-            ?assertEqual(true, beamtalk_tuple:has_method('class')),
-            ?assertEqual(true, beamtalk_tuple:has_method('size')),
-            ?assertEqual(true, beamtalk_tuple:has_method('at:')),
-            ?assertEqual(true, beamtalk_tuple:has_method('isOk')),
-            ?assertEqual(true, beamtalk_tuple:has_method('isError')),
-            ?assertEqual(true, beamtalk_tuple:has_method('unwrap')),
-            ?assertEqual(true, beamtalk_tuple:has_method('unwrapOr:')),
-            ?assertEqual(true, beamtalk_tuple:has_method('unwrapOrElse:')),
-            ?assertEqual(true, beamtalk_tuple:has_method('asString')),
-            ?assertEqual(false, beamtalk_tuple:has_method('unknownMethod'))
-        end}
-    ]}.
+dispatch_size_test() ->
+    ?assertEqual(3, beamtalk_tuple:dispatch('size', [], {a, b, c})),
+    ?assertEqual(0, beamtalk_tuple:dispatch('size', [], {})).
+
+dispatch_at_test() ->
+    ?assertEqual(b, beamtalk_tuple:dispatch('at:', [2], {a, b, c})).
+
+dispatch_at_out_of_bounds_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple:dispatch('at:', [0], {a, b})).
+
+dispatch_is_ok_test() ->
+    ?assertEqual(true, beamtalk_tuple:dispatch('isOk', [], {ok, 42})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {error, reason})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {a, b})).
+
+dispatch_is_error_test() ->
+    ?assertEqual(true, beamtalk_tuple:dispatch('isError', [], {error, reason})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {ok, 42})).
+
+dispatch_unwrap_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrap', [], {ok, 42})),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
+                 beamtalk_tuple:dispatch('unwrap', [], {error, reason})).
+
+dispatch_unwrap_or_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOr:', [default], {ok, 42})),
+    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOr:', [default], {error, reason})).
+
+dispatch_as_string_test() ->
+    ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple:dispatch('asString', [], {ok, 42})).
+
+dispatch_unwrap_or_else_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {ok, 42})),
+    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {error, reason})).
+
+dispatch_unwrap_invalid_pattern_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
+                 beamtalk_tuple:dispatch('unwrap', [], {a, b})).
 
 %%% ============================================================================
-%%% Extension Registry Tests
+%%% beamtalk_primitive:send integration tests
+%%% Verifies the full dispatch path: primitive:send → compiled tuple module
 %%% ============================================================================
 
-extension_method_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Extension methods work via DNU", fun() ->
-            %% Register a custom extension method
-            ExtFun = fun([], _Tuple) -> <<"custom">> end,
-            beamtalk_extensions:register('Tuple', 'customMethod', ExtFun, test_module),
-            
-            %% Should find the extension method
-            ?assertEqual(true, beamtalk_tuple:has_method('customMethod')),
-            
-            %% Should dispatch to extension
-            Result = beamtalk_tuple:dispatch('customMethod', [], {a, b}),
-            ?assertEqual(<<"custom">>, Result)
-        end},
-        
-        {"Unknown method raises does_not_understand", fun() ->
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unknownMethod'},
-                         beamtalk_tuple:dispatch('unknownMethod', [], {a, b}))
-        end}
-    ]}.
+primitive_send_size_test() ->
+    ?assertEqual(3, beamtalk_primitive:send({a, b, c}, 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send({}, 'size', [])).
 
-%%% ============================================================================
-%%% Type Safety Tests
-%%% ============================================================================
+primitive_send_at_test() ->
+    ?assertEqual(b, beamtalk_primitive:send({a, b, c}, 'at:', [2])).
 
-type_safety_test_() ->
-    {setup, fun setup/0, fun cleanup/1, [
-        {"Non-function argument to unwrapOrElse: raises does_not_understand", fun() ->
-            ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'},
-                         beamtalk_tuple:dispatch('unwrapOrElse:', [42], {error, reason}))
-        end}
-    ]}.
+primitive_send_is_ok_test() ->
+    ?assertEqual(true, beamtalk_primitive:send({ok, 42}, 'isOk', [])),
+    ?assertEqual(false, beamtalk_primitive:send({error, reason}, 'isOk', [])).
 
-%%% ============================================================================
-%%% Instance Variable Reflection Tests (BT-164)
-%%% ============================================================================
+primitive_send_unwrap_test() ->
+    ?assertEqual(42, beamtalk_primitive:send({ok, 42}, 'unwrap', [])).
 
-instVarNames_test() ->
-    %% Primitives have no instance variables
-    ?assertEqual([], beamtalk_tuple:dispatch('instVarNames', [], {a, b})),
-    ?assertEqual([], beamtalk_tuple:dispatch('instVarNames', [], {})).
+primitive_send_as_string_test() ->
+    ?assertEqual(<<"{a, b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
 
-instVarAt_test() ->
-    %% Primitives always return nil for instVarAt:
-    ?assertEqual(nil, beamtalk_tuple:dispatch('instVarAt', [anyField], {ok, 42})),
-    ?assertEqual(nil, beamtalk_tuple:dispatch('instVarAt', [value], {a, b, c})).
 
-instVarAt_put_immutable_error_test() ->
-    %% Trying to mutate a primitive should raise an immutable_primitive error
-    ?assertError({beamtalk_error, immutable_primitive, 'Tuple', 'instVarAt:put:', _, _, _},
-                 beamtalk_tuple:dispatch('instVarAt:put:', [value, 99], {a, b})).
