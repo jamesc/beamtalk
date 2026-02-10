@@ -254,6 +254,78 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
             write!(output, "call 'beamtalk_string_ops':'repeat'(Self, {p0})").ok()?;
             Some(())
         }
+        // Lines and words
+        "lines" => {
+            write!(output, "call 'beamtalk_string_ops':'lines'(Self)").ok()?;
+            Some(())
+        }
+        "words" => {
+            write!(output, "call 'beamtalk_string_ops':'words'(Self)").ok()?;
+            Some(())
+        }
+        // Replace
+        "replaceAll:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(
+                output,
+                "call 'binary':'replace'(Self, {p0}, {p1}, ['global'])"
+            )
+            .ok()?;
+            Some(())
+        }
+        "replaceFirst:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(output, "call 'binary':'replace'(Self, {p0}, {p1}, [])").ok()?;
+            Some(())
+        }
+        // Substring
+        "take:" => {
+            write!(output, "call 'beamtalk_string_ops':'take'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "drop:" => {
+            write!(output, "call 'beamtalk_string_ops':'drop'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Padding
+        "padLeft:" => {
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'leading'))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "padRight:" => {
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'trailing'))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "padLeft:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'leading', {p1}))"
+            )
+            .ok()?;
+            Some(())
+        }
+        // Testing
+        "isBlank" => {
+            write!(output, "call 'beamtalk_string_ops':'is_blank'(Self)").ok()?;
+            Some(())
+        }
+        "isDigit" => {
+            write!(output, "call 'beamtalk_string_ops':'is_digit'(Self)").ok()?;
+            Some(())
+        }
+        "isAlpha" => {
+            write!(output, "call 'beamtalk_string_ops':'is_alpha'(Self)").ok()?;
+            Some(())
+        }
         // Conversion
         "asInteger" => {
             write!(output, "call 'erlang':'binary_to_integer'(Self)").ok()?;
@@ -715,6 +787,38 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
             write!(output, "call 'erlang':'++'(Self, [{p0}|[]])").ok()?;
             Some(())
         }
+        // Concatenation
+        "++" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'erlang':'++'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Subsequence / Search
+        "from:to:" => {
+            let p0 = params.first().map_or("_Start", String::as_str);
+            let p1 = params.get(1).map_or("_End", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'from_to'(Self, {p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "indexOf:" => {
+            let p0 = params.first().map_or("_Item", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'index_of'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Iteration with index
+        "eachWithIndex:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'each_with_index'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
         // Reflection
         "describe" => {
             let s = core_erlang_binary_string("a List");
@@ -1115,5 +1219,53 @@ mod tests {
         let result = generate_primitive_bif(&mut output, "Symbol", "printString", &[]);
         assert!(result.is_some());
         assert_eq!(output, "call 'beamtalk_primitive':'print_string'(Self)");
+    }
+
+    #[test]
+    fn test_list_concat() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "List", "++", &["Other".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'++'(Self, Other)");
+    }
+
+    #[test]
+    fn test_list_from_to() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(
+            &mut output,
+            "List",
+            "from:to:",
+            &["Start".to_string(), "End".to_string()],
+        );
+        assert!(result.is_some());
+        assert_eq!(
+            output,
+            "call 'beamtalk_list_ops':'from_to'(Self, Start, End)"
+        );
+    }
+
+    #[test]
+    fn test_list_index_of() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "List", "indexOf:", &["Item".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'beamtalk_list_ops':'index_of'(Self, Item)");
+    }
+
+    #[test]
+    fn test_list_each_with_index() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(
+            &mut output,
+            "List",
+            "eachWithIndex:",
+            &["Block".to_string()],
+        );
+        assert!(result.is_some());
+        assert_eq!(
+            output,
+            "call 'beamtalk_list_ops':'each_with_index'(Self, Block)"
+        );
     }
 }

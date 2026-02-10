@@ -76,17 +76,14 @@ dispatch('respondsTo:', [Selector], _Self, State) when is_atom(Selector) ->
     {reply, Result, State};
 
 dispatch('instVarNames', [], _Self, State) ->
-    {reply, beamtalk_tagged_map:user_field_keys(State), State};
+    {reply, beamtalk_reflection:field_names(State), State};
 
 dispatch('instVarAt:', [FieldName], _Self, State) ->
-    %% Return nil for non-existent fields (Smalltalk semantics)
-    Value = maps:get(FieldName, State, nil),
-    {reply, Value, State};
+    {reply, beamtalk_reflection:read_field(FieldName, State), State};
 
 dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
-    %% Allow creating new fields; returns value (Smalltalk-80 semantics)
-    NewState = maps:put(FieldName, Value, State),
-    {reply, Value, NewState};
+    {WrittenValue, NewState} = beamtalk_reflection:write_field(FieldName, Value, State),
+    {reply, WrittenValue, NewState};
 
 %% --- Display methods ---
 
@@ -97,7 +94,7 @@ dispatch('printString', [], _Self, State) ->
 
 dispatch(inspect, [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    UserFields = beamtalk_tagged_map:user_field_keys(State),
+    UserFields = beamtalk_reflection:field_names(State),
     FieldStrs = [io_lib:format("~p: ~p", [K, maps:get(K, State)]) || K <- UserFields],
     FieldsPart = case FieldStrs of
         [] -> <<"">>;
@@ -150,13 +147,13 @@ dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
 
-%% BT-105: Abstract method contract — subclass must override
+%% BT-405: Abstract method contract — mirrors Object.bt pure method body
+%% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, subclassResponsibility),
-    Error2 = beamtalk_error:with_hint(Error1, <<"This method is abstract and must be implemented by a subclass.">>),
-    {error, Error2, State};
+    Error0 = beamtalk_error:new(user_error, ClassName),
+    Error1 = beamtalk_error:with_message(Error0, <<"This method is abstract and must be overridden by a subclass">>),
+    {error, Error1, State};
 
 %% --- Fallback: method not found ---
 

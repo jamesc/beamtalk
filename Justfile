@@ -18,7 +18,7 @@ default:
 
 # Run local CI checks (build, lint, unit & E2E tests)
 # Note: Runtime integration tests run only in GitHub Actions CI
-ci: build lint test test-e2e
+ci: build lint test test-stdlib test-e2e
 
 # Full clean and rebuild everything
 clean-all: clean clean-erlang
@@ -107,7 +107,13 @@ test-e2e: build-stdlib _clean-daemon-state
     cargo test --test e2e -- --ignored
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-e2e test-runtime
+test-all: test-rust test-stdlib test-e2e test-runtime
+
+# Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
+test-stdlib: build-rust build-erlang build-stdlib
+    @echo "🧪 Running stdlib tests..."
+    @cargo run --bin beamtalk --quiet -- test-stdlib
+    @echo "✅ Stdlib tests complete"
 
 # Clean up stale daemon state (internal helper)
 _clean-daemon-state:
@@ -230,14 +236,42 @@ coverage-e2e: _clean-daemon-state
         exit 1
     fi
 
-# Generate combined Erlang coverage (eunit + E2E)
-# Runs eunit with --cover, then E2E with cover, then merges both into one report.
-coverage-combined: coverage-runtime coverage-e2e
+# Collect stdlib test coverage (runs stdlib tests with Erlang cover instrumentation)
+coverage-stdlib: build-rust build-erlang build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Running stdlib tests with Erlang cover instrumentation..."
+    echo "   (This is slower than normal stdlib tests due to cover overhead)"
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib || true
+    if [ -f runtime/_build/test/cover/stdlib.coverdata ]; then
+        SIZE=$(wc -c < runtime/_build/test/cover/stdlib.coverdata)
+        echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"
+    else
+        echo "⚠️  No stdlib coverdata produced"
+        exit 1
+    fi
+
+# Generate combined Erlang coverage (eunit + E2E + stdlib)
+# Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
+coverage-combined: coverage-runtime coverage-e2e coverage-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
-    echo "📊 Merging eunit + E2E coverage data..."
-    # rebar3 cover imports all .coverdata files in _build/test/cover/
+    echo "📊 Merging eunit + E2E + stdlib coverage data..."
+    # Merge all .coverdata files into eunit.coverdata so rebar3 covertool sees them
+    # (covertool only imports eunit.coverdata, not e2e/stdlib coverdata)
+    erl -noshell -eval '
+        cover:start(),
+        Files = filelib:wildcard("_build/test/cover/*.coverdata"),
+        lists:foreach(fun(F) ->
+            io:format("  Importing: ~s~n", [F]),
+            cover:import(F)
+        end, Files),
+        ok = cover:export("_build/test/cover/eunit.coverdata"),
+        io:format("  Merged ~p files into eunit.coverdata~n", [length(Files)]),
+        cover:stop(),
+        init:stop().
+    '
     rebar3 cover --verbose
     rebar3 covertool generate
     python3 ../scripts/clean-covertool-xml.py

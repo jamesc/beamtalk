@@ -170,8 +170,15 @@ super(Selector, Args, Self, State, CurrentClass) ->
                     Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in superclass chain">>),
                     {error, Error2};
                 SuperclassName ->
-                    %% Start lookup at superclass (skip current class)
-                    lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
+                    %% Check extension registry on superclass before hierarchy walk
+                    case check_extension(SuperclassName, Selector) of
+                        {ok, Fun} ->
+                            logger:debug("Found extension method ~p on superclass ~p via super", [Selector, SuperclassName]),
+                            invoke_extension(Fun, Args, Self, State);
+                        not_found ->
+                            %% Start lookup at superclass (skip current class)
+                            lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
+                    end
             end
     end.
 

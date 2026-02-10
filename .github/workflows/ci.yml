@@ -99,6 +99,9 @@ jobs:
       - name: Test Rust (unit + integration)
         run: just test-rust
 
+      - name: Test stdlib (compiled language features)
+        run: just test-stdlib
+
       - name: Test E2E (full pipeline)
         run: just test-e2e
 
@@ -200,7 +203,7 @@ jobs:
       - name: Build standard library
         run: just build-stdlib
 
-      - name: Generate Erlang coverage (unit + E2E)
+      - name: Generate Erlang coverage (unit + E2E + stdlib)
         run: just coverage-combined
 
       - name: Rust Coverage Summary

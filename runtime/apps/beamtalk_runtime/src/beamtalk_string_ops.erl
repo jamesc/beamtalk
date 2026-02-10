@@ -23,7 +23,14 @@
     as_list/1,
     each/2,
     collect/2,
-    select/2
+    select/2,
+    lines/1,
+    words/1,
+    take/2,
+    drop/2,
+    is_blank/1,
+    is_digit/1,
+    is_alpha/1
 ]).
 
 %% @doc 1-based grapheme access. Returns the grapheme at the given index.
@@ -134,6 +141,61 @@ select(Str, Block) when is_binary(Str), is_function(Block, 1) ->
     Graphemes = as_list(Str),
     Selected = lists:filter(Block, Graphemes),
     iolist_to_binary(Selected).
+
+%% @doc Split string by newlines.
+-spec lines(binary()) -> [binary()].
+lines(Str) when is_binary(Str) ->
+    binary:split(Str, [<<"\n">>, <<"\r\n">>], [global]).
+
+%% @doc Split string by whitespace, filtering empty segments.
+-spec words(binary()) -> [binary()].
+words(Str) when is_binary(Str) ->
+    Parts = binary:split(string:trim(Str), [<<" ">>, <<"\t">>, <<"\n">>, <<"\r">>], [global]),
+    [P || P <- Parts, P =/= <<>>].
+
+%% @doc First N graphemes.
+-spec take(binary(), integer()) -> binary().
+take(_Str, N) when is_integer(N), N =< 0 -> <<>>;
+take(Str, N) when is_binary(Str), is_integer(N) ->
+    Graphemes = as_list(Str),
+    Taken = lists:sublist(Graphemes, N),
+    iolist_to_binary(Taken).
+
+%% @doc Skip first N graphemes.
+-spec drop(binary(), integer()) -> binary().
+drop(Str, N) when is_integer(N), N =< 0, is_binary(Str) -> Str;
+drop(Str, N) when is_binary(Str), is_integer(N) ->
+    Graphemes = as_list(Str),
+    Dropped = lists:nthtail(min(N, length(Graphemes)), Graphemes),
+    iolist_to_binary(Dropped).
+
+%% @doc Test if string is empty or only whitespace.
+-spec is_blank(binary()) -> boolean().
+is_blank(Str) when is_binary(Str) ->
+    string:trim(Str) =:= <<>>.
+
+%% @doc Test if all characters are digits.
+-spec is_digit(binary()) -> boolean().
+is_digit(<<>>) -> false;
+is_digit(Str) when is_binary(Str) ->
+    lists:all(fun(G) ->
+        case G of
+            <<C>> when C >= $0, C =< $9 -> true;
+            _ -> false
+        end
+    end, as_list(Str)).
+
+%% @doc Test if all characters are alphabetic.
+-spec is_alpha(binary()) -> boolean().
+is_alpha(<<>>) -> false;
+is_alpha(Str) when is_binary(Str) ->
+    lists:all(fun(G) ->
+        case G of
+            <<C>> when C >= $a, C =< $z -> true;
+            <<C>> when C >= $A, C =< $Z -> true;
+            _ -> false
+        end
+    end, as_list(Str)).
 
 %%% ============================================================================
 %%% Internal Functions

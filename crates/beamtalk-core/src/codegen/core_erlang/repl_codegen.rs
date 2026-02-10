@@ -1,27 +1,23 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! REPL evaluation module code generation.
+//! REPL and test evaluation module code generation.
 //!
 //! **DDD Context:** Code Generation
 //!
-//! This module handles code generation for REPL evaluation modules,
-//! creating simple modules with an `eval/1` function that evaluates
-//! an expression with the provided bindings map.
+//! This module handles code generation for evaluation modules, creating
+//! simple modules with an `eval/1` function that evaluates an expression
+//! with the provided bindings map.
 
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
-    /// Generates a simple REPL evaluation module.
+    /// Generates a REPL evaluation module (with workspace bindings).
     ///
     /// Creates a module with a single `eval/1` function that evaluates
     /// an expression with the provided bindings map.
-    ///
-    /// # Arguments
-    ///
-    /// * `expression` - The expression to evaluate
     ///
     /// # Generated Code
     ///
@@ -39,15 +35,36 @@ impl CoreErlangGenerator {
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
     pub(super) fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
-        // Save previous is_repl_mode so it can be restored after generation
         let previous_is_repl_mode = self.is_repl_mode;
-
-        // BT-213: Set context to Repl for this module
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true;
-        // BT-374 / ADR 0010: REPL runs in workspace context, bindings are available
+        // BT-374 / ADR 0010: REPL runs in workspace context
         self.workspace_mode = true;
 
+        self.generate_eval_module_body(expression)?;
+
+        self.is_repl_mode = previous_is_repl_mode;
+        Ok(())
+    }
+
+    /// Generates a test evaluation module (no workspace bindings).
+    ///
+    /// Like [`generate_repl_module`] but with `workspace_mode = false`.
+    /// Used by `beamtalk test-stdlib` for compiled expression tests (ADR 0014).
+    pub(super) fn generate_test_module(&mut self, expression: &Expression) -> Result<()> {
+        let previous_is_repl_mode = self.is_repl_mode;
+        self.context = CodeGenContext::Repl;
+        self.is_repl_mode = true;
+        self.workspace_mode = false;
+
+        self.generate_eval_module_body(expression)?;
+
+        self.is_repl_mode = previous_is_repl_mode;
+        Ok(())
+    }
+
+    /// Common eval module body shared by REPL and test codegen.
+    fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<()> {
         // Module header - simple module with just eval/1
         writeln!(self.output, "module '{}' ['eval'/1]", self.module_name)?;
         writeln!(self.output, "  attributes []")?;
@@ -88,9 +105,6 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
         self.indent -= 1;
-
-        // Restore REPL mode flag
-        self.is_repl_mode = previous_is_repl_mode;
 
         // Module end
         writeln!(self.output, "end")?;

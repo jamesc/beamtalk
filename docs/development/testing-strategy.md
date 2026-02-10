@@ -4,27 +4,35 @@ This document describes the testing approach for the Beamtalk compiler and runti
 
 ## Overview
 
-Beamtalk uses a multi-layered testing strategy covering both the Rust compiler and the Erlang runtime:
+Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlang runtime, and language features:
 
 | Layer | Technology | Location | Purpose |
 |-------|------------|----------|---------|
 | Unit Tests | Rust `#[test]` | `crates/*/src/*.rs` | Test individual functions and modules |
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
+| **Stdlib Tests** | **EUnit (compiled)** | **`tests/stdlib/*.bt`** | **Language feature validation (no REPL needed)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
-| E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | Language feature validation via REPL |
+| E2E Tests (Rust) | Rust + REPL | `tests/e2e/` | REPL/workspace integration tests |
 
 ## Running Tests
 
 ### Quick Check (CI equivalent)
 
 ```bash
+just ci                  # Build, lint, test, test-stdlib, test-e2e
+```
+
+Or individual steps:
+```bash
 cargo build --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo test --all-targets
+just test-stdlib         # Compiled language feature tests (fast, ~14s)
+just test-e2e            # REPL integration tests (slower, ~50s)
 ```
 
 ### Code Coverage
@@ -131,7 +139,7 @@ Standard Rust `#[test]` functions colocated with the code they test.
 
 **Count:** ~200 tests
 
-**Example** ([erlang.rs](../crates/beamtalk-core/src/erlang.rs)):
+**Example** ([erlang.rs](../../crates/beamtalk-core/src/erlang.rs)):
 ```rust
 #[test]
 fn test_generate_literal_integer() {
@@ -219,7 +227,63 @@ These tests verify that generated Core Erlang actually compiles with `erlc`.
 
 ---
 
-### 4. Erlang Runtime Unit Tests
+### 4. Stdlib Tests (Compiled Expression Tests)
+
+Language feature tests compiled directly to EUnit — no REPL daemon needed. These validate arithmetic, strings, blocks, closures, collections, and other pure language features at ~50-100x the speed of E2E tests.
+
+**Location:** `tests/stdlib/*.bt`
+
+**Count:** 32 test files, ~654 assertions
+
+**Command:** `just test-stdlib`
+
+**How it works:** The `beamtalk test-stdlib` command compiles each `.bt` file, parses `// =>` assertion comments, generates a thin EUnit wrapper, and runs via `eunit:test/1`. No REPL daemon is involved — tests compile and execute directly on BEAM.
+
+**Test file format** (same `// =>` format as E2E):
+```beamtalk
+// Basic arithmetic
+1 + 2
+// => 3
+
+5 negated
+// => -5
+
+// String operations
+'hello' size
+// => 5
+```
+
+**With fixtures** (`@load` directive):
+```beamtalk
+// @load tests/e2e/fixtures/counter.bt
+
+Counter spawn
+// => _
+
+// Wildcard _ means "runs but don't check result"
+```
+
+**When to use stdlib tests:**
+| Test needs... | Use stdlib test? |
+|---|---|
+| Pure language features (arithmetic, strings, blocks) | ✅ Yes |
+| Collections (List, Dictionary, Set, Tuple) | ✅ Yes |
+| Actor spawning + messaging (with `@load`) | ✅ Yes |
+| Workspace bindings (Transcript, Beamtalk) | ❌ No — use E2E |
+| REPL commands (`:load`, `:quit`, `:help`) | ❌ No — use E2E |
+| Auto-await behavior | ❌ No — use E2E |
+| `ERROR:` assertion pattern | ❌ No — use E2E |
+
+**Adding a new stdlib test:**
+1. Create `tests/stdlib/my_feature.bt`
+2. Add expressions with `// => expected_result` annotations
+3. Run `just test-stdlib`
+
+**Design:** See [ADR 0014](../ADR/0014-beamtalk-test-framework.md) for the full rationale behind compiled expression tests vs E2E tests.
+
+---
+
+### 5. Erlang Runtime Unit Tests
 
 EUnit tests for the Erlang runtime modules.
 
@@ -249,7 +313,7 @@ resolve_sets_value_test() ->
 
 ---
 
-### 5. Integration Tests
+### 6. Integration Tests
 
 Test the interaction between the Rust compiler daemon and Erlang runtime.
 
@@ -277,7 +341,7 @@ rebar3 eunit --module=beamtalk_repl_integration_tests
 
 ---
 
-### 6. Codegen Simulation Tests
+### 7. Codegen Simulation Tests
 
 Tests runtime behavior using **real compiled Beamtalk code** and simulated patterns.
 
@@ -327,46 +391,58 @@ spawn_zero_uses_default_state_test() ->
 
 ---
 
-### 7. End-to-End Tests (Rust)
+### 8. End-to-End Tests (REPL Integration)
 
-Language feature validation via REPL TCP connection.
+REPL and workspace integration tests that require a running REPL daemon.
 
 **Location:** `tests/e2e/`
 
-**Test cases:** `tests/e2e/cases/*.bt`
+**Test cases:** `tests/e2e/cases/*.bt` (~23 files)
 
 **Test harness:** `crates/beamtalk-cli/tests/e2e.rs`
 
 **What they test:**
-- Complete compilation and execution via REPL
-- Language features as users would experience them
-- Arithmetic operators, blocks, closures
+- Workspace bindings (Transcript, Beamtalk globals)
+- REPL commands (`:load`, variable persistence)
+- Actor auto-await behavior
+- `ERROR:` assertion patterns
 - Integration between compiler daemon and runtime
+
+**When to use E2E tests:**
+Only for tests that genuinely need the REPL daemon. Most language feature tests belong in `tests/stdlib/` instead (see section 4).
 
 **Test file format:**
 ```smalltalk
-// Test arithmetic
-3 + 4
-// => 7
+// Test workspace bindings
+Transcript show: 'Hello'
+// => nil
 
-// Test blocks
-[:x | x + 1] value: 5
-// => 6
+// Variable persistence across expressions
+x := 42
+// => 42
+
+x + 1
+// => 43
 ```
 
 **Running:**
 ```bash
 # Run E2E tests only
-cargo test --test e2e
+just test-e2e
+
+# Or via cargo directly
+cargo test --test e2e -- --ignored
 
 # Run with verbose output
-cargo test --test e2e -- --nocapture
+cargo test --test e2e -- --ignored --nocapture
 ```
 
-**Adding a new test case:**
+**Adding a new E2E test case:**
 1. Create `tests/e2e/cases/my_feature.bt`
 2. Add expressions with `// =>` expected results
-3. Run `cargo test --test e2e`
+3. Run `just test-e2e`
+
+**Note:** Before adding to E2E, consider whether the test needs the REPL. If it tests pure language features, add it to `tests/stdlib/` instead (see section 4).
 
 **Error testing:**
 ```smalltalk
@@ -374,24 +450,48 @@ undefined_var
 // => ERROR: Undefined variable
 ```
 
-See [tests/e2e/README.md](../tests/e2e/README.md) for full documentation.
+See [tests/e2e/README.md](../../tests/e2e/README.md) for full documentation.
 
 ---
 
 ## CI Pipeline
 
-The [CI workflow](../.github/workflows/ci.yml) runs on every PR:
+The [CI workflow](../../.github/workflows/ci.yml) runs on every PR:
 
-```yaml
-steps:
-  - cargo build --all-targets          # Build everything
-  - cargo clippy --all-targets -- -D warnings  # Lint (warnings = errors)
-  - cargo fmt --all -- --check         # Format check
-  - cargo test --all-targets           # All Rust tests + Erlang runtime
-  - rebar3 eunit --module=...          # Unit tests
-  - # Start daemon, then:
-  - rebar3 eunit --module=beamtalk_repl_integration_tests  # Integration
+```bash
+just ci
+# Equivalent to:
+#   just build           # Build Rust + Erlang
+#   just lint            # Clippy + fmt-check + dialyzer
+#   just test            # Rust unit tests + runtime EUnit
+#   just test-stdlib     # Compiled language feature tests (~14s)
+#   just test-e2e        # REPL integration tests (~50s)
 ```
+
+### Testing Pyramid
+
+The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-beamtalk-test-framework.md):
+
+```
+         ╱╲
+        ╱  ╲        E2E Tests (~23 files)
+       ╱    ╲       REPL/workspace integration — slow (~50s)
+      ╱──────╲
+     ╱        ╲     Stdlib Tests (~32 files, ~654 assertions)
+    ╱          ╲    Compiled language features — fast (~14s)
+   ╱────────────╲
+  ╱              ╲  Rust + Erlang Unit Tests (~600+ tests)
+ ╱                ╲ Parser, codegen, runtime modules — fast (~10s)
+╱──────────────────╲
+```
+
+| Layer | Count | Speed | What it tests |
+|-------|-------|-------|---------------|
+| Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
+| Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
+| Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
+| **Stdlib tests** | **~654 assertions** | **~14s** | **Language features (compiled)** |
+| E2E tests | ~23 files | ~50s | REPL/workspace integration |
 
 ---
 
@@ -514,17 +614,39 @@ mod tests {
 2. Manually construct state as compiler would generate
 3. Run `cd runtime && rebar3 eunit --module=beamtalk_codegen_simulation_tests`
 
-### Adding an E2E Test (Rust/REPL)
+### Adding a Stdlib Test (Language Features)
 
-1. Create or edit a `.bt` file in `tests/e2e/cases/`
+1. Create `tests/stdlib/my_feature.bt`
 2. Add expressions with `// => expected_result` annotations
-3. Run `cargo test --test e2e`
+3. Optionally use `// @load path/to/fixture.bt` for fixtures
+4. Run `just test-stdlib`
 
 Example test file:
-```smalltalk
+```beamtalk
 // Test my new feature
 myExpression
 // => expected_result
+
+// Wildcard (run but don't check value)
+sideEffectExpression
+// => _
+```
+
+**Use this for:** Pure language features, arithmetic, strings, blocks, closures, collections, actor spawn/messaging (with `@load`).
+
+### Adding an E2E Test (REPL/Workspace Integration)
+
+1. Create or edit a `.bt` file in `tests/e2e/cases/`
+2. Add expressions with `// => expected_result` annotations
+3. Run `just test-e2e`
+
+**Use this for:** Workspace bindings, REPL commands, variable persistence, auto-await, `ERROR:` patterns.
+
+Example test file:
+```smalltalk
+// Test workspace feature
+Transcript show: 'hello'
+// => nil
 ```
 
 ---
@@ -699,7 +821,7 @@ just fuzz 5  # 5 seconds
 
 ## Performance Testing (Future)
 
-From [AGENTS.md](../AGENTS.md), targets for tooling responsiveness:
+From [AGENTS.md](../../AGENTS.md), targets for tooling responsiveness:
 
 | Operation | Target |
 |-----------|--------|
@@ -714,8 +836,9 @@ Performance regression tests are planned but not yet implemented.
 
 ## References
 
-- [test-package-compiler/README.md](../test-package-compiler/README.md) - Snapshot test details
-- [tests/e2e/README.md](../tests/e2e/README.md) - E2E test framework details
-- [runtime/README.md](../runtime/README.md) - Erlang runtime test details
-- [AGENTS.md](../AGENTS.md) - Development guidelines
+- [ADR 0014: Beamtalk Test Framework](../ADR/0014-beamtalk-test-framework.md) - Architecture decision for the three-layer test strategy
+- [test-package-compiler/README.md](../../test-package-compiler/README.md) - Snapshot test details
+- [tests/e2e/README.md](../../tests/e2e/README.md) - E2E test framework details
+- [runtime/README.md](../../runtime/README.md) - Erlang runtime test details
+- [AGENTS.md](../../AGENTS.md) - Development guidelines
 - [insta documentation](https://insta.rs/) - Snapshot testing framework

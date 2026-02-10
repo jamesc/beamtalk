@@ -236,3 +236,146 @@ select_all_test() ->
 select_none_test() ->
     ?assertEqual(<<>>,
                  beamtalk_string_ops:select(<<"hi">>, fun(_) -> false end)).
+
+%%% ============================================================================
+%%% lines/1
+%%% ============================================================================
+
+lines_newline_test() ->
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
+                 beamtalk_string_ops:lines(<<"a\nb\nc">>)).
+
+lines_crlf_test() ->
+    ?assertEqual([<<"a">>, <<"b">>],
+                 beamtalk_string_ops:lines(<<"a\r\nb">>)).
+
+lines_mixed_test() ->
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>],
+                 beamtalk_string_ops:lines(<<"a\r\nb\nc">>)).
+
+lines_single_test() ->
+    ?assertEqual([<<"hello">>],
+                 beamtalk_string_ops:lines(<<"hello">>)).
+
+lines_empty_test() ->
+    ?assertEqual([<<>>],
+                 beamtalk_string_ops:lines(<<>>)).
+
+%%% ============================================================================
+%%% words/1
+%%% ============================================================================
+
+words_basic_test() ->
+    ?assertEqual([<<"hello">>, <<"world">>],
+                 beamtalk_string_ops:words(<<"hello world">>)).
+
+words_extra_spaces_test() ->
+    ?assertEqual([<<"hello">>, <<"world">>],
+                 beamtalk_string_ops:words(<<"  hello   world  ">>)).
+
+words_tabs_test() ->
+    ?assertEqual([<<"a">>, <<"b">>],
+                 beamtalk_string_ops:words(<<"a\tb">>)).
+
+words_single_test() ->
+    ?assertEqual([<<"hello">>],
+                 beamtalk_string_ops:words(<<"hello">>)).
+
+words_empty_test() ->
+    ?assertEqual([],
+                 beamtalk_string_ops:words(<<>>)).
+
+%%% ============================================================================
+%%% take/2
+%%% ============================================================================
+
+take_basic_test() ->
+    ?assertEqual(<<"hel">>, beamtalk_string_ops:take(<<"hello">>, 3)).
+
+take_all_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_string_ops:take(<<"hello">>, 10)).
+
+take_zero_test() ->
+    ?assertEqual(<<>>, beamtalk_string_ops:take(<<"hello">>, 0)).
+
+take_negative_test() ->
+    ?assertEqual(<<>>, beamtalk_string_ops:take(<<"hello">>, -1)).
+
+take_utf8_test() ->
+    Str = unicode:characters_to_binary("héllo"),
+    ?assertEqual(unicode:characters_to_binary("hé"),
+                 beamtalk_string_ops:take(Str, 2)).
+
+%%% ============================================================================
+%%% drop/2
+%%% ============================================================================
+
+drop_basic_test() ->
+    ?assertEqual(<<"llo">>, beamtalk_string_ops:drop(<<"hello">>, 2)).
+
+drop_all_test() ->
+    ?assertEqual(<<>>, beamtalk_string_ops:drop(<<"hello">>, 10)).
+
+drop_zero_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_string_ops:drop(<<"hello">>, 0)).
+
+drop_negative_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_string_ops:drop(<<"hello">>, -1)).
+
+drop_utf8_test() ->
+    Str = unicode:characters_to_binary("héllo"),
+    ?assertEqual(<<"llo">>, beamtalk_string_ops:drop(Str, 2)).
+
+%%% ============================================================================
+%%% is_blank/1
+%%% ============================================================================
+
+is_blank_empty_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_blank(<<>>)).
+
+is_blank_spaces_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_blank(<<"   ">>)).
+
+is_blank_tabs_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_blank(<<"\t\n">>)).
+
+is_blank_content_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_blank(<<"hello">>)).
+
+is_blank_mixed_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_blank(<<"  hi  ">>)).
+
+%%% ============================================================================
+%%% is_digit/1
+%%% ============================================================================
+
+is_digit_all_digits_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_digit(<<"12345">>)).
+
+is_digit_mixed_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_digit(<<"12a">>)).
+
+is_digit_empty_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_digit(<<>>)).
+
+is_digit_alpha_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_digit(<<"abc">>)).
+
+%%% ============================================================================
+%%% is_alpha/1
+%%% ============================================================================
+
+is_alpha_lowercase_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_alpha(<<"hello">>)).
+
+is_alpha_uppercase_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_alpha(<<"HELLO">>)).
+
+is_alpha_mixed_case_test() ->
+    ?assertEqual(true, beamtalk_string_ops:is_alpha(<<"Hello">>)).
+
+is_alpha_with_digits_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_alpha(<<"hello1">>)).
+
+is_alpha_empty_test() ->
+    ?assertEqual(false, beamtalk_string_ops:is_alpha(<<>>)).

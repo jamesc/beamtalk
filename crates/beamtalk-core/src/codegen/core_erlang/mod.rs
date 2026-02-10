@@ -342,6 +342,21 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
     Ok(generator.output)
 }
 
+/// Generates Core Erlang for a test expression (no workspace bindings).
+///
+/// Like [`generate_repl_expression`] but with `workspace_mode = false`,
+/// suitable for compiled tests that don't need REPL/workspace context.
+/// Used by `beamtalk test-stdlib` (ADR 0014 Phase 1).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
+    let mut generator = CoreErlangGenerator::new(module_name);
+    generator.generate_test_module(expression)?;
+    Ok(generator.output)
+}
+
 /// Generates Core Erlang code with workspace mode enabled.
 ///
 /// BT-374 / ADR 0010: When `workspace_mode` is true, workspace binding names

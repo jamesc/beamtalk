@@ -11,7 +11,11 @@
 //!
 //! - **Block evaluation**: `value`, `whileTrue:`, `repeat` → Function application & loops
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
-//! - **Object**: `isNil`, `notNil`, `respondsTo:`, `subclassResponsibility` → Protocol methods
+//! - **Object protocol** (split into domain-aligned groups):
+//!   - **Nil protocol**: `isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:` → Nil-testing boolean protocol
+//!   - **Error signaling**: `error:` → Error construction and signaling
+//!   - **Object identity**: `yourself`, `hash`, `printString` → Identity and representation
+//!   - **Object reflection**: `respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:` → Runtime introspection
 //! - **Dynamic dispatch**: `perform:`, `perform:withArguments:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
 //! Unlike type-specific dispatch (which goes through `beamtalk_primitive:send/3`
@@ -498,35 +502,50 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Tries to generate code for Object reflection methods.
+    /// Tries to generate code for Object protocol methods.
     ///
-    /// Object provides reflection and introspection capabilities for all objects
-    /// that inherit from it. This function handles both:
-    /// - Reflection methods (respondsTo:, instVarNames, instVarAt:) for actors
-    /// - Nil-testing protocol (isNil, notNil, ifNil:, ifNotNil:) for all values
+    /// **DDD Context:** Object Protocol — Orchestrator
+    ///
+    /// Delegates to domain-aligned intrinsic groups:
+    /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`)
+    /// - Error signaling (`error:`)
+    /// - Object identity (`yourself`, `hash`, `printString`)
+    /// - Object reflection (`respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`)
     ///
     /// - Returns `Ok(Some(()))` if the message was an Object method and code was generated
     /// - Returns `Ok(None)` if the message is NOT an Object method (caller should continue)
     /// - Returns `Err(...)` on error
-    ///
-    /// # Object Reflection Methods (Actors only)
-    ///
-    /// - `respondsTo:` - Check if object responds to a selector
-    /// - `instVarNames` - Get list of instance variable names
-    /// - `instVarAt:` - Read instance variable by name
-    ///
-    /// # Nil-Testing Protocol (All values)
-    ///
-    /// - `isNil` - Returns true only for nil, false for everything else
-    /// - `notNil` - Returns false only for nil, true for everything else
-    /// - `ifNil:` - Conditional execution if nil
-    /// - `ifNotNil:` - Conditional execution if not nil
-    /// - `ifNil:ifNotNil:` / `ifNotNil:ifNil:` - Two-way conditional
-    #[expect(
-        clippy::too_many_lines,
-        reason = "handles multiple Object protocol methods"
-    )]
     pub(in crate::codegen::core_erlang) fn try_generate_object_message(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        if let Some(r) = self.try_generate_nil_protocol(receiver, selector, arguments)? {
+            return Ok(Some(r));
+        }
+        if let Some(r) = self.try_generate_error_signaling(receiver, selector, arguments)? {
+            return Ok(Some(r));
+        }
+        if let Some(r) = self.try_generate_object_identity(receiver, selector, arguments)? {
+            return Ok(Some(r));
+        }
+        if let Some(r) = self.try_generate_object_reflection(receiver, selector, arguments)? {
+            return Ok(Some(r));
+        }
+        Ok(None)
+    }
+
+    /// Generates code for nil-testing protocol methods.
+    ///
+    /// **DDD Context:** Object Protocol — Nil Testing
+    ///
+    /// - `isNil` — Returns true only for nil, false for everything else
+    /// - `notNil` — Returns false only for nil, true for everything else
+    /// - `ifNil:` — Conditional execution if nil
+    /// - `ifNotNil:` — Conditional execution if not nil
+    /// - `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — Two-way conditional
+    fn try_generate_nil_protocol(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
@@ -553,83 +572,6 @@ impl CoreErlangGenerator {
                     write!(
                         self.output,
                         " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
-                    )?;
-                    Ok(Some(()))
-                }
-                "yourself" if arguments.is_empty() => {
-                    // Identity: just return the receiver
-                    self.generate_expression(receiver)?;
-                    Ok(Some(()))
-                }
-                "hash" if arguments.is_empty() => {
-                    // Hash using erlang:phash2/1 — works for all BEAM types
-                    let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
-                    Ok(Some(()))
-                }
-                "printString" if arguments.is_empty() => {
-                    // Delegate to beamtalk_primitive:print_string/1 which handles all types
-                    let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in call 'beamtalk_primitive':'print_string'({recv_var})"
-                    )?;
-                    Ok(Some(()))
-                }
-                "instVarNames" if arguments.is_empty() => {
-                    // For actors: Extract instance variable names from state map
-                    // For primitives: Intended future semantics is to return empty list
-                    //                 (they have no instance vars); current implementation
-                    //                 only supports actor instances (see BT-164).
-                    //
-                    // Generate async call since actors need mailbox serialization:
-                    // beamtalk_actor:async_send(Pid, instVarNames, [], Future)
-
-                    let receiver_var = self.fresh_var("Receiver");
-                    let pid_var = self.fresh_var("Pid");
-                    let future_var = self.fresh_var("Future");
-
-                    write!(self.output, "let {receiver_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, " in ")?;
-
-                    write!(
-                        self.output,
-                        "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-                    )?;
-
-                    write!(
-                        self.output,
-                        "let {future_var} = call 'beamtalk_future':'new'() in "
-                    )?;
-
-                    write!(
-                        self.output,
-                        "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in "
-                    )?;
-
-                    write!(self.output, "{future_var}")?;
-
-                    Ok(Some(()))
-                }
-                "subclassResponsibility" if arguments.is_empty() => {
-                    // Raise a structured beamtalk_error for abstract methods
-                    let err0 = self.fresh_temp_var("Err");
-                    let err1 = self.fresh_temp_var("Err");
-                    let err2 = self.fresh_temp_var("Err");
-                    let hint = core_erlang_binary_string(
-                        "This method is abstract and must be overridden by a subclass.",
-                    );
-                    write!(
-                        self.output,
-                        "let {err0} = call 'beamtalk_error':'new'('does_not_understand', 'Object') in \
-                         let {err1} = call 'beamtalk_error':'with_selector'({err0}, 'subclassResponsibility') in \
-                         let {err2} = call 'beamtalk_error':'with_hint'({err1}, {hint}) in \
-                         call 'erlang':'error'({err2})"
                     )?;
                     Ok(Some(()))
                 }
@@ -701,6 +643,29 @@ impl CoreErlangGenerator {
                         )?;
                         Ok(Some(()))
                     }
+                    _ => Ok(None),
+                }
+            }
+            MessageSelector::Binary(_) => Ok(None),
+        }
+    }
+
+    /// Generates code for error signaling methods.
+    ///
+    /// **DDD Context:** Object Protocol — Error Signaling
+    ///
+    /// - `error:` — Smalltalk-style error signaling with receiver's class
+    fn try_generate_error_signaling(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
                     "error:" if arguments.len() == 1 => {
                         // Smalltalk-style error signaling: self error: 'message'
                         // Creates a #beamtalk_error{kind=user_error} with receiver's class
@@ -723,6 +688,120 @@ impl CoreErlangGenerator {
                         )?;
                         Ok(Some(()))
                     }
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Generates code for object identity and representation methods.
+    ///
+    /// **DDD Context:** Object Protocol — Object Identity
+    ///
+    /// - `yourself` — Identity: returns the receiver unchanged
+    /// - `hash` — Hash using `erlang:phash2/1`
+    /// - `printString` — String representation via `beamtalk_primitive:print_string/1`
+    fn try_generate_object_identity(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "yourself" if arguments.is_empty() => {
+                    // Identity: just return the receiver
+                    self.generate_expression(receiver)?;
+                    Ok(Some(()))
+                }
+                "hash" if arguments.is_empty() => {
+                    // Hash using erlang:phash2/1 — works for all BEAM types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
+                    Ok(Some(()))
+                }
+                "printString" if arguments.is_empty() => {
+                    // Delegate to beamtalk_primitive:print_string/1 which handles all types
+                    let recv_var = self.fresh_temp_var("Obj");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in call 'beamtalk_primitive':'print_string'({recv_var})"
+                    )?;
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+            _ => Ok(None),
+        }
+    }
+
+    /// Generates code for object reflection and introspection methods.
+    ///
+    /// **DDD Context:** Object Protocol — Object Reflection
+    ///
+    /// - `respondsTo:` — Check if object responds to a selector
+    /// - `instVarNames` — Get list of instance variable names (actors only)
+    /// - `instVarAt:` — Read instance variable by name
+    /// - `instVarAt:put:` — Write instance variable by name
+    #[expect(
+        clippy::too_many_lines,
+        reason = "instVarAt: and instVarAt:put: require verbose type guards for actor vs primitive dispatch"
+    )]
+    fn try_generate_object_reflection(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        match selector {
+            MessageSelector::Unary(name) => match name.as_str() {
+                "instVarNames" if arguments.is_empty() => {
+                    // For actors: Extract instance variable names from state map
+                    // For primitives: Intended future semantics is to return empty list
+                    //                 (they have no instance vars); current implementation
+                    //                 only supports actor instances (see BT-164).
+                    //
+                    // Generate async call since actors need mailbox serialization:
+                    // beamtalk_actor:async_send(Pid, instVarNames, [], Future)
+
+                    let receiver_var = self.fresh_var("Receiver");
+                    let pid_var = self.fresh_var("Pid");
+                    let future_var = self.fresh_var("Future");
+
+                    write!(self.output, "let {receiver_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(self.output, " in ")?;
+
+                    write!(
+                        self.output,
+                        "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
+                    )?;
+
+                    write!(
+                        self.output,
+                        "let {future_var} = call 'beamtalk_future':'new'() in "
+                    )?;
+
+                    write!(
+                        self.output,
+                        "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in "
+                    )?;
+
+                    write!(self.output, "{future_var}")?;
+
+                    Ok(Some(()))
+                }
+                _ => Ok(None),
+            },
+            MessageSelector::Keyword(parts) => {
+                let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+
+                match selector_name.as_str() {
                     "respondsTo:" if arguments.len() == 1 => {
                         // Check if object responds to a selector
                         // Use beamtalk_primitive:responds_to/2 which handles both actors and primitives
