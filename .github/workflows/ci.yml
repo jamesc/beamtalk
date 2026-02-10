@@ -203,7 +203,7 @@ jobs:
       - name: Build standard library
         run: just build-stdlib
 
-      - name: Generate Erlang coverage (unit + E2E)
+      - name: Generate Erlang coverage (unit + E2E + stdlib)
         run: just coverage-combined
 
       - name: Rust Coverage Summary
