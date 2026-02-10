@@ -352,15 +352,12 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid) ->
 %% The class process knows the module name, so we can determine which strategy to use.
 %% ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
 -spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) -> dispatch_result().
-invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
+invoke_method(_ClassName, ClassPid, Selector, Args, Self, State) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name(ClassPid) of
         undefined ->
-            %% Dynamic class or error
-            Error0 = beamtalk_error:new(internal_error, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Class has no module name">>),
-            {error, Error2};
+            %% Dynamic class or no module — continue to superclass (BT-427)
+            continue_to_superclass(Selector, Args, Self, State, ClassPid);
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
             %% BEAM lazy-loads modules, and function_exported/3 only checks
@@ -371,10 +368,8 @@ invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
             %% bugs inside the dispatch function itself.
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
-                    Error0 = beamtalk_error:new(internal_error, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Module missing dispatch/4 function">>),
-                    {error, Error2};
+                    %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
+                    continue_to_superclass(Selector, Args, Self, State, ClassPid);
                 true ->
                     logger:debug("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
                     %% Normalize the return value: dispatch/4 returns either
@@ -386,6 +381,30 @@ invoke_method(ClassName, ClassPid, Selector, Args, Self, State) ->
                         {error, Error, _State} -> {error, Error};
                         Other -> Other
                     end
+            end
+    end.
+
+%% @private
+%% @doc Continue hierarchy walk to superclass when current class can't dispatch.
+%% Used when a class has no module or its module lacks dispatch/4 (abstract classes).
+-spec continue_to_superclass(selector(), args(), bt_self(), state(), pid()) -> dispatch_result().
+continue_to_superclass(Selector, Args, Self, State, ClassPid) ->
+    case beamtalk_object_class:superclass(ClassPid) of
+        none ->
+            %% Reached root without finding dispatchable method
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            Error0 = beamtalk_error:new(does_not_understand, ClassName),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+            {error, Error2};
+        SuperclassName ->
+            case beamtalk_object_class:whereis_class(SuperclassName) of
+                undefined ->
+                    Error0 = beamtalk_error:new(class_not_found, SuperclassName),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error1};
+                SuperclassPid ->
+                    lookup_in_class_chain_slow(Selector, Args, Self, State, SuperclassName, SuperclassPid)
             end
     end.
 

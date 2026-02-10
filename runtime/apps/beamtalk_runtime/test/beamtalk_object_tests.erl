@@ -46,9 +46,9 @@ object_reflection_test_() ->
         {"instVarNames filters internal fields", fun test_inst_var_names/0},
         {"instVarNames with multiple fields", fun test_inst_var_names_multi/0},
         {"instVarAt: reads field value", fun test_inst_var_at/0},
-        {"instVarAt: with non-existent field returns error", fun test_inst_var_at_missing/0},
-        {"instVarAt:put: sets field value", fun test_inst_var_at_put/0},
-        {"instVarAt:put: with non-existent field returns error", fun test_inst_var_at_put_missing/0},
+        {"instVarAt: with non-existent field returns nil", fun test_inst_var_at_missing/0},
+        {"instVarAt:put: sets field value and returns value", fun test_inst_var_at_put/0},
+        {"instVarAt:put: with non-existent field creates it", fun test_inst_var_at_put_missing/0},
         {"instVarAt:put: returns updated state", fun test_inst_var_at_put_state/0}
     ]}.
 
@@ -75,7 +75,7 @@ test_inst_var_at() ->
 test_inst_var_at_missing() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch('instVarAt:', [nonexistent], self_ref(), State),
-    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+    ?assertMatch({reply, nil, _}, Result).
 
 test_inst_var_at_put() ->
     State = counter_state(),
@@ -85,7 +85,10 @@ test_inst_var_at_put() ->
 test_inst_var_at_put_missing() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch('instVarAt:put:', [nonexistent, 42], self_ref(), State),
-    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+    %% BT-427: Smalltalk semantics — creates the field, returns value
+    ?assertMatch({reply, 42, _}, Result),
+    {reply, _, NewState} = Result,
+    ?assertEqual(42, maps:get(nonexistent, NewState)).
 
 test_inst_var_at_put_state() ->
     State = counter_state(),
@@ -181,10 +184,23 @@ has_method_test_() ->
 
 fallback_test_() ->
     {"dispatch fallback for unknown methods", [
-        {"unknown method returns error", fun test_unknown_method/0}
+        {"unknown method returns error", fun test_unknown_method/0},
+        {"perform: unknown returns 3-tuple error", fun test_perform_unknown_returns_3tuple/0},
+        {"perform:withArguments: bad type returns 3-tuple error", fun test_perform_withargs_bad_type/0}
     ]}.
 
 test_unknown_method() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch(unknownMethod, [], self_ref(), State),
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, _}, Result).
+
+test_perform_unknown_returns_3tuple() ->
+    State = counter_state(),
+    Result = beamtalk_object:dispatch('perform:', [nonExistentMethod], self_ref(), State),
+    %% Must return 3-tuple {error, Error, State} not 2-tuple {error, Error}
+    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+
+test_perform_withargs_bad_type() ->
+    State = counter_state(),
+    Result = beamtalk_object:dispatch('perform:withArguments:', ["notAnAtom", []], self_ref(), State),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}, _}, Result).
