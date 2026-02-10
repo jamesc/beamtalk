@@ -4,7 +4,7 @@
 %%% @doc Standard library initialization for Beamtalk.
 %%%
 %%% This module registers all primitive classes (Integer, String, Boolean, etc.)
-%%% and the Beamtalk global class in the class registry at runtime startup.
+%%% and the SystemDictionary/TranscriptStream classes in the class registry at runtime startup.
 %%%
 %%% ## Classes Registered
 %%%
@@ -19,7 +19,8 @@
 %%% | UndefinedObject | Object | beamtalk_undefined_object |
 %%% | Block | Object | beamtalk_block |
 %%% | Tuple | Object | beamtalk_tuple |
-%%% | Beamtalk | Actor | beamtalk_system_dictionary |
+%%% | SystemDictionary | Actor | beamtalk_system_dictionary |
+%%% | TranscriptStream | Actor | beamtalk_transcript_stream |
 %%% | File | Object | beamtalk_file |
 %%%
 %%% ## Usage
@@ -73,7 +74,7 @@ init(Parent) ->
 -spec do_init() -> ok.
 do_init() ->
     logger:info("Registering primitive classes"),
-    Results = [
+    PrimitiveResults = [
         register_number_class(),
         register_integer_class(),
         register_string_class(),
@@ -82,10 +83,13 @@ do_init() ->
         register_nil_class(),
         register_block_class(),
         register_tuple_class(),
-        register_beamtalk_class(),
         register_float_class(),
         register_file_class()
     ],
+    %% Register classes for workspace globals (singletons like Beamtalk, Transcript).
+    %% Each module exports class_info/0 as the single source of truth for its metadata.
+    GlobalResults = register_workspace_globals(),
+    Results = PrimitiveResults ++ GlobalResults,
     %% Log any failures but don't crash
     lists:foreach(fun
         ({ok, ClassName}) -> 
@@ -344,28 +348,6 @@ register_tuple_class() ->
     register_class('Tuple', ClassInfo).
 
 %%% ============================================================================
-%%% Beamtalk Global Class (System Reflection)
-%%% BT-376: Points to beamtalk_system_dictionary actor module (ADR 0010)
-%%% ============================================================================
-
--spec register_beamtalk_class() -> {ok, atom()} | {error, atom(), term()}.
-register_beamtalk_class() ->
-    ClassInfo = #{
-        name => 'Beamtalk',
-        module => beamtalk_system_dictionary,
-        superclass => 'Actor',
-        instance_methods => #{},
-        class_methods => #{
-            allClasses => #{arity => 0},
-            'classNamed:' => #{arity => 1},
-            globals => #{arity => 0},
-            version => #{arity => 0}
-        },
-        instance_variables => []
-    },
-    register_class('Beamtalk', ClassInfo).
-
-%%% ============================================================================
 %%% Float Class (BT-340)
 %%% ============================================================================
 
@@ -431,6 +413,23 @@ register_file_class() ->
 %%% ============================================================================
 %%% Helper Functions
 %%% ============================================================================
+
+%% Workspace global singleton modules whose classes need registering.
+%% Each module exports class_info/0 as the single source of truth for its metadata.
+%% To add a new workspace global: implement class_info/0 in the module and add it here.
+-define(WORKSPACE_GLOBALS, [
+    beamtalk_system_dictionary,
+    beamtalk_transcript_stream
+]).
+
+%% @doc Register classes for all workspace global singletons.
+-spec register_workspace_globals() -> [{ok, atom()} | {error, atom(), term()}].
+register_workspace_globals() ->
+    [begin
+        ClassInfo = Mod:class_info(),
+        ClassName = maps:get(name, ClassInfo),
+        register_class(ClassName, ClassInfo)
+     end || Mod <- ?WORKSPACE_GLOBALS].
 
 %% @doc Register a class with the class registry.
 %% Returns {ok, ClassName} on success, {error, ClassName, Reason} on failure.
