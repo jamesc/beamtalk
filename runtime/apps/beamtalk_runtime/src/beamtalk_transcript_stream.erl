@@ -34,7 +34,7 @@
 
 %% API
 -export([start_link/0, start_link/1, start_link_singleton/1, spawn/0, spawn/1]).
--export([has_method/1]).
+-export([has_method/1, class_info/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -94,6 +94,28 @@ has_method(unsubscribe)  -> true;
 has_method(recent)       -> true;
 has_method(clear)        -> true;
 has_method(_)            -> false.
+
+%% @doc Return class registration metadata for TranscriptStream.
+%%
+%% Used by beamtalk_stdlib to register this singleton's class.
+%% Single source of truth for class name, superclass, and method table.
+-spec class_info() -> map().
+class_info() ->
+    #{
+        name => 'TranscriptStream',
+        module => ?MODULE,
+        superclass => 'Actor',
+        instance_methods => #{
+            'show:' => #{arity => 1},
+            cr => #{arity => 0},
+            subscribe => #{arity => 0},
+            unsubscribe => #{arity => 0},
+            recent => #{arity => 0},
+            clear => #{arity => 0}
+        },
+        class_methods => #{},
+        instance_variables => []
+    }.
 
 %%% ============================================================================
 %%% gen_server callbacks

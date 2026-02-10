@@ -192,7 +192,17 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 fn is_primitive_type(class_name: &str) -> bool {
     matches!(
         class_name,
-        "Integer" | "Float" | "String" | "True" | "False" | "UndefinedObject" | "Block" | "Symbol"
+        "Integer"
+            | "Float"
+            | "String"
+            | "True"
+            | "False"
+            | "UndefinedObject"
+            | "Block"
+            | "Symbol"
+            | "Tuple"
+            | "List"
+            | "Dictionary"
     )
 }
 

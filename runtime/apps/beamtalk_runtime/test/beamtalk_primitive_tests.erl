@@ -48,11 +48,11 @@ class_of_symbol_test() ->
     ?assertEqual('Symbol', beamtalk_primitive:class_of('hello')),
     ?assertEqual('Symbol', beamtalk_primitive:class_of('with_underscores')).
 
-class_of_array_test() ->
-    ?assertEqual('Array', beamtalk_primitive:class_of([])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([1, 2, 3])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([a, b, c])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([[1], [2], [3]])).
+class_of_list_test() ->
+    ?assertEqual('List', beamtalk_primitive:class_of([])),
+    ?assertEqual('List', beamtalk_primitive:class_of([1, 2, 3])),
+    ?assertEqual('List', beamtalk_primitive:class_of([a, b, c])),
+    ?assertEqual('List', beamtalk_primitive:class_of([[1], [2], [3]])).
 
 class_of_dictionary_test() ->
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
@@ -257,12 +257,12 @@ class_of_special_atoms_test() ->
 
 class_of_empty_collections_test() ->
     ?assertEqual('String', beamtalk_primitive:class_of(<<>>)),
-    ?assertEqual('Array', beamtalk_primitive:class_of([])),
+    ?assertEqual('List', beamtalk_primitive:class_of([])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({})).
 
 class_of_nested_structures_test() ->
-    ?assertEqual('Array', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
+    ?assertEqual('List', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => #{nested => value}})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({{a, b}, {c, d}})).
 
@@ -508,14 +508,14 @@ value_type_send_does_not_understand_test() ->
     end.
 
 plain_map_still_routes_to_dictionary_test() ->
-    %% Plain maps without $beamtalk_class still route to beamtalk_map
+    %% Plain maps without $beamtalk_class still route to beamtalk_dictionary
     Self = #{a => 1, b => 2},
     Result = beamtalk_primitive:send(Self, 'size', []),
     ?assertEqual(2, Result).
 
 %% BT-324: Dictionary with user '__class__' key dispatches as Dictionary
 dictionary_with_old_class_key_dispatches_as_dictionary_test() ->
-    %% A user Dictionary with '__class__' (old tag) must route to beamtalk_map,
+    %% A user Dictionary with '__class__' (old tag) must route to beamtalk_dictionary,
     %% not to whatever class name the key contains
     Dict = #{'__class__' => 'Integer', value => 42},
     ?assertEqual(2, beamtalk_primitive:send(Dict, 'size', [])).

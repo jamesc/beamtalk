@@ -43,6 +43,11 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Tuple" => generate_tuple_bif(output, selector, params),
+        "List" => generate_list_bif(output, selector, params),
+        "Dictionary" => generate_dictionary_bif(output, selector, params),
+        "Object" => generate_object_bif(output, selector, params),
+        "Association" => generate_association_bif(output, selector, params),
         _ => None,
     }
 }
@@ -446,7 +451,405 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
     }
 }
 
+/// Tuple primitive implementations (BT-417).
+///
+/// Tuples are Erlang tuples — immutable fixed-size collections, particularly
+/// useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "size" => {
+            write!(output, "call 'erlang':'tuple_size'(Self)").ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'at'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "isOk" => {
+            write!(
+                output,
+                "case Self of <{{'ok', _Value}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "isError" => {
+            write!(
+                output,
+                "case Self of <{{'error', _Reason}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "unwrap" => {
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap'(Self)").ok()?;
+            Some(())
+        }
+        "unwrapOr:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "unwrapOrElse:" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "asString" => {
+            write!(output, "call 'beamtalk_tuple_ops':'as_string'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// List primitive implementations (BT-419).
+///
+/// Lists are Erlang linked lists — fast prepend, sequential access.
+/// Complex operations delegate to `beamtalk_list_ops` helper module.
+#[allow(clippy::too_many_lines)]
+fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Access
+        "size" => {
+            write!(output, "call 'erlang':'length'(Self)").ok()?;
+            Some(())
+        }
+        "isEmpty" => {
+            write!(output, "call 'erlang':'=:='(Self, [])").ok()?;
+            Some(())
+        }
+        "first" => {
+            let hint = core_erlang_binary_string("Cannot get first element of empty list");
+            write!(
+                output,
+                "case Self of \
+                 <[H|_T]> when 'true' -> H \
+                 <[]> when 'true' -> \
+                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
+                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'first') in \
+                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
+                   call 'erlang':'error'(Error2) \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "rest" => {
+            write!(
+                output,
+                "case Self of \
+                 <[_H|T]> when 'true' -> T \
+                 <[]> when 'true' -> [] \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "last" => {
+            let hint = core_erlang_binary_string("Cannot get last element of empty list");
+            write!(
+                output,
+                "case Self of \
+                 <[]> when 'true' -> \
+                   let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
+                   let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'last') in \
+                   let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
+                   call 'erlang':'error'(Error2) \
+                 <_> when 'true' -> \
+                   call 'lists':'last'(Self) \
+                 end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first().map_or("_N", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'at'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "includes:" => {
+            let p0 = params.first().map_or("_Item", String::as_str);
+            write!(output, "call 'lists':'member'({p0}, Self)").ok()?;
+            Some(())
+        }
+        // Ordering
+        "sort" => {
+            write!(output, "call 'lists':'sort'(Self)").ok()?;
+            Some(())
+        }
+        "sort:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'sort_with'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "reversed" => {
+            write!(output, "call 'lists':'reverse'(Self)").ok()?;
+            Some(())
+        }
+        "unique" => {
+            write!(output, "call 'lists':'usort'(Self)").ok()?;
+            Some(())
+        }
+        // Search
+        "detect:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'detect'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "detect:ifNone:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            let p1 = params.get(1).map_or("_Default", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'detect_if_none'(Self, {p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        // Iteration
+        "do:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'do'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "collect:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'map'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "select:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'filter'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "reject:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'reject'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "inject:into:" => {
+            let p0 = params.first().map_or("_Initial", String::as_str);
+            let p1 = params.get(1).map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'foldl'({p1}, {p0}, Self)").ok()?;
+            Some(())
+        }
+        // Functional
+        "take:" => {
+            let p0 = params.first().map_or("_N", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'take'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "drop:" => {
+            let p0 = params.first().map_or("_N", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'drop'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "flatten" => {
+            write!(output, "call 'lists':'flatten'(Self)").ok()?;
+            Some(())
+        }
+        "flatMap:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'flatmap'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "count:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'erlang':'length'(call 'lists':'filter'({p0}, Self))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "anySatisfy:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'any'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "allSatisfy:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'all'({p0}, Self)").ok()?;
+            Some(())
+        }
+        // Advanced
+        "zip:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'zip'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "groupBy:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'group_by'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "partition:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'partition'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "takeWhile:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'takewhile'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "dropWhile:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'lists':'dropwhile'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "intersperse:" => {
+            let p0 = params.first().map_or("_Sep", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'intersperse'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "add:" => {
+            let p0 = params.first().map_or("_Item", String::as_str);
+            write!(output, "call 'erlang':'++'(Self, [{p0}|[]])").ok()?;
+            Some(())
+        }
+        // Reflection
+        "describe" => {
+            let s = core_erlang_binary_string("a List");
+            write!(output, "{s}").ok()?;
+            Some(())
+        }
+        // Display
+        "printString" => {
+            write!(output, "call 'beamtalk_primitive':'print_string'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Dictionary primitive implementations (BT-418).
+///
+/// Dictionaries are Erlang maps — immutable key-value collections.
+fn generate_dictionary_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "size" => {
+            write!(output, "call 'erlang':'map_size'(Self)").ok()?;
+            Some(())
+        }
+        "keys" => {
+            write!(output, "call 'maps':'keys'(Self)").ok()?;
+            Some(())
+        }
+        "values" => {
+            write!(output, "call 'maps':'values'(Self)").ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'get'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "at:ifAbsent:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            let p1 = params.get(1).map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_map_ops':'at_if_absent'(Self, {p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "at:put:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            let p1 = params.get(1).map_or("_Value", String::as_str);
+            write!(output, "call 'maps':'put'({p0}, {p1}, Self)").ok()?;
+            Some(())
+        }
+        "includesKey:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'is_key'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "removeKey:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'remove'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "merge:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'maps':'merge'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "keysAndValuesDo:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_map_ops':'keys_and_values_do'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Object primitive implementations (BT-335).
+///
+/// Object is the root class — methods here are inherited by all objects.
+fn generate_object_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Association creation: `self -> value` creates an Association tagged map
+        "->" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "~{{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => {p0}}}~"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Association primitive implementations (BT-335).
+///
+/// Associations are key-value pairs represented as tagged maps.
+fn generate_association_bif(output: &mut String, selector: &str, _params: &[String]) -> Option<()> {
+    match selector {
+        "key" => {
+            write!(output, "call 'maps':'get'('key', Self)").ok()?;
+            Some(())
+        }
+        "value" => {
+            write!(output, "call 'maps':'get'('value', Self)").ok()?;
+            Some(())
+        }
+        "asString" => {
+            write!(output, "call 'beamtalk_association':'format_string'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
 // Helper functions for generating common patterns
+
+/// Encodes a string as a Core Erlang binary literal.
+///
+/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
+fn core_erlang_binary_string(s: &str) -> String {
+    if s.is_empty() {
+        return "#{}#".to_string();
+    }
+    let segments: Vec<String> = s
+        .bytes()
+        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
+        .collect();
+    format!("#{{{}}}#", segments.join(","))
+}
 
 /// Writes a binary BIF call: `call 'erlang':'op'(Self, Param0)`
 fn write_binary_bif(output: &mut String, erlang_op: &str, params: &[String]) -> Option<()> {

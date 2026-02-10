@@ -19,7 +19,7 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::{CoreErlangGenerator, Result};
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, Literal, MessageSelector};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -55,8 +55,24 @@ impl CoreErlangGenerator {
     ) -> Result<Option<()>> {
         match selector {
             // `value` - evaluate block with no arguments
+            // BT-335: When the receiver is a block literal, use fast inline apply.
+            // For other receivers, generate a runtime type check to handle both
+            // blocks (apply) and non-blocks (runtime dispatch via send).
             MessageSelector::Unary(name) if name == "value" => {
-                self.generate_block_value_call(receiver, &[])?;
+                if matches!(receiver, Expression::Block { .. }) {
+                    self.generate_block_value_call(receiver, &[])?;
+                } else {
+                    let recv_var = self.fresh_temp_var("ValRecv");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case call 'erlang':'is_function'({recv_var}) of \
+                         'true' when 'true' -> apply {recv_var} () \
+                         'false' when 'true' -> \
+                         call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
+                    )?;
+                }
                 Ok(Some(()))
             }
 
@@ -139,6 +155,10 @@ impl CoreErlangGenerator {
     /// List methods are structural intrinsics that require inline code generation
     /// for proper state threading when used inside actor methods with field mutations.
     ///
+    /// **BT-416**: This intrinsic now checks the receiver type to avoid intercepting
+    /// String primitive methods. String literals use `@primitive` codegen that delegates
+    /// to `beamtalk_string_ops`, not `lists:map/filter`.
+    ///
     /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
     /// - Returns `Err(...)` on error
@@ -156,6 +176,13 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<()>> {
+        // BT-416: Skip list intrinsics for String literals.
+        // String has its own @primitive implementations (collect:, select:, etc.)
+        // that delegate to beamtalk_string_ops, not lists:map/filter.
+        if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
+            return Ok(None);
+        }
+
         match selector {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();

@@ -18,7 +18,7 @@
 %%% | true/false  | Boolean        |
 %%% | nil         | UndefinedObject|
 %%% | function()  | Block          |
-%%% | list()      | Array          |
+%%% | list()      | List           |
 %%% | map()       | Dictionary     |
 %%% | tuple()     | Tuple          |
 %%% | pid()       | Pid            |
@@ -69,7 +69,7 @@
 %% class_of(nil)             % => 'UndefinedObject'
 %% class_of(fun() -> ok end) % => 'Block'
 %% class_of('symbol')        % => 'Symbol'
-%% class_of([1,2,3])         % => 'Array'
+%% class_of([1,2,3])         % => 'List'
 %% class_of(#{a => 1})       % => 'Dictionary'
 %% class_of({1,2,3})         % => 'Tuple'
 %% class_of(self())          % => 'Pid'
@@ -83,7 +83,7 @@ class_of(false) -> 'False';
 class_of(nil) -> 'UndefinedObject';
 class_of(X) when is_function(X) -> 'Block';
 class_of(X) when is_atom(X) -> 'Symbol';
-class_of(X) when is_list(X) -> 'Array';
+class_of(X) when is_list(X) -> 'List';
 class_of(X) when is_map(X) ->
     beamtalk_tagged_map:class_of(X, 'Dictionary');
 class_of(X) when is_tuple(X), tuple_size(X) >= 2, element(1, X) =:= beamtalk_object ->
@@ -121,6 +121,9 @@ print_string(X) when is_map(X) ->
         'Exception' ->
             %% BT-338: Format exceptions nicely
             beamtalk_exception_handler:dispatch('printString', [], X);
+        'Association' ->
+            %% BT-335: Format associations as "key -> value"
+            beamtalk_association:format_string(X);
         _ ->
             ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
             iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
@@ -186,9 +189,12 @@ send(X, Selector, Args) when is_map(X) ->
         'Exception' ->
             %% BT-338: Exception value type - direct dispatch
             beamtalk_exception_handler:dispatch(Selector, Args, X);
+        'Association' ->
+            %% BT-335: Association value type - direct dispatch
+            bt_stdlib_association:dispatch(Selector, Args, X);
         undefined ->
-            %% Plain map (Dictionary)
-            beamtalk_map:dispatch(Selector, Args, X);
+            %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
+            beamtalk_dictionary:dispatch(Selector, Args, X);
         Class ->
             %% Value type instance - route to class module (BT-354)
             value_type_send(X, Class, Selector, Args)
@@ -256,8 +262,11 @@ responds_to(X, Selector) when is_map(X) ->
         'Exception' ->
             %% BT-338: Exception value type
             beamtalk_exception_handler:has_method(Selector);
+        'Association' ->
+            %% BT-335: Association value type
+            bt_stdlib_association:has_method(Selector);
         undefined ->
-            beamtalk_map:has_method(Selector);
+            beamtalk_dictionary:has_method(Selector);
         Class ->
             %% Value type instance - check class module exports (BT-354)
             value_type_responds_to(Class, Selector)

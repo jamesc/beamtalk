@@ -1,229 +1,212 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%% @doc Tests for List runtime helper operations.
+%%
+%% Tests the beamtalk_list_ops module which provides complex List methods
+%% that can't be expressed as simple BIF calls.
+%%
+%% BT-419: Updated from beamtalk_list dispatch tests to beamtalk_list_ops tests.
 -module(beamtalk_list_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
-%%% Reflection Tests
+%%% Class name via beamtalk_primitive
 %%% ============================================================================
 
-class_test() ->
-    ?assertEqual('Array', beamtalk_list:dispatch('class', [], [1, 2, 3])),
-    ?assertEqual('Array', beamtalk_list:dispatch('class', [], [])).
-
-responds_to_test() ->
-    beamtalk_extensions:init(),
-    ?assertEqual(true, beamtalk_list:has_method('class')),
-    ?assertEqual(true, beamtalk_list:has_method('size')),
-    ?assertEqual(true, beamtalk_list:has_method('isEmpty')),
-    ?assertEqual(true, beamtalk_list:has_method('first')),
-    ?assertEqual(true, beamtalk_list:has_method('last')),
-    ?assertEqual(true, beamtalk_list:has_method('at:')),
-    ?assertEqual(true, beamtalk_list:has_method('includes:')),
-    ?assertEqual(true, beamtalk_list:has_method('sort')),
-    ?assertEqual(true, beamtalk_list:has_method('sort:')),
-    ?assertEqual(true, beamtalk_list:has_method('reversed')),
-    ?assertEqual(true, beamtalk_list:has_method('detect:')),
-    ?assertEqual(true, beamtalk_list:has_method('detect:ifNone:')),
-    ?assertEqual(true, beamtalk_list:has_method('do:')),
-    ?assertEqual(true, beamtalk_list:has_method('collect:')),
-    ?assertEqual(true, beamtalk_list:has_method('select:')),
-    ?assertEqual(true, beamtalk_list:has_method('reject:')),
-    ?assertEqual(true, beamtalk_list:has_method('inject:into:')),
-    ?assertEqual(true, beamtalk_list:has_method('take:')),
-    ?assertEqual(true, beamtalk_list:has_method('drop:')),
-    ?assertEqual(true, beamtalk_list:has_method('flatten')),
-    ?assertEqual(true, beamtalk_list:has_method('flatMap:')),
-    ?assertEqual(true, beamtalk_list:has_method('count:')),
-    ?assertEqual(true, beamtalk_list:has_method('anySatisfy:')),
-    ?assertEqual(true, beamtalk_list:has_method('allSatisfy:')),
-    ?assertEqual(true, beamtalk_list:has_method('zip:')),
-    ?assertEqual(true, beamtalk_list:has_method('unique')),
-    ?assertEqual(true, beamtalk_list:has_method('add:')),
-    ?assertEqual(false, beamtalk_list:has_method('nonExistent')).
+class_of_test() ->
+    ?assertEqual('List', beamtalk_primitive:class_of([1, 2, 3])),
+    ?assertEqual('List', beamtalk_primitive:class_of([])).
 
 %%% ============================================================================
-%%% Basic Operations
+%%% Access Operations (beamtalk_list_ops)
 %%% ============================================================================
 
-size_test() ->
-    ?assertEqual(3, beamtalk_list:dispatch('size', [], [1, 2, 3])),
-    ?assertEqual(0, beamtalk_list:dispatch('size', [], [])).
+at_test() ->
+    ?assertEqual(1, beamtalk_list_ops:at([1, 2, 3], 1)),
+    ?assertEqual(2, beamtalk_list_ops:at([1, 2, 3], 2)),
+    ?assertEqual(3, beamtalk_list_ops:at([1, 2, 3], 3)).
 
-is_empty_test() ->
-    ?assertEqual(true, beamtalk_list:dispatch('isEmpty', [], [])),
-    ?assertEqual(false, beamtalk_list:dispatch('isEmpty', [], [1])).
+at_out_of_bounds_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List'},
+        beamtalk_list_ops:at([1, 2, 3], 0)),
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List'},
+        beamtalk_list_ops:at([1, 2, 3], 4)),
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List'},
+        beamtalk_list_ops:at([1, 2, 3], -1)).
 
-first_test() ->
-    ?assertEqual(1, beamtalk_list:dispatch('first', [], [1, 2, 3])).
+at_invalid_type_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:at([1, 2, 3], foo)).
 
-first_empty_test() ->
-    ?assertError(_, beamtalk_list:dispatch('first', [], [])).
+%%% ============================================================================
+%%% Search Operations
+%%% ============================================================================
 
-rest_test() ->
-    ?assertEqual([2, 3], beamtalk_list:dispatch('rest', [], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('rest', [], [])).
+detect_test() ->
+    ?assertEqual(2,
+        beamtalk_list_ops:detect([1, 2, 3], fun(X) -> X > 1 end)).
+
+detect_not_found_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List'},
+        beamtalk_list_ops:detect([1, 2, 3], fun(X) -> X > 10 end)).
+
+detect_if_none_test() ->
+    ?assertEqual(2,
+        beamtalk_list_ops:detect_if_none([1, 2, 3], fun(X) -> X > 1 end, 0)),
+    ?assertEqual(0,
+        beamtalk_list_ops:detect_if_none([1, 2, 3], fun(X) -> X > 10 end, 0)).
 
 %%% ============================================================================
 %%% Iteration Operations
 %%% ============================================================================
 
 do_test() ->
-    ?assertEqual(nil, beamtalk_list:dispatch('do:', [fun(_) -> ok end], [1, 2, 3])).
-
-collect_test() ->
-    ?assertEqual([2, 4, 6],
-        beamtalk_list:dispatch('collect:', [fun(X) -> X * 2 end], [1, 2, 3])).
-
-select_test() ->
-    ?assertEqual([2, 4],
-        beamtalk_list:dispatch('select:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
+    ?assertEqual(nil, beamtalk_list_ops:do([1, 2, 3], fun(_) -> ok end)).
 
 reject_test() ->
     ?assertEqual([1, 3],
-        beamtalk_list:dispatch('reject:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
-
-inject_into_test() ->
-    ?assertEqual(10,
-        beamtalk_list:dispatch('inject:into:', [0, fun(Acc, X) -> Acc + X end], [1, 2, 3, 4])).
+        beamtalk_list_ops:reject([1, 2, 3, 4], fun(X) -> X rem 2 =:= 0 end)).
 
 %%% ============================================================================
-%%% Does Not Understand
-%%% ============================================================================
-
-does_not_understand_test() ->
-    beamtalk_extensions:init(),
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Array'},
-        beamtalk_list:dispatch('nonExistent', [], [1, 2, 3])).
-
-%%% ============================================================================
-%%% Tier 1: Essential Methods
-%%% ============================================================================
-
-last_test() ->
-    ?assertEqual(3, beamtalk_list:dispatch('last', [], [1, 2, 3])),
-    ?assertEqual(1, beamtalk_list:dispatch('last', [], [1])).
-
-last_empty_test() ->
-    ?assertError(_, beamtalk_list:dispatch('last', [], [])).
-
-at_test() ->
-    ?assertEqual(1, beamtalk_list:dispatch('at:', [1], [1, 2, 3])),
-    ?assertEqual(2, beamtalk_list:dispatch('at:', [2], [1, 2, 3])),
-    ?assertEqual(3, beamtalk_list:dispatch('at:', [3], [1, 2, 3])).
-
-at_out_of_bounds_test() ->
-    ?assertError(_, beamtalk_list:dispatch('at:', [0], [1, 2, 3])),
-    ?assertError(_, beamtalk_list:dispatch('at:', [4], [1, 2, 3])).
-
-includes_test() ->
-    ?assertEqual(true, beamtalk_list:dispatch('includes:', [2], [1, 2, 3])),
-    ?assertEqual(false, beamtalk_list:dispatch('includes:', [4], [1, 2, 3])),
-    ?assertEqual(false, beamtalk_list:dispatch('includes:', [1], [])).
-
-sort_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('sort', [], [3, 1, 2])),
-    ?assertEqual([], beamtalk_list:dispatch('sort', [], [])).
-
-sort_with_block_test() ->
-    %% Sort descending
-    ?assertEqual([3, 2, 1],
-        beamtalk_list:dispatch('sort:', [fun(A, B) -> A >= B end], [1, 3, 2])).
-
-reversed_test() ->
-    ?assertEqual([3, 2, 1], beamtalk_list:dispatch('reversed', [], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('reversed', [], [])).
-
-detect_test() ->
-    ?assertEqual(2,
-        beamtalk_list:dispatch('detect:', [fun(X) -> X > 1 end], [1, 2, 3])).
-
-detect_not_found_test() ->
-    ?assertError(_, beamtalk_list:dispatch('detect:', [fun(X) -> X > 10 end], [1, 2, 3])).
-
-detect_if_none_test() ->
-    ?assertEqual(2,
-        beamtalk_list:dispatch('detect:ifNone:', [fun(X) -> X > 1 end, 0], [1, 2, 3])),
-    ?assertEqual(0,
-        beamtalk_list:dispatch('detect:ifNone:', [fun(X) -> X > 10 end, 0], [1, 2, 3])).
-
-%%% ============================================================================
-%%% Tier 2: Functional Methods
+%%% Functional Operations
 %%% ============================================================================
 
 take_test() ->
-    ?assertEqual([1, 2], beamtalk_list:dispatch('take:', [2], [1, 2, 3])),
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('take:', [5], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('take:', [0], [1, 2, 3])).
+    ?assertEqual([1, 2], beamtalk_list_ops:take([1, 2, 3], 2)),
+    ?assertEqual([1, 2, 3], beamtalk_list_ops:take([1, 2, 3], 5)),
+    ?assertEqual([], beamtalk_list_ops:take([1, 2, 3], 0)).
+
+take_invalid_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:take([1, 2, 3], -1)),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:take([1, 2, 3], foo)).
 
 drop_test() ->
-    ?assertEqual([3], beamtalk_list:dispatch('drop:', [2], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('drop:', [5], [1, 2, 3])),
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('drop:', [0], [1, 2, 3])).
+    ?assertEqual([3], beamtalk_list_ops:drop([1, 2, 3], 2)),
+    ?assertEqual([], beamtalk_list_ops:drop([1, 2, 3], 5)),
+    ?assertEqual([1, 2, 3], beamtalk_list_ops:drop([1, 2, 3], 0)).
 
-flatten_test() ->
-    ?assertEqual([1, 2, 3, 4], beamtalk_list:dispatch('flatten', [], [[1, 2], [3, 4]])),
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('flatten', [], [[1, [2, 3]]])).
+drop_invalid_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:drop([1, 2, 3], -1)),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:drop([1, 2, 3], foo)).
 
-flat_map_test() ->
-    ?assertEqual([1, 1, 2, 2, 3, 3],
-        beamtalk_list:dispatch('flatMap:', [fun(X) -> [X, X] end], [1, 2, 3])).
+sort_with_test() ->
+    ?assertEqual([3, 2, 1],
+        beamtalk_list_ops:sort_with([1, 3, 2], fun(A, B) -> A >= B end)).
 
-count_test() ->
-    ?assertEqual(2,
-        beamtalk_list:dispatch('count:', [fun(X) -> X > 1 end], [1, 2, 3])).
-
-any_satisfy_test() ->
-    ?assertEqual(true,
-        beamtalk_list:dispatch('anySatisfy:', [fun(X) -> X > 2 end], [1, 2, 3])),
-    ?assertEqual(false,
-        beamtalk_list:dispatch('anySatisfy:', [fun(X) -> X > 5 end], [1, 2, 3])).
-
-all_satisfy_test() ->
-    ?assertEqual(true,
-        beamtalk_list:dispatch('allSatisfy:', [fun(X) -> X > 0 end], [1, 2, 3])),
-    ?assertEqual(false,
-        beamtalk_list:dispatch('allSatisfy:', [fun(X) -> X > 1 end], [1, 2, 3])).
+sort_with_invalid_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'List'},
+        beamtalk_list_ops:sort_with([1, 2, 3], not_a_function)).
 
 %%% ============================================================================
-%%% Tier 3: Advanced Methods
+%%% Advanced Operations
 %%% ============================================================================
 
 zip_test() ->
-    Result = beamtalk_list:dispatch('zip:', [[4, 5, 6]], [1, 2, 3]),
+    Result = beamtalk_list_ops:zip([1, 2, 3], [4, 5, 6]),
     ?assertEqual([#{<<"key">> => 1, <<"value">> => 4},
                   #{<<"key">> => 2, <<"value">> => 5},
                   #{<<"key">> => 3, <<"value">> => 6}], Result).
 
 group_by_test() ->
-    Result = beamtalk_list:dispatch('groupBy:',
-        [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4]),
+    Result = beamtalk_list_ops:group_by([1, 2, 3, 4],
+        fun(X) -> X rem 2 =:= 0 end),
     ?assertEqual(#{false => [1, 3], true => [2, 4]}, Result).
 
 partition_test() ->
-    Result = beamtalk_list:dispatch('partition:',
-        [fun(X) -> X > 2 end], [1, 2, 3, 4]),
+    Result = beamtalk_list_ops:partition([1, 2, 3, 4],
+        fun(X) -> X > 2 end),
     ?assertEqual(#{<<"matching">> => [3, 4], <<"nonMatching">> => [1, 2]}, Result).
-
-unique_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('unique', [], [3, 1, 2, 1, 3])).
-
-take_while_test() ->
-    ?assertEqual([1, 2],
-        beamtalk_list:dispatch('takeWhile:', [fun(X) -> X < 3 end], [1, 2, 3, 4])).
-
-drop_while_test() ->
-    ?assertEqual([3, 4],
-        beamtalk_list:dispatch('dropWhile:', [fun(X) -> X < 3 end], [1, 2, 3, 4])).
 
 intersperse_test() ->
     ?assertEqual([1, 0, 2, 0, 3],
-        beamtalk_list:dispatch('intersperse:', [0], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('intersperse:', [0], [])),
-    ?assertEqual([1], beamtalk_list:dispatch('intersperse:', [0], [1])).
+        beamtalk_list_ops:intersperse([1, 2, 3], 0)),
+    ?assertEqual([], beamtalk_list_ops:intersperse([], 0)),
+    ?assertEqual([1], beamtalk_list_ops:intersperse([1], 0)).
 
-add_test() ->
-    ?assertEqual([1, 2, 3, 4], beamtalk_list:dispatch('add:', [4], [1, 2, 3])),
-    ?assertEqual([1], beamtalk_list:dispatch('add:', [1], [])).
+%%% ============================================================================
+%%% Compiled dispatch integration tests
+%%% Tests via beamtalk_list:dispatch/3 (compiled from lib/List.bt)
+%%% to verify BIF mappings are wired correctly end-to-end.
+%%% ============================================================================
+
+dispatch_size_test() ->
+    ?assertEqual(3, beamtalk_list:dispatch('size', [], [1, 2, 3])),
+    ?assertEqual(0, beamtalk_list:dispatch('size', [], [])).
+
+dispatch_is_empty_test() ->
+    ?assertEqual(true, beamtalk_list:dispatch('isEmpty', [], [])),
+    ?assertEqual(false, beamtalk_list:dispatch('isEmpty', [], [1])).
+
+dispatch_first_test() ->
+    ?assertEqual(1, beamtalk_list:dispatch('first', [], [1, 2, 3])).
+
+dispatch_first_empty_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'},
+        beamtalk_list:dispatch('first', [], [])).
+
+dispatch_rest_test() ->
+    ?assertEqual([2, 3], beamtalk_list:dispatch('rest', [], [1, 2, 3])),
+    ?assertEqual([], beamtalk_list:dispatch('rest', [], [])).
+
+dispatch_last_test() ->
+    ?assertEqual(3, beamtalk_list:dispatch('last', [], [1, 2, 3])).
+
+dispatch_at_test() ->
+    ?assertEqual(2, beamtalk_list:dispatch('at:', [2], [1, 2, 3])).
+
+dispatch_includes_test() ->
+    ?assertEqual(true, beamtalk_list:dispatch('includes:', [2], [1, 2, 3])),
+    ?assertEqual(false, beamtalk_list:dispatch('includes:', [4], [1, 2, 3])).
+
+dispatch_sort_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('sort', [], [3, 1, 2])).
+
+dispatch_reversed_test() ->
+    ?assertEqual([3, 2, 1], beamtalk_list:dispatch('reversed', [], [1, 2, 3])).
+
+dispatch_collect_test() ->
+    ?assertEqual([2, 4, 6],
+        beamtalk_list:dispatch('collect:', [fun(X) -> X * 2 end], [1, 2, 3])).
+
+dispatch_select_test() ->
+    ?assertEqual([2, 4],
+        beamtalk_list:dispatch('select:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
+
+dispatch_inject_into_test() ->
+    ?assertEqual(6,
+        beamtalk_list:dispatch('inject:into:', [0, fun(Acc, X) -> Acc + X end], [1, 2, 3])).
+
+dispatch_add_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('add:', [3], [1, 2])).
+
+dispatch_flatten_test() ->
+    ?assertEqual([1, 2, 3, 4], beamtalk_list:dispatch('flatten', [], [[1, 2], [3, 4]])).
+
+%%% ============================================================================
+%%% beamtalk_primitive:send integration tests
+%%% ============================================================================
+
+primitive_send_size_test() ->
+    ?assertEqual(3, beamtalk_primitive:send([1, 2, 3], 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send([], 'size', [])).
+
+primitive_send_first_test() ->
+    ?assertEqual(1, beamtalk_primitive:send([1, 2, 3], 'first', [])).
+
+primitive_send_reversed_test() ->
+    ?assertEqual([3, 2, 1], beamtalk_primitive:send([1, 2, 3], 'reversed', [])).
+
+primitive_send_includes_test() ->
+    ?assertEqual(true, beamtalk_primitive:send([1, 2, 3], 'includes:', [2])),
+    ?assertEqual(false, beamtalk_primitive:send([1, 2, 3], 'includes:', [4])).
+
+primitive_send_collect_test() ->
+    ?assertEqual([2, 4, 6],
+        beamtalk_primitive:send([1, 2, 3], 'collect:', [fun(X) -> X * 2 end])).
+
