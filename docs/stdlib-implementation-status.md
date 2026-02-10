@@ -12,7 +12,7 @@
 | **Total stdlib methods** | 236 |
 | **✅ Implemented** | 234 (99.2%) |
 | **❌ Not Implemented** | 2 (0.8%) |
-| **E2E test coverage** | 118 methods (50.0%) |
+| **E2E test coverage** | 158 methods (66.9%) |
 | **Stdlib .bt files** | 13 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
 | **Missing .bt files** | 3 (ProtoObject, Collection, SequenceableCollection) |
@@ -77,19 +77,19 @@
 | `-` | @primitive selector | ✅ | 🧪 | `Integer>>-` |
 | `*` | @primitive selector | ✅ | 🧪 | `Integer>>*` |
 | `/` | @primitive selector | ✅ | 🧪 | `Integer>>/` |
-| `%` | @primitive selector | ✅ | | `Integer>>\\` |
+| `%` | @primitive selector | ✅ | 🧪 | `Integer>>\\` |
 | `**` | @primitive selector | ✅ | | `Integer>>raisedTo:` |
 | `=` | @primitive selector | ✅ | 🧪 | `Integer>>=` |
 | `~=` | pure BT | ✅ | 🧪 | `Integer>>~=` |
-| `<` | @primitive selector | ✅ | | `Integer>><` |
-| `>` | @primitive selector | ✅ | | `Integer>>>` |
-| `<=` | @primitive selector | ✅ | | `Integer>><=` |
-| `>=` | @primitive selector | ✅ | | `Integer>>>=` |
+| `<` | @primitive selector | ✅ | 🧪 | `Integer>><` |
+| `>` | @primitive selector | ✅ | 🧪 | `Integer>>>` |
+| `<=` | @primitive selector | ✅ | 🧪 | `Integer>><=` |
+| `>=` | @primitive selector | ✅ | 🧪 | `Integer>>>=` |
 | `negated` | pure BT | ✅ | 🧪 | `Integer>>negated` |
 | `abs` | pure BT | ✅ | 🧪 | `Integer>>abs` |
 | `isZero` | pure BT | ✅ | 🧪 | `Integer>>isZero` |
-| `isPositive` | pure BT | ✅ | | `Integer>>positive` |
-| `isNegative` | pure BT | ✅ | | `Integer>>negative` |
+| `isPositive` | pure BT | ✅ | 🧪 | `Integer>>positive` |
+| `isNegative` | pure BT | ✅ | 🧪 | `Integer>>negative` |
 | `isEven` | pure BT | ✅ | 🧪 | `Integer>>even` |
 | `isOdd` | pure BT | ✅ | 🧪 | `Integer>>odd` |
 | `min:` | pure BT | ✅ | | `Magnitude>>min:` |
@@ -97,9 +97,9 @@
 | `timesRepeat:` | intrinsic | ✅ | | `Integer>>timesRepeat:` |
 | `to:do:` | intrinsic | ✅ | | `Integer>>to:do:` |
 | `to:by:do:` | intrinsic | ✅ | | `Integer>>to:by:do:` |
-| `asFloat` | @primitive selector | ✅ | | `Integer>>asFloat` |
-| `asString` | @primitive selector | ✅ | | `Integer>>asString` |
-| `printString` | @primitive selector | ✅ | | `Integer>>printString` |
+| `asFloat` | @primitive selector | ✅ | 🧪 | `Integer>>asFloat` |
+| `asString` | @primitive selector | ✅ | 🧪 | `Integer>>asString` |
+| `printString` | @primitive selector | ✅ | 🧪 | `Integer>>printString` |
 | `describe` | pure BT | ✅ | | N/A |
 
 ### String (`lib/String.bt`)
@@ -111,29 +111,29 @@
 |----------|-----------|--------|-----|------------------|
 | `=` | @primitive selector | ✅ | 🧪 | `String>>=` |
 | `~=` | pure BT | ✅ | 🧪 | `String>>~=` |
-| `<` | @primitive selector | ✅ | | `String>><` |
-| `>` | @primitive selector | ✅ | | `String>>>` |
-| `<=` | @primitive selector | ✅ | | `String>><=` |
-| `>=` | @primitive selector | ✅ | | `String>>>=` |
+| `<` | @primitive selector | ✅ | 🧪 | `String>><` |
+| `>` | @primitive selector | ✅ | 🧪 | `String>>>` |
+| `<=` | @primitive selector | ✅ | 🧪 | `String>><=` |
+| `>=` | @primitive selector | ✅ | 🧪 | `String>>>=` |
 | `++` | @primitive selector | ✅ | 🧪 | `String>>,` |
 | `,` | pure BT | ✅ | | `String>>,` |
 | `length` | @primitive selector | ✅ | 🧪 | `String>>size` |
-| `size` | pure BT | ✅ | | `String>>size` |
-| `at:` | @primitive selector | ✅ | | `String>>at:` |
-| `uppercase` | @primitive selector | ✅ | | `String>>asUppercase` |
-| `lowercase` | @primitive selector | ✅ | | `String>>asLowercase` |
-| `capitalize` | @primitive selector | ✅ | | `String>>capitalized` |
-| `trim` | @primitive selector | ✅ | | `String>>trimBoth` |
-| `trimLeft` | @primitive selector | ✅ | | `String>>trimLeft` |
-| `trimRight` | @primitive selector | ✅ | | `String>>trimRight` |
-| `reverse` | @primitive selector | ✅ | | `String>>reversed` |
-| `includes:` | @primitive selector | ✅ | | `String>>includesSubstring:` |
-| `startsWith:` | @primitive selector | ✅ | | `String>>beginsWith:` |
-| `endsWith:` | @primitive selector | ✅ | | `String>>endsWith:` |
-| `indexOf:` | @primitive selector | ✅ | | `String>>indexOfSubCollection:` |
-| `split:` | @primitive selector | ✅ | | N/A |
-| `splitOn:` | @primitive selector | ✅ | | N/A |
-| `repeat:` | @primitive selector | ✅ | | N/A |
+| `size` | pure BT | ✅ | 🧪 | `String>>size` |
+| `at:` | @primitive selector | ✅ | 🧪 | `String>>at:` |
+| `uppercase` | @primitive selector | ✅ | 🧪 | `String>>asUppercase` |
+| `lowercase` | @primitive selector | ✅ | 🧪 | `String>>asLowercase` |
+| `capitalize` | @primitive selector | ✅ | 🧪 | `String>>capitalized` |
+| `trim` | @primitive selector | ✅ | 🧪 | `String>>trimBoth` |
+| `trimLeft` | @primitive selector | ✅ | 🧪 | `String>>trimLeft` |
+| `trimRight` | @primitive selector | ✅ | 🧪 | `String>>trimRight` |
+| `reverse` | @primitive selector | ✅ | 🧪 | `String>>reversed` |
+| `includes:` | @primitive selector | ✅ | 🧪 | `String>>includesSubstring:` |
+| `startsWith:` | @primitive selector | ✅ | 🧪 | `String>>beginsWith:` |
+| `endsWith:` | @primitive selector | ✅ | 🧪 | `String>>endsWith:` |
+| `indexOf:` | @primitive selector | ✅ | 🧪 | `String>>indexOfSubCollection:` |
+| `split:` | @primitive selector | ✅ | 🧪 | N/A |
+| `splitOn:` | @primitive selector | ✅ | 🧪 | N/A |
+| `repeat:` | @primitive selector | ✅ | 🧪 | N/A |
 | `lines` | @primitive selector | ✅ | | `String>>lines` |
 | `words` | @primitive selector | ✅ | 🧪 | `String>>substrings` |
 | `replaceAll:with:` | @primitive selector | ✅ | 🧪 | `String>>replaceAll:with:` |
@@ -147,14 +147,14 @@
 | `isDigit` | @primitive selector | ✅ | 🧪 | `String>>isAllDigits` |
 | `isAlpha` | @primitive selector | ✅ | 🧪 | `String>>isAllLetters` |
 | `isEmpty` | pure BT | ✅ | 🧪 | `String>>isEmpty` |
-| `isNotEmpty` | pure BT | ✅ | | `String>>isNotEmpty` |
-| `asInteger` | @primitive selector | ✅ | | `String>>asInteger` |
-| `asFloat` | @primitive selector | ✅ | | `String>>asFloat` |
+| `isNotEmpty` | pure BT | ✅ | 🧪 | `String>>isNotEmpty` |
+| `asInteger` | @primitive selector | ✅ | 🧪 | `String>>asInteger` |
+| `asFloat` | @primitive selector | ✅ | 🧪 | `String>>asFloat` |
 | `asAtom` | @primitive selector | ✅ | | N/A (BEAM-specific) |
-| `asList` | @primitive selector | ✅ | | `String>>asArray` |
-| `each:` | @primitive selector | ✅ | | `String>>do:` |
-| `collect:` | @primitive selector | ✅ | | `String>>collect:` |
-| `select:` | @primitive selector | ✅ | | `String>>select:` |
+| `asList` | @primitive selector | ✅ | 🧪 | `String>>asArray` |
+| `each:` | @primitive selector | ✅ | 🧪 | `String>>do:` |
+| `collect:` | @primitive selector | ✅ | 🧪 | `String>>collect:` |
+| `select:` | @primitive selector | ✅ | 🧪 | `String>>select:` |
 | `describe` | pure BT | ✅ | | N/A |
 | `printString` | pure BT | ✅ | | `String>>printString` |
 
@@ -214,11 +214,11 @@
 | `value:value:` | intrinsic `blockValue2` | ✅ | 🧪 | `BlockClosure>>value:value:` |
 | `value:value:value:` | intrinsic `blockValue3` | ✅ | 🧪 | `BlockClosure>>value:value:value:` |
 | `whileTrue:` | intrinsic `whileTrue` | ✅ | 🧪 | `BlockClosure>>whileTrue:` |
-| `whileFalse:` | intrinsic `whileFalse` | ✅ | | `BlockClosure>>whileFalse:` |
+| `whileFalse:` | intrinsic `whileFalse` | ✅ | 🧪 | `BlockClosure>>whileFalse:` |
 | `repeat` | intrinsic `repeat` | ✅ | | `BlockClosure>>repeat` |
 | `on:` | @primitive selector | **❌** | | `BlockClosure>>on:do:` |
 | `ensure:` | @primitive selector | **❌** | | `BlockClosure>>ensure:` |
-| `arity` | @primitive selector | ✅ | | `BlockClosure>>argumentCount` |
+| `arity` | @primitive selector | ✅ | 🧪 | `BlockClosure>>argumentCount` |
 | `describe` | pure BT | ✅ | | N/A |
 
 > **⚠️ `on:` and `ensure:` are declared with `@primitive` in Block.bt but have no runtime handler.**
@@ -264,26 +264,34 @@
 
 ### Float (`lib/Float.bt`)
 
-**Class:** `Float` — superclass: `Object` — `@sealed`
-**Methods:** 17/17 implemented (100%)
+**Class:** `Float` — superclass: `Number` — `@sealed`
+**Methods:** 25/25 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
-| `+` | @primitive selector | ✅ | | `Float>>+` |
-| `-` | @primitive selector | ✅ | | `Float>>-` |
-| `*` | @primitive selector | ✅ | | `Float>>*` |
-| `/` | @primitive selector | ✅ | | `Float>>/` |
-| `=` | @primitive selector | ✅ | | `Float>>=` |
+| `+` | @primitive selector | ✅ | 🧪 | `Float>>+` |
+| `-` | @primitive selector | ✅ | 🧪 | `Float>>-` |
+| `*` | @primitive selector | ✅ | 🧪 | `Float>>*` |
+| `/` | @primitive selector | ✅ | 🧪 | `Float>>/` |
+| `=` | @primitive selector | ✅ | 🧪 | `Float>>=` |
 | `~=` | pure BT | ✅ | | `Float>>~=` |
-| `<` | @primitive selector | ✅ | | `Float>><` |
-| `>` | @primitive selector | ✅ | | `Float>>>` |
+| `<` | @primitive selector | ✅ | 🧪 | `Float>><` |
+| `>` | @primitive selector | ✅ | 🧪 | `Float>>>` |
 | `<=` | @primitive selector | ✅ | | `Float>><=` |
 | `>=` | @primitive selector | ✅ | | `Float>>>=` |
-| `negated` | pure BT | ✅ | | `Float>>negated` |
-| `abs` | pure BT | ✅ | | `Float>>abs` |
-| `min:` | pure BT | ✅ | | `Magnitude>>min:` |
-| `max:` | pure BT | ✅ | | `Magnitude>>max:` |
-| `asString` | @primitive selector | ✅ | | `Float>>asString` |
+| `negated` | pure BT | ✅ | 🧪 | `Float>>negated` |
+| `abs` | pure BT | ✅ | 🧪 | `Float>>abs` |
+| `min:` | pure BT | ✅ | 🧪 | `Magnitude>>min:` |
+| `max:` | pure BT | ✅ | 🧪 | `Magnitude>>max:` |
+| `rounded` | @primitive selector | ✅ | 🧪 | `Float>>rounded` |
+| `ceiling` | @primitive selector | ✅ | 🧪 | `Float>>ceiling` |
+| `floor` | @primitive selector | ✅ | 🧪 | `Float>>floor` |
+| `truncated` | @primitive selector | ✅ | 🧪 | `Float>>truncated` |
+| `isNaN` | pure BT | ✅ | 🧪 | `Float>>isNaN` |
+| `isInfinite` | pure BT | ✅ | 🧪 | `Float>>isInfinite` |
+| `isZero` | pure BT | ✅ | 🧪 | `Float>>isZero` |
+| `asInteger` | @primitive selector | ✅ | 🧪 | `Float>>asInteger` |
+| `asString` | @primitive selector | ✅ | 🧪 | `Float>>asString` |
 | `printString` | @primitive selector | ✅ | | `Float>>printString` |
 | `describe` | pure BT | ✅ | | N/A |
 
@@ -455,12 +463,6 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `isNaN` | ❌ Not defined | Medium |
-| `isInfinite` | ❌ Not defined | Medium |
-| `rounded` | ❌ Not defined | Medium |
-| `ceiling` | ❌ Not defined | Medium |
-| `floor` | ❌ Not defined | Medium |
-| `truncated` | ❌ Not defined | Medium |
 | `**` (exponentiation) | ❌ Not defined (Integer has it) | Medium |
 
 ### String
@@ -521,13 +523,12 @@ Methods with no E2E test coverage that should be tested:
 
 | Class | Untested Methods |
 |-------|-----------------|
-| **Integer** | `%`, `**`, `<`, `>`, `<=`, `>=`, `isPositive`, `isNegative`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:`, `asFloat`, `asString`, `printString` |
-| **Float** | ALL methods (0/17 E2E coverage) |
-| **String** | `<`, `>`, `<=`, `>=`, `,`, `size`, `at:`, `uppercase`, `lowercase`, `capitalize`, `trim`, `trimLeft`, `trimRight`, `reverse`, `includes:`, `startsWith:`, `endsWith:`, `indexOf:`, `split:`, `splitOn:`, `repeat:`, `lines`, `isNotEmpty`, `asInteger`, `asFloat`, `asAtom`, `asList`, `each:`, `collect:`, `select:` |
+| **Integer** | `**`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:` |
+| **Float** | `~=`, `<=`, `>=`, `printString`, `describe` |
+| **String** | `,`, `lines`, `asAtom`, `describe`, `printString` |
 | **List** | `detect:ifNone:`, `describe`, `printString` |
-| **Block** | `whileFalse:`, `repeat`, `arity` |
-| **Dictionary** | `describe` (literal, no E2E needed) |
-| **Tuple** | ALL methods (0 E2E coverage) |
+| **Block** | `repeat` |
+| **Tuple** | ALL methods (0 E2E coverage — placeholder test file) |
 
 ### Medium Priority
 
