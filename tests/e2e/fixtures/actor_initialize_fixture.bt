@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for actor initialize E2E tests
+
+Actor subclass: InitCounter
+  state: value = 0
+
+  initialize =>
+    self.value := 100
+
+  getValue => self.value
+
+  increment =>
+    self.value := self.value + 1

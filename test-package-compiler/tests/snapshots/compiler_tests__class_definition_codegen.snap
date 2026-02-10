@@ -153,7 +153,7 @@ module 'class_definition' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
 
 'register_class'/0 = fun () ->
     try
-        let _Reg0 = case call 'beamtalk_object_class':'start_link'('Counter', ~{
+        let _Reg0 = case call 'beamtalk_object_class':'start'('Counter', ~{
             'name' => 'Counter',
             'module' => 'class_definition',
             'superclass' => 'Actor',

@@ -375,19 +375,22 @@ impl CoreErlangGenerator {
     /// Generates the `register_class/0` function for class registration.
     ///
     /// This function is called automatically via `-on_load` when the module loads.
-    /// It registers the class with `beamtalk_class:start_link/2`, making the class
-    /// available as a first-class object for reflection and metaprogramming.
+    /// It registers the class with `beamtalk_object_class:start/2` (unlinked), making
+    /// the class available as a first-class object for reflection and metaprogramming.
     ///
-    /// The function is defensive - if `beamtalk_class` is not available (e.g., during
-    /// early module loading), it returns `ok` to allow the module to load. Classes can
-    /// be registered later via explicit calls if needed.
+    /// Uses `start` (not `start_link`) so the class process survives after the
+    /// `on_load` caller exits. Class processes are long-lived singletons that must
+    /// persist independently of whoever loaded the module.
+    ///
+    /// The function is defensive - if `beamtalk_object_class` is not available (e.g.,
+    /// during early module loading), it returns `ok` to allow the module to load.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'register_class'/0 = fun () ->
     ///     try
-    ///         case call 'beamtalk_object_class':'start_link'('Counter', ~{...}~) of
+    ///         case call 'beamtalk_object_class':'start'('Counter', ~{...}~) of
     ///             <{'ok', _Pid}> when 'true' -> 'ok'
     ///             <{'error', {'already_started', _}}> when 'true' -> 'ok'
     ///             <{'error', _Reason}> when 'true' -> 'ok'
@@ -421,7 +424,7 @@ impl CoreErlangGenerator {
             }
             write!(
                 self.output,
-                "let _Reg{} = case call 'beamtalk_object_class':'start_link'('{}', ~{{",
+                "let _Reg{} = case call 'beamtalk_object_class':'start'('{}', ~{{",
                 i, class.name.name
             )?;
             writeln!(self.output)?;
@@ -498,6 +501,7 @@ impl CoreErlangGenerator {
             writeln!(self.output, "],")?;
 
             // Class methods — depends on whether this is an actor or value type
+            // BT-411: Include both built-in and user-defined class methods
             self.write_indent()?;
             writeln!(self.output, "'class_methods' => ~{{")?;
             self.indent += 1;
@@ -514,6 +518,18 @@ impl CoreErlangGenerator {
             }
             self.write_indent()?;
             writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
+            // BT-411: User-defined class methods
+            for method in &class.class_methods {
+                if method.kind == MethodKind::Primary {
+                    self.write_indent()?;
+                    writeln!(
+                        self.output,
+                        ", '{}' => ~{{'arity' => {}}}~",
+                        method.selector.name(),
+                        method.selector.arity()
+                    )?;
+                }
+            }
             self.indent -= 1;
             self.write_indent()?;
             writeln!(self.output, "}}~,")?;
@@ -572,6 +588,100 @@ impl CoreErlangGenerator {
         self.indent -= 1;
         writeln!(self.output)?;
 
+        Ok(())
+    }
+
+    /// Generates standalone function bodies for class-side methods.
+    ///
+    /// Class methods are module-level functions with a `class_` prefix.
+    /// They take `ClassSelf` as the first parameter (the class object),
+    /// followed by any user-defined parameters.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'class_defaultValue'/1 = fun (ClassSelf) ->
+    ///     42
+    ///
+    /// 'class_create'/1 = fun (ClassSelf) ->
+    ///     let _Result = call 'beamtalk_object_class':'class_send'(
+    ///         call 'erlang':'element'(4, ClassSelf), 'new:', [~{}~])
+    ///     in _Result
+    /// ```
+    pub(in crate::codegen::core_erlang) fn generate_class_method_functions(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<()> {
+        for method in &class.class_methods {
+            if method.kind != MethodKind::Primary {
+                continue;
+            }
+
+            let selector_name = method.selector.name();
+            let arity = method.selector.arity() + 1; // +1 for ClassSelf
+
+            writeln!(self.output)?;
+            write!(
+                self.output,
+                "'class_{selector_name}'/{arity} = fun (ClassSelf"
+            )?;
+
+            // Push scope for parameter bindings
+            self.push_scope();
+            self.current_method_params.clear();
+            self.reset_state_version();
+
+            // Bind ClassSelf as 'self' in scope
+            self.bind_var("self", "ClassSelf");
+            self.in_class_method = true;
+
+            // Generate parameter names
+            for param in &method.parameters {
+                let var_name = self.fresh_var(&param.name);
+                write!(self.output, ", {var_name}")?;
+                self.current_method_params.push(var_name);
+            }
+            writeln!(self.output, ") ->")?;
+            self.indent += 1;
+
+            // Generate method body
+            self.write_indent()?;
+            if method.body.is_empty() {
+                write!(self.output, "'nil'")?;
+            } else {
+                self.generate_class_method_body(method)?;
+            }
+            writeln!(self.output)?;
+
+            self.indent -= 1;
+            self.pop_scope();
+            self.in_class_method = false;
+        }
+        Ok(())
+    }
+
+    /// Generates the body of a class-side method.
+    ///
+    /// Unlike instance methods, class methods have no state threading.
+    /// They simply evaluate expressions and return the last value.
+    fn generate_class_method_body(&mut self, method: &MethodDefinition) -> Result<()> {
+        for (i, expr) in method.body.iter().enumerate() {
+            let is_last = i == method.body.len() - 1;
+
+            if let Expression::Return { value, .. } = expr {
+                self.generate_expression(value)?;
+                return Ok(());
+            }
+
+            if is_last {
+                self.generate_expression(expr)?;
+            } else {
+                let tmp_var = self.fresh_temp_var("seq");
+                write!(self.output, "let {tmp_var} = ")?;
+                self.generate_expression(expr)?;
+                write!(self.output, " in ")?;
+            }
+        }
         Ok(())
     }
 

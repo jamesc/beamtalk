@@ -196,6 +196,8 @@ pub struct ClassDefinition {
     pub state: Vec<StateDeclaration>,
     /// Method definitions.
     pub methods: Vec<MethodDefinition>,
+    /// Class-side method definitions (defined with `class` prefix).
+    pub class_methods: Vec<MethodDefinition>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -217,6 +219,7 @@ impl ClassDefinition {
             is_sealed: false,
             state,
             methods,
+            class_methods: Vec::new(),
             span,
         }
     }
@@ -239,6 +242,7 @@ impl ClassDefinition {
             is_sealed,
             state,
             methods,
+            class_methods: Vec::new(),
             span,
         }
     }

@@ -82,7 +82,14 @@ impl CoreErlangGenerator {
             "true" => write!(self.output, "'true'")?,
             "false" => write!(self.output, "'false'")?,
             "nil" => write!(self.output, "'nil'")?,
-            "self" => write!(self.output, "Self")?, // self → Self parameter (BT-161)
+            "self" => {
+                // BT-411: Check if self is explicitly bound (e.g., in class methods)
+                if let Some(var_name) = self.lookup_var("self").cloned() {
+                    write!(self.output, "{var_name}")?;
+                } else {
+                    write!(self.output, "Self")?; // self → Self parameter (BT-161)
+                }
+            }
             "super" => {
                 // super alone is an error - must be used in message send (super method: args)
                 return Err(CodeGenError::UnsupportedFeature {
@@ -207,6 +214,16 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<()> {
+        // BT-426: Class methods cannot access instance fields
+        if self.in_class_method {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot access instance field '{}' in a class method",
+                    field.name
+                ),
+                location: format!("{:?}", field.span),
+            });
+        }
         // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
@@ -252,6 +269,15 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<()> {
+        // BT-426: Reject field assignments in class method context
+        if self.in_class_method {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot assign to instance field '{field_name}' in a class method"
+                ),
+                location: "class method body".to_string(),
+            });
+        }
         // BT-213: Reject field assignments in value type context
         if matches!(self.context, super::CodeGenContext::ValueType) {
             return Err(CodeGenError::UnsupportedFeature {

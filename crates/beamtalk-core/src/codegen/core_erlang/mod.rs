@@ -451,6 +451,10 @@ enum CodeGenContext {
 /// - [`gen_server`] - OTP `gen_server` scaffolding
 /// - [`intrinsics`] - Compiler intrinsics (block, `ProtoObject`, `Object`, list iteration)
 /// - [`operators`] - Binary operator code generation
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Generator flags are context switches, not configuration"
+)]
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
     module_name: String,
@@ -491,6 +495,9 @@ pub(super) struct CoreErlangGenerator {
     /// `persistent_term:get` + async actor send. When false (batch compile),
     /// workspace binding names produce a compile error.
     workspace_mode: bool,
+    /// BT-426: Whether we're currently generating a class-side method body.
+    /// When true, field access/assignment should produce a compile error.
+    in_class_method: bool,
 }
 
 impl CoreErlangGenerator {
@@ -511,6 +518,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            in_class_method: false,
         }
     }
 
@@ -531,6 +539,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            in_class_method: false,
         }
     }
 
@@ -3199,6 +3208,7 @@ end
                     span: Span::new(0, 10),
                 },
             ],
+            class_methods: vec![],
             span: Span::new(0, 50),
         };
 
@@ -3229,10 +3239,10 @@ end
             "Should generate register_class function. Got:\n{code}"
         );
 
-        // Check that it calls beamtalk_class:start_link
+        // Check that it calls beamtalk_object_class:start (unlinked)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
-            "Should call beamtalk_class:start_link with class name. Got:\n{code}"
+            code.contains("call 'beamtalk_object_class':'start'('Counter',"),
+            "Should call beamtalk_object_class:start with class name. Got:\n{code}"
         );
 
         // Check metadata fields
@@ -3344,6 +3354,7 @@ end
                 span: Span::new(0, 10),
             }],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 20),
         };
 
@@ -3359,6 +3370,7 @@ end
                 span: Span::new(0, 10),
             }],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 30),
         };
 
@@ -3379,7 +3391,7 @@ end
 
         // Should register first class (Counter)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Counter',"),
+            code.contains("call 'beamtalk_object_class':'start'('Counter',"),
             "Should register Counter class. Got:\n{code}"
         );
         assert!(
@@ -3393,7 +3405,7 @@ end
 
         // Should register second class (Logger)
         assert!(
-            code.contains("call 'beamtalk_object_class':'start_link'('Logger',"),
+            code.contains("call 'beamtalk_object_class':'start'('Logger',"),
             "Should register Logger class. Got:\n{code}"
         );
         assert!(
@@ -3435,6 +3447,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 50),
         };
 
@@ -3541,7 +3554,7 @@ end
             "Workspace binding should use async_send. Got:\n{code}"
         );
 
-        // Test 2: Non-binding class (Counter) generates direct function call in REPL
+        // Test 2: Non-binding class (Point) dispatches via class_send in REPL
         let expr2 = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Point", Span::new(0, 5)),
@@ -3555,13 +3568,36 @@ end
         let code2 = generate_repl_expression(&expr2, "repl_eval2")
             .expect("codegen should succeed for non-binding class");
 
+        // BT-411: Non-binding classes now use class_send for both built-in
+        // and user-defined class methods
         assert!(
-            code2.contains("call 'point':'new'()"),
-            "Non-binding class should generate direct function call. Got:\n{code2}"
+            code2.contains("whereis_class") && code2.contains("class_send"),
+            "Non-binding class should use class_send dispatch. Got:\n{code2}"
         );
         assert!(
             !code2.contains("persistent_term"),
             "Non-binding class should NOT use persistent_term. Got:\n{code2}"
+        );
+
+        // Test 3: ClassReference spawn in REPL uses generate_actor_spawn with registry
+        let expr3 = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("InitCounter", Span::new(0, 11)),
+                span: Span::new(0, 11),
+            }),
+            selector: MessageSelector::Unary("spawn".into()),
+            arguments: vec![],
+            span: Span::new(0, 17),
+        };
+
+        let code3 = generate_repl_expression(&expr3, "repl_eval3")
+            .expect("codegen should succeed for spawn");
+
+        // Spawn on ClassReference uses generate_actor_spawn which calls
+        // Module:spawn() with REPL registry integration
+        assert!(
+            code3.contains("'initcounter':'spawn'") || code3.contains("register_spawned"),
+            "REPL spawn should use direct module spawn (with optional registry). Got:\n{code3}"
         );
     }
 
@@ -3715,6 +3751,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3736,6 +3773,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3759,6 +3797,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let logging_counter = ClassDefinition {
@@ -3768,6 +3807,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         // Module with both classes; first class is LoggingCounter
@@ -3808,6 +3848,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3830,6 +3871,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3856,6 +3898,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3881,6 +3924,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3990,6 +4034,43 @@ end
         assert!(
             !code.contains("'filter'(fun"),
             "Wrapper fun must be let-bound, not inlined in filter call. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_class_method_rejects_field_access() {
+        // BT-426: Class methods should reject instance field access
+        let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let result = generate_with_workspace(&module, "test_class_field", true);
+        assert!(
+            result.is_err(),
+            "Should reject field access in class method"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("cannot access instance field"),
+            "Error should mention field access. Got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_class_method_rejects_field_assignment() {
+        // BT-426: Class methods should reject instance field mutation
+        let src =
+            "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value := 42";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let result = generate_with_workspace(&module, "test_class_assign", true);
+        assert!(
+            result.is_err(),
+            "Should reject field assignment in class method"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("cannot assign to instance field"),
+            "Error should mention field assignment. Got: {err}"
         );
     }
 }

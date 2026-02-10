@@ -51,6 +51,7 @@ Module {
                     },
                 },
             ],
+            class_methods: [],
             span: Span {
                 start: 203,
                 end: 248,
@@ -102,6 +103,7 @@ Module {
                     },
                 },
             ],
+            class_methods: [],
             span: Span {
                 start: 250,
                 end: 294,
@@ -153,6 +155,7 @@ Module {
                     },
                 },
             ],
+            class_methods: [],
             span: Span {
                 start: 296,
                 end: 333,
