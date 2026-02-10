@@ -54,14 +54,14 @@ Bootstrap classes (ProtoObject, Object, Actor) are explicitly skipped via `is_bo
 `send/3` pattern-matches on Erlang type guards and dispatches to the compiled module:
 
 ```erlang
-send(Selector, Args, X) when is_integer(X) ->
-    beamtalk_integer:dispatch(Selector, Args, X);    % beamtalk_ prefix
-send(Selector, Args, X) when is_binary(X) ->
-    beamtalk_string:dispatch(Selector, Args, X);     % beamtalk_ prefix
+send(X, Selector, Args) when is_integer(X) ->
+    beamtalk_integer:dispatch(X, Selector, Args);    % beamtalk_ prefix
+send(X, Selector, Args) when is_binary(X) ->
+    beamtalk_string:dispatch(X, Selector, Args);     % beamtalk_ prefix
 ...
 %% Tagged maps — examine $beamtalk_class tag:
-    bt_stdlib_association:dispatch(Selector, Args, X);  % bt_stdlib_ prefix (!)
-    beamtalk_set:dispatch(Selector, Args, X);           % beamtalk_ prefix
+    bt_stdlib_association:dispatch(X, Selector, Args);  % bt_stdlib_ prefix (!)
+    beamtalk_set:dispatch(X, Selector, Args);           % beamtalk_ prefix
 ```
 
 For user-defined value types, `class_name_to_module/1` converts CamelCase → snake_case at runtime *without any prefix*, falling back to the module name as compiled by the user.
@@ -208,16 +208,16 @@ No code changes in `beamtalk_stdlib.erl` — it reads `{Module, ClassName, Super
 
 ### 5. Update `beamtalk_primitive.erl` dispatch atoms
 
-Mechanical rename of module atoms in `send/3` and `has_method/1`:
+Mechanical rename of module atoms in `send/3` and `responds_to/2` (which in turn calls the per-class `has_method/1` implementations):
 
 ```erlang
 %% Before:
-send(Selector, Args, X) when is_integer(X) ->
-    beamtalk_integer:dispatch(Selector, Args, X);
+send(X, Selector, Args) when is_integer(X) ->
+    beamtalk_integer:dispatch(X, Selector, Args);
 
 %% After:
-send(Selector, Args, X) when is_integer(X) ->
-    bt_stdlib_integer:dispatch(Selector, Args, X);
+send(X, Selector, Args) when is_integer(X) ->
+    bt_stdlib_integer:dispatch(X, Selector, Args);
 ```
 
 The dispatch logic (type guard matching, tagged-map detection, fallback to `beamtalk_object`) is unchanged. Only the module atoms that appear after the `->` change.
@@ -317,7 +317,7 @@ Shorter prefix to reduce verbosity.
 
 ### Negative
 - Mechanical churn across ~8 files (low risk but nonzero)
-- `beamtalk_primitive.erl` needs ~24 module atom updates (12 in `send/3`, 12 in `has_method/1`)
+- `beamtalk_primitive.erl` needs ~24 module atom updates (12 in `send/3`, 12 in `responds_to/2`)
 - Snapshot tests for codegen need updating (module names appear in generated Core Erlang)
 - Dialyzer PLT may need a clean rebuild after the rename
 
