@@ -55,7 +55,8 @@
     start_link/1,
     start_link_singleton/0,
     start_link_singleton/1,
-    has_method/1
+    has_method/1,
+    class_info/0
 ]).
 
 %% gen_server callbacks
@@ -115,6 +116,26 @@ has_method('classNamed:') -> true;
 has_method(globals) -> true;
 has_method(version) -> true;
 has_method(_) -> false.
+
+%% @doc Return class registration metadata for SystemDictionary.
+%%
+%% Used by beamtalk_stdlib to register this singleton's class.
+%% Single source of truth for class name, superclass, and method table.
+-spec class_info() -> map().
+class_info() ->
+    #{
+        name => 'SystemDictionary',
+        module => ?MODULE,
+        superclass => 'Actor',
+        instance_methods => #{
+            allClasses => #{arity => 0},
+            'classNamed:' => #{arity => 1},
+            globals => #{arity => 0},
+            version => #{arity => 0}
+        },
+        class_methods => #{},
+        instance_variables => []
+    }.
 
 %%====================================================================
 %% gen_server callbacks
