@@ -544,10 +544,12 @@ test_super_finds_extension_on_superclass() ->
     Self = make_ref(),
 
     %% Call super from Counter — should find the extension on Actor
-    Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
+    try
+        Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
 
-    %% Clean up extension
-    catch ets:delete(beamtalk_extensions, {'Actor', superExtTest}),
-
-    %% Should invoke the extension registered on Actor
-    ?assertMatch({reply, {super_extension_called, _}, _}, Result).
+        %% Should invoke the extension registered on Actor
+        ?assertMatch({reply, {super_extension_called, _}, _}, Result)
+    after
+        %% Clean up extension (ignore any error if it's already gone)
+        catch ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+    end.
