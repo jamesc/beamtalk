@@ -41,6 +41,9 @@ impl CoreErlangGenerator {
         // BT-403: Build sealed method exports
         let sealed_export_str = self.build_sealed_export_str(module);
 
+        // BT-411: Build class method exports
+        let class_method_export_str = self.build_class_method_export_str(module);
+
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
@@ -55,7 +58,7 @@ impl CoreErlangGenerator {
         if has_classes {
             writeln!(
                 self.output,
-                "module '{}' [{base_exports}{sealed_export_str}, 'register_class'/0]",
+                "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}, 'register_class'/0]",
                 self.module_name
             )?;
             writeln!(
@@ -66,7 +69,7 @@ impl CoreErlangGenerator {
         } else {
             writeln!(
                 self.output,
-                "module '{}' [{base_exports}{sealed_export_str}]",
+                "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}]",
                 self.module_name
             )?;
             writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
@@ -152,6 +155,13 @@ impl CoreErlangGenerator {
             self.generate_sealed_method_functions(module)?;
         }
 
+        // BT-411: Generate class-side method standalone functions
+        if let Some(class) = module.classes.first() {
+            if !class.class_methods.is_empty() {
+                self.generate_class_method_functions(class)?;
+            }
+        }
+
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
             writeln!(self.output)?;
@@ -211,6 +221,28 @@ impl CoreErlangGenerator {
             String::new()
         } else {
             format!(", {}", sealed_exports.join(", "))
+        }
+    }
+
+    /// Builds the export string for class-side method functions (BT-411).
+    fn build_class_method_export_str(&self, module: &Module) -> String {
+        if let Some(class) = module.classes.first() {
+            let class_method_exports: Vec<String> = class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .map(|m| {
+                    // Class method takes ClassSelf + user params
+                    format!("'class_{}'/{}", m.selector.name(), m.selector.arity() + 1)
+                })
+                .collect();
+            if class_method_exports.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", class_method_exports.join(", "))
+            }
+        } else {
+            String::new()
         }
     }
 

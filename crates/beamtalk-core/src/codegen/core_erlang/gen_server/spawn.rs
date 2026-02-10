@@ -36,6 +36,12 @@ impl CoreErlangGenerator {
         &mut self,
         _module: &Module,
     ) -> Result<()> {
+        // BT-411: Check if class defines an initialize method
+        let has_initialize = _module
+            .classes
+            .first()
+            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+
         writeln!(self.output, "'spawn'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -50,14 +56,30 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        // Return #beamtalk_object{} record instead of raw pid
-        // Record syntax in Core Erlang: {RecordTag, Field1, Field2, ...}
         let class_name = self.class_name();
-        writeln!(
-            self.output,
-            "{{'beamtalk_object', '{}', '{}', Pid}}",
-            class_name, self.module_name
-        )?;
+
+        if has_initialize {
+            // BT-411: Build object, call initialize, then return object
+            writeln!(
+                self.output,
+                "let _Obj = {{'beamtalk_object', '{}', '{}', Pid}} in",
+                class_name, self.module_name
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "let _InitResult = call 'gen_server':'call'(Pid, {{'initialize', []}}) in"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "_Obj")?;
+        } else {
+            writeln!(
+                self.output,
+                "{{'beamtalk_object', '{}', '{}', Pid}}",
+                class_name, self.module_name
+            )?;
+        }
+
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
@@ -99,6 +121,12 @@ impl CoreErlangGenerator {
         &mut self,
         _module: &Module,
     ) -> Result<()> {
+        // BT-411: Check if class defines an initialize method
+        let has_initialize = _module
+            .classes
+            .first()
+            .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
+
         writeln!(self.output, "'spawn'/1 = fun (InitArgs) ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -112,13 +140,30 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        // Return #beamtalk_object{} record instead of raw pid
         let class_name = self.class_name();
-        writeln!(
-            self.output,
-            "{{'beamtalk_object', '{}', '{}', Pid}}",
-            class_name, self.module_name
-        )?;
+
+        if has_initialize {
+            // BT-411: Build object, call initialize, then return object
+            writeln!(
+                self.output,
+                "let _Obj = {{'beamtalk_object', '{}', '{}', Pid}} in",
+                class_name, self.module_name
+            )?;
+            self.write_indent()?;
+            writeln!(
+                self.output,
+                "let _InitResult = call 'gen_server':'call'(Pid, {{'initialize', []}}) in"
+            )?;
+            self.write_indent()?;
+            writeln!(self.output, "_Obj")?;
+        } else {
+            writeln!(
+                self.output,
+                "{{'beamtalk_object', '{}', '{}', Pid}}",
+                class_name, self.module_name
+            )?;
+        }
+
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;

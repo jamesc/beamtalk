@@ -82,7 +82,14 @@ impl CoreErlangGenerator {
             "true" => write!(self.output, "'true'")?,
             "false" => write!(self.output, "'false'")?,
             "nil" => write!(self.output, "'nil'")?,
-            "self" => write!(self.output, "Self")?, // self → Self parameter (BT-161)
+            "self" => {
+                // BT-411: Check if self is explicitly bound (e.g., in class methods)
+                if let Some(var_name) = self.lookup_var("self").cloned() {
+                    write!(self.output, "{var_name}")?;
+                } else {
+                    write!(self.output, "Self")?; // self → Self parameter (BT-161)
+                }
+            }
             "super" => {
                 // super alone is an error - must be used in message send (super method: args)
                 return Err(CodeGenError::UnsupportedFeature {
