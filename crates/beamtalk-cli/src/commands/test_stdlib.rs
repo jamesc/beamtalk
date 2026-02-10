@@ -167,7 +167,6 @@ fn compile_expression_to_core(
 /// - booleans: `true`/`false` → `true`/`false`
 /// - nil: `nil` → `nil`
 /// - strings: `hello world` → `<<"hello world">>`
-/// - symbols: `#foo` → `foo` (atom)
 fn expected_to_erlang_term(expected: &str) -> String {
     // Wildcard - no assertion needed
     if expected == "_" {
@@ -216,11 +215,11 @@ fn generate_eunit_wrapper(
 ) -> String {
     let mut erl = String::new();
 
-    // Module header
+    // Module header (quote the module atom for Erlang atom safety)
     let _ = write!(
         erl,
         "%% Generated from {test_file_path}\n\
-         -module({test_module_name}).\n\
+         -module('{test_module_name}').\n\
          -include_lib(\"eunit/include/eunit.hrl\").\n\n"
     );
 
@@ -523,9 +522,11 @@ fn run_eunit_test(
 ) -> Result<TestFileResult> {
     debug!("Running EUnit test: {}", test_module_name);
 
-    // Code paths for runtime and stdlib BEAM files
-    let runtime_ebin = "runtime/_build/default/lib/beamtalk_runtime/ebin";
-    let stdlib_ebin = "runtime/apps/beamtalk_stdlib/ebin";
+    // Discover runtime paths via shared helpers (same as REPL and E2E)
+    let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
+        .wrap_err("Cannot find Erlang runtime directory")?;
+    let beam_paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
+    let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     let eval_cmd = format!(
         "case eunit:test('{test_module_name}', [verbose]) of \
@@ -534,16 +535,17 @@ fn run_eunit_test(
          end."
     );
 
-    let output = std::process::Command::new("erl")
-        .arg("-noshell")
-        .arg("-pa")
-        .arg(build_dir.as_str())
-        .arg("-pa")
-        .arg(runtime_ebin)
-        .arg("-pa")
-        .arg(stdlib_ebin)
-        .arg("-eval")
-        .arg(&eval_cmd)
+    let mut cmd = std::process::Command::new("erl");
+    cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
+
+    // Add runtime/stdlib/workspace paths from shared discovery
+    for arg in &pa_args {
+        cmd.arg(arg);
+    }
+
+    cmd.arg("-eval").arg(&eval_cmd);
+
+    let output = cmd
         .output()
         .into_diagnostic()
         .wrap_err("Failed to run eunit test")?;
@@ -735,7 +737,7 @@ mod tests {
         }];
         let eval_modules = vec!["test_arith_0".to_string()];
         let wrapper = generate_eunit_wrapper("arith_tests", "test/arith.bt", &cases, &eval_modules);
-        assert!(wrapper.contains("-module(arith_tests)."));
+        assert!(wrapper.contains("-module('arith_tests')."));
         assert!(wrapper.contains("?assertEqual"));
         assert!(wrapper.contains("test_arith_0"));
     }

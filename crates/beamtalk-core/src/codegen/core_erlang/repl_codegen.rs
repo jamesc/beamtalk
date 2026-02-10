@@ -50,7 +50,7 @@ impl CoreErlangGenerator {
     /// Generates a test evaluation module (no workspace bindings).
     ///
     /// Like [`generate_repl_module`] but with `workspace_mode = false`.
-    /// Used by `beamtalk test` for compiled expression tests (ADR 0014).
+    /// Used by `beamtalk test-stdlib` for compiled expression tests (ADR 0014).
     pub(super) fn generate_test_module(&mut self, expression: &Expression) -> Result<()> {
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;

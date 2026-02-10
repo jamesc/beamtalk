@@ -346,7 +346,7 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 ///
 /// Like [`generate_repl_expression`] but with `workspace_mode = false`,
 /// suitable for compiled tests that don't need REPL/workspace context.
-/// Used by `beamtalk test` (ADR 0014 Phase 1).
+/// Used by `beamtalk test-stdlib` (ADR 0014 Phase 1).
 ///
 /// # Errors
 ///
