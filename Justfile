@@ -18,7 +18,7 @@ default:
 
 # Run local CI checks (build, lint, unit & E2E tests)
 # Note: Runtime integration tests run only in GitHub Actions CI
-ci: build lint test test-e2e
+ci: build lint test test-stdlib test-e2e
 
 # Full clean and rebuild everything
 clean-all: clean clean-erlang
@@ -107,7 +107,7 @@ test-e2e: build-stdlib _clean-daemon-state
     cargo test --test e2e -- --ignored
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-e2e test-runtime
+test-all: test-rust test-stdlib test-e2e test-runtime
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~2s)
 test-stdlib: build-rust build-erlang build-stdlib

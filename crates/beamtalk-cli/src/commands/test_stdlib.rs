@@ -158,55 +158,51 @@ fn compile_expression_to_core(
 // EUnit wrapper generation
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Convert an expected value string to an Erlang term literal.
+/// Convert an expected value string to an Erlang binary literal for
+/// string-based comparison.
 ///
-/// Handles common Beamtalk value representations:
-/// - integers: `42` → `42`
-/// - floats: `3.14` → `3.14`
-/// - negative numbers: `-5` → `-5`
-/// - booleans: `true`/`false` → `true`/`false`
-/// - nil: `nil` → `nil`
-/// - strings: `hello world` → `<<"hello world">>`
-fn expected_to_erlang_term(expected: &str) -> String {
-    // Wildcard - no assertion needed
-    if expected == "_" {
-        return "_".to_string();
-    }
-
-    // Booleans and nil
-    if expected == "true" || expected == "false" || expected == "nil" {
-        return format!("'{expected}'");
-    }
-
-    // Negative numbers
-    if let Some(rest) = expected.strip_prefix('-') {
-        if rest.chars().all(|c| c.is_ascii_digit()) {
-            return expected.to_string();
-        }
-        if rest.parse::<f64>().is_ok() && rest.contains('.') {
-            return expected.to_string();
-        }
-    }
-
-    // Integers
-    if expected.chars().all(|c| c.is_ascii_digit()) {
-        return expected.to_string();
-    }
-
-    // Floats
-    if expected.parse::<f64>().is_ok() && expected.contains('.') {
-        return expected.to_string();
-    }
-
-    // Default: treat as string (Beamtalk strings are binaries)
+/// All expected values are represented as binaries (`<<"">>`) since
+/// `format_result/1` always returns a binary. This matches E2E semantics
+/// where the REPL compares string representations.
+fn expected_to_binary_literal(expected: &str) -> String {
     let escaped = expected.replace('\\', "\\\\").replace('"', "\\\"");
     format!("<<\"{escaped}\">>")
+}
+
+/// Extract the variable name from an assignment expression (`x := expr`).
+///
+/// Mirrors the REPL's `extract_assignment/1`: matches `name := ...` pattern.
+/// Returns `Some(var_name)` if the expression is an assignment, `None` otherwise.
+fn extract_assignment_var(expression: &str) -> Option<String> {
+    let trimmed = expression.trim();
+    // Find `:=` and check that everything before it is a valid identifier
+    let assign_pos = trimmed.find(":=")?;
+    let before = trimmed[..assign_pos].trim();
+    // Validate it's a simple identifier (letters, digits, underscores, starts with letter/underscore)
+    if before.is_empty() {
+        return None;
+    }
+    let first = before.chars().next()?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    if before
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        Some(before.to_string())
+    } else {
+        None
+    }
 }
 
 /// Generate an `EUnit` test module (.erl) for a parsed test file.
 ///
 /// Creates a single test function that evaluates all expressions
 /// sequentially, threading variable bindings between them.
+///
+/// Results are formatted to strings before comparison (matching E2E
+/// semantics where the REPL returns string representations).
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -223,6 +219,39 @@ fn generate_eunit_wrapper(
          -include_lib(\"eunit/include/eunit.hrl\").\n\n"
     );
 
+    // format_result/1 mirrors the REPL's term_to_json formatting so that
+    // expected values written as strings (like E2E tests) match correctly.
+    erl.push_str(
+        "format_result(V) when is_integer(V) -> integer_to_binary(V);\n\
+         format_result(V) when is_float(V) ->\n\
+         \x20   %% Match Erlang/REPL float formatting\n\
+         \x20   list_to_binary(io_lib:format(\"~p\", [V]));\n\
+         format_result(true) -> <<\"true\">>;\n\
+         format_result(false) -> <<\"false\">>;\n\
+         format_result(nil) -> <<\"nil\">>;\n\
+         format_result(V) when is_atom(V) -> atom_to_binary(V, utf8);\n\
+         format_result(V) when is_binary(V) -> V;\n\
+         format_result(V) when is_function(V) ->\n\
+         \x20   {arity, A} = erlang:fun_info(V, arity),\n\
+         \x20   iolist_to_binary([<<\"a Block/\">>, integer_to_binary(A)]);\n\
+         format_result(V) when is_pid(V) ->\n\
+         \x20   S = pid_to_list(V),\n\
+         \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
+         \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
+         format_result(V) when is_map(V) ->\n\
+         \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
+         \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
+         \x20   catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end;\n\
+         format_result(V) when is_list(V) ->\n\
+         \x20   case V of\n\
+         \x20       [] -> <<\"[]\">>;\n\
+         \x20       _ ->\n\
+         \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
+         \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
+         \x20   end;\n\
+         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n",
+    );
+
     // Single test function with all assertions (stateful test)
     let _ = writeln!(erl, "{test_module_name}_test() ->");
 
@@ -231,19 +260,35 @@ fn generate_eunit_wrapper(
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         let bindings_in = format!("Bindings{i}");
-        let bindings_out = format!("Bindings{}", i + 1);
         let result_var = format!("Result{i}");
 
-        // Call the eval module
+        // Call the eval module — returns {Result, RawBindings}
+        let raw_bindings = format!("RawBindings{}", i + 1);
         let _ = writeln!(
             erl,
-            "    {{{result_var}, {bindings_out}}} = '{eval_mod}':eval({bindings_in}),"
+            "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
         );
+
+        // If this expression is a variable assignment (x := expr), persist
+        // the binding in the bindings map for subsequent expressions.
+        // This mirrors the REPL's extract_assignment + maps:put logic.
+        let bindings_out = format!("Bindings{}", i + 1);
+        if let Some(var_name) = extract_assignment_var(&case.expression) {
+            let _ = writeln!(
+                erl,
+                "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
+            );
+        } else {
+            let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
+        }
 
         // Add assertion (unless wildcard)
         if case.expected != "_" {
-            let expected_term = expected_to_erlang_term(&case.expected);
-            let _ = writeln!(erl, "    ?assertEqual({expected_term}, {result_var}),");
+            let expected_bin = expected_to_binary_literal(&case.expected);
+            let _ = writeln!(
+                erl,
+                "    ?assertEqual({expected_bin}, format_result({result_var})),"
+            );
         }
     }
 
@@ -529,7 +574,8 @@ fn run_eunit_test(
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     let eval_cmd = format!(
-        "case eunit:test('{test_module_name}', [verbose]) of \
+        "beamtalk_extensions:init(), \
+         case eunit:test('{test_module_name}', [verbose]) of \
            ok -> init:stop(0); \
            error -> init:stop(1) \
          end."
@@ -695,37 +741,32 @@ mod tests {
     }
 
     #[test]
-    fn test_expected_to_erlang_term_integer() {
-        assert_eq!(expected_to_erlang_term("42"), "42");
-        assert_eq!(expected_to_erlang_term("-5"), "-5");
-        assert_eq!(expected_to_erlang_term("0"), "0");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_float() {
-        assert_eq!(expected_to_erlang_term("3.14"), "3.14");
-        assert_eq!(expected_to_erlang_term("-2.5"), "-2.5");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_boolean() {
-        assert_eq!(expected_to_erlang_term("true"), "'true'");
-        assert_eq!(expected_to_erlang_term("false"), "'false'");
-        assert_eq!(expected_to_erlang_term("nil"), "'nil'");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_string() {
-        assert_eq!(expected_to_erlang_term("hello"), "<<\"hello\">>");
+    fn test_expected_to_binary_literal() {
+        assert_eq!(expected_to_binary_literal("42"), "<<\"42\">>");
+        assert_eq!(expected_to_binary_literal("-5"), "<<\"-5\">>");
+        assert_eq!(expected_to_binary_literal("0"), "<<\"0\">>");
+        assert_eq!(expected_to_binary_literal("3.14"), "<<\"3.14\">>");
+        assert_eq!(expected_to_binary_literal("-2.5"), "<<\"-2.5\">>");
+        assert_eq!(expected_to_binary_literal("true"), "<<\"true\">>");
+        assert_eq!(expected_to_binary_literal("false"), "<<\"false\">>");
+        assert_eq!(expected_to_binary_literal("nil"), "<<\"nil\">>");
+        assert_eq!(expected_to_binary_literal("hello"), "<<\"hello\">>");
         assert_eq!(
-            expected_to_erlang_term("hello world"),
+            expected_to_binary_literal("hello world"),
             "<<\"hello world\">>"
         );
     }
 
     #[test]
-    fn test_expected_to_erlang_term_wildcard() {
-        assert_eq!(expected_to_erlang_term("_"), "_");
+    fn test_extract_assignment_var() {
+        assert_eq!(extract_assignment_var("x := 5"), Some("x".to_string()));
+        assert_eq!(
+            extract_assignment_var("counter := Counter spawn"),
+            Some("counter".to_string())
+        );
+        assert_eq!(extract_assignment_var("42"), None);
+        assert_eq!(extract_assignment_var("x + y"), None);
+        assert_eq!(extract_assignment_var("self.x := 5"), None);
     }
 
     #[test]
