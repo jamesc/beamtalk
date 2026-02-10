@@ -117,7 +117,8 @@
     before_methods = #{} :: #{selector() => [fun()]},
     after_methods = #{} :: #{selector() => [fun()]},
     dynamic_methods = #{} :: #{selector() => fun()},  % For dynamic classes: actual closures
-    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}}  % ADR 0006 Phase 2: cached method table including inherited
+    flattened_methods = #{} :: #{selector() => {class_name(), method_info()}},  % ADR 0006 Phase 2: cached method table including inherited
+    flattened_class_methods = #{} :: #{selector() => {class_name(), method_info()}}  % BT-411: cached class method table including inherited
 }).
 
 %%====================================================================
@@ -225,12 +226,18 @@ class_send(ClassPid, class_name, []) ->
     gen_server:call(ClassPid, class_name);
 class_send(ClassPid, module_name, []) ->
     gen_server:call(ClassPid, module_name);
-class_send(ClassPid, Selector, _Args) ->
-    ClassName = gen_server:call(ClassPid, class_name),
-    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
-    error(Error2).
+class_send(ClassPid, Selector, Args) ->
+    %% BT-411: Try user-defined class methods before raising does_not_understand
+    case gen_server:call(ClassPid, {class_method_call, Selector, Args}) of
+        {ok, Result} -> Result;
+        {error, not_found} ->
+            ClassName = gen_server:call(ClassPid, class_name),
+            Error0 = beamtalk_error:new(does_not_understand, ClassName),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
+            error(Error2);
+        {error, Error} -> error(Error)
+    end.
 
 %% @doc Convert a class name atom to a class object tag (BT-246).
 %%
@@ -445,9 +452,11 @@ init({ClassName, ClassInfo}) ->
     %% Extract class info
     Superclass = maps:get(superclass, ClassInfo, none),
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
+    ClassMethods = maps:get(class_methods, ClassInfo, #{}),
     
-    %% Build flattened method table (ADR 0006 Phase 2)
+    %% Build flattened method tables (ADR 0006 Phase 2)
     FlattenedMethods = build_flattened_methods(ClassName, Superclass, InstanceMethods),
+    FlattenedClassMethods = build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
     
     %% Build state
     State = #class_state{
@@ -457,14 +466,15 @@ init({ClassName, ClassInfo}) ->
         is_sealed = maps:get(is_sealed, ClassInfo, false),
         is_abstract = maps:get(is_abstract, ClassInfo, false),
         instance_methods = InstanceMethods,
-        class_methods = maps:get(class_methods, ClassInfo, #{}),
+        class_methods = ClassMethods,
         instance_variables = maps:get(instance_variables, ClassInfo, []),
         class_variables = maps:get(class_variables, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         before_methods = maps:get(before_methods, ClassInfo, #{}),
         after_methods = maps:get(after_methods, ClassInfo, #{}),
         dynamic_methods = maps:get(dynamic_methods, ClassInfo, #{}),
-        flattened_methods = FlattenedMethods
+        flattened_methods = FlattenedMethods,
+        flattened_class_methods = FlattenedClassMethods
     },
     %% ADR 0006 Phase 2: Notify existing subclasses to rebuild their flattened
     %% tables. Handles out-of-order registration (e.g., Counter registered
@@ -680,6 +690,38 @@ handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods 
     end,
     {reply, Result, State};
 
+%% BT-411: User-defined class method dispatch.
+%% Looks up selector in flattened_class_methods and calls the module function.
+handle_call({class_method_call, Selector, Args}, _From,
+            #class_state{flattened_class_methods = FlatClassMethods,
+                         name = ClassName, module = Module} = State) ->
+    case maps:find(Selector, FlatClassMethods) of
+        {ok, {_DefiningClass, _MethodInfo}} ->
+            %% Build class self object for `self` reference in class methods
+            ClassSelf = {beamtalk_object, class_object_tag(ClassName), Module, self()},
+            %% Class method function name: class_<selector>
+            FunName = class_method_fun_name(Selector),
+            try erlang:apply(Module, FunName, [ClassSelf | Args]) of
+                Result -> {reply, {ok, Result}, State}
+            catch
+                error:Error -> {reply, {error, Error}, State}
+            end;
+        error ->
+            {reply, {error, not_found}, State}
+    end;
+
+%% BT-411: Actor initialize protocol.
+%% Called as first message after spawn to run user-defined initialization.
+handle_call({initialize, _Args}, _From, #class_state{} = State) ->
+    %% Initialize is dispatched as an instance method on the just-spawned actor,
+    %% not on the class process. This handler should not be reached — initialize
+    %% is called directly on the actor pid by spawn codegen.
+    {reply, {ok, nil}, State};
+
+%% BT-411: Query for flattened class methods (for inheritance)
+handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_methods = Flattened} = State) ->
+    {reply, {ok, Flattened}, State};
+
 %% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
     {reply, Module, State}.
@@ -726,16 +768,18 @@ handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
 handle_info({rebuild_flattened, ChangedClass}, #class_state{
     name = Name,
     superclass = Superclass,
-    instance_methods = InstanceMethods
+    instance_methods = InstanceMethods,
+    class_methods = ClassMethods
 } = State) ->
     %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it.
-    %% Wrapped in try/catch: if any ancestor process is dead/busy, we skip the
-    %% rebuild rather than crashing this class process. The slow-path dispatch
-    %% will still find inherited methods correctly.
     try inherits_from(Superclass, ChangedClass) of
         true ->
             NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
-            {noreply, State#class_state{flattened_methods = NewFlattened}};
+            NewFlattenedClass = build_flattened_methods(Name, Superclass, ClassMethods, get_flattened_class_methods),
+            {noreply, State#class_state{
+                flattened_methods = NewFlattened,
+                flattened_class_methods = NewFlattenedClass
+            }};
         false ->
             {noreply, State}
     catch
@@ -757,9 +801,18 @@ code_change(OldVsn, State, Extra) ->
         NewState#class_state.superclass,
         NewState#class_state.instance_methods
     ),
+    NewFlattenedClass = build_flattened_methods(
+        NewState#class_state.name,
+        NewState#class_state.superclass,
+        NewState#class_state.class_methods,
+        get_flattened_class_methods
+    ),
     %% Invalidate subclass tables in case hot_reload modified our methods
     invalidate_subclass_flattened_tables(NewState#class_state.name),
-    {ok, NewState#class_state{flattened_methods = NewFlattened}}.
+    {ok, NewState#class_state{
+        flattened_methods = NewFlattened,
+        flattened_class_methods = NewFlattenedClass
+    }}.
 
 %%====================================================================
 %% Internal functions
@@ -948,6 +1001,14 @@ invoke_super_method(Module, Selector, MethodInfo, Args, State) ->
 -spec build_flattened_methods(class_name(), class_name() | none, #{selector() => method_info()}) ->
     #{selector() => {class_name(), method_info()}}.
 build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
+    build_flattened_methods(CurrentClass, Superclass, LocalMethods, get_flattened_methods).
+
+%% @doc Build flattened method table with configurable superclass query message.
+%% Used for both instance methods (get_flattened_methods) and class methods
+%% (get_flattened_class_methods).
+-spec build_flattened_methods(class_name(), class_name() | none, #{selector() => method_info()}, atom()) ->
+    #{selector() => {class_name(), method_info()}}.
+build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
     %% Start with local methods (maps each selector to {CurrentClass, MethodInfo})
     LocalFlattened = maps:fold(fun(Selector, MethodInfo, Acc) ->
         maps:put(Selector, {CurrentClass, MethodInfo}, Acc)
@@ -962,16 +1023,9 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
             %% Get inherited methods from superclass
             case whereis_class(SuperclassName) of
                 undefined ->
-                    %% Superclass not registered yet (bootstrap ordering)
-                    %% Just return local methods - flattening will be incomplete
-                    %% but will be fixed on next hot reload
                     LocalFlattened;
                 SuperclassPid ->
-                    %% Get the superclass's flattened methods
-                    %% Wrapped in try/catch: if superclass is busy/restarting,
-                    %% degrade gracefully to local-only methods (slow path
-                    %% will still find inherited methods at dispatch time)
-                    SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, get_flattened_methods, 5000) of
+                    SuperclassFlattenedMethods = try gen_server:call(SuperclassPid, QueryMsg, 5000) of
                         {ok, Methods} -> Methods;
                         _ -> #{}
                     catch
@@ -979,7 +1033,13 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods) ->
                     end,
                     
                     %% Merge: local methods override inherited
-                    %% maps:merge prefers second argument on collision, so put inherited first
                     maps:merge(SuperclassFlattenedMethods, LocalFlattened)
             end
     end.
+
+%% @doc Convert a class method selector to its module function name.
+%% Class methods are generated with a 'class_' prefix, e.g.
+%% `class defaultValue => 42` becomes `class_defaultValue/1`.
+-spec class_method_fun_name(selector()) -> atom().
+class_method_fun_name(Selector) ->
+    list_to_atom("class_" ++ atom_to_list(Selector)).
