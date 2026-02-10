@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Set — the class of unique element collections (Erlang ordsets).
+//
+// Sets are immutable unordered collections of unique elements backed by
+// Erlang's ordsets module. Operations that "modify" a set return a new set.
+//
+// Sets are represented as tagged maps: #{'$beamtalk_class' => 'Set', elements => OrdsetData}
+// Creation: Set new
+
+sealed Object subclass: Set
+  state: elements = #()
+
+  // Size
+  size => @primitive 'size'
+  isEmpty => @primitive 'isEmpty'
+
+  // Membership
+  includes: element => @primitive 'includes:'
+
+  // Modification (returns new Set)
+  add: element => @primitive 'add:'
+  remove: element => @primitive 'remove:'
+
+  // Set operations (returns new Set)
+  union: other => @primitive 'union:'
+  intersection: other => @primitive 'intersection:'
+  difference: other => @primitive 'difference:'
+
+  // Predicates
+  isSubsetOf: other => @primitive 'isSubsetOf:'
+
+  // Conversion
+  asList => @primitive 'asList'
+  fromList: list => @primitive 'fromList:'
+
+  // Iteration
+  do: block => @primitive 'do:'
+
+  // Reflection
+  describe => 'a Set'

@@ -203,6 +203,7 @@ fn is_primitive_type(class_name: &str) -> bool {
             | "Tuple"
             | "List"
             | "Dictionary"
+            | "Set"
     )
 }
 
