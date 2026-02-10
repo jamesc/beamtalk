@@ -3,6 +3,7 @@
 
 -module(beamtalk_object_class_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%====================================================================
 %% Setup/Teardown
@@ -707,7 +708,7 @@ async_cast_unknown_message_test_() ->
               FuturePid = self(),
               gen_server:cast(ClassPid, {unknownSelector, [arg1], FuturePid}),
               receive
-                  {reject, {error, {unknown_class_message, unknownSelector}}} ->
+                  {reject, #beamtalk_error{kind = does_not_understand, selector = unknownSelector}} ->
                       ok
               after 1000 ->
                   ?assert(false)

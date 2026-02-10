@@ -76,7 +76,7 @@ actor_spawn_updates_activity_test() ->
         timer:sleep(1100),
         
         %% Simulate actor spawn by calling update_activity
-        %% (This is what beamtalk_actor:spawn_with_registry does after registration)
+        %% (This is what beamtalk_actor:register_spawned does after registration)
         ok = beamtalk_workspace_meta:update_activity(),
         
         %% Verify activity time was updated
