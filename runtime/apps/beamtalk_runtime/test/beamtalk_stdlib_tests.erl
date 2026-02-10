@@ -41,7 +41,8 @@ stdlib_test_() ->
         {"UndefinedObject class is registered", fun nil_class_registered_test/0},
         {"Block class is registered", fun block_class_registered_test/0},
         {"Tuple class is registered", fun tuple_class_registered_test/0},
-        {"Beamtalk class is registered", fun beamtalk_class_registered_test/0},
+        {"SystemDictionary class is registered", fun system_dictionary_class_registered_test/0},
+        {"TranscriptStream class is registered", fun transcript_stream_class_registered_test/0},
         {"Integer class has correct superclass", fun integer_superclass_test/0},
         {"Integer class has expected methods", fun integer_methods_test/0},
         %% Beamtalk class method tests
@@ -63,7 +64,7 @@ init_registers_all_classes_test() ->
     
     %% After init, should have bootstrap + stdlib classes
     ClassesAfter = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(14, length(ClassesAfter)),  % 4 bootstrap + 10 stdlib (Transcript removed - BT-376, Number added from main)
+    ?assertEqual(15, length(ClassesAfter)),  % 3 bootstrap + 10 primitives + 2 workspace globals
     
     %% Verify expected classes are present
     ?assert(lists:member('ProtoObject', ClassesAfter)),
@@ -77,7 +78,8 @@ init_registers_all_classes_test() ->
     ?assert(lists:member('Block', ClassesAfter)),
     ?assert(lists:member('Tuple', ClassesAfter)),
     ?assert(lists:member('Float', ClassesAfter)),
-    ?assert(lists:member('Beamtalk', ClassesAfter)).
+    ?assert(lists:member('SystemDictionary', ClassesAfter)),
+    ?assert(lists:member('TranscriptStream', ClassesAfter)).
 
 init_idempotent_test() ->
     %% Call init multiple times
@@ -86,7 +88,7 @@ init_idempotent_test() ->
     
     %% Should still have same number of classes (no duplicates)
     Classes = [beamtalk_object_class:class_name(Pid) || Pid <- beamtalk_object_class:all_classes()],
-    ?assertEqual(14, length(Classes)).
+    ?assertEqual(15, length(Classes)).
 
 integer_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
@@ -130,11 +132,17 @@ tuple_class_registered_test() ->
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('Tuple', beamtalk_object_class:class_name(Pid)).
 
-beamtalk_class_registered_test() ->
+system_dictionary_class_registered_test() ->
     ok = beamtalk_stdlib:init(),
-    Pid = beamtalk_object_class:whereis_class('Beamtalk'),
+    Pid = beamtalk_object_class:whereis_class('SystemDictionary'),
     ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid)).
+    ?assertEqual('SystemDictionary', beamtalk_object_class:class_name(Pid)).
+
+transcript_stream_class_registered_test() ->
+    ok = beamtalk_stdlib:init(),
+    Pid = beamtalk_object_class:whereis_class('TranscriptStream'),
+    ?assertNotEqual(undefined, Pid),
+    ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
 
 integer_superclass_test() ->
     ok = beamtalk_stdlib:init(),
@@ -174,7 +182,8 @@ beamtalk_all_classes_test() ->
     ?assert(lists:member('True', Classes)),
     ?assert(lists:member('False', Classes)),
     ?assert(lists:member('Block', Classes)),
-    ?assert(lists:member('Beamtalk', Classes)),
+    ?assert(lists:member('SystemDictionary', Classes)),
+    ?assert(lists:member('TranscriptStream', Classes)),
     ?assert(lists:member('ProtoObject', Classes)),
     ?assert(lists:member('Object', Classes)),
     ?assert(lists:member('Actor', Classes)).

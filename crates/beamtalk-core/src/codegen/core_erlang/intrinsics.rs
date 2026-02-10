@@ -19,7 +19,7 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::{CoreErlangGenerator, Result};
-use crate::ast::{Expression, MessageSelector};
+use crate::ast::{Expression, Literal, MessageSelector};
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -155,6 +155,10 @@ impl CoreErlangGenerator {
     /// List methods are structural intrinsics that require inline code generation
     /// for proper state threading when used inside actor methods with field mutations.
     ///
+    /// **BT-416**: This intrinsic now checks the receiver type to avoid intercepting
+    /// String primitive methods. String literals use `@primitive` codegen that delegates
+    /// to `beamtalk_string_ops`, not `lists:map/filter`.
+    ///
     /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
     /// - Returns `Err(...)` on error
@@ -172,6 +176,13 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<()>> {
+        // BT-416: Skip list intrinsics for String literals.
+        // String has its own @primitive implementations (collect:, select:, etc.)
+        // that delegate to beamtalk_string_ops, not lists:map/filter.
+        if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
+            return Ok(None);
+        }
+
         match selector {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();

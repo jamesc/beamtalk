@@ -193,8 +193,8 @@ send(X, Selector, Args) when is_map(X) ->
             %% BT-335: Association value type - direct dispatch
             bt_stdlib_association:dispatch(Selector, Args, X);
         undefined ->
-            %% Plain map (Dictionary)
-            beamtalk_map:dispatch(Selector, Args, X);
+            %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
+            beamtalk_dictionary:dispatch(Selector, Args, X);
         Class ->
             %% Value type instance - route to class module (BT-354)
             value_type_send(X, Class, Selector, Args)
@@ -266,7 +266,7 @@ responds_to(X, Selector) when is_map(X) ->
             %% BT-335: Association value type
             bt_stdlib_association:has_method(Selector);
         undefined ->
-            beamtalk_map:has_method(Selector);
+            beamtalk_dictionary:has_method(Selector);
         Class ->
             %% Value type instance - check class module exports (BT-354)
             value_type_responds_to(Class, Selector)

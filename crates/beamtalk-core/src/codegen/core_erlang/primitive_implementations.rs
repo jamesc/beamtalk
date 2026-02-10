@@ -43,6 +43,7 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Dictionary" => generate_dictionary_bif(output, selector, params),
         "Object" => generate_object_bif(output, selector, params),
         "Association" => generate_association_bif(output, selector, params),
         _ => None,
@@ -442,6 +443,72 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Dictionary primitive implementations (BT-418).
+///
+/// Dictionaries are Erlang maps — immutable key-value collections.
+fn generate_dictionary_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "size" => {
+            write!(output, "call 'erlang':'map_size'(Self)").ok()?;
+            Some(())
+        }
+        "keys" => {
+            write!(output, "call 'maps':'keys'(Self)").ok()?;
+            Some(())
+        }
+        "values" => {
+            write!(output, "call 'maps':'values'(Self)").ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'get'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "at:ifAbsent:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            let p1 = params.get(1).map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_map_ops':'at_if_absent'(Self, {p0}, {p1})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "at:put:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            let p1 = params.get(1).map_or("_Value", String::as_str);
+            write!(output, "call 'maps':'put'({p0}, {p1}, Self)").ok()?;
+            Some(())
+        }
+        "includesKey:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'is_key'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "removeKey:" => {
+            let p0 = params.first().map_or("_Key", String::as_str);
+            write!(output, "call 'maps':'remove'({p0}, Self)").ok()?;
+            Some(())
+        }
+        "merge:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'maps':'merge'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "keysAndValuesDo:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(
+                output,
+                "call 'beamtalk_map_ops':'keys_and_values_do'(Self, {p0})"
+            )
+            .ok()?;
             Some(())
         }
         _ => None,
