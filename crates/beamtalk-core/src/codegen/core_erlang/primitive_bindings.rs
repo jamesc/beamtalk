@@ -79,7 +79,8 @@ impl PrimitiveBindingTable {
         for class in &module.classes {
             let class_name = class.name.name.to_string();
 
-            for method in &class.methods {
+            // Walk both instance methods and class methods for @primitive bindings.
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
                 // A primitive method has exactly one expression in its body:
                 // an Expression::Primitive node.
                 if method.body.len() == 1 {
