@@ -158,55 +158,51 @@ fn compile_expression_to_core(
 // EUnit wrapper generation
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Convert an expected value string to an Erlang term literal.
+/// Convert an expected value string to an Erlang binary literal for
+/// string-based comparison.
 ///
-/// Handles common Beamtalk value representations:
-/// - integers: `42` → `42`
-/// - floats: `3.14` → `3.14`
-/// - negative numbers: `-5` → `-5`
-/// - booleans: `true`/`false` → `true`/`false`
-/// - nil: `nil` → `nil`
-/// - strings: `hello world` → `<<"hello world">>`
-fn expected_to_erlang_term(expected: &str) -> String {
-    // Wildcard - no assertion needed
-    if expected == "_" {
-        return "_".to_string();
-    }
-
-    // Booleans and nil
-    if expected == "true" || expected == "false" || expected == "nil" {
-        return format!("'{expected}'");
-    }
-
-    // Negative numbers
-    if let Some(rest) = expected.strip_prefix('-') {
-        if rest.chars().all(|c| c.is_ascii_digit()) {
-            return expected.to_string();
-        }
-        if rest.parse::<f64>().is_ok() && rest.contains('.') {
-            return expected.to_string();
-        }
-    }
-
-    // Integers
-    if expected.chars().all(|c| c.is_ascii_digit()) {
-        return expected.to_string();
-    }
-
-    // Floats
-    if expected.parse::<f64>().is_ok() && expected.contains('.') {
-        return expected.to_string();
-    }
-
-    // Default: treat as string (Beamtalk strings are binaries)
+/// All expected values are represented as binaries (`<<"">>`) since
+/// `format_result/1` always returns a binary. This matches E2E semantics
+/// where the REPL compares string representations.
+fn expected_to_binary_literal(expected: &str) -> String {
     let escaped = expected.replace('\\', "\\\\").replace('"', "\\\"");
     format!("<<\"{escaped}\">>")
+}
+
+/// Extract the variable name from an assignment expression (`x := expr`).
+///
+/// Mirrors the REPL's `extract_assignment/1`: matches `name := ...` pattern.
+/// Returns `Some(var_name)` if the expression is an assignment, `None` otherwise.
+fn extract_assignment_var(expression: &str) -> Option<String> {
+    let trimmed = expression.trim();
+    // Find `:=` and check that everything before it is a valid identifier
+    let assign_pos = trimmed.find(":=")?;
+    let before = trimmed[..assign_pos].trim();
+    // Validate it's a simple identifier (letters, digits, underscores, starts with letter/underscore)
+    if before.is_empty() {
+        return None;
+    }
+    let first = before.chars().next()?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    if before
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        Some(before.to_string())
+    } else {
+        None
+    }
 }
 
 /// Generate an `EUnit` test module (.erl) for a parsed test file.
 ///
 /// Creates a single test function that evaluates all expressions
 /// sequentially, threading variable bindings between them.
+///
+/// Results are formatted to strings before comparison (matching E2E
+/// semantics where the REPL returns string representations).
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -223,6 +219,39 @@ fn generate_eunit_wrapper(
          -include_lib(\"eunit/include/eunit.hrl\").\n\n"
     );
 
+    // format_result/1 mirrors the REPL's term_to_json formatting so that
+    // expected values written as strings (like E2E tests) match correctly.
+    erl.push_str(
+        "format_result(V) when is_integer(V) -> integer_to_binary(V);\n\
+         format_result(V) when is_float(V) ->\n\
+         \x20   %% Match Erlang/REPL float formatting\n\
+         \x20   list_to_binary(io_lib:format(\"~p\", [V]));\n\
+         format_result(true) -> <<\"true\">>;\n\
+         format_result(false) -> <<\"false\">>;\n\
+         format_result(nil) -> <<\"nil\">>;\n\
+         format_result(V) when is_atom(V) -> atom_to_binary(V, utf8);\n\
+         format_result(V) when is_binary(V) -> V;\n\
+         format_result(V) when is_function(V) ->\n\
+         \x20   {arity, A} = erlang:fun_info(V, arity),\n\
+         \x20   iolist_to_binary([<<\"a Block/\">>, integer_to_binary(A)]);\n\
+         format_result(V) when is_pid(V) ->\n\
+         \x20   S = pid_to_list(V),\n\
+         \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
+         \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
+         format_result(V) when is_map(V) ->\n\
+         \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
+         \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
+         \x20   catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end;\n\
+         format_result(V) when is_list(V) ->\n\
+         \x20   case V of\n\
+         \x20       [] -> <<\"[]\">>;\n\
+         \x20       _ ->\n\
+         \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
+         \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
+         \x20   end;\n\
+         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n",
+    );
+
     // Single test function with all assertions (stateful test)
     let _ = writeln!(erl, "{test_module_name}_test() ->");
 
@@ -231,19 +260,35 @@ fn generate_eunit_wrapper(
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         let bindings_in = format!("Bindings{i}");
-        let bindings_out = format!("Bindings{}", i + 1);
         let result_var = format!("Result{i}");
 
-        // Call the eval module
+        // Call the eval module — returns {Result, RawBindings}
+        let raw_bindings = format!("RawBindings{}", i + 1);
         let _ = writeln!(
             erl,
-            "    {{{result_var}, {bindings_out}}} = '{eval_mod}':eval({bindings_in}),"
+            "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
         );
+
+        // If this expression is a variable assignment (x := expr), persist
+        // the binding in the bindings map for subsequent expressions.
+        // This mirrors the REPL's extract_assignment + maps:put logic.
+        let bindings_out = format!("Bindings{}", i + 1);
+        if let Some(var_name) = extract_assignment_var(&case.expression) {
+            let _ = writeln!(
+                erl,
+                "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
+            );
+        } else {
+            let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
+        }
 
         // Add assertion (unless wildcard)
         if case.expected != "_" {
-            let expected_term = expected_to_erlang_term(&case.expected);
-            let _ = writeln!(erl, "    ?assertEqual({expected_term}, {result_var}),");
+            let expected_bin = expected_to_binary_literal(&case.expected);
+            let _ = writeln!(
+                erl,
+                "    ?assertEqual({expected_bin}, format_result({result_var})),"
+            );
         }
     }
 
@@ -289,10 +334,21 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<()>
 // Main entry point
 // ──────────────────────────────────────────────────────────────────────────
 
+/// Metadata for a compiled test file, ready to be run.
+struct CompiledTestFile {
+    /// Original source file path.
+    source_file: Utf8PathBuf,
+    /// `EUnit` module name (e.g., `arithmetic_tests`).
+    module_name: String,
+    /// Number of assertions in this file.
+    assertion_count: usize,
+}
+
 /// Run stdlib tests.
 ///
 /// Finds all `.bt` files in the test directory, parses `// =>` assertions,
-/// compiles expressions to Core Erlang, generates `EUnit` wrappers, and runs them.
+/// compiles expressions to Core Erlang, generates `EUnit` wrappers, and runs
+/// all tests in a single BEAM process.
 #[instrument(skip_all)]
 pub fn run_tests(path: &str) -> Result<()> {
     info!("Starting stdlib test run");
@@ -318,26 +374,64 @@ pub fn run_tests(path: &str) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
-    let mut total_tests = 0;
+    // Phase 1: Compile all test files (Core Erlang + EUnit wrappers)
+    let mut compiled_files = Vec::new();
+    let mut all_core_files = Vec::new();
+    let mut all_erl_files = Vec::new();
+
+    for test_file in &test_files {
+        let result = compile_single_test_file(test_file, &build_dir)?;
+        all_core_files.extend(result.core_files);
+        all_erl_files.push(result.erl_file);
+        compiled_files.push(CompiledTestFile {
+            source_file: test_file.clone(),
+            module_name: result.test_module_name,
+            assertion_count: result.test_count,
+        });
+    }
+
+    // Phase 2: Batch compile all .core → .beam
+    if !all_core_files.is_empty() {
+        let compiler = BeamCompiler::new(build_dir.clone());
+        compiler
+            .compile_batch(&all_core_files)
+            .wrap_err("Failed to batch-compile test expression modules to BEAM")?;
+    }
+
+    // Phase 3: Batch compile all EUnit .erl → .beam in a single erlc call
+    compile_erl_files(&all_erl_files, &build_dir)?;
+
+    // Phase 4: Run ALL EUnit test modules in a single BEAM process
+    let test_module_names: Vec<&str> = compiled_files
+        .iter()
+        .map(|f| f.module_name.as_str())
+        .collect();
+
+    let total_tests: usize = compiled_files.iter().map(|f| f.assertion_count).sum();
+
+    let eunit_result = run_all_eunit_tests(&test_module_names, &build_dir)?;
+
+    // Phase 5: Report results per file
     let mut total_passed = 0;
     let mut total_failed = 0;
     let mut failed_details = Vec::new();
 
-    for test_file in &test_files {
-        let result = run_single_test_file(test_file, &build_dir)?;
-        total_tests += result.test_count;
-        total_passed += result.pass_count;
-        total_failed += result.fail_count;
+    for compiled in &compiled_files {
+        let file_stem = compiled.source_file.file_stem().unwrap_or("unknown");
 
-        let status = if result.fail_count == 0 { "✓" } else { "✗" };
-        let file_stem = test_file.file_stem().unwrap_or("unknown");
-        println!(
-            "  {file_stem}: {} tests, {} passed {status}",
-            result.test_count, result.pass_count
-        );
-
-        if !result.failures.is_empty() {
-            failed_details.extend(result.failures);
+        if let Some(failure) = eunit_result.failed_modules.get(&compiled.module_name) {
+            total_failed += compiled.assertion_count;
+            println!(
+                "  {file_stem}: {} tests, 0 passed ✗",
+                compiled.assertion_count
+            );
+            failed_details.push(format!("FAIL {}:\n  {}", compiled.source_file, failure));
+        } else {
+            total_passed += compiled.assertion_count;
+            println!(
+                "  {file_stem}: {} tests, {} passed ✓",
+                compiled.assertion_count, compiled.assertion_count
+            );
         }
     }
 
@@ -350,7 +444,6 @@ pub fn run_tests(path: &str) -> Result<()> {
             total_passed
         );
     } else {
-        // Print failure details
         for detail in &failed_details {
             eprintln!("{detail}");
         }
@@ -368,16 +461,25 @@ pub fn run_tests(path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Result of running a single test file.
-struct TestFileResult {
+/// Result of compiling a single test file (no execution yet).
+struct CompilationResult {
+    /// `EUnit` test module name.
+    test_module_name: String,
+    /// Core Erlang files generated for this test file's expressions.
+    core_files: Vec<Utf8PathBuf>,
+    /// `EUnit` wrapper `.erl` file.
+    erl_file: Utf8PathBuf,
+    /// Number of test assertions.
     test_count: usize,
-    pass_count: usize,
-    fail_count: usize,
-    failures: Vec<String>,
 }
 
-/// Run tests from a single `.bt` file.
-fn run_single_test_file(test_file: &Utf8Path, build_dir: &Utf8Path) -> Result<TestFileResult> {
+/// Compile a single `.bt` test file into Core Erlang modules + `EUnit` wrapper.
+///
+/// Does NOT execute — just produces files ready for batch compilation and execution.
+fn compile_single_test_file(
+    test_file: &Utf8Path,
+    build_dir: &Utf8Path,
+) -> Result<CompilationResult> {
     let content = fs::read_to_string(test_file)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{test_file}'"))?;
@@ -394,15 +496,6 @@ fn run_single_test_file(test_file: &Utf8Path, build_dir: &Utf8Path) -> Result<Te
             test_file,
             parsed.warnings.len()
         );
-    }
-
-    if parsed.cases.is_empty() {
-        return Ok(TestFileResult {
-            test_count: 0,
-            pass_count: 0,
-            fail_count: 0,
-            failures: Vec::new(),
-        });
     }
 
     // Compile @load fixtures
@@ -466,12 +559,6 @@ fn run_single_test_file(test_file: &Utf8Path, build_dir: &Utf8Path) -> Result<Te
         }
     }
 
-    // Batch compile .core → .beam
-    let compiler = BeamCompiler::new(build_dir.to_owned());
-    compiler
-        .compile_batch(&core_files)
-        .wrap_err("Failed to compile test expression modules to BEAM")?;
-
     // Generate EUnit wrapper
     let test_module_name = format!("{safe_stem}_tests");
     let eunit_source = generate_eunit_wrapper(
@@ -486,59 +573,93 @@ fn run_single_test_file(test_file: &Utf8Path, build_dir: &Utf8Path) -> Result<Te
         .into_diagnostic()
         .wrap_err("Failed to write EUnit wrapper")?;
 
-    // Compile EUnit wrapper with erlc
-    compile_erl_file(&erl_file, build_dir)?;
-
-    // Run EUnit test
-    run_eunit_test(&test_module_name, build_dir, test_file, &parsed.cases)
+    Ok(CompilationResult {
+        test_module_name,
+        core_files,
+        erl_file,
+        test_count: parsed.cases.len(),
+    })
 }
 
-/// Compile an Erlang source file with erlc.
-fn compile_erl_file(erl_file: &Utf8Path, output_dir: &Utf8Path) -> Result<()> {
-    debug!("Compiling EUnit wrapper: {}", erl_file);
+/// Compile Erlang source files with erlc (batch).
+fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result<()> {
+    if erl_files.is_empty() {
+        return Ok(());
+    }
+    debug!("Batch compiling {} EUnit wrappers", erl_files.len());
 
-    let output = std::process::Command::new("erlc")
-        .arg("-o")
-        .arg(output_dir.as_str())
-        .arg(erl_file.as_str())
+    let mut cmd = std::process::Command::new("erlc");
+    cmd.arg("-o").arg(output_dir.as_str());
+    for erl_file in erl_files {
+        cmd.arg(erl_file.as_str());
+    }
+
+    let output = cmd
         .output()
         .into_diagnostic()
         .wrap_err("Failed to run erlc")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        miette::bail!("erlc failed for '{}':\n{}", erl_file, stderr);
+        miette::bail!("erlc batch compilation failed:\n{}", stderr);
     }
 
     Ok(())
 }
 
-/// Run an `EUnit` test module and parse results.
-fn run_eunit_test(
-    test_module_name: &str,
-    build_dir: &Utf8Path,
-    test_file: &Utf8Path,
-    cases: &[TestCase],
-) -> Result<TestFileResult> {
-    debug!("Running EUnit test: {}", test_module_name);
+/// Result of running all `EUnit` tests in a single BEAM process.
+struct EunitBatchResult {
+    /// Map of module name → failure message for modules that failed.
+    failed_modules: std::collections::HashMap<String, String>,
+}
 
-    // Discover runtime paths via shared helpers (same as REPL and E2E)
+/// Run all `EUnit` test modules in a single BEAM process.
+///
+/// This avoids the ~3s BEAM startup overhead per test file by running
+/// all modules in one `erl` invocation.
+fn run_all_eunit_tests(
+    test_module_names: &[&str],
+    build_dir: &Utf8Path,
+) -> Result<EunitBatchResult> {
+    debug!(
+        "Running {} EUnit modules in single process",
+        test_module_names.len()
+    );
+
     let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
         .wrap_err("Cannot find Erlang runtime directory")?;
     let beam_paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
+    // Build Erlang expression that runs each module and collects failures
+    let module_list: String = test_module_names
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     let eval_cmd = format!(
-        "case eunit:test('{test_module_name}', [verbose]) of \
-           ok -> init:stop(0); \
-           error -> init:stop(1) \
+        "beamtalk_extensions:init(), \
+         Modules = [{module_list}], \
+         Failed = lists:foldl(fun(M, Acc) -> \
+           case eunit:test(M, []) of \
+             ok -> Acc; \
+             error -> [M | Acc] \
+           end \
+         end, [], Modules), \
+         case Failed of \
+           [] -> init:stop(0); \
+           _ -> \
+             lists:foreach(fun(M) -> \
+               io:format(\"FAILED_MODULE:~s~n\", [M]) \
+             end, Failed), \
+             init:stop(1) \
          end."
     );
 
     let mut cmd = std::process::Command::new("erl");
     cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
 
-    // Add runtime/stdlib/workspace paths from shared discovery
     for arg in &pa_args {
         cmd.arg(arg);
     }
@@ -548,7 +669,7 @@ fn run_eunit_test(
     let output = cmd
         .output()
         .into_diagnostic()
-        .wrap_err("Failed to run eunit test")?;
+        .wrap_err("Failed to run EUnit tests")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -556,66 +677,42 @@ fn run_eunit_test(
     debug!("EUnit stdout: {}", stdout);
     debug!("EUnit stderr: {}", stderr);
 
-    let test_count = cases.len();
+    let mut failed_modules = std::collections::HashMap::new();
 
-    if output.status.success() {
-        Ok(TestFileResult {
-            test_count,
-            pass_count: test_count,
-            fail_count: 0,
-            failures: Vec::new(),
-        })
-    } else {
-        // Parse failures from EUnit output
-        let failures = parse_eunit_failures(test_file, cases, &stdout, &stderr);
-        let fail_count = if failures.is_empty() {
-            test_count
-        } else {
-            failures.len()
-        };
-        Ok(TestFileResult {
-            test_count,
-            pass_count: test_count.saturating_sub(fail_count),
-            fail_count,
-            failures,
-        })
-    }
-}
+    if !output.status.success() {
+        // Parse which modules failed from our FAILED_MODULE: markers
+        let combined = format!("{stdout}\n{stderr}");
+        for line in combined.lines() {
+            if let Some(module_name) = line.strip_prefix("FAILED_MODULE:") {
+                let module_name = module_name.trim().to_string();
+                // Collect any EUnit failure details
+                let details = combined
+                    .lines()
+                    .filter(|l| {
+                        l.contains(&module_name)
+                            || l.contains("Failed")
+                            || l.contains("failed")
+                            || l.contains("assertEqual")
+                            || l.contains("expected")
+                            || l.contains("got")
+                    })
+                    .map(|l| format!("    {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                failed_modules.insert(module_name, details);
+            }
+        }
 
-/// Parse `EUnit` failure output into user-friendly messages.
-fn parse_eunit_failures(
-    test_file: &Utf8Path,
-    _cases: &[TestCase],
-    stdout: &str,
-    stderr: &str,
-) -> Vec<String> {
-    let mut failures = Vec::new();
-    let combined = format!("{stdout}\n{stderr}");
-
-    // EUnit outputs detailed assertion failures
-    if combined.contains("Failed:") || combined.contains("*failed*") {
-        failures.push(format!(
-            "FAIL {test_file}\n  EUnit output:\n{}",
-            combined
-                .lines()
-                .filter(|l| {
-                    l.contains("Failed")
-                        || l.contains("failed")
-                        || l.contains("assertEqual")
-                        || l.contains("expected")
-                        || l.contains("got")
-                })
-                .map(|l| format!("    {l}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-    } else if !combined.trim().is_empty() {
-        failures.push(format!("FAIL {test_file}\n  {combined}"));
-    } else {
-        failures.push(format!("FAIL {test_file} (unknown error)"));
+        // If no FAILED_MODULE markers found but process failed, mark all as failed
+        if failed_modules.is_empty() {
+            let detail = format!("EUnit process failed:\n{combined}");
+            for name in test_module_names {
+                failed_modules.insert(name.to_string(), detail.clone());
+            }
+        }
     }
 
-    failures
+    Ok(EunitBatchResult { failed_modules })
 }
 
 /// Find all `.bt` files in the test directory.
@@ -695,37 +792,32 @@ mod tests {
     }
 
     #[test]
-    fn test_expected_to_erlang_term_integer() {
-        assert_eq!(expected_to_erlang_term("42"), "42");
-        assert_eq!(expected_to_erlang_term("-5"), "-5");
-        assert_eq!(expected_to_erlang_term("0"), "0");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_float() {
-        assert_eq!(expected_to_erlang_term("3.14"), "3.14");
-        assert_eq!(expected_to_erlang_term("-2.5"), "-2.5");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_boolean() {
-        assert_eq!(expected_to_erlang_term("true"), "'true'");
-        assert_eq!(expected_to_erlang_term("false"), "'false'");
-        assert_eq!(expected_to_erlang_term("nil"), "'nil'");
-    }
-
-    #[test]
-    fn test_expected_to_erlang_term_string() {
-        assert_eq!(expected_to_erlang_term("hello"), "<<\"hello\">>");
+    fn test_expected_to_binary_literal() {
+        assert_eq!(expected_to_binary_literal("42"), "<<\"42\">>");
+        assert_eq!(expected_to_binary_literal("-5"), "<<\"-5\">>");
+        assert_eq!(expected_to_binary_literal("0"), "<<\"0\">>");
+        assert_eq!(expected_to_binary_literal("3.14"), "<<\"3.14\">>");
+        assert_eq!(expected_to_binary_literal("-2.5"), "<<\"-2.5\">>");
+        assert_eq!(expected_to_binary_literal("true"), "<<\"true\">>");
+        assert_eq!(expected_to_binary_literal("false"), "<<\"false\">>");
+        assert_eq!(expected_to_binary_literal("nil"), "<<\"nil\">>");
+        assert_eq!(expected_to_binary_literal("hello"), "<<\"hello\">>");
         assert_eq!(
-            expected_to_erlang_term("hello world"),
+            expected_to_binary_literal("hello world"),
             "<<\"hello world\">>"
         );
     }
 
     #[test]
-    fn test_expected_to_erlang_term_wildcard() {
-        assert_eq!(expected_to_erlang_term("_"), "_");
+    fn test_extract_assignment_var() {
+        assert_eq!(extract_assignment_var("x := 5"), Some("x".to_string()));
+        assert_eq!(
+            extract_assignment_var("counter := Counter spawn"),
+            Some("counter".to_string())
+        );
+        assert_eq!(extract_assignment_var("42"), None);
+        assert_eq!(extract_assignment_var("x + y"), None);
+        assert_eq!(extract_assignment_var("self.x := 5"), None);
     }
 
     #[test]
