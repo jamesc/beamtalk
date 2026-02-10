@@ -696,12 +696,21 @@ handle_call({class_method_call, Selector, Args}, _From,
             #class_state{flattened_class_methods = FlatClassMethods,
                          name = ClassName, module = Module} = State) ->
     case maps:find(Selector, FlatClassMethods) of
-        {ok, {_DefiningClass, _MethodInfo}} ->
+        {ok, {DefiningClass, _MethodInfo}} ->
+            %% Resolve the module for the defining class (may differ for inherited methods)
+            DefiningModule = case DefiningClass of
+                ClassName -> Module;
+                _ ->
+                    case whereis_class(DefiningClass) of
+                        undefined -> Module;
+                        DefPid -> gen_server:call(DefPid, get_module, 5000)
+                    end
+            end,
             %% Build class self object for `self` reference in class methods
-            ClassSelf = {beamtalk_object, class_object_tag(ClassName), Module, self()},
+            ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
             %% Class method function name: class_<selector>
             FunName = class_method_fun_name(Selector),
-            try erlang:apply(Module, FunName, [ClassSelf | Args]) of
+            try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
                 Result -> {reply, {ok, Result}, State}
             catch
                 error:Error -> {reply, {error, Error}, State}
