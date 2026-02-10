@@ -15,7 +15,7 @@ impl CoreErlangGenerator {
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
     /// - Arithmetic: `+`, `-`, `*`, `/`, `%` (rem)
     /// - Comparison: `==`, `=` (strict), `~=` (inequality), `<`, `>`, `<=`, `>=`
-    /// - String: `++` (concatenation via `iolist_to_binary`)
+    /// - Concatenation: `++` (list append via `erlang:'++'`, string via `iolist_to_binary`)
     ///
     /// # Arguments
     ///
@@ -38,17 +38,9 @@ impl CoreErlangGenerator {
             ));
         }
 
-        // Special case: string concatenation uses iolist_to_binary
+        // Special case: ++ works on both lists and strings
         if op == "++" {
-            write!(
-                self.output,
-                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'("
-            )?;
-            self.generate_expression(left)?;
-            write!(self.output, "), call 'erlang':'binary_to_list'(")?;
-            self.generate_expression(&arguments[0])?;
-            write!(self.output, ")])")?;
-            return Ok(());
+            return self.generate_concat_op(left, &arguments[0]);
         }
 
         let erlang_op = match op {
@@ -77,6 +69,61 @@ impl CoreErlangGenerator {
         write!(self.output, ", ")?;
         self.generate_expression(&arguments[0])?;
         write!(self.output, ")")?;
+
+        Ok(())
+    }
+
+    /// Generates `++` concatenation with runtime type dispatch.
+    ///
+    /// Lists use `erlang:'++'`, strings use `iolist_to_binary`.
+    /// When the receiver type is known at compile time (literal), we emit
+    /// the optimal path directly. Otherwise, a runtime `is_list` check selects.
+    fn generate_concat_op(&mut self, left: &Expression, right: &Expression) -> Result<()> {
+        use crate::ast::Literal;
+
+        // Compile-time optimization: detect known types from AST
+        let is_list = matches!(
+            left,
+            Expression::ListLiteral { .. } | Expression::Literal(Literal::List(_), _)
+        );
+        let is_string = matches!(left, Expression::Literal(Literal::String(_), _));
+
+        if is_list {
+            // List concatenation: erlang:'++'
+            write!(self.output, "call 'erlang':'++'(")?;
+            self.generate_expression(left)?;
+            write!(self.output, ", ")?;
+            self.generate_expression(right)?;
+            write!(self.output, ")")?;
+        } else if is_string {
+            // String concatenation: iolist_to_binary
+            write!(
+                self.output,
+                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'("
+            )?;
+            self.generate_expression(left)?;
+            write!(self.output, "), call 'erlang':'binary_to_list'(")?;
+            self.generate_expression(right)?;
+            write!(self.output, ")])")?;
+        } else {
+            // Runtime dispatch: check is_list at runtime
+            let left_var = self.fresh_temp_var("ConcatLeft");
+            let right_var = self.fresh_temp_var("ConcatRight");
+            write!(self.output, "let {left_var} = ")?;
+            self.generate_expression(left)?;
+            write!(self.output, " in let {right_var} = ")?;
+            self.generate_expression(right)?;
+            write!(
+                self.output,
+                " in case call 'erlang':'is_list'({left_var}) of \
+                 <'true'> when 'true' -> call 'erlang':'++'({left_var}, {right_var}) \
+                 <'false'> when 'true' -> \
+                   call 'erlang':'iolist_to_binary'(\
+                     [call 'erlang':'binary_to_list'({left_var}), \
+                      call 'erlang':'binary_to_list'({right_var})]) \
+                 end"
+            )?;
+        }
 
         Ok(())
     }
