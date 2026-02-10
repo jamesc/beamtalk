@@ -210,25 +210,13 @@ is_class_object(_) ->
 %% Unwraps {ok, Value} / {error, Error} results for seamless integration.
 -spec class_send(pid(), atom(), list()) -> term().
 class_send(ClassPid, 'new', []) ->
-    case gen_server:call(ClassPid, {new, []}) of
-        {ok, Obj} -> Obj;
-        {error, Error} -> error(Error)
-    end;
+    unwrap_class_call(gen_server:call(ClassPid, {new, []}));
 class_send(ClassPid, 'new:', [Map]) ->
-    case gen_server:call(ClassPid, {new, [Map]}) of
-        {ok, Obj} -> Obj;
-        {error, Error} -> error(Error)
-    end;
+    unwrap_class_call(gen_server:call(ClassPid, {new, [Map]}));
 class_send(ClassPid, spawn, []) ->
-    case gen_server:call(ClassPid, {spawn, []}) of
-        {ok, Obj} -> Obj;
-        {error, Error} -> error(Error)
-    end;
+    unwrap_class_call(gen_server:call(ClassPid, {spawn, []}));
 class_send(ClassPid, 'spawnWith:', [Map]) ->
-    case gen_server:call(ClassPid, {spawn, [Map]}) of
-        {ok, Obj} -> Obj;
-        {error, Error} -> error(Error)
-    end;
+    unwrap_class_call(gen_server:call(ClassPid, {spawn, [Map]}));
 class_send(ClassPid, methods, []) ->
     gen_server:call(ClassPid, methods);
 class_send(ClassPid, superclass, []) ->
@@ -250,7 +238,7 @@ class_send(ClassPid, Selector, Args) ->
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
             error(Error2);
-        {error, Error} -> error(Error)
+        Other -> unwrap_class_call(Other)
     end.
 
 %% @doc Convert a class name atom to a class object tag (BT-246).
@@ -507,10 +495,7 @@ handle_call({spawn, Args}, _From, #class_state{
         [] -> spawn;
         _ -> 'spawnWith:'
     end,
-    Error0 = beamtalk_error:new(instantiation_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>),
-    {reply, {error, Error2}, State};
+    {reply, {error, abstract_class_error(ClassName, Selector)}, State};
 
 handle_call({spawn, Args}, _From, #class_state{
     name = ClassName,
@@ -547,10 +532,7 @@ handle_call({new, Args}, _From, #class_state{
         [] -> 'new';
         _ -> 'new:'
     end,
-    Error0 = beamtalk_error:new(instantiation_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>),
-    {reply, {error, Error2}, State};
+    {reply, {error, abstract_class_error(ClassName, Selector)}, State};
 
 handle_call({new, Args}, _From, #class_state{
     name = ClassName,
@@ -778,13 +760,14 @@ handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
                     {noreply, State};
                 {{method, _MethodSelector}, _} ->
                     %% For method lookup, just reject - this is complex
-                    Error = {error, not_supported_in_async},
+                    Error = beamtalk_error:new(type_error, State#class_state.name),
                     FuturePid ! {reject, Error},
                     {noreply, State};
                 _ ->
                     %% Unknown message
-                    Error = {error, {unknown_class_message, Selector}},
-                    FuturePid ! {reject, Error},
+                    Error0 = beamtalk_error:new(does_not_understand, State#class_state.name),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    FuturePid ! {reject, Error1},
                     {noreply, State}
             end;
         _ ->
@@ -792,20 +775,12 @@ handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
     end.
 
 handle_info({rebuild_flattened, ChangedClass}, #class_state{
-    name = Name,
-    superclass = Superclass,
-    instance_methods = InstanceMethods,
-    class_methods = ClassMethods
+    superclass = Superclass
 } = State) ->
     %% ADR 0006 Phase 2: A parent class changed — rebuild if we inherit from it.
     try inherits_from(Superclass, ChangedClass) of
         true ->
-            NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
-            NewFlattenedClass = build_flattened_methods(Name, Superclass, ClassMethods, get_flattened_class_methods),
-            {noreply, State#class_state{
-                flattened_methods = NewFlattened,
-                flattened_class_methods = NewFlattenedClass
-            }};
+            {noreply, rebuild_all_flattened_tables(State)};
         false ->
             {noreply, State}
     catch
@@ -822,27 +797,53 @@ code_change(OldVsn, State, Extra) ->
     %% First let hot_reload modify state (may update instance_methods)
     {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
     %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
-    NewFlattened = build_flattened_methods(
-        NewState#class_state.name,
-        NewState#class_state.superclass,
-        NewState#class_state.instance_methods
-    ),
-    NewFlattenedClass = build_flattened_methods(
-        NewState#class_state.name,
-        NewState#class_state.superclass,
-        NewState#class_state.class_methods,
-        get_flattened_class_methods
-    ),
+    FinalState = rebuild_all_flattened_tables(NewState),
     %% Invalidate subclass tables in case hot_reload modified our methods
-    invalidate_subclass_flattened_tables(NewState#class_state.name),
-    {ok, NewState#class_state{
-        flattened_methods = NewFlattened,
-        flattened_class_methods = NewFlattenedClass
-    }}.
+    invalidate_subclass_flattened_tables(FinalState#class_state.name),
+    {ok, FinalState}.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% @private
+%% @doc Unwrap a class gen_server call result for use in class_send.
+%%
+%% Translates {ok, Value} → Value, {error, Error} → error(Error).
+%% This DRYs the repeated unwrap pattern in class_send/3 clauses.
+-spec unwrap_class_call(term()) -> term().
+unwrap_class_call({ok, Value}) -> Value;
+unwrap_class_call({error, Error}) -> error(Error).
+
+%% @private
+%% @doc Build a structured instantiation_error for abstract classes.
+%%
+%% DRYs the repeated error construction in handle_call({spawn,...})
+%% and handle_call({new,...}) for abstract classes.
+-spec abstract_class_error(atom(), atom()) -> #beamtalk_error{}.
+abstract_class_error(ClassName, Selector) ->
+    Error0 = beamtalk_error:new(instantiation_error, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>).
+
+%% @private
+%% @doc Rebuild both instance and class flattened method tables from State.
+%%
+%% Returns updated State with new flattened_methods and flattened_class_methods.
+%% DRYs the repeated rebuild in code_change and handle_info({rebuild_flattened,...}).
+-spec rebuild_all_flattened_tables(#class_state{}) -> #class_state{}.
+rebuild_all_flattened_tables(#class_state{
+    name = Name,
+    superclass = Superclass,
+    instance_methods = InstanceMethods,
+    class_methods = ClassMethods
+} = State) ->
+    NewFlattened = build_flattened_methods(Name, Superclass, InstanceMethods),
+    NewFlattenedClass = build_flattened_methods(Name, Superclass, ClassMethods, get_flattened_class_methods),
+    State#class_state{
+        flattened_methods = NewFlattened,
+        flattened_class_methods = NewFlattenedClass
+    }.
 
 %% Ensure pg (process groups) is started.
 %% pg is used for tracking all class processes.
