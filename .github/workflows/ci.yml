@@ -200,8 +200,8 @@ jobs:
       - name: Build standard library
         run: just build-stdlib
 
-      - name: Generate Erlang runtime coverage
-        run: just coverage-runtime
+      - name: Generate Erlang coverage (unit + E2E)
+        run: just coverage-combined
 
       - name: Rust Coverage Summary
         id: rust_coverage

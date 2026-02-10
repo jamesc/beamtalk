@@ -40,7 +40,7 @@ use std::fmt::Write;
 ///
 /// These names resolve to workspace singletons via `persistent_term` rather than
 /// direct module function calls. The set is static — dynamic bindings are out of scope.
-const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk"];
+const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk", "Workspace"];
 
 /// Returns true if the given class name is a workspace binding (ADR 0010).
 pub(super) fn is_workspace_binding(name: &str) -> bool {
@@ -189,16 +189,6 @@ impl CoreErlangGenerator {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
                 }
-            }
-
-            // Special case: "error:" raises an error with the given message
-            // Compiles to: erlang:error({beamtalk_error, Message})
-            if parts.len() == 1 && parts[0].keyword == "error:" && arguments.len() == 1 {
-                write!(self.output, "call 'erlang':'error'(")?;
-                write!(self.output, "{{'beamtalk_error', ")?;
-                self.generate_expression(&arguments[0])?;
-                write!(self.output, "}})")?;
-                return Ok(());
             }
         }
 
@@ -1010,87 +1000,7 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Resolves the module name for class method dispatch.
-///
-/// Most classes use `to_module_name()` (`CamelCase` → `snake_case`), but some
-/// class names produce module names that conflict with Erlang stdlib modules
-/// (use `beamtalk_` prefix), and non-primitive stdlib classes compiled from
-/// `lib/*.bt` use the `bt_stdlib_` prefix.
-#[cfg(test)]
-fn class_method_module_name(class_name: &str) -> String {
-    let module = to_module_name(class_name);
-    if is_erlang_stdlib_module(&module) {
-        format!("beamtalk_{module}")
-    } else if is_bt_stdlib_class(class_name) {
-        format!("bt_stdlib_{module}")
-    } else {
-        module
-    }
-}
-
-/// Returns true if the class is a non-primitive stdlib class compiled from `lib/*.bt`.
-///
-/// These classes are compiled by `build_stdlib` with a `bt_stdlib_` prefix
-/// to distinguish them from user-defined classes.
-#[cfg(test)]
-fn is_bt_stdlib_class(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "ProtoObject" | "Object" | "Actor" | "SystemDictionary" | "TranscriptStream"
-    )
-}
-
-/// Returns true if the given name conflicts with a well-known Erlang/OTP module.
-///
-/// When a Beamtalk class name (e.g., `File`) converts to an Erlang stdlib module
-/// name (e.g., `file`), we must prefix with `beamtalk_` to avoid collisions.
-#[cfg(test)]
-fn is_erlang_stdlib_module(name: &str) -> bool {
-    matches!(
-        name,
-        "file" | "io" | "lists" | "maps" | "math" | "timer" | "os" | "net" | "code" | "error"
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_class_method_module_name_no_conflict() {
-        assert_eq!(class_method_module_name("Transcript"), "transcript");
-        assert_eq!(class_method_module_name("Counter"), "counter");
-        assert_eq!(
-            class_method_module_name("MyCounterActor"),
-            "my_counter_actor"
-        );
-    }
-
-    #[test]
-    fn test_class_method_module_name_erlang_conflict() {
-        assert_eq!(class_method_module_name("File"), "beamtalk_file");
-        assert_eq!(class_method_module_name("Io"), "beamtalk_io");
-        assert_eq!(class_method_module_name("Timer"), "beamtalk_timer");
-    }
-
-    #[test]
-    fn test_is_erlang_stdlib_module() {
-        assert!(is_erlang_stdlib_module("file"));
-        assert!(is_erlang_stdlib_module("io"));
-        assert!(is_erlang_stdlib_module("lists"));
-        assert!(!is_erlang_stdlib_module("transcript"));
-        assert!(!is_erlang_stdlib_module("counter"));
-        assert!(!is_erlang_stdlib_module("beamtalk_file"));
-    }
-
-    #[test]
-    fn test_class_method_module_name_bt_stdlib() {
-        assert_eq!(
-            class_method_module_name("ProtoObject"),
-            "bt_stdlib_proto_object"
-        );
-        assert_eq!(class_method_module_name("Object"), "bt_stdlib_object");
-        assert_eq!(class_method_module_name("Actor"), "bt_stdlib_actor");
-        assert_eq!(class_method_module_name("Array"), "array");
-    }
-}
+// NOTE: class_method_module_name and related helpers (is_primitive_stdlib_class,
+// is_bt_stdlib_class, is_erlang_stdlib_module) were removed in BT-411.
+// Class dispatch now goes through runtime class_send/3 instead of
+// compile-time module name resolution.

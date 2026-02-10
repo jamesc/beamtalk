@@ -39,3 +39,70 @@ counter decrement
 // Final state verification
 counter getValue
 // => 2
+
+// ===========================================================================
+// BT-427: Object method delegation for actors
+// ===========================================================================
+//
+// Actors inherit Object base methods (describe, inspect, hash, isNil, etc.)
+// via the class hierarchy walk. These methods are NOT hardcoded in actor
+// dispatch but discovered through the Object superclass.
+
+// ---------------------------------------------------------------------------
+// describe and inspect — display methods from Object
+// ---------------------------------------------------------------------------
+
+counter describe
+// => _
+
+counter inspect
+// => _
+
+// ---------------------------------------------------------------------------
+// isNil and notNil — nil-testing protocol from Object
+// ---------------------------------------------------------------------------
+
+counter isNil
+// => false
+
+counter notNil
+// => true
+
+// ---------------------------------------------------------------------------
+// yourself — identity method from Object
+// ---------------------------------------------------------------------------
+
+counter yourself
+// => _
+
+// ---------------------------------------------------------------------------
+// hash — hashing from Object
+// ---------------------------------------------------------------------------
+
+counter hash
+// => _
+
+// ---------------------------------------------------------------------------
+// respondsTo: — checks both user methods and inherited methods
+// ---------------------------------------------------------------------------
+
+// User-defined methods
+counter respondsTo: #increment
+// => true
+
+counter respondsTo: #getValue
+// => true
+
+counter respondsTo: #decrement
+// => true
+
+// Nonexistent method
+counter respondsTo: #nonExistent
+// => false
+
+// ---------------------------------------------------------------------------
+// class — returns class name from Object
+// ---------------------------------------------------------------------------
+
+counter class
+// => Counter

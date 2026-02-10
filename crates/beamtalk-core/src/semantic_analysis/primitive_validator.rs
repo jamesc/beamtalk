@@ -68,6 +68,8 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     // Exception handling
     "onDo",
     "ensure",
+    // Error signaling
+    "error",
 ];
 
 /// Validates all `@primitive` usages in a module.

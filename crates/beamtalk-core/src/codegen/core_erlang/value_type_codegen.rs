@@ -330,6 +330,7 @@ impl CoreErlangGenerator {
                 | "Tuple"
                 | "List"
                 | "Dictionary"
+                | "Set"
         )
     }
 

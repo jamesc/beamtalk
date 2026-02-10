@@ -42,8 +42,8 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
-    %% Should have 8 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, repl_server, idle_monitor, actor_sup, session_sup
-    ?assertEqual(8, length(ChildSpecs)).
+    %% Should have 9 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_actor, repl_server, idle_monitor, actor_sup, session_sup
+    ?assertEqual(9, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -53,6 +53,7 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assert(lists:member(beamtalk_system_dictionary, Ids)),
+    ?assert(lists:member(beamtalk_workspace_actor, Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),

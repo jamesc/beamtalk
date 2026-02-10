@@ -124,6 +124,11 @@ print_string(X) when is_map(X) ->
         'Association' ->
             %% BT-335: Format associations as "key -> value"
             beamtalk_association:format_string(X);
+        'Set' ->
+            %% BT-73: Format sets as "Set(element1, element2, ...)"
+            Elements = maps:get(elements, X, []),
+            ElemStrs = [print_string(E) || E <- Elements],
+            iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
         _ ->
             ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
             iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
@@ -192,6 +197,9 @@ send(X, Selector, Args) when is_map(X) ->
         'Association' ->
             %% BT-335: Association value type - direct dispatch
             bt_stdlib_association:dispatch(Selector, Args, X);
+        'Set' ->
+            %% BT-73: Set value type - dispatch to compiled stdlib
+            beamtalk_set:dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
             beamtalk_dictionary:dispatch(Selector, Args, X);
@@ -265,6 +273,9 @@ responds_to(X, Selector) when is_map(X) ->
         'Association' ->
             %% BT-335: Association value type
             bt_stdlib_association:has_method(Selector);
+        'Set' ->
+            %% BT-73: Set value type
+            beamtalk_set:has_method(Selector);
         undefined ->
             beamtalk_dictionary:has_method(Selector);
         Class ->

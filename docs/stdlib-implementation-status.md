@@ -1,6 +1,6 @@
 # Stdlib Implementation Status
 
-> **Last updated:** 2026-02-10
+> **Last updated:** 2026-02-11
 > **Issue:** BT-247
 > **Methodology:** Audit of `lib/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
 > runtime dispatch modules (`beamtalk_*.erl`), and E2E test coverage (`tests/e2e/cases/*.bt`).
@@ -9,13 +9,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 208 |
-| **✅ Implemented** | 206 (99.0%) |
-| **❌ Not Implemented** | 2 (1.0%) |
-| **E2E test coverage** | 88 methods (42.3%) |
-| **Stdlib .bt files** | 12 |
+| **Total stdlib methods** | 222 |
+| **✅ Implemented** | 220 (99.1%) |
+| **❌ Not Implemented** | 2 (0.9%) |
+| **E2E test coverage** | 104 methods (46.8%) |
+| **Stdlib .bt files** | 13 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
-| **Missing .bt files** | 4 (ProtoObject, Collection, SequenceableCollection, Set) |
+| **Missing .bt files** | 3 (ProtoObject, Collection, SequenceableCollection) |
 
 ## Status Categories
 
@@ -334,6 +334,32 @@
 | `keysAndValuesDo:` | ✅ | Iteration | `Dictionary>>keysAndValuesDo:` |
 | `describe` | ✅ | Returns `'a Dictionary'` | `Dictionary>>printString` |
 
+### Set (`lib/Set.bt` — BT-73)
+
+**Stdlib module:** `lib/Set.bt` → `beamtalk_set`
+**Helper module:** `beamtalk_set_ops.erl` (ordsets operations + tagged map wrapping)
+**Representation:** Tagged map `#{'$beamtalk_class' => 'Set', elements => [sorted_list]}`
+**Methods:** 14 — all implemented
+
+| Selector | Status | Notes | Pharo Equivalent |
+|----------|--------|-------|------------------|
+| `new` | ✅ | Auto-generated, empty set | `Set>>new` |
+| `size` | ✅ | `length(Elements)` | `Set>>size` |
+| `isEmpty` | ✅ | `Elements == []` | `Set>>isEmpty` |
+| `includes:` | ✅ | `ordsets:is_element` | `Set>>includes:` |
+| `add:` | ✅ | `ordsets:add_element` | `Set>>add:` |
+| `remove:` | ✅ | `ordsets:del_element` | `Set>>remove:` |
+| `union:` | ✅ | `ordsets:union` | `Set>>union:` |
+| `intersection:` | ✅ | `ordsets:intersection` | `Set>>intersection:` |
+| `difference:` | ✅ | `ordsets:subtract` | `Set>>difference:` |
+| `isSubsetOf:` | ✅ | `ordsets:is_subset` | `Set>>isSubsetOf:` |
+| `asList` | ✅ | Returns sorted elements | `Set>>asArray` |
+| `fromList:` | ✅ | `ordsets:from_list` | `Set>>addAll:` |
+| `do:` | ✅ | Iterate elements | `Set>>do:` |
+| `describe` | ✅ | Returns `'a Set'` | `Set>>printString` |
+
+**E2E coverage:** All 14 methods tested in `tests/e2e/cases/set.bt` (47 assertions)
+
 ---
 
 ## Tier 3: Runtime-Only Classes (No `.bt` File)
@@ -376,7 +402,7 @@ These classes are implemented entirely in Erlang runtime modules with no corresp
 > - **BT-338**: Block `on:do:` / `ensure:` (exception handling)
 > - **BT-334**: Float methods (`rounded`, `ceiling`, `floor`, `isNaN`) and Number hierarchy
 > - **BT-44**: Missing collection methods (`sort`, `detect:`, `take:`, `flatMap:`, etc.)
-> - **BT-331**: Compilable stdlib collection classes (Dictionary, List, Set)
+> - **BT-331**: Compilable stdlib collection classes (Dictionary ✅, List ✅, Set ✅)
 > - **BT-408**: E2E test coverage for untested stdlib methods
 
 Methods that Pharo users would expect but Beamtalk does **not** define or implement:
@@ -439,7 +465,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
 | `remove:` | ❌ Not defined | Medium |
-| `asSet` | ❌ Not defined | Low |
+| `asSet` | ✅ Via `(Set new) fromList: aList` | Low |
 | `asDictionary` | ❌ Not defined | Low |
 | `with:collect:` | ❌ Not defined | Low |
 | `at:put:` | ❌ Not defined (lists are immutable linked lists) | Low |
@@ -471,7 +497,7 @@ These classes are either referenced in the original issue or have runtime suppor
 | `ProtoObject` | ❌ No `.bt` file | Intrinsics handle `class`, `==`, `~=` | Medium (BT-375) |
 | `Collection` | ❌ No `.bt` file | N/A (abstract) | Low |
 | `SequenceableCollection` | ❌ No `.bt` file | N/A (abstract) | Low |
-| `Set` | ❌ No `.bt` file | No runtime support | Low |
+| `Set` | ✅ `lib/Set.bt` | `beamtalk_set` compiled stdlib + `beamtalk_set_ops` helper | Done (BT-73) |
 | `Dictionary` | ✅ `lib/Dictionary.bt` | `beamtalk_dictionary` compiled stdlib | Done (BT-418) |
 
 ---

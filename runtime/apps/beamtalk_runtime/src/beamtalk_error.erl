@@ -14,6 +14,7 @@
 
 -export([
     new/2,
+    with_message/2,
     with_selector/2,
     with_hint/2,
     with_details/2,
@@ -42,6 +43,22 @@ new(Kind, Class) ->
         hint = undefined,
         details = #{}
     }.
+
+%% @doc Set the message on an existing error.
+%%
+%% Overrides the auto-generated message with a custom one.
+%% Used by Object>>error: for user-supplied error messages.
+%%
+%% Example:
+%%   Error0 = beamtalk_error:new(user_error, 'Counter'),
+%%   Error = beamtalk_error:with_message(Error0, <<"invalid state">>)
+-spec with_message(#beamtalk_error{}, term()) -> #beamtalk_error{}.
+with_message(Error, Message) when is_binary(Message) ->
+    Error#beamtalk_error{message = Message};
+with_message(Error, Message) when is_atom(Message) ->
+    Error#beamtalk_error{message = atom_to_binary(Message, utf8)};
+with_message(Error, Message) ->
+    Error#beamtalk_error{message = iolist_to_binary(io_lib:format("~p", [Message]))}.
 
 %% @doc Add a selector to an existing error.
 %%
@@ -141,6 +158,10 @@ generate_message(io_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s: I/O error", [Class]));
 generate_message(io_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("~s '~s': I/O error", [Class, Selector]));
+generate_message(user_error, _Class, undefined) ->
+    <<"Error">>;
+generate_message(user_error, _Class, Selector) ->
+    iolist_to_binary(io_lib:format("~p", [Selector]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->

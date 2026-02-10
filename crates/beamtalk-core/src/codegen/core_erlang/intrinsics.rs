@@ -701,6 +701,28 @@ impl CoreErlangGenerator {
                         )?;
                         Ok(Some(()))
                     }
+                    "error:" if arguments.len() == 1 => {
+                        // Smalltalk-style error signaling: self error: 'message'
+                        // Creates a #beamtalk_error{kind=user_error} with receiver's class
+                        let recv_var = self.fresh_temp_var("Obj");
+                        let msg_var = self.fresh_temp_var("Msg");
+                        let class_var = self.fresh_temp_var("Class");
+                        let err0 = self.fresh_temp_var("Err");
+                        let err1 = self.fresh_temp_var("Err");
+
+                        write!(self.output, "let {recv_var} = ")?;
+                        self.generate_expression(receiver)?;
+                        write!(self.output, " in let {msg_var} = ")?;
+                        self.generate_expression(&arguments[0])?;
+                        write!(
+                            self.output,
+                            " in let {class_var} = call 'beamtalk_primitive':'class_of'({recv_var}) in \
+                             let {err0} = call 'beamtalk_error':'new'('user_error', {class_var}) in \
+                             let {err1} = call 'beamtalk_error':'with_message'({err0}, {msg_var}) in \
+                             call 'erlang':'error'({err1})"
+                        )?;
+                        Ok(Some(()))
+                    }
                     "respondsTo:" if arguments.len() == 1 => {
                         // Check if object responds to a selector
                         // Use beamtalk_primitive:responds_to/2 which handles both actors and primitives
