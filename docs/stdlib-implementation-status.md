@@ -9,13 +9,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 236 |
-| **✅ Implemented** | 234 (99.2%) |
-| **❌ Not Implemented** | 2 (0.8%) |
-| **E2E test coverage** | 158 methods (66.9%) |
-| **Stdlib .bt files** | 13 |
-| **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
-| **Missing .bt files** | 3 (ProtoObject, Collection, SequenceableCollection) |
+| **Total stdlib methods** | 293 |
+| **✅ Implemented** | 293 (100%) |
+| **❌ Not Implemented** | 0 (0%) |
+| **E2E test coverage** | 208 methods (71.0%) |
+| **Stdlib .bt files** | 22 |
+| **Runtime-only classes** | 1 (CompiledMethod) |
+| **Missing .bt files** | 0 |
 
 ## Status Categories
 
@@ -32,16 +32,29 @@
 | **Compiler intrinsic** | Inlined at call site by codegen (`intrinsics.rs`) | `Block >> value`, `Object >> class` |
 | **@primitive selector** | Runtime dispatch via `beamtalk_*.erl` module | `Integer >> +`, `String >> length` |
 | **Pure Beamtalk** | Compiled from `.bt` source (ADR 0007) | `True >> not`, `Integer >> isEven` |
-| **Runtime only** | Erlang module with no `.bt` definition | `Dictionary >> keys`, `Tuple >> unwrap` |
+| **Runtime only** | Erlang module with no `.bt` definition | `CompiledMethod >> selector` |
 
 ---
 
 ## Tier 1: Core Classes
 
+### ProtoObject (`lib/ProtoObject.bt`)
+
+**Class:** `ProtoObject` — superclass: `nil` (root class)
+**Methods:** 5/5 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `==` | intrinsic | ✅ | 🧪 | Identity comparison |
+| `~=` | intrinsic | ✅ | 🧪 | Not-equal comparison |
+| `class` | intrinsic | ✅ | 🧪 | Type introspection |
+| `doesNotUnderstand:args:` | intrinsic | ✅ | 🧪 | Fallback for unknown messages |
+| `perform:withArguments:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
+
 ### Object (`lib/Object.bt`)
 
 **Class:** `Object` — superclass: `ProtoObject`
-**Methods:** 20/20 implemented (100%)
+**Methods:** 22/22 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Notes |
 |----------|-----------|--------|-----|-------|
@@ -63,13 +76,28 @@
 | `instVarAt:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `instVarAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
-| `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
+| `perform:withArguments:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
+| `->` | intrinsic | ✅ | 🧪 | Association creation (key-value pair) |
 | `subclassResponsibility` | intrinsic | ✅ | 🧪 | Raises `beamtalk_error` |
+| `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
+
+### Number (`lib/Number.bt`)
+
+**Class:** `Number` — superclass: `Object` — `abstract`
+**Methods:** 5/5 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `isZero` | pure BT | ✅ | 🧪 | `Number>>isZero` |
+| `isPositive` | pure BT | ✅ | 🧪 | `Number>>positive` |
+| `isNegative` | pure BT | ✅ | 🧪 | `Number>>negative` |
+| `sign` | pure BT | ✅ | 🧪 | `Number>>sign` |
+| `between:and:` | pure BT | ✅ | 🧪 | `Magnitude>>between:and:` |
 
 ### Integer (`lib/Integer.bt`)
 
-**Class:** `Integer` — superclass: `Object` — `@sealed`
-**Methods:** 28/28 implemented (100%)
+**Class:** `Integer` — superclass: `Number` — `@sealed`
+**Methods:** 33/33 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -87,9 +115,6 @@
 | `>=` | @primitive selector | ✅ | 🧪 | `Integer>>>=` |
 | `negated` | pure BT | ✅ | 🧪 | `Integer>>negated` |
 | `abs` | pure BT | ✅ | 🧪 | `Integer>>abs` |
-| `isZero` | pure BT | ✅ | 🧪 | `Integer>>isZero` |
-| `isPositive` | pure BT | ✅ | 🧪 | `Integer>>positive` |
-| `isNegative` | pure BT | ✅ | 🧪 | `Integer>>negative` |
 | `isEven` | pure BT | ✅ | 🧪 | `Integer>>even` |
 | `isOdd` | pure BT | ✅ | 🧪 | `Integer>>odd` |
 | `min:` | pure BT | ✅ | | `Magnitude>>min:` |
@@ -101,11 +126,19 @@
 | `asString` | @primitive selector | ✅ | 🧪 | `Integer>>asString` |
 | `printString` | @primitive selector | ✅ | 🧪 | `Integer>>printString` |
 | `describe` | pure BT | ✅ | | N/A |
+| `bitAnd:` | @primitive selector | ✅ | 🧪 | `Integer>>bitAnd:` |
+| `bitOr:` | @primitive selector | ✅ | 🧪 | `Integer>>bitOr:` |
+| `bitXor:` | @primitive selector | ✅ | 🧪 | `Integer>>bitXor:` |
+| `bitShift:` | @primitive selector | ✅ | 🧪 | `Integer>>bitShift:` |
+| `bitNot` | @primitive selector | ✅ | 🧪 | `Integer>>bitNot` |
+| `factorial` | pure BT | ✅ | 🧪 | `Integer>>factorial` |
+| `gcd:` | pure BT | ✅ | 🧪 | `Integer>>gcd:` |
+| `lcm:` | pure BT | ✅ | 🧪 | `Integer>>lcm:` |
 
 ### String (`lib/String.bt`)
 
 **Class:** `String` — superclass: `Object` — `@sealed`
-**Methods:** 50/50 implemented (100%)
+**Methods:** 48/48 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -205,7 +238,7 @@
 ### Block (`lib/Block.bt`)
 
 **Class:** `Block` — superclass: `Object` — `@sealed`
-**Methods:** 9/11 implemented (81.8%)
+**Methods:** 12/12 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -216,19 +249,16 @@
 | `whileTrue:` | intrinsic `whileTrue` | ✅ | 🧪 | `BlockClosure>>whileTrue:` |
 | `whileFalse:` | intrinsic `whileFalse` | ✅ | 🧪 | `BlockClosure>>whileFalse:` |
 | `repeat` | intrinsic `repeat` | ✅ | | `BlockClosure>>repeat` |
-| `on:` | @primitive selector | **❌** | | `BlockClosure>>on:do:` |
-| `ensure:` | @primitive selector | **❌** | | `BlockClosure>>ensure:` |
+| `on:do:` | intrinsic `onDo` | ✅ | 🧪 | `BlockClosure>>on:do:` |
+| `ensure:` | intrinsic `ensure` | ✅ | 🧪 | `BlockClosure>>ensure:` |
 | `arity` | @primitive selector | ✅ | 🧪 | `BlockClosure>>argumentCount` |
+| `valueWithArguments:` | @primitive selector | ✅ | 🧪 | `BlockClosure>>valueWithArguments:` |
 | `describe` | pure BT | ✅ | | N/A |
-
-> **⚠️ `on:` and `ensure:` are declared with `@primitive` in Block.bt but have no runtime handler.**
-> These are critical for exception handling (`try/catch` equivalent) and resource cleanup (`try/finally` equivalent).
-> **Tracked in:** BT-338 (Implement Error/Exception class hierarchy)
 
 ### True (`lib/True.bt`) & False (`lib/False.bt`)
 
 **Class:** `True` / `False` — superclass: `Object` — `@sealed`
-**Methods:** 10/10 implemented each (100%)
+**Methods:** 11/11 implemented each (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -238,6 +268,7 @@
 | `and:` | pure BT | ✅ | 🧪 | `Boolean>>and:` |
 | `or:` | pure BT | ✅ | 🧪 | `Boolean>>or:` |
 | `not` | pure BT | ✅ | 🧪 | `Boolean>>not` |
+| `xor:` | pure BT | ✅ | 🧪 | `Boolean>>xor:` |
 | `isTrue` | pure BT | ✅ | | N/A |
 | `isFalse` | pure BT | ✅ | | N/A |
 | `describe` | pure BT | ✅ | | N/A |
@@ -325,14 +356,15 @@
 
 ### Beamtalk / SystemDictionary (`lib/Beamtalk.bt`)
 
-**Class:** `Beamtalk` — superclass: `Object`
-**Methods:** 3/3 implemented (100%)
+**Class:** `Beamtalk` — superclass: `Actor`
+**Methods:** 4/4 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
 | `allClasses` | @primitive selector | ✅ | 🧪 | `Smalltalk>>allClasses` |
 | `classNamed:` | @primitive selector | ✅ | 🧪 | `Smalltalk>>at:` |
 | `globals` | @primitive selector | ✅ | | `Smalltalk>>globals` |
+| `version` | @primitive selector | ✅ | 🧪 | N/A |
 
 ### Dictionary (`lib/Dictionary.bt` — BT-418)
 
@@ -340,19 +372,19 @@
 **Helper module:** `beamtalk_map_ops.erl` (complex operations)
 **Methods:** 11 — all implemented
 
-| Selector | Status | Notes | Pharo Equivalent |
-|----------|--------|-------|------------------|
-| `keys` | ✅ | `maps:keys` | `Dictionary>>keys` |
-| `values` | ✅ | `maps:values` | `Dictionary>>values` |
-| `size` | ✅ | `maps:size` | `Dictionary>>size` |
-| `at:` | ✅ | `maps:get` | `Dictionary>>at:` |
-| `at:ifAbsent:` | ✅ | Fallback block | `Dictionary>>at:ifAbsent:` |
-| `at:put:` | ✅ | `maps:put` | `Dictionary>>at:put:` |
-| `includesKey:` | ✅ | `maps:is_key` | `Dictionary>>includesKey:` |
-| `removeKey:` | ✅ | `maps:remove` | `Dictionary>>removeKey:` |
-| `merge:` | ✅ | `maps:merge` | `Dictionary>>merge:` |
-| `keysAndValuesDo:` | ✅ | Iteration | `Dictionary>>keysAndValuesDo:` |
-| `describe` | ✅ | Returns `'a Dictionary'` | `Dictionary>>printString` |
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `keys` | @primitive selector | ✅ | 🧪 | `Dictionary>>keys` |
+| `values` | @primitive selector | ✅ | 🧪 | `Dictionary>>values` |
+| `size` | @primitive selector | ✅ | 🧪 | `Dictionary>>size` |
+| `at:` | @primitive selector | ✅ | 🧪 | `Dictionary>>at:` |
+| `at:ifAbsent:` | @primitive selector | ✅ | 🧪 | `Dictionary>>at:ifAbsent:` |
+| `at:put:` | @primitive selector | ✅ | 🧪 | `Dictionary>>at:put:` |
+| `includesKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>includesKey:` |
+| `removeKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>removeKey:` |
+| `merge:` | @primitive selector | ✅ | 🧪 | `Dictionary>>merge:` |
+| `keysAndValuesDo:` | @primitive selector | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
+| `describe` | pure BT | ✅ | | `Dictionary>>printString` |
 
 ### Set (`lib/Set.bt` — BT-73)
 
@@ -378,30 +410,98 @@
 | `do:` | ✅ | Iterate elements | `Set>>do:` |
 | `describe` | ✅ | Returns `'a Set'` | `Set>>printString` |
 
-**E2E coverage:** All 14 methods tested in `tests/e2e/cases/set.bt` (47 assertions)
+**E2E coverage:** 13 of 14 methods tested in `tests/e2e/cases/set.bt` (47 assertions). Only `describe` lacks E2E coverage.
+
+### Tuple (`lib/Tuple.bt`)
+
+**Class:** `Tuple` — superclass: `Object` — `@sealed`
+**Methods:** 8/8 implemented (100%)
+**Note:** BEAM-specific, wraps Erlang result tuples `{ok, Value}` / `{error, Reason}`.
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `size` | @primitive selector | ✅ | | `tuple_size` |
+| `at:` | @primitive selector | ✅ | | 1-based index via `element` |
+| `isOk` | @primitive selector | ✅ | | `{ok, _}` pattern match |
+| `isError` | @primitive selector | ✅ | | `{error, _}` pattern match |
+| `unwrap` | @primitive selector | ✅ | | Extract value or raise |
+| `unwrapOr:` | @primitive selector | ✅ | | Extract or return default |
+| `unwrapOrElse:` | @primitive selector | ✅ | | Extract or evaluate block |
+| `asString` | @primitive selector | ✅ | | String representation |
+
+### Symbol (`lib/Symbol.bt`)
+
+**Class:** `Symbol` — superclass: `Object` — `@sealed`
+**Methods:** 7/7 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `asString` | @primitive selector | ✅ | 🧪 | `Symbol>>asString` |
+| `asAtom` | @primitive selector | ✅ | 🧪 | N/A (BEAM-specific) |
+| `printString` | @primitive selector | ✅ | 🧪 | `Symbol>>printString` |
+| `describe` | @primitive selector | ✅ | 🧪 | N/A |
+| `=` | @primitive selector | ✅ | 🧪 | `Symbol>>=` |
+| `~=` | @primitive selector | ✅ | 🧪 | `Symbol>>~=` |
+| `hash` | @primitive selector | ✅ | 🧪 | `Symbol>>hash` |
+
+### Association (`lib/Association.bt`)
+
+**Class:** `Association` — superclass: `Object` — `@sealed`
+**Methods:** 5/5 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `key` | @primitive selector | ✅ | 🧪 | `Association>>key` |
+| `value` | @primitive selector | ✅ | 🧪 | `Association>>value` |
+| `asString` | @primitive selector | ✅ | 🧪 | `Association>>printString` |
+| `printString` | pure BT | ✅ | | `Association>>printString` |
+| `describe` | pure BT | ✅ | | N/A |
+
+### Exception (`lib/Exception.bt`)
+
+**Class:** `Exception` — superclass: `Object`
+**Methods:** 9/9 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `message` | @primitive selector | ✅ | 🧪 | `Exception>>messageText` |
+| `hint` | @primitive selector | ✅ | 🧪 | N/A |
+| `kind` | @primitive selector | ✅ | 🧪 | N/A |
+| `selector` | @primitive selector | ✅ | 🧪 | N/A |
+| `errorClass` | @primitive selector | ✅ | 🧪 | N/A |
+| `printString` | @primitive selector | ✅ | 🧪 | `Exception>>printString` |
+| `describe` | pure BT | ✅ | | N/A |
+| `signal` | @primitive selector | ✅ | | `Exception>>signal` |
+| `signal:` | @primitive selector | ✅ | | `Exception>>signal:` |
+
+### Error (`lib/Error.bt`)
+
+**Class:** `Error` — superclass: `Exception`
+**Methods:** 1/1 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `describe` | pure BT | ✅ | | N/A |
+
+### TranscriptStream (`lib/TranscriptStream.bt`)
+
+**Class:** `TranscriptStream` — superclass: `Actor`
+**Methods:** 6/6 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `show:` | @primitive selector | ✅ | 🧪 | `Transcript>>show:` |
+| `cr` | @primitive selector | ✅ | 🧪 | `Transcript>>cr` |
+| `subscribe` | @primitive selector | ✅ | | N/A |
+| `unsubscribe` | @primitive selector | ✅ | | N/A |
+| `recent` | @primitive selector | ✅ | | N/A |
+| `clear` | @primitive selector | ✅ | | N/A |
 
 ---
 
 ## Tier 3: Runtime-Only Classes (No `.bt` File)
 
 These classes are implemented entirely in Erlang runtime modules with no corresponding `lib/*.bt` definition.
-
-### Tuple (`beamtalk_tuple.erl`)
-
-**Runtime module:** `beamtalk_tuple.erl`
-**Methods:** 8 — all implemented
-**Note:** BEAM-specific, wraps Erlang result tuples `{ok, Value}` / `{error, Reason}`.
-
-| Selector | Status | Notes |
-|----------|--------|-------|
-| `size` | ✅ | `tuple_size` |
-| `at:` | ✅ | 1-based index via `element` |
-| `isOk` | ✅ | `{ok, _}` pattern match |
-| `isError` | ✅ | `{error, _}` pattern match |
-| `unwrap` | ✅ | Extract value or raise |
-| `unwrapOr:` | ✅ | Extract or return default |
-| `unwrapOrElse:` | ✅ | Extract or evaluate block |
-| `asString` | ✅ | String representation |
 
 ### CompiledMethod (`beamtalk_compiled_method.erl`)
 
@@ -419,22 +519,17 @@ These classes are implemented entirely in Erlang runtime modules with no corresp
 ## Pharo Comparison: Notable Gaps
 
 > **Tracked in existing issues:**
-> - **BT-338**: Block `on:do:` / `ensure:` (exception handling)
-> - **BT-334**: Float methods (`rounded`, `ceiling`, `floor`, `isNaN`) and Number hierarchy
 > - **BT-44**: Missing collection methods (`sort`, `detect:`, `take:`, `flatMap:`, etc.)
 > - **BT-331**: Compilable stdlib collection classes (Dictionary ✅, List ✅, Set ✅)
 > - **BT-408**: E2E test coverage for untested stdlib methods
 
 Methods that Pharo users would expect but Beamtalk does **not** define or implement:
 
-### ProtoObject (No `.bt` file exists)
+### ProtoObject
 
 | Pharo Method | Beamtalk Status | Priority |
 |-------------|-----------------|----------|
-| `==` (identity) | ✅ Intrinsic (handled by codegen) | — |
 | `~~` (not identical) | ❌ Not defined | Low |
-| `doesNotUnderstand:` | ✅ Runtime (beamtalk_error) | — |
-| `identityHash` | ✅ `hash` intrinsic | — |
 
 ### Object
 
@@ -442,7 +537,6 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 |-------------|-----------------|----------|
 | `copy` | ❌ Not defined (except UndefinedObject) | Medium |
 | `deepCopy` | ❌ Not defined (except UndefinedObject) | Low |
-| `error:` | ✅ Intrinsic | — |
 | `halt` | ❌ Not defined | Low |
 | `assert:` | ❌ Not defined | Medium |
 | `deny:` | ❌ Not defined | Low |
@@ -451,13 +545,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `factorial` | ❌ Not defined | Low |
-| `gcd:` | ❌ Not defined | Low |
-| `lcm:` | ❌ Not defined | Low |
 | `isPrime` | ❌ Not defined | Low |
-| `bitAnd:` | ❌ Not defined | Medium |
-| `bitOr:` | ❌ Not defined | Medium |
-| `bitShift:` | ❌ Not defined | Medium |
 
 ### Float
 
@@ -487,31 +575,20 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `on:do:` | ❌ `on:` defined but not implemented — **BT-338** | **Critical** |
-| `ensure:` | ❌ Defined but not implemented — **BT-338** | **Critical** |
-| `valueWithArguments:` | ❌ Not defined | Medium |
 | `cull:` | ❌ Not defined | Low |
 | `newProcess` / `fork` | ❌ Not defined (use Actor >> spawn) | Low |
-
-### Boolean
-
-| Pharo Method | Beamtalk Equivalent | Priority |
-|-------------|---------------------|----------|
-| `xor:` | ❌ Not defined | Low |
 
 ---
 
 ## Missing `.bt` Files
 
-These classes are either referenced in the original issue or have runtime support but no stdlib definition:
+All stdlib classes now have corresponding `lib/*.bt` definitions. The only runtime-only class is `CompiledMethod`,
+which is implemented entirely in `beamtalk_compiled_method.erl`.
 
-| Class | Status | Runtime Support | Priority |
-|-------|--------|----------------|----------|
-| `ProtoObject` | ❌ No `.bt` file | Intrinsics handle `class`, `==`, `~=` | Medium (BT-375) |
-| `Collection` | ❌ No `.bt` file | N/A (abstract) | Low |
-| `SequenceableCollection` | ❌ No `.bt` file | N/A (abstract) | Low |
-| `Set` | ✅ `lib/Set.bt` | `beamtalk_set` compiled stdlib + `beamtalk_set_ops` helper | Done (BT-73) |
-| `Dictionary` | ✅ `lib/Dictionary.bt` | `beamtalk_dictionary` compiled stdlib | Done (BT-418) |
+| Class | Status | Notes |
+|-------|--------|-------|
+| `Collection` | N/A | Abstract concept — not planned as a standalone `.bt` file |
+| `SequenceableCollection` | N/A | Abstract concept — not planned as a standalone `.bt` file |
 
 ---
 
@@ -523,21 +600,28 @@ Methods with no E2E test coverage that should be tested:
 
 | Class | Untested Methods |
 |-------|-----------------|
-| **Integer** | `**`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:` |
+| **Integer** | `**`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:`, `describe` |
 | **Float** | `~=`, `<=`, `>=`, `printString`, `describe` |
 | **String** | `,`, `lines`, `asAtom`, `describe`, `printString` |
 | **List** | `detect:ifNone:`, `describe`, `printString` |
-| **Block** | `repeat` |
-| **Tuple** | ALL methods (0 E2E coverage — placeholder test file) |
+| **Block** | `repeat`, `describe` |
+| **Tuple** | ALL methods (0 E2E coverage — no tuple literal syntax yet) |
 
 ### Medium Priority
 
 | Class | Untested Methods |
 |-------|-----------------|
 | **Object** | `inspect`, `describe` |
-| **Actor** | `spawnWith:`, `new` (error case), `new:` (error case) |
-| **UndefinedObject** | `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`, `copy`, `deepCopy`, `shallowCopy` |
+| **Actor** | `spawnWith:`, `new` (error case), `new:` (error case), `describe` |
+| **UndefinedObject** | `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`, `copy`, `deepCopy`, `shallowCopy`, `describe`, `printString` |
 | **True/False** | `isTrue`, `isFalse`, `describe`, `printString` |
+| **Dictionary** | `describe` |
+| **Set** | `describe` |
+| **Association** | `printString`, `describe` |
+| **Exception** | `describe`, `signal`, `signal:` |
+| **Error** | `describe` |
+| **TranscriptStream** | `subscribe`, `unsubscribe`, `recent`, `clear` |
+| **SystemDictionary** | `globals` |
 
 ---
 
