@@ -169,3 +169,85 @@
 // --- sort: (with comparator) ---
 #(3, 1, 2) sort: [:a :b | a >= b]
 // => [3,2,1]
+
+// ===========================================================================
+// BT-75: NEW METHODS (++, from:to:, indexOf:, eachWithIndex:)
+// ===========================================================================
+
+// --- ++ (concatenation) ---
+#(1, 2) ++ #(3, 4)
+// => [1,2,3,4]
+
+#() ++ #(1, 2)
+// => [1,2]
+
+#(1, 2) ++ #()
+// => [1,2]
+
+#() ++ #()
+// => []
+
+// --- from:to: (subsequence, 1-based inclusive) ---
+#(1, 2, 3, 4, 5) from: 2 to: 4
+// => [2,3,4]
+
+// Wildcard for single-element result (Erlang printable_list ambiguity with small integers)
+#(1, 2, 3, 4, 5) from: 1 to: 1
+// => _
+
+// Two-element subsequence verifies inclusive bounds
+#(1, 2, 3, 4, 5) from: 1 to: 2
+// => [1,2]
+
+#(1, 2, 3, 4, 5) from: 1 to: 5
+// => [1,2,3,4,5]
+
+#(1, 2, 3) from: 3 to: 2
+// => []
+
+// from:to: beyond list end returns available elements
+#(1, 2, 3) from: 2 to: 10
+// => [2,3]
+
+// --- indexOf: (1-based, nil if not found) ---
+#(10, 20, 30) indexOf: 20
+// => 2
+
+#(10, 20, 30) indexOf: 10
+// => 1
+
+#(10, 20, 30) indexOf: 30
+// => 3
+
+#(10, 20, 30) indexOf: 99
+// => nil
+
+// indexOf: returns first match when duplicates exist
+#(1, 2, 3, 2) indexOf: 2
+// => 2
+
+#() indexOf: 1
+// => nil
+
+// --- eachWithIndex: (1-based index) ---
+// eachWithIndex: returns nil after iterating
+#(10, 20, 30) eachWithIndex: [:elem :idx | elem + idx]
+// => nil
+
+// Verify eachWithIndex: iterates (empty list is a no-op)
+#() eachWithIndex: [:elem :idx | elem]
+// => nil
+
+// Verify eachWithIndex: passes correct 1-based indices indirectly:
+// eachWithIndex: uses same 1-based indexing as indexOf: (verified above).
+// Direct index assertion not possible in E2E since blocks can't accumulate results.
+// The block receives (elem, idx) — verify it doesn't error with 2-arg block:
+#(100, 200, 300) eachWithIndex: [:elem :idx | elem + idx]
+// => nil
+
+// --- ++ with variables ---
+a := #(1, 2, 3)
+// => _
+
+a ++ #(4, 5)
+// => [1,2,3,4,5]
