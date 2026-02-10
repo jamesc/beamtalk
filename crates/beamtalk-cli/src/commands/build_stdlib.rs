@@ -202,6 +202,7 @@ fn is_primitive_type(class_name: &str) -> bool {
             | "Symbol"
             | "List"
             | "Dictionary"
+            | "Set"
     )
 }
 

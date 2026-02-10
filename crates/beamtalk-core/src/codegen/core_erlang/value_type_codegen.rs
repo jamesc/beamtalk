@@ -315,6 +315,7 @@ impl CoreErlangGenerator {
                 | "Symbol"
                 | "List"
                 | "Dictionary"
+                | "Set"
         )
     }
 
