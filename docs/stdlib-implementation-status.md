@@ -9,10 +9,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 222 |
-| **✅ Implemented** | 220 (99.1%) |
-| **❌ Not Implemented** | 2 (0.9%) |
-| **E2E test coverage** | 104 methods (46.8%) |
+| **Total stdlib methods** | 236 |
+| **✅ Implemented** | 234 (99.2%) |
+| **❌ Not Implemented** | 2 (0.8%) |
+| **E2E test coverage** | 118 methods (50.0%) |
 | **Stdlib .bt files** | 13 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
 | **Missing .bt files** | 3 (ProtoObject, Collection, SequenceableCollection) |
@@ -105,7 +105,7 @@
 ### String (`lib/String.bt`)
 
 **Class:** `String` — superclass: `Object` — `@sealed`
-**Methods:** 36/36 implemented (100%)
+**Methods:** 50/50 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -134,6 +134,18 @@
 | `split:` | @primitive selector | ✅ | | N/A |
 | `splitOn:` | @primitive selector | ✅ | | N/A |
 | `repeat:` | @primitive selector | ✅ | | N/A |
+| `lines` | @primitive selector | ✅ | | `String>>lines` |
+| `words` | @primitive selector | ✅ | 🧪 | `String>>substrings` |
+| `replaceAll:with:` | @primitive selector | ✅ | 🧪 | `String>>replaceAll:with:` |
+| `replaceFirst:with:` | @primitive selector | ✅ | 🧪 | `String>>copyReplaceFirst:with:` |
+| `take:` | @primitive selector | ✅ | 🧪 | `String>>first:` |
+| `drop:` | @primitive selector | ✅ | 🧪 | `String>>allButFirst:` |
+| `padLeft:` | @primitive selector | ✅ | 🧪 | `String>>padLeftTo:` |
+| `padRight:` | @primitive selector | ✅ | 🧪 | `String>>padRightTo:` |
+| `padLeft:with:` | @primitive selector | ✅ | 🧪 | `String>>padLeftTo:with:` |
+| `isBlank` | @primitive selector | ✅ | 🧪 | `String>>isAllSeparators` |
+| `isDigit` | @primitive selector | ✅ | 🧪 | `String>>isAllDigits` |
+| `isAlpha` | @primitive selector | ✅ | 🧪 | `String>>isAllLetters` |
 | `isEmpty` | pure BT | ✅ | 🧪 | `String>>isEmpty` |
 | `isNotEmpty` | pure BT | ✅ | | `String>>isNotEmpty` |
 | `asInteger` | @primitive selector | ✅ | | `String>>asInteger` |
@@ -455,8 +467,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `replaceAll:with:` | ❌ Not defined (runtime has `replace:with:`) | Medium |
-| `copyFrom:to:` | ❌ Not defined (runtime has `substring:to:`) | Low |
+| `copyFrom:to:` | ❌ Not defined (use `take:`/`drop:` combination) | Low |
 | `asSymbol` | ❌ Not defined | Low |
 | `match:` | ❌ Not defined | Low |
 
@@ -512,7 +523,7 @@ Methods with no E2E test coverage that should be tested:
 |-------|-----------------|
 | **Integer** | `%`, `**`, `<`, `>`, `<=`, `>=`, `isPositive`, `isNegative`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:`, `asFloat`, `asString`, `printString` |
 | **Float** | ALL methods (0/17 E2E coverage) |
-| **String** | `<`, `>`, `<=`, `>=`, `,`, `size`, `at:`, `uppercase`, `lowercase`, `capitalize`, `trim`, `trimLeft`, `trimRight`, `reverse`, `includes:`, `startsWith:`, `endsWith:`, `indexOf:`, `split:`, `splitOn:`, `repeat:`, `isNotEmpty`, `asInteger`, `asFloat`, `asAtom`, `asList`, `each:`, `collect:`, `select:` |
+| **String** | `<`, `>`, `<=`, `>=`, `,`, `size`, `at:`, `uppercase`, `lowercase`, `capitalize`, `trim`, `trimLeft`, `trimRight`, `reverse`, `includes:`, `startsWith:`, `endsWith:`, `indexOf:`, `split:`, `splitOn:`, `repeat:`, `lines`, `isNotEmpty`, `asInteger`, `asFloat`, `asAtom`, `asList`, `each:`, `collect:`, `select:` |
 | **List** | `detect:ifNone:`, `describe`, `printString` |
 | **Block** | `whileFalse:`, `repeat`, `arity` |
 | **Dictionary** | `describe` (literal, no E2E needed) |
