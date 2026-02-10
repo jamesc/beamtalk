@@ -146,4 +146,34 @@ dispatch_unwrap_or_test() ->
 dispatch_as_string_test() ->
     ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple:dispatch('asString', [], {ok, 42})).
 
+dispatch_unwrap_or_else_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {ok, 42})),
+    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOrElse:', [fun() -> default end], {error, reason})).
+
+dispatch_unwrap_invalid_pattern_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
+                 beamtalk_tuple:dispatch('unwrap', [], {a, b})).
+
+%%% ============================================================================
+%%% beamtalk_primitive:send integration tests
+%%% Verifies the full dispatch path: primitive:send → compiled tuple module
+%%% ============================================================================
+
+primitive_send_size_test() ->
+    ?assertEqual(3, beamtalk_primitive:send({a, b, c}, 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send({}, 'size', [])).
+
+primitive_send_at_test() ->
+    ?assertEqual(b, beamtalk_primitive:send({a, b, c}, 'at:', [2])).
+
+primitive_send_is_ok_test() ->
+    ?assertEqual(true, beamtalk_primitive:send({ok, 42}, 'isOk', [])),
+    ?assertEqual(false, beamtalk_primitive:send({error, reason}, 'isOk', [])).
+
+primitive_send_unwrap_test() ->
+    ?assertEqual(42, beamtalk_primitive:send({ok, 42}, 'unwrap', [])).
+
+primitive_send_as_string_test() ->
+    ?assertEqual(<<"{a, b}">>, beamtalk_primitive:send({a, b}, 'asString', [])).
+
 
