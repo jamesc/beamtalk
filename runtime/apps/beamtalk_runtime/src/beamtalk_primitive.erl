@@ -187,8 +187,8 @@ send(X, Selector, Args) when is_map(X) ->
             %% BT-338: Exception value type - direct dispatch
             beamtalk_exception_handler:dispatch(Selector, Args, X);
         undefined ->
-            %% Plain map (Dictionary)
-            beamtalk_map:dispatch(Selector, Args, X);
+            %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
+            beamtalk_dictionary:dispatch(Selector, Args, X);
         Class ->
             %% Value type instance - route to class module (BT-354)
             value_type_send(X, Class, Selector, Args)
@@ -257,7 +257,7 @@ responds_to(X, Selector) when is_map(X) ->
             %% BT-338: Exception value type
             beamtalk_exception_handler:has_method(Selector);
         undefined ->
-            beamtalk_map:has_method(Selector);
+            beamtalk_dictionary:has_method(Selector);
         Class ->
             %% Value type instance - check class module exports (BT-354)
             value_type_responds_to(Class, Selector)
