@@ -86,7 +86,9 @@ pub fn startup_prelude(port: u16) -> String {
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          _ = beamtalk_transcript_stream:start_link_singleton(1000), \
-         _ = beamtalk_system_dictionary:start_link_singleton()"
+         _ = beamtalk_system_dictionary:start_link_singleton(), \
+         _ = beamtalk_repl_actors:start_link(registered), \
+         _ = beamtalk_workspace_actor:start_link_singleton()"
     )
 }
 
@@ -225,6 +227,7 @@ mod tests {
         // Must start workspace singletons (ADR 0010 — workspace bindings)
         assert!(prelude.contains("beamtalk_transcript_stream:start_link_singleton"));
         assert!(prelude.contains("beamtalk_system_dictionary:start_link_singleton"));
+        assert!(prelude.contains("beamtalk_workspace_actor:start_link_singleton"));
         // Prelude should NOT contain the blocking receive
         assert!(!prelude.contains("receive"));
     }

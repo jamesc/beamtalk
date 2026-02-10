@@ -76,6 +76,14 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
         register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
+        %% BT-423 stopgap: also register with the global registry so
+        %% Workspace actors API can find them. Remove when BT-297
+        %% eliminates the legacy per-session registry.
+        case whereis(beamtalk_actor_registry) of
+            GlobalPid when is_pid(GlobalPid), GlobalPid =/= RegistryPid ->
+                register_actor(GlobalPid, ActorPid, ClassName, ModuleName);
+            _ -> ok
+        end,
         beamtalk_workspace_meta:register_actor(ActorPid),
         beamtalk_workspace_meta:update_activity()
     catch

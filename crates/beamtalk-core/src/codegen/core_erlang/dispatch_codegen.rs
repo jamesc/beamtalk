@@ -40,7 +40,7 @@ use std::fmt::Write;
 ///
 /// These names resolve to workspace singletons via `persistent_term` rather than
 /// direct module function calls. The set is static — dynamic bindings are out of scope.
-const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk"];
+const WORKSPACE_BINDING_NAMES: &[&str] = &["Transcript", "Beamtalk", "Workspace"];
 
 /// Returns true if the given class name is a workspace binding (ADR 0010).
 pub(super) fn is_workspace_binding(name: &str) -> bool {

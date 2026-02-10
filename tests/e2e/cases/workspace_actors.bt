@@ -1,0 +1,101 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Workspace actor introspection API (BT-423).
+//
+// Workspace is a singleton actor that provides introspection
+// of live actors in the workspace via persistent_term binding.
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// WORKSPACE BINDING — CLASS INTROSPECTION
+// ===========================================================================
+
+// Workspace class returns Workspace
+Workspace class
+// => Workspace
+
+// Workspace respondsTo: #actors returns true
+Workspace respondsTo: #actors
+// => true
+
+// Workspace respondsTo: #actorAt: returns true
+Workspace respondsTo: #actorAt:
+// => true
+
+// Workspace respondsTo: #actorsOf: returns true
+Workspace respondsTo: #actorsOf:
+// => true
+
+// Workspace respondsTo: unknown method returns false
+Workspace respondsTo: #nonExistentMethod
+// => false
+
+// ===========================================================================
+// WORKSPACE ACTORS — RETURNS A LIST
+// ===========================================================================
+
+// Workspace actors returns a list (may contain actors from prior tests)
+allActors := (Workspace actors) await
+// => _
+
+// ===========================================================================
+// WORKSPACE ACTORS — WITH LIVE ACTORS
+// ===========================================================================
+
+// Record count before spawning
+beforeCount := allActors size
+// => _
+
+// Spawn a counter actor
+c := Counter spawn
+// => _
+
+// Workspace actors now has more actors
+actors := (Workspace actors) await
+// => _
+
+actors size > beforeCount
+// => true
+
+// ===========================================================================
+// WORKSPACE ACTORS OF — BY CLASS
+// ===========================================================================
+
+// Record counter count before spawning second
+countersBefore := (Workspace actorsOf: Counter) await
+// => _
+
+countersBeforeSize := countersBefore size
+// => _
+
+// Spawn a second counter
+c2 := Counter spawn
+// => _
+
+// actorsOf: Counter now returns one more
+countersAfter := (Workspace actorsOf: Counter) await
+// => _
+
+countersAfter size > countersBeforeSize
+// => true
+
+// ===========================================================================
+// WORKSPACE ACTORS — FUNCTIONAL REFERENCES
+// ===========================================================================
+
+// Actors returned are fully functional — can send messages
+c increment
+// => _
+
+c getValue
+// => 1
+
+// ===========================================================================
+// WORKSPACE ACTOR AT — NOT FOUND
+// ===========================================================================
+
+// actorAt: with invalid pid returns nil
+(Workspace actorAt: 'invalid') await
+// => nil
