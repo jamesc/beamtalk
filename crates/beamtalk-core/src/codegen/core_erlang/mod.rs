@@ -2304,7 +2304,7 @@ end
     }
 
     #[test]
-    fn test_non_block_message_still_creates_future() {
+    fn test_non_block_message_uses_unified_dispatch() {
         // BT-430: Regular message sends now use unified dispatch
         // actor increment → beamtalk_message_dispatch:send(actor, 'increment', [])
         let mut generator = CoreErlangGenerator::new("test");

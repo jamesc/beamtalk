@@ -37,20 +37,22 @@ actor_test_() ->
       ]}.
 
 actor_returns_future() ->
-    %% Create a minimal actor object for testing
-    Self = self(),
-    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Self},
+    %% Spawn a dummy process that discards messages (avoids noisy mailbox on self())
+    Dummy = spawn(fun() -> receive _ -> ok end end),
+    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
     %% Send returns a future (pid), not a direct value
     Result = beamtalk_message_dispatch:send(Obj, 'testMsg', []),
-    ?assert(is_pid(Result)).
+    ?assert(is_pid(Result)),
+    exit(Dummy, kill).
 
 actor_future_is_pid() ->
     %% Future returned by actor dispatch should be a new pid (not the actor pid)
-    Self = self(),
-    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Self},
+    Dummy = spawn(fun() -> receive _ -> ok end end),
+    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
     Future = beamtalk_message_dispatch:send(Obj, 'someMsg', []),
     ?assert(is_pid(Future)),
-    ?assertNotEqual(Self, Future).
+    ?assertNotEqual(Dummy, Future),
+    exit(Dummy, kill).
 
 class_object_returns_value() ->
     ClassPid = beamtalk_object_class:whereis_class('Object'),
@@ -60,3 +62,26 @@ class_object_returns_value() ->
     ClassObj = #beamtalk_object{class = ClassTag, class_mod = ClassMod, pid = ClassPid},
     Result = beamtalk_message_dispatch:send(ClassObj, class_name, []),
     ?assertEqual('Object', Result).
+
+%% ============================================================================
+%% Primitive dispatch tests (no bootstrap needed)
+%% ============================================================================
+
+primitive_test_() ->
+    {setup,
+     fun actor_setup/0,
+     fun actor_teardown/1,
+     [
+         {"primitive integer dispatch", fun primitive_integer_dispatch/0},
+         {"primitive list dispatch", fun primitive_list_dispatch/0}
+      ]}.
+
+primitive_integer_dispatch() ->
+    %% Integer addition via primitive dispatch path
+    Result = beamtalk_message_dispatch:send(2, '+', [3]),
+    ?assertEqual(5, Result).
+
+primitive_list_dispatch() ->
+    %% List size via primitive dispatch path
+    Result = beamtalk_message_dispatch:send([1, 2, 3], size, []),
+    ?assertEqual(3, Result).
