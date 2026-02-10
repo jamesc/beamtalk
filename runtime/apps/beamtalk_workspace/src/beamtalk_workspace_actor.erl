@@ -285,8 +285,10 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
     end.
 
 %% @doc Register the Workspace class with the class registry.
-%% Uses start_link which creates a link — wrapped in try/catch to avoid
-%% taking down the Workspace actor if class registration fails.
+%% Uses start_link which creates a link to the class process.
+%% Wrapped in try/catch to handle startup failures gracefully.
+%% Note: post-start crashes of the linked class process will propagate,
+%% but this matches how all other classes are registered (beamtalk_stdlib pattern).
 -spec register_class() -> ok.
 register_class() ->
     try

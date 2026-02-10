@@ -82,15 +82,26 @@ countersAfter size > countersBeforeSize
 // => true
 
 // ===========================================================================
-// WORKSPACE ACTORS — FUNCTIONAL REFERENCES
+// WORKSPACE ACTORS — FUNCTIONAL REFERENCES FROM WORKSPACE API
 // ===========================================================================
 
-// Actors returned are fully functional — can send messages
+// Actors returned by Workspace are fully functional — pick one and message it
 c increment
 // => _
 
 c getValue
 // => 1
+
+// Verify actorsOf: returns functional references too
+counterRefs := (Workspace actorsOf: Counter) await
+// => _
+
+// Get last element and send it a message
+lastCounter := counterRefs last
+// => _
+
+lastCounter getValue
+// => _
 
 // ===========================================================================
 // WORKSPACE ACTOR AT — NOT FOUND

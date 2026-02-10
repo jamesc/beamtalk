@@ -17,8 +17,8 @@
 %%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
 %%%   ├─ beamtalk_transcript_stream   % Transcript singleton (ADR 0010)
 %%%   ├─ beamtalk_system_dictionary   % Beamtalk singleton (ADR 0010)
-%%%   ├─ beamtalk_workspace_actor     % Workspace singleton (BT-423)
 %%%   ├─ beamtalk_actor_registry      % Workspace-wide actor registry
+%%%   ├─ beamtalk_workspace_actor     % Workspace singleton (BT-423)
 %%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
 %%%   ├─ beamtalk_actor_sup           % Supervises user actors
