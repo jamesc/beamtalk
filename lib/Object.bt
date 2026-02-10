@@ -40,3 +40,6 @@ ProtoObject subclass: Object
 
   // Abstract method marker — raises error if not overridden by subclass
   subclassResponsibility => @primitive subclassResponsibility
+
+  // Error signaling — Smalltalk-style error from any object
+  error: message => @primitive error
