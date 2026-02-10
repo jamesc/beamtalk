@@ -169,3 +169,62 @@
 // --- sort: (with comparator) ---
 #(3, 1, 2) sort: [:a :b | a >= b]
 // => [3,2,1]
+
+// ===========================================================================
+// BT-75: NEW METHODS (++, from:to:, indexOf:, eachWithIndex:)
+// ===========================================================================
+
+// --- ++ (concatenation) ---
+#(1, 2) ++ #(3, 4)
+// => [1,2,3,4]
+
+#() ++ #(1, 2)
+// => [1,2]
+
+#(1, 2) ++ #()
+// => [1,2]
+
+#() ++ #()
+// => []
+
+// --- from:to: (subsequence, 1-based inclusive) ---
+#(1, 2, 3, 4, 5) from: 2 to: 4
+// => [2,3,4]
+
+#(1, 2, 3, 4, 5) from: 1 to: 1
+// => _
+
+#(1, 2, 3, 4, 5) from: 1 to: 5
+// => [1,2,3,4,5]
+
+#(1, 2, 3) from: 3 to: 2
+// => []
+
+// from:to: beyond list end returns available elements
+#(1, 2, 3) from: 2 to: 10
+// => [2,3]
+
+// --- indexOf: (1-based, nil if not found) ---
+#(10, 20, 30) indexOf: 20
+// => 2
+
+#(10, 20, 30) indexOf: 10
+// => 1
+
+#(10, 20, 30) indexOf: 30
+// => 3
+
+#(10, 20, 30) indexOf: 99
+// => nil
+
+#() indexOf: 1
+// => nil
+
+// --- eachWithIndex: (1-based index) ---
+// eachWithIndex: returns nil after iterating
+#(10, 20, 30) eachWithIndex: [:elem :idx | elem + idx]
+// => nil
+
+// Verify eachWithIndex: iterates (empty list is a no-op)
+#() eachWithIndex: [:elem :idx | elem]
+// => nil

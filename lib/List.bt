@@ -43,6 +43,16 @@ sealed Object subclass: List
   anySatisfy: block => @primitive 'anySatisfy:'
   allSatisfy: block => @primitive 'allSatisfy:'
 
+  // Concatenation
+  ++ other => @primitive '++'
+
+  // Subsequence / Search
+  from: start to: end => @primitive 'from:to:'
+  indexOf: item => @primitive 'indexOf:'
+
+  // Iteration with index
+  eachWithIndex: block => @primitive 'eachWithIndex:'
+
   // Advanced
   zip: other => @primitive 'zip:'
   groupBy: block => @primitive 'groupBy:'

@@ -715,6 +715,30 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
             write!(output, "call 'erlang':'++'(Self, [{p0}|[]])").ok()?;
             Some(())
         }
+        // Concatenation
+        "++" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'erlang':'++'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Subsequence / Search
+        "from:to:" => {
+            let p0 = params.first().map_or("_Start", String::as_str);
+            let p1 = params.get(1).map_or("_End", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'from_to'(Self, {p0}, {p1})").ok()?;
+            Some(())
+        }
+        "indexOf:" => {
+            let p0 = params.first().map_or("_Item", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'index_of'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Iteration with index
+        "eachWithIndex:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_list_ops':'each_with_index'(Self, {p0})").ok()?;
+            Some(())
+        }
         // Reflection
         "describe" => {
             let s = core_erlang_binary_string("a List");
