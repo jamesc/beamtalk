@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: Validator value type with error: usage
+
+Object subclass: Validator
+  check: value =>
+    value < 0 ifTrue: [self error: 'must be non-negative']
+    value
