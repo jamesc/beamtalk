@@ -1,0 +1,102 @@
+// E2E tests for new String methods (BT-43)
+
+// ===========================================================================
+// REPLACE
+// ===========================================================================
+
+// replaceAll:with:
+'hello world' replaceAll: 'o' with: '0'
+// => hell0 w0rld
+
+'aaa' replaceAll: 'a' with: 'bb'
+// => bbbbbb
+
+// replaceFirst:with:
+'hello world' replaceFirst: 'o' with: '0'
+// => hell0 world
+
+// ===========================================================================
+// LINES AND WORDS
+// ===========================================================================
+
+// words
+'hello world foo' words
+// => ["hello","world","foo"]
+
+// words with extra spaces
+'  hello   world  ' words
+// => ["hello","world"]
+
+// ===========================================================================
+// TAKE AND DROP
+// ===========================================================================
+
+// take:
+'hello' take: 3
+// => hel
+
+'hello' take: 10
+// => hello
+
+'hello' take: 0
+// => 
+
+// drop:
+'hello' drop: 2
+// => llo
+
+'hello' drop: 0
+// => hello
+
+'hello' drop: 10
+// => 
+
+// ===========================================================================
+// PADDING
+// ===========================================================================
+
+// padLeft:
+'hi' padLeft: 5
+// => _
+
+// padRight:
+'hi' padRight: 5
+// => _
+
+// padLeft:with: - pad with specific character
+'42' padLeft: 5 with: '0'
+// => 00042
+
+// ===========================================================================
+// TESTING
+// ===========================================================================
+
+// isBlank
+'' isBlank
+// => true
+
+'   ' isBlank
+// => true
+
+'hello' isBlank
+// => false
+
+// isDigit
+'123' isDigit
+// => true
+
+'12a' isDigit
+// => false
+
+'' isDigit
+// => false
+
+// isAlpha
+'hello' isAlpha
+// => true
+
+'hello1' isAlpha
+// => false
+
+'' isAlpha
+// => false

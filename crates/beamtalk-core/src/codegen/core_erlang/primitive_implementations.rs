@@ -254,6 +254,78 @@ fn generate_string_bif(output: &mut String, selector: &str, params: &[String]) -
             write!(output, "call 'beamtalk_string_ops':'repeat'(Self, {p0})").ok()?;
             Some(())
         }
+        // Lines and words
+        "lines" => {
+            write!(output, "call 'beamtalk_string_ops':'lines'(Self)").ok()?;
+            Some(())
+        }
+        "words" => {
+            write!(output, "call 'beamtalk_string_ops':'words'(Self)").ok()?;
+            Some(())
+        }
+        // Replace
+        "replaceAll:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(
+                output,
+                "call 'binary':'replace'(Self, {p0}, {p1}, ['global'])"
+            )
+            .ok()?;
+            Some(())
+        }
+        "replaceFirst:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(output, "call 'binary':'replace'(Self, {p0}, {p1}, [])").ok()?;
+            Some(())
+        }
+        // Substring
+        "take:" => {
+            write!(output, "call 'beamtalk_string_ops':'take'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "drop:" => {
+            write!(output, "call 'beamtalk_string_ops':'drop'(Self, {p0})").ok()?;
+            Some(())
+        }
+        // Padding
+        "padLeft:" => {
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'leading'))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "padRight:" => {
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'trailing'))"
+            )
+            .ok()?;
+            Some(())
+        }
+        "padLeft:with:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            write!(
+                output,
+                "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, {p0}, 'leading', {p1}))"
+            )
+            .ok()?;
+            Some(())
+        }
+        // Testing
+        "isBlank" => {
+            write!(output, "call 'beamtalk_string_ops':'is_blank'(Self)").ok()?;
+            Some(())
+        }
+        "isDigit" => {
+            write!(output, "call 'beamtalk_string_ops':'is_digit'(Self)").ok()?;
+            Some(())
+        }
+        "isAlpha" => {
+            write!(output, "call 'beamtalk_string_ops':'is_alpha'(Self)").ok()?;
+            Some(())
+        }
         // Conversion
         "asInteger" => {
             write!(output, "call 'erlang':'binary_to_integer'(Self)").ok()?;
