@@ -76,9 +76,9 @@
 | `instVarAt:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `instVarAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
-| `perform:withArguments:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
+| `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
 | `->` | intrinsic | ✅ | 🧪 | Association creation (key-value pair) |
-| `subclassResponsibility` | intrinsic | ✅ | 🧪 | Raises `beamtalk_error` |
+| `subclassResponsibility` | pure BT | ✅ | 🧪 | Calls `self error:` — pure Beamtalk method (BT-405) |
 | `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
 
 ### Number (`lib/Number.bt`)

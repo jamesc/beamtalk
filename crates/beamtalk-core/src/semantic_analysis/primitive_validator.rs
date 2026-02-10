@@ -34,7 +34,6 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "instVarNames",
     "instVarAt",
     "instVarAtPut",
-    "subclassResponsibility",
     // Object protocol
     "printString",
     "hash",
