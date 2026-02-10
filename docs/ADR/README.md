@@ -41,6 +41,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0012](0012-list-literal-syntax.md) | Collection Literal Syntax and the `#` Data Literal System | Accepted | 2026-02-08 |
 | [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Proposed | 2026-02-09 |
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Accepted | 2026-02-09 |
+| [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Proposed | 2026-02-10 |
 
 ## Creating New ADRs
 
