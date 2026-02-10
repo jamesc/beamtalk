@@ -73,12 +73,12 @@ runtime/apps/
 The REPL/workspace modules form a clean layer on top of the core runtime, with **exactly one coupling point**:
 
 ```erlang
-%% In beamtalk_actor.erl, spawn_with_registry/4:
+%% In beamtalk_actor.erl, register_spawned/4:
 ok = beamtalk_repl_actors:register_actor(RegistryPid, Pid, Class, Module),
 beamtalk_workspace_meta:register_actor(Pid),
 ```
 
-No other core runtime modules reference REPL or workspace modules. The dependency is one-directional (core → REPL) at a single well-defined point.
+No other core runtime modules reference REPL or workspace modules. The dependency is one-directional (core → REPL) at a single well-defined point via an application env callback.
 
 ### Constraints
 
@@ -161,23 +161,15 @@ The one coupling point (`beamtalk_actor.erl` → `beamtalk_repl_actors`) is reso
 
 ```erlang
 %% In beamtalk_actor.erl — use application env for optional callback
-spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
-    InitState = #{
-        '__registry_pid__' => RegistryPid,
-        '__class__' => ClassName
-    },
-    case gen_server:start_link(Module, maps:merge(InitState, Args), []) of
-        {ok, Pid} ->
-            %% Notify registered callback (if any)
-            case application:get_env(beamtalk_runtime, actor_spawn_callback) of
-                {ok, CallbackMod} ->
-                    CallbackMod:on_actor_spawned(RegistryPid, Pid, ClassName, Module);
-                undefined ->
-                    ok
-            end,
-            {ok, Pid};
-        {error, Reason} ->
-            {error, Reason}
+%% register_spawned/4 registers an already-spawned actor with the REPL.
+%% (Replaced the former spawn_with_registry/3,4 which both spawned and
+%% registered, bypassing the module's initialize protocol.)
+register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
+    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
+        {ok, CallbackMod} ->
+            CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module);
+        undefined ->
+            ok
     end.
 ```
 
