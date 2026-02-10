@@ -161,7 +161,7 @@ generate_message(io_error, Class, Selector) ->
 generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s", [Selector]));
+    iolist_to_binary(io_lib:format("~p", [Selector]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
