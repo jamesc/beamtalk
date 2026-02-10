@@ -173,3 +173,29 @@ big isSubsetOf: small
 
 ((Set new) fromList: #(1, 2, 3)) do: [:x | nil]
 // => nil
+
+// ===========================================================================
+// RESPONDSTO (method reflection)
+// ===========================================================================
+
+s4 := (Set new) add: 1
+// => _
+
+s4 respondsTo: #size
+// => true
+
+s4 respondsTo: #includes:
+// => true
+
+s4 respondsTo: #nonExistent
+// => false
+
+// ===========================================================================
+// PRINTSTRING
+// ===========================================================================
+
+((Set new) fromList: #(1, 2, 3)) printString
+// => Set(1, 2, 3)
+
+(Set new) printString
+// => Set()

@@ -1,13 +1,19 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_set_ops — Set operations using ordsets in tagged maps.
+%% @doc Tests for beamtalk_set_ops helper module and compiled
+%% beamtalk_set stdlib dispatch (BT-73).
 %%
-%% BT-73: Verifies all Set operations work correctly with the tagged map
-%% representation #{'$beamtalk_class' => 'Set', elements => OrdsetData}.
+%% Tests cover:
+%% - beamtalk_set_ops: tagged map operations using ordsets
+%% - beamtalk_set:dispatch/3: compiled stdlib dispatch
+%% - beamtalk_set:has_method/1: method reflection
+%% - beamtalk_primitive:send/3: runtime dispatch integration
+%% - Error handling: type_error, does_not_understand
 -module(beamtalk_set_ops_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Creation Tests
@@ -191,3 +197,134 @@ do_test() ->
 do_returns_nil_test() ->
     Set = beamtalk_set_ops:from_list([1]),
     ?assertEqual(nil, beamtalk_set_ops:do(Set, fun(_) -> ok end)).
+
+%%% ============================================================================
+%%% Compiled beamtalk_set dispatch/3
+%%% ============================================================================
+
+set_dispatch_class_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertEqual('Set', beamtalk_set:dispatch('class', [], Set)).
+
+set_dispatch_class_empty_test() ->
+    Set = beamtalk_set_ops:new(),
+    ?assertEqual('Set', beamtalk_set:dispatch('class', [], Set)).
+
+set_dispatch_size_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2, 3]),
+    ?assertEqual(3, beamtalk_set:dispatch('size', [], Set)).
+
+set_dispatch_includes_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2, 3]),
+    ?assertEqual(true, beamtalk_set:dispatch('includes:', [2], Set)),
+    ?assertEqual(false, beamtalk_set:dispatch('includes:', [5], Set)).
+
+set_dispatch_add_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    Result = beamtalk_set:dispatch('add:', [3], Set),
+    ?assertEqual(true, beamtalk_set_ops:includes(Result, 3)).
+
+set_dispatch_remove_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2, 3]),
+    Result = beamtalk_set:dispatch('remove:', [2], Set),
+    ?assertEqual(false, beamtalk_set_ops:includes(Result, 2)).
+
+set_dispatch_union_test() ->
+    A = beamtalk_set_ops:from_list([1, 2]),
+    B = beamtalk_set_ops:from_list([2, 3]),
+    Result = beamtalk_set:dispatch('union:', [B], A),
+    ?assertEqual(3, beamtalk_set_ops:size(Result)).
+
+set_dispatch_asList_test() ->
+    Set = beamtalk_set_ops:from_list([3, 1, 2]),
+    ?assertEqual([1, 2, 3], beamtalk_set:dispatch('asList', [], Set)).
+
+%%% ============================================================================
+%%% Compiled beamtalk_set has_method/1
+%%% ============================================================================
+
+set_responds_to_test() ->
+    beamtalk_extensions:init(),
+    ?assertEqual(true, beamtalk_set:has_method('class')),
+    ?assertEqual(true, beamtalk_set:has_method('size')),
+    ?assertEqual(true, beamtalk_set:has_method('isEmpty')),
+    ?assertEqual(true, beamtalk_set:has_method('includes:')),
+    ?assertEqual(true, beamtalk_set:has_method('add:')),
+    ?assertEqual(true, beamtalk_set:has_method('remove:')),
+    ?assertEqual(true, beamtalk_set:has_method('union:')),
+    ?assertEqual(true, beamtalk_set:has_method('intersection:')),
+    ?assertEqual(true, beamtalk_set:has_method('difference:')),
+    ?assertEqual(true, beamtalk_set:has_method('isSubsetOf:')),
+    ?assertEqual(true, beamtalk_set:has_method('asList')),
+    ?assertEqual(true, beamtalk_set:has_method('fromList:')),
+    ?assertEqual(true, beamtalk_set:has_method('do:')),
+    ?assertEqual(false, beamtalk_set:has_method('nonExistent')).
+
+%%% ============================================================================
+%%% Does Not Understand
+%%% ============================================================================
+
+set_does_not_understand_test() ->
+    beamtalk_extensions:init(),
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Set'},
+        beamtalk_set:dispatch('nonExistent', [], Set)).
+
+%%% ============================================================================
+%%% Runtime Dispatch Integration (beamtalk_primitive)
+%%% ============================================================================
+
+primitive_class_of_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertEqual('Set', beamtalk_primitive:class_of(Set)).
+
+primitive_send_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2, 3]),
+    ?assertEqual(3, beamtalk_primitive:send(Set, 'size', [])).
+
+primitive_responds_to_test() ->
+    Set = beamtalk_set_ops:from_list([1]),
+    ?assertEqual(true, beamtalk_primitive:responds_to(Set, 'size')),
+    ?assertEqual(false, beamtalk_primitive:responds_to(Set, 'nonExistent')).
+
+primitive_print_string_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2, 3]),
+    Result = beamtalk_primitive:print_string(Set),
+    ?assertEqual(<<"Set(1, 2, 3)">>, Result).
+
+primitive_print_string_empty_test() ->
+    Set = beamtalk_set_ops:new(),
+    ?assertEqual(<<"Set()">>, beamtalk_primitive:print_string(Set)).
+
+%%% ============================================================================
+%%% Type Error Tests
+%%% ============================================================================
+
+from_list_type_error_test() ->
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'fromList:'},
+        beamtalk_set_ops:from_list(42)).
+
+union_type_error_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'union:'},
+        beamtalk_set_ops:union(Set, not_a_set)).
+
+intersection_type_error_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'intersection:'},
+        beamtalk_set_ops:intersection(Set, 42)).
+
+difference_type_error_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'difference:'},
+        beamtalk_set_ops:difference(Set, 42)).
+
+is_subset_of_type_error_test() ->
+    Set = beamtalk_set_ops:from_list([1, 2]),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'isSubsetOf:'},
+        beamtalk_set_ops:is_subset_of(Set, 42)).
+
+do_type_error_test() ->
+    Set = beamtalk_set_ops:from_list([1]),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Set', selector = 'do:'},
+        beamtalk_set_ops:do(Set, not_a_function)).
