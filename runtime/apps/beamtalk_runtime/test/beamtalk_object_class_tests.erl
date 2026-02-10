@@ -181,7 +181,10 @@ superclass_test_() ->
                          module => proto_object,
                          superclass => none
                      },
-                     {ok, Pid} = beamtalk_object_class:start_link('ProtoObject', ClassInfo),
+                     {ok, Pid} = case beamtalk_object_class:start_link('ProtoObject', ClassInfo) of
+                         {ok, P} -> {ok, P};
+                         {error, {already_started, P}} -> {ok, P}
+                     end,
                      ?assertEqual(none, beamtalk_object_class:superclass(Pid))
                  end)
          ]

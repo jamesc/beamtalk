@@ -1,12 +1,15 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Bootstrap the three-level class hierarchy.
+%%% @doc Bootstrap the foundational class hierarchy.
 %%%
-%%% This module creates the foundational class objects for Beamtalk:
+%%% This module creates ONLY the irreducible foundation classes:
 %%% - ProtoObject class (true root, superclass = none)
 %%% - Object class (superclass = ProtoObject class)
 %%% - Actor class (superclass = Object class)
+%%%
+%%% All other classes (Number, Integer, String, etc.) are registered by
+%%% their compiled stdlib modules via on_load, loaded by beamtalk_stdlib.
 %%%
 %%% These three class processes must exist before any user-defined classes
 %%% can be instantiated. They form the parallel metaclass hierarchy:
@@ -115,28 +118,7 @@ init(Parent) ->
             {error, {already_started, Pid2}} -> {ok, Pid2}
         end,
         
-        %% Step 3: Create Number class (abstract numeric superclass, inherits from Object)
-        NumberClassInfo = #{
-            name => 'Number',
-            module => bt_stdlib_number,
-            superclass => 'Object',
-            is_abstract => true,
-            instance_methods => #{
-                isZero => #{arity => 0},
-                isPositive => #{arity => 0},
-                isNegative => #{arity => 0},
-                sign => #{arity => 0},
-                'between:and:' => #{arity => 2}
-            },
-            class_methods => #{},
-            instance_variables => []
-        },
-        {ok, _NumberClassPid} = case beamtalk_object_class:start_link('Number', NumberClassInfo) of
-            {ok, Pid3a} -> {ok, Pid3a};
-            {error, {already_started, Pid3a}} -> {ok, Pid3a}
-        end,
-        
-        %% Step 4: Create Actor class (inherits from Object class)
+        %% Step 3: Create Actor class (inherits from Object class)
         ActorClassInfo = #{
             name => 'Actor',
             module => 'beamtalk_object',  % BT-427: Actor is abstract — delegates dispatch to Object
