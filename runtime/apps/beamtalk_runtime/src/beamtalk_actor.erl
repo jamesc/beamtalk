@@ -146,7 +146,7 @@
 -include("beamtalk.hrl").
 
 %% Public API
--export([start_link/2, start_link/3, start_link_supervised/3, spawn_with_registry/3, spawn_with_registry/4, register_spawned/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 
 %% Message send helpers (lifecycle-aware wrappers)
 -export([async_send/4, sync_send/3]).
@@ -180,63 +180,15 @@ start_link(Name, Module, Args) ->
 start_link_supervised(Module, Function, Args) ->
     erlang:apply(Module, Function, Args).
 
-%% @doc Spawn an actor and register it with the REPL actor registry.
-%% Returns {ok, Pid} or {error, Reason}.
-%% Used by generated code when spawning actors in a REPL context.
--spec spawn_with_registry(pid(), module(), term()) -> {ok, pid()} | {error, term()}.
-spawn_with_registry(RegistryPid, Module, Args) ->
-    spawn_with_registry(RegistryPid, Module, Args, undefined).
-
-%% @doc Spawn an actor with registry, specifying a class name.
-%% ClassName is the Beamtalk class name (e.g., 'Counter'), used for display.
--spec spawn_with_registry(pid(), module(), term(), atom() | undefined) -> {ok, pid()} | {error, term()}.
-spawn_with_registry(RegistryPid, Module, Args, ClassName) ->
-    %% Add registry info to args for init callback
-    ArgsWithRegistry = case is_map(Args) of
-        true -> maps:put('__registry_pid__', RegistryPid, Args);
-        false -> #{'__registry_pid__' => RegistryPid, '__init_args__' => Args}
-    end,
-    
-    case gen_server:start_link(Module, ArgsWithRegistry, []) of
-        {ok, Pid} ->
-            %% Determine class name for callbacks
-            Class = case ClassName of
-                undefined -> Module; % Use module name as fallback
-                _ -> ClassName
-            end,
-            
-            %% Notify registered callback (if any) - supports optional REPL/workspace tracking.
-            %% The beamtalk_repl app registers this callback on startup.
-            %% Guarded with try/catch so actor spawning succeeds even if the
-            %% callback module is missing, not loaded, or fails.
-            case application:get_env(beamtalk_runtime, actor_spawn_callback) of
-                {ok, CallbackMod} ->
-                    try
-                        CallbackMod:on_actor_spawned(RegistryPid, Pid, Class, Module)
-                    catch
-                        Kind:Reason ->
-                            logger:warning("Actor spawn callback failed", #{
-                                callback => CallbackMod,
-                                kind => Kind,
-                                reason => Reason,
-                                actor_pid => Pid,
-                                class => Class
-                            }),
-                            ok
-                    end;
-                undefined ->
-                    ok
-            end,
-            
-            {ok, Pid};
-        {error, Reason} ->
-            {error, Reason}
-    end.
-
 %% @doc Register an already-spawned actor with the REPL actor registry.
 %% Called by generated REPL code after Module:spawn() returns.
 %% This separates spawn lifecycle (handled by Module:spawn) from
 %% REPL tracking (handled here).
+%%
+%% Replaced the former spawn_with_registry/3,4 functions which both
+%% spawned and registered actors. That approach bypassed the module's
+%% initialize protocol, so we now let Module:spawn() handle the actor
+%% lifecycle and only register the resulting pid here.
 -spec register_spawned(pid(), pid(), atom(), module()) -> ok.
 register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
     case application:get_env(beamtalk_runtime, actor_spawn_callback) of

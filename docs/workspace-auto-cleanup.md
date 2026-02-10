@@ -19,7 +19,7 @@ Each workspace node includes `beamtalk_idle_monitor`, a gen_server that:
 Activity is automatically tracked when:
 
 - **REPL session connects** (`beamtalk_repl_server.erl` in session startup)
-- **Actor is spawned** (`beamtalk_actor.erl` in spawn_with_registry)
+- **Actor is spawned** (`beamtalk_actor.erl` in register_spawned)
 - **Code is hot-reloaded** (`beamtalk_repl_eval.erl` in do_load after module load)
 
 Active sessions (even if idle in REPL) prevent auto-cleanup.
