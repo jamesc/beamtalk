@@ -377,6 +377,7 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
 handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
     ClassPids = try beamtalk_object_class:all_classes()
                 catch _:_ -> [] end,
+    RegistryPid = whereis(beamtalk_actor_registry),
     ModulesWithInfo = lists:filtermap(
         fun(Pid) ->
             try
@@ -386,10 +387,18 @@ handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
                     {file, F} when is_list(F) -> F;
                     _ -> "loaded"
                 end,
+                ActorCount = case RegistryPid of
+                    undefined -> 0;
+                    _ ->
+                        case beamtalk_repl_actors:count_actors_for_module(RegistryPid, ModName) of
+                            {ok, N} -> N;
+                            _ -> 0
+                        end
+                end,
                 Info = #{
                     name => atom_to_binary(Name, utf8),
                     source_file => SourceFile,
-                    actor_count => 0,
+                    actor_count => ActorCount,
                     load_time => 0,
                     time_ago => "n/a"
                 },
@@ -409,10 +418,15 @@ handle_op(<<"unload">>, Params, Msg, _SessionPid) ->
                 {invalid_module, missing}, Msg, fun format_error_message/1);
         _ ->
             Module = binary_to_atom(ModuleBin, utf8),
-            case code:is_loaded(Module) of
+            %% Resolve class name to BEAM module name if needed
+            ResolvedModule = case code:is_loaded(Module) of
+                {file, _} -> Module;
+                false -> resolve_class_to_module(Module)
+            end,
+            case code:is_loaded(ResolvedModule) of
                 {file, _} ->
-                    _ = code:soft_purge(Module),
-                    _ = code:delete(Module),
+                    _ = code:soft_purge(ResolvedModule),
+                    _ = code:delete(ResolvedModule),
                     beamtalk_repl_protocol:encode_status(ok, Msg, fun term_to_json/1);
                 false ->
                     beamtalk_repl_protocol:encode_error(
@@ -877,6 +891,28 @@ is_known_actor(Pid) when is_pid(Pid) ->
                 {ok, _} -> true;
                 {error, not_found} -> false
             end
+    end.
+
+%% @private
+%% Resolve a class name (e.g. 'Counter') to its BEAM module name (e.g. 'counter').
+-spec resolve_class_to_module(atom()) -> atom().
+resolve_class_to_module(ClassName) ->
+    ClassPids = try beamtalk_object_class:all_classes()
+                catch _:_ -> [] end,
+    resolve_class_to_module(ClassName, ClassPids).
+
+resolve_class_to_module(ClassName, []) ->
+    ClassName;
+resolve_class_to_module(ClassName, [Pid | Rest]) ->
+    try
+        case gen_server:call(Pid, class_name, 1000) of
+            ClassName ->
+                gen_server:call(Pid, module_name, 1000);
+            _ ->
+                resolve_class_to_module(ClassName, Rest)
+        end
+    catch _:_ ->
+        resolve_class_to_module(ClassName, Rest)
     end.
 
 %% @private
