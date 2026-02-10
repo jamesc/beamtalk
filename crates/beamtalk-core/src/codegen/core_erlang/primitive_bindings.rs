@@ -550,6 +550,36 @@ mod tests {
     }
 
     #[test]
+    fn test_class_method_primitive_extraction() {
+        // BT-444: Verify that @primitive bindings in class_methods are extracted.
+        let mut class = ClassDefinition::new(
+            Identifier::new("File", span()),
+            Identifier::new("Object", span()),
+            vec![],
+            vec![], // no instance methods
+            span(),
+        );
+        class.class_methods = vec![make_primitive_method(
+            MessageSelector::Keyword(vec![KeywordPart::new("exists:", span())]),
+            vec![Identifier::new("path", span())],
+            "exists:",
+            true,
+        )];
+
+        let module = Module::with_classes(vec![class], span());
+        let mut table = PrimitiveBindingTable::new();
+        table.add_from_module(&module);
+
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table.lookup("File", "exists:"),
+            Some(&PrimitiveBinding::SelectorBased {
+                selector: "exists:".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn test_load_from_real_stdlib() {
         // This test loads the actual lib/*.bt files from the project root.
         // It verifies that the binding table is populated correctly.
