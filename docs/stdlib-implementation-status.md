@@ -15,7 +15,7 @@
 | **E2E test coverage** | 88 methods (42.3%) |
 | **Stdlib .bt files** | 12 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
-| **Missing .bt files** | 5 (ProtoObject, Collection, SequenceableCollection, Set, Dictionary) |
+| **Missing .bt files** | 4 (ProtoObject, Collection, SequenceableCollection, Set) |
 
 ## Status Categories
 
@@ -314,16 +314,11 @@
 | `classNamed:` | @primitive selector | ✅ | 🧪 | `Smalltalk>>at:` |
 | `globals` | @primitive selector | ✅ | | `Smalltalk>>globals` |
 
----
+### Dictionary (`lib/Dictionary.bt` — BT-418)
 
-## Tier 3: Runtime-Only Classes (No `.bt` File)
-
-These classes are implemented entirely in Erlang runtime modules with no corresponding `lib/*.bt` definition.
-
-### Dictionary (`beamtalk_map.erl`)
-
-**Runtime module:** `beamtalk_map.erl`
-**Methods:** 10 — all implemented
+**Stdlib module:** `lib/Dictionary.bt` → `beamtalk_dictionary`
+**Helper module:** `beamtalk_map_ops.erl` (complex operations)
+**Methods:** 11 — all implemented
 
 | Selector | Status | Notes | Pharo Equivalent |
 |----------|--------|-------|------------------|
@@ -337,6 +332,13 @@ These classes are implemented entirely in Erlang runtime modules with no corresp
 | `removeKey:` | ✅ | `maps:remove` | `Dictionary>>removeKey:` |
 | `merge:` | ✅ | `maps:merge` | `Dictionary>>merge:` |
 | `keysAndValuesDo:` | ✅ | Iteration | `Dictionary>>keysAndValuesDo:` |
+| `describe` | ✅ | Returns `'a Dictionary'` | `Dictionary>>printString` |
+
+---
+
+## Tier 3: Runtime-Only Classes (No `.bt` File)
+
+These classes are implemented entirely in Erlang runtime modules with no corresponding `lib/*.bt` definition.
 
 ### Tuple (`beamtalk_tuple.erl`)
 
@@ -470,7 +472,7 @@ These classes are either referenced in the original issue or have runtime suppor
 | `Collection` | ❌ No `.bt` file | N/A (abstract) | Low |
 | `SequenceableCollection` | ❌ No `.bt` file | N/A (abstract) | Low |
 | `Set` | ❌ No `.bt` file | No runtime support | Low |
-| `Dictionary` | ❌ No `.bt` file | `beamtalk_map.erl` has full support | Medium |
+| `Dictionary` | ✅ `lib/Dictionary.bt` | `beamtalk_dictionary` compiled stdlib | Done (BT-418) |
 
 ---
 
@@ -487,7 +489,7 @@ Methods with no E2E test coverage that should be tested:
 | **String** | `<`, `>`, `<=`, `>=`, `,`, `size`, `at:`, `uppercase`, `lowercase`, `capitalize`, `trim`, `trimLeft`, `trimRight`, `reverse`, `includes:`, `startsWith:`, `endsWith:`, `indexOf:`, `split:`, `splitOn:`, `repeat:`, `isNotEmpty`, `asInteger`, `asFloat`, `asAtom`, `asList`, `each:`, `collect:`, `select:` |
 | **List** | `detect:ifNone:`, `describe`, `printString` |
 | **Block** | `whileFalse:`, `repeat`, `arity` |
-| **Dictionary** | ALL methods (0 E2E coverage) |
+| **Dictionary** | `describe` (literal, no E2E needed) |
 | **Tuple** | ALL methods (0 E2E coverage) |
 
 ### Medium Priority

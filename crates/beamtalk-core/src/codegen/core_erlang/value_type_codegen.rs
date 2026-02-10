@@ -314,6 +314,7 @@ impl CoreErlangGenerator {
                 | "Block"
                 | "Symbol"
                 | "List"
+                | "Dictionary"
         )
     }
 
