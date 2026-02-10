@@ -441,7 +441,7 @@ impl CoreErlangGenerator {
         {
             // BT-374 / ADR 0010: Workspace binding cascade support.
             // When the underlying receiver is a workspace binding (e.g., `Transcript show: 'Hello'; cr`),
-            // look up PID from persistent_term instead of extracting from beamtalk_object record.
+            // look up the binding object from persistent_term instead of evaluating the receiver.
             let is_binding_cascade =
                 if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
                     super::dispatch_codegen::is_workspace_binding(&name.name)
@@ -449,7 +449,7 @@ impl CoreErlangGenerator {
                     false
                 };
 
-            let pid_var = if is_binding_cascade {
+            let receiver_var = if is_binding_cascade {
                 let binding_name =
                     if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
                         &name.name
@@ -469,28 +469,14 @@ impl CoreErlangGenerator {
                     self.output,
                     "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
                 )?;
-
-                // Extract PID from beamtalk_object record (4th element)
-                let pid_var = self.fresh_temp_var("BindingPid");
-                write!(
-                    self.output,
-                    "let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "
-                )?;
-                pid_var
+                binding_var
             } else {
                 // Bind the underlying receiver once
                 let receiver_var = self.fresh_temp_var("Receiver");
                 write!(self.output, "let {receiver_var} = ")?;
                 self.generate_expression(underlying_receiver)?;
                 write!(self.output, " in ")?;
-
-                // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
-                let pid_var = self.fresh_temp_var("Pid");
-                write!(
-                    self.output,
-                    "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-                )?;
-                pid_var
+                receiver_var
             };
 
             // Total number of messages in the cascade: first + remaining
@@ -514,18 +500,7 @@ impl CoreErlangGenerator {
                     (&msg.selector, msg.arguments.as_slice())
                 };
 
-                // Generate async message send to the receiver pid variable
-                let future_var = self.fresh_var("Future");
-                write!(
-                    self.output,
-                    "let {future_var} = call 'beamtalk_future':'new'() in "
-                )?;
-                write!(
-                    self.output,
-                    "let _ = call 'beamtalk_actor':'async_send'({pid_var}, "
-                )?;
-
-                // Selector (using domain service)
+                // Unified message dispatch to the bound receiver
                 let selector_atom = selector.to_erlang_atom();
                 if matches!(selector, MessageSelector::Binary(_)) {
                     return Err(CodeGenError::UnsupportedFeature {
@@ -533,7 +508,10 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
-                write!(self.output, "'{selector_atom}', [")?;
+                write!(
+                    self.output,
+                    "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
+                )?;
 
                 // Arguments
                 for (j, arg) in arguments.iter().enumerate() {
@@ -543,7 +521,7 @@ impl CoreErlangGenerator {
                     self.generate_expression(arg)?;
                 }
 
-                write!(self.output, "], {future_var}) in {future_var}")?;
+                write!(self.output, "])")?;
 
                 if !is_last {
                     write!(self.output, " in ")?;
@@ -560,13 +538,6 @@ impl CoreErlangGenerator {
             self.generate_expression(receiver)?;
             write!(self.output, " in ")?;
 
-            // Extract pid from #beamtalk_object{} record (4th element, 1-indexed)
-            let pid_var = self.fresh_temp_var("Pid");
-            write!(
-                self.output,
-                "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-            )?;
-
             // Generate each message send, discarding intermediate results
             for (i, message) in messages.iter().enumerate() {
                 let is_last = i == messages.len() - 1;
@@ -576,18 +547,7 @@ impl CoreErlangGenerator {
                     write!(self.output, "let _ = ")?;
                 }
 
-                // Generate async message send to the receiver pid variable
-                let future_var = self.fresh_var("Future");
-                write!(
-                    self.output,
-                    "let {future_var} = call 'beamtalk_future':'new'() in "
-                )?;
-                write!(
-                    self.output,
-                    "let _ = call 'beamtalk_actor':'async_send'({pid_var}, "
-                )?;
-
-                // Selector (using domain service)
+                // Unified message dispatch to the bound receiver
                 let selector_atom = message.selector.to_erlang_atom();
                 if matches!(message.selector, MessageSelector::Binary(_)) {
                     return Err(CodeGenError::UnsupportedFeature {
@@ -595,7 +555,10 @@ impl CoreErlangGenerator {
                         location: "cascade message with binary selector".to_string(),
                     });
                 }
-                write!(self.output, "'{selector_atom}', [")?;
+                write!(
+                    self.output,
+                    "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
+                )?;
 
                 // Arguments
                 for (j, arg) in message.arguments.iter().enumerate() {
@@ -605,7 +568,7 @@ impl CoreErlangGenerator {
                     self.generate_expression(arg)?;
                 }
 
-                write!(self.output, "], {future_var}) in {future_var}")?;
+                write!(self.output, "])")?;
 
                 if !is_last {
                     write!(self.output, " in ")?;

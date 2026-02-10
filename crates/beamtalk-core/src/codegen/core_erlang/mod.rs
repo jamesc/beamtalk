@@ -1437,23 +1437,14 @@ end
         assert!(result.is_ok());
 
         let output = &generator.output;
-        // Check async protocol: create future, cast, return future
+        // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
-            output.contains("beamtalk_future':'new'()"),
-            "Should create a future with beamtalk_future:new(). Got: {output}"
-        );
-        assert!(
-            output.contains("beamtalk_actor':'async_send'("),
-            "Should send via beamtalk_actor:async_send(). Got: {output}"
+            output.contains("beamtalk_message_dispatch':'send'("),
+            "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
         );
         assert!(
             output.contains("'increment'"),
             "Should include selector atom. Got: {output}"
-        );
-        // Check that a fresh future variable is used (pattern: _Future + number)
-        assert!(
-            output.contains("_Future") && output.matches("_Future").count() == 3,
-            "Should use a fresh future variable 3 times (bind, send, return). Got: {output}"
         );
     }
 
@@ -1478,14 +1469,10 @@ end
         assert!(result.is_ok());
 
         let output = &generator.output;
-        // Check async protocol
+        // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
-            output.contains("beamtalk_future':'new'()"),
-            "Should create a future. Got: {output}"
-        );
-        assert!(
-            output.contains("beamtalk_actor':'async_send'("),
-            "Should send via beamtalk_actor:async_send(). Got: {output}"
+            output.contains("beamtalk_message_dispatch':'send'("),
+            "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
         );
         assert!(
             output.contains("'foo:bar:'"),
@@ -1615,27 +1602,11 @@ end
 
         let output = &generator.output;
 
-        // Check that we have at least two different _Future variables
-        // (The exact numbers depend on the fresh_var counter state, but they should be different)
-        let has_multiple_futures =
-            output.contains("_Future") && output.matches("_Future").count() >= 6; // At least 2 futures * 3 occurrences each
+        // BT-430: Unified dispatch generates nested beamtalk_message_dispatch:send calls
+        let send_count = output.matches("beamtalk_message_dispatch':'send'(").count();
         assert!(
-            has_multiple_futures,
-            "Nested message sends should use unique future variables. Got: {output}"
-        );
-
-        // Check that we have receiver and pid extraction in the output
-        assert!(
-            output.contains("_Receiver"),
-            "Should have receiver variable. Got: {output}"
-        );
-        assert!(
-            output.contains("_Pid"),
-            "Should have pid variable for message sending. Got: {output}"
-        );
-        assert!(
-            output.contains("call 'erlang':'element'(4,"),
-            "Should extract pid from #beamtalk_object{{}}. Got: {output}"
+            send_count >= 2,
+            "Nested message sends should produce at least 2 dispatch calls. Got {send_count} in: {output}"
         );
     }
 
@@ -2334,8 +2305,8 @@ end
 
     #[test]
     fn test_non_block_message_still_creates_future() {
-        // Regular message sends should still use async protocol
-        // actor increment → should create future
+        // BT-430: Regular message sends now use unified dispatch
+        // actor increment → beamtalk_message_dispatch:send(actor, 'increment', [])
         let mut generator = CoreErlangGenerator::new("test");
 
         let receiver = Expression::Identifier(Identifier::new("actor", Span::new(0, 5)));
@@ -2346,12 +2317,8 @@ end
 
         let output = &generator.output;
         assert!(
-            output.contains("beamtalk_future':'new'()"),
-            "Non-block unary messages should create futures. Got: {output}"
-        );
-        assert!(
-            output.contains("beamtalk_actor':'async_send'("),
-            "Non-block messages should use beamtalk_actor:async_send(). Got: {output}"
+            output.contains("beamtalk_message_dispatch':'send'("),
+            "Non-block unary messages should use unified dispatch. Got: {output}"
         );
     }
 
@@ -2603,7 +2570,7 @@ end
     #[test]
     fn test_dictionary_at_on_identifier() {
         // BT-296: Dictionary methods now go through runtime dispatch
-        // person at: #name -> beamtalk_primitive:send(person, 'at:', ['name'])
+        // BT-430: person at: #name -> beamtalk_message_dispatch:send(person, 'at:', ['name'])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2620,17 +2587,17 @@ end
             .unwrap();
         let output = &generator.output;
 
-        // BT-223: Runtime dispatch checks actor vs primitive
+        // BT-430: Unified dispatch
         assert!(
-            output.contains("beamtalk_primitive") && output.contains("'at:'"),
-            "Should generate runtime dispatch for at:. Got: {output}"
+            output.contains("beamtalk_message_dispatch") && output.contains("'at:'"),
+            "Should generate unified dispatch for at:. Got: {output}"
         );
     }
 
     #[test]
     fn test_dictionary_at_put_on_identifier() {
         // BT-296: Dictionary methods now go through runtime dispatch
-        // person at: #age put: 31 -> beamtalk_primitive:send(person, 'at:put:', ['age', 31])
+        // BT-430: person at: #age put: 31 -> beamtalk_message_dispatch:send(person, 'at:put:', ['age', 31])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2651,15 +2618,15 @@ end
         let output = &generator.output;
 
         assert!(
-            output.contains("beamtalk_primitive") && output.contains("'at:put:'"),
-            "Should generate runtime dispatch for at:put:. Got: {output}"
+            output.contains("beamtalk_message_dispatch") && output.contains("'at:put:'"),
+            "Should generate unified dispatch for at:put:. Got: {output}"
         );
     }
 
     #[test]
     fn test_dictionary_size_on_identifier() {
         // BT-296: Dictionary methods now go through runtime dispatch
-        // person size -> beamtalk_primitive:send(person, 'size', [])
+        // BT-430: person size -> beamtalk_message_dispatch:send(person, 'size', [])
         let mut generator = CoreErlangGenerator::new("test");
         generator.push_scope();
         generator.bind_var("person", "Person");
@@ -2673,8 +2640,8 @@ end
         let output = &generator.output;
 
         assert!(
-            output.contains("beamtalk_primitive") && output.contains("'size'"),
-            "Should generate runtime dispatch for size. Got: {output}"
+            output.contains("beamtalk_message_dispatch") && output.contains("'size'"),
+            "Should generate unified dispatch for size. Got: {output}"
         );
     }
 
@@ -2718,7 +2685,7 @@ end
             "Should bind the underlying receiver x. Got: {output}"
         );
 
-        // Should send BOTH messages (negated AND abs) to the receiver
+        // Should send BOTH messages (negated AND abs) to the receiver via unified dispatch
         assert!(
             output.contains("'negated'"),
             "Should send first message 'negated'. Got: {output}"
@@ -2728,22 +2695,10 @@ end
             "Should send second message 'abs'. Got: {output}"
         );
 
-        // Should use beamtalk_actor:async_send for async message sends with extracted pid
+        // BT-430: Should use unified dispatch for cascade messages
         assert!(
-            output.contains("call 'beamtalk_actor':'async_send'(_Pid"),
-            "Should send messages via async_send to the extracted pid. Got: {output}"
-        );
-
-        // Should extract pid from beamtalk_object record
-        assert!(
-            output.contains("call 'erlang':'element'(4, _Receiver"),
-            "Should extract pid from #beamtalk_object{{}} record. Got: {output}"
-        );
-
-        // Should create futures for async messages
-        assert!(
-            output.contains("call 'beamtalk_future':'new'()"),
-            "Should create futures for async messages. Got: {output}"
+            output.contains("call 'beamtalk_message_dispatch':'send'(_Receiver"),
+            "Should send messages via unified dispatch. Got: {output}"
         );
 
         generator.pop_scope();
