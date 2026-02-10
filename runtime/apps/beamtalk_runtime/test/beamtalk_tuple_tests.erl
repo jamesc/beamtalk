@@ -108,3 +108,42 @@ as_string_test() ->
     ?assertEqual(<<"{hello}">>, beamtalk_tuple_ops:as_string({hello})),
     ?assertEqual(<<"{}">>, beamtalk_tuple_ops:as_string({})).
 
+%%% ============================================================================
+%%% Compiled dispatch integration tests
+%%% Tests via beamtalk_tuple:dispatch/3 (compiled from lib/Tuple.bt)
+%%% to verify BIF mappings are wired correctly end-to-end.
+%%% ============================================================================
+
+dispatch_size_test() ->
+    ?assertEqual(3, beamtalk_tuple:dispatch('size', [], {a, b, c})),
+    ?assertEqual(0, beamtalk_tuple:dispatch('size', [], {})).
+
+dispatch_at_test() ->
+    ?assertEqual(b, beamtalk_tuple:dispatch('at:', [2], {a, b, c})).
+
+dispatch_at_out_of_bounds_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+                 beamtalk_tuple:dispatch('at:', [0], {a, b})).
+
+dispatch_is_ok_test() ->
+    ?assertEqual(true, beamtalk_tuple:dispatch('isOk', [], {ok, 42})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {error, reason})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isOk', [], {a, b})).
+
+dispatch_is_error_test() ->
+    ?assertEqual(true, beamtalk_tuple:dispatch('isError', [], {error, reason})),
+    ?assertEqual(false, beamtalk_tuple:dispatch('isError', [], {ok, 42})).
+
+dispatch_unwrap_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrap', [], {ok, 42})),
+    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
+                 beamtalk_tuple:dispatch('unwrap', [], {error, reason})).
+
+dispatch_unwrap_or_test() ->
+    ?assertEqual(42, beamtalk_tuple:dispatch('unwrapOr:', [default], {ok, 42})),
+    ?assertEqual(default, beamtalk_tuple:dispatch('unwrapOr:', [default], {error, reason})).
+
+dispatch_as_string_test() ->
+    ?assertEqual(<<"{ok, 42}">>, beamtalk_tuple:dispatch('asString', [], {ok, 42})).
+
+
