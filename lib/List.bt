@@ -1,13 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Array - Ordered collection of elements (Erlang linked list)
+// List - Ordered collection of elements (Erlang linked list)
 //
 // Lists in Beamtalk are Erlang linked lists, created with the #() syntax.
-// The runtime class name is 'Array' for historical reasons.
+// Fast prepend (O(1)), sequential access. Use for stack-like and functional patterns.
 // Example: #(1, 2, 3)
 
-sealed Object subclass: Array
+sealed Object subclass: List
   // Access
   size => @primitive 'size'
   isEmpty => @primitive 'isEmpty'
@@ -53,4 +53,4 @@ sealed Object subclass: Array
   add: item => @primitive 'add:'
 
   // Reflection
-  describe => 'an Array'
+  describe => 'a List'

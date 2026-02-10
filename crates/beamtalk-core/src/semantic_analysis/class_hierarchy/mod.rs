@@ -420,7 +420,6 @@ mod tests {
         assert!(h.has_class("Integer"));
         assert!(h.has_class("Float"));
         assert!(h.has_class("String"));
-        assert!(h.has_class("Array"));
         assert!(h.has_class("List"));
         assert!(h.has_class("Dictionary"));
         assert!(h.has_class("Set"));

@@ -200,6 +200,7 @@ fn is_primitive_type(class_name: &str) -> bool {
             | "UndefinedObject"
             | "Block"
             | "Symbol"
+            | "List"
             | "Dictionary"
     )
 }

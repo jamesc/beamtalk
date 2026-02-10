@@ -1,6 +1,6 @@
 # Stdlib Implementation Status
 
-> **Last updated:** 2026-02-09
+> **Last updated:** 2026-02-10
 > **Issue:** BT-247
 > **Methodology:** Audit of `lib/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
 > runtime dispatch modules (`beamtalk_*.erl`), and E2E test coverage (`tests/e2e/cases/*.bt`).
@@ -9,13 +9,13 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 185 |
-| **✅ Implemented** | 183 (98.9%) |
-| **❌ Not Implemented** | 2 (1.1%) |
-| **E2E test coverage** | 67 methods (36.2%) |
+| **Total stdlib methods** | 208 |
+| **✅ Implemented** | 206 (99.0%) |
+| **❌ Not Implemented** | 2 (1.0%) |
+| **E2E test coverage** | 88 methods (42.3%) |
 | **Stdlib .bt files** | 12 |
 | **Runtime-only classes** | 3 (Dictionary, Tuple, CompiledMethod) |
-| **Missing .bt files** | 6 (ProtoObject, Collection, SequenceableCollection, Set, Dictionary, List) |
+| **Missing .bt files** | 4 (ProtoObject, Collection, SequenceableCollection, Set) |
 
 ## Status Categories
 
@@ -146,24 +146,49 @@
 | `describe` | pure BT | ✅ | | N/A |
 | `printString` | pure BT | ✅ | | `String>>printString` |
 
-### Array (`lib/Array.bt`)
+### List (`lib/List.bt`)
 
-**Class:** `Array` — superclass: `Object` — `@sealed`
-**Methods:** 10/10 implemented (100%)
-**Note:** Array in Beamtalk maps to Erlang lists (not tuples). Literal syntax: `#(1, 2, 3)`.
+**Class:** `List` — superclass: `Object` — `@sealed`
+**Methods:** 33/33 implemented (100%)
+**Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
+**Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `lib/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
-| `size` | @primitive selector | ✅ | 🧪 | `Array>>size` |
-| `isEmpty` | @primitive selector | ✅ | 🧪 | `Array>>isEmpty` |
-| `first` | @primitive selector | ✅ | 🧪 | `Array>>first` |
-| `rest` | @primitive selector | ✅ | 🧪 | `Array>>allButFirst` |
-| `do:` | @primitive selector | ✅ | | `Array>>do:` |
-| `collect:` | @primitive selector | ✅ | | `Array>>collect:` |
-| `select:` | @primitive selector | ✅ | | `Array>>select:` |
-| `reject:` | @primitive selector | ✅ | | `Array>>reject:` |
-| `inject:into:` | @primitive selector | ✅ | | `Array>>inject:into:` |
-| `describe` | pure BT | ✅ | | N/A |
+| `size` | @primitive BIF (`erlang:length`) | ✅ | 🧪 | `SequenceableCollection>>size` |
+| `isEmpty` | @primitive BIF (`=:= []`) | ✅ | 🧪 | `Collection>>isEmpty` |
+| `first` | @primitive BIF (`hd`) | ✅ | 🧪 | `SequenceableCollection>>first` |
+| `last` | @primitive BIF (`lists:last`) | ✅ | 🧪 | `SequenceableCollection>>last` |
+| `rest` | @primitive BIF (`tl`) | ✅ | 🧪 | `SequenceableCollection>>allButFirst` |
+| `at:` | @primitive → `beamtalk_list_ops:at/2` | ✅ | 🧪 | `SequenceableCollection>>at:` |
+| `includes:` | @primitive BIF (`lists:member`) | ✅ | 🧪 | `Collection>>includes:` |
+| `add:` | @primitive BIF (prepend `[Arg\|Self]`) | ✅ | 🧪 | `OrderedCollection>>add:` |
+| `sort` | @primitive BIF (`lists:sort`) | ✅ | 🧪 | `SequenceableCollection>>sort` |
+| `sort:` | @primitive → `beamtalk_list_ops:sort_with/2` | ✅ | 🧪 | `SequenceableCollection>>sort:` |
+| `reversed` | @primitive BIF (`lists:reverse`) | ✅ | 🧪 | `SequenceableCollection>>reversed` |
+| `unique` | @primitive BIF (`lists:usort`) | ✅ | 🧪 | `Collection>>asSet asArray` |
+| `flatten` | @primitive BIF (`lists:flatten`) | ✅ | 🧪 | `Collection>>flattened` |
+| `do:` | @primitive → `beamtalk_list_ops:do/2` | ✅ | 🧪 | `Collection>>do:` |
+| `collect:` | @primitive BIF (`lists:map`) | ✅ | 🧪 | `Collection>>collect:` |
+| `select:` | @primitive BIF (`lists:filter`) | ✅ | 🧪 | `Collection>>select:` |
+| `reject:` | @primitive → `beamtalk_list_ops:reject/2` | ✅ | 🧪 | `Collection>>reject:` |
+| `inject:into:` | @primitive BIF (`lists:foldl`) | ✅ | 🧪 | `Collection>>inject:into:` |
+| `detect:` | @primitive → `beamtalk_list_ops:detect/2` | ✅ | 🧪 | `Collection>>detect:` |
+| `detect:ifNone:` | @primitive → `beamtalk_list_ops:detect_if_none/3` | ✅ | | `Collection>>detect:ifNone:` |
+| `flatMap:` | @primitive BIF (`lists:flatmap`) | ✅ | 🧪 | `Collection>>flatCollect:` |
+| `count:` | @primitive BIF (foldl count) | ✅ | 🧪 | `Collection>>count:` |
+| `anySatisfy:` | @primitive BIF (`lists:any`) | ✅ | 🧪 | `Collection>>anySatisfy:` |
+| `allSatisfy:` | @primitive BIF (`lists:all`) | ✅ | 🧪 | `Collection>>allSatisfy:` |
+| `take:` | @primitive → `beamtalk_list_ops:take/2` | ✅ | 🧪 | `SequenceableCollection>>first:` |
+| `drop:` | @primitive → `beamtalk_list_ops:drop/2` | ✅ | 🧪 | `SequenceableCollection>>allButFirst:` |
+| `takeWhile:` | @primitive BIF (`lists:takewhile`) | ✅ | 🧪 | N/A |
+| `dropWhile:` | @primitive BIF (`lists:dropwhile`) | ✅ | 🧪 | N/A |
+| `zip:` | @primitive → `beamtalk_list_ops:zip/2` | ✅ | 🧪 | `SequenceableCollection>>with:collect:` |
+| `groupBy:` | @primitive → `beamtalk_list_ops:group_by/2` | ✅ | 🧪 | `Collection>>groupedBy:` |
+| `partition:` | @primitive → `beamtalk_list_ops:partition/2` | ✅ | 🧪 | `Collection>>partition:` |
+| `intersperse:` | @primitive → `beamtalk_list_ops:intersperse/2` | ✅ | 🧪 | N/A |
+| `describe` | @primitive BIF | ✅ | | N/A |
+| `printString` | @primitive BIF | ✅ | | N/A |
 
 ### Block (`lib/Block.bt`)
 
@@ -409,27 +434,15 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 | `asSymbol` | ❌ Not defined | Low |
 | `match:` | ❌ Not defined | Low |
 
-### Array / Collection
+### List / Collection
 
 | Pharo Method | Beamtalk Equivalent | Priority |
 |-------------|---------------------|----------|
-| `add:` | ❌ Not defined | High |
 | `remove:` | ❌ Not defined | Medium |
-| `sort` | ❌ Not defined | High |
-| `sort:` | ❌ Not defined | High |
-| `reversed` | ❌ Not defined | Medium |
 | `asSet` | ❌ Not defined | Low |
 | `asDictionary` | ❌ Not defined | Low |
-| `detect:` | ❌ Not defined | High |
-| `detect:ifNone:` | ❌ Not defined | High |
-| `anySatisfy:` | ❌ Not defined | Medium |
-| `allSatisfy:` | ❌ Not defined | Medium |
-| `count:` | ❌ Not defined | Medium |
 | `with:collect:` | ❌ Not defined | Low |
-| `at:` | ❌ Not defined (lists are linked — access by index is O(n)) | Medium |
-| `at:put:` | ❌ Not defined | Low |
-| `last` | ❌ Not defined | Medium |
-| `includes:` | ❌ Not defined | High |
+| `at:put:` | ❌ Not defined (lists are immutable linked lists) | Low |
 
 ### Block
 
@@ -460,7 +473,6 @@ These classes are either referenced in the original issue or have runtime suppor
 | `SequenceableCollection` | ❌ No `.bt` file | N/A (abstract) | Low |
 | `Set` | ❌ No `.bt` file | No runtime support | Low |
 | `Dictionary` | ✅ `lib/Dictionary.bt` | `beamtalk_dictionary` compiled stdlib | Done (BT-418) |
-| `List` | ❌ No `.bt` file | `beamtalk_list.erl` handles Array dispatch | Low |
 
 ---
 
@@ -475,7 +487,7 @@ Methods with no E2E test coverage that should be tested:
 | **Integer** | `%`, `**`, `<`, `>`, `<=`, `>=`, `isPositive`, `isNegative`, `min:`, `max:`, `timesRepeat:`, `to:do:`, `to:by:do:`, `asFloat`, `asString`, `printString` |
 | **Float** | ALL methods (0/17 E2E coverage) |
 | **String** | `<`, `>`, `<=`, `>=`, `,`, `size`, `at:`, `uppercase`, `lowercase`, `capitalize`, `trim`, `trimLeft`, `trimRight`, `reverse`, `includes:`, `startsWith:`, `endsWith:`, `indexOf:`, `split:`, `splitOn:`, `repeat:`, `isNotEmpty`, `asInteger`, `asFloat`, `asAtom`, `asList`, `each:`, `collect:`, `select:` |
-| **Array** | `do:`, `collect:`, `select:`, `reject:`, `inject:into:` |
+| **List** | `detect:ifNone:`, `describe`, `printString` |
 | **Block** | `whileFalse:`, `repeat`, `arity` |
 | **Dictionary** | `describe` (literal, no E2E needed) |
 | **Tuple** | ALL methods (0 E2E coverage) |

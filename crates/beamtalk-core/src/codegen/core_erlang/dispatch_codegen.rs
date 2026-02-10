@@ -999,7 +999,7 @@ fn class_method_module_name(class_name: &str) -> String {
 fn is_bt_stdlib_class(class_name: &str) -> bool {
     matches!(
         class_name,
-        "ProtoObject" | "Object" | "Actor" | "Array" | "SystemDictionary" | "TranscriptStream"
+        "ProtoObject" | "Object" | "Actor" | "SystemDictionary" | "TranscriptStream"
     )
 }
 
@@ -1053,6 +1053,6 @@ mod tests {
         );
         assert_eq!(class_method_module_name("Object"), "bt_stdlib_object");
         assert_eq!(class_method_module_name("Actor"), "bt_stdlib_actor");
-        assert_eq!(class_method_module_name("Array"), "bt_stdlib_array");
+        assert_eq!(class_method_module_name("Array"), "array");
     }
 }
