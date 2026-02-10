@@ -1,0 +1,165 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%% @doc Runtime helper for complex List operations.
+%%
+%% Provides implementations for List methods that require custom logic
+%% beyond simple BIF calls (bounds checking, error formatting, iteration).
+%%
+%% BT-419: Created as part of Array→List rename and compiled stdlib migration.
+-module(beamtalk_list_ops).
+
+-export([at/2, detect/2, detect_if_none/3, do/2, reject/2,
+         zip/2, group_by/2, partition/2, intersperse/2,
+         take/2, drop/2, sort_with/2]).
+
+-include("beamtalk.hrl").
+
+%% @doc Access element at 1-based index with bounds checking.
+-spec at(list(), term()) -> term().
+at(List, N) when is_list(List), not is_integer(N) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Index must be a positive integer, got: ~p", [N])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2);
+at(List, N) when is_list(List), is_integer(N), N =< 0 ->
+    Error0 = beamtalk_error:new(does_not_understand, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Index ~p is out of bounds (must be >= 1)", [N])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2);
+at(List, N) when is_list(List), is_integer(N), N >= 1 ->
+    try
+        lists:nth(N, List)
+    catch
+        error:badarg ->
+            Error0 = beamtalk_error:new(does_not_understand, 'List'),
+            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+            Hint = iolist_to_binary(
+                io_lib:format("Index ~p is out of bounds", [N])),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            error(Error2);
+        error:function_clause ->
+            Error0 = beamtalk_error:new(does_not_understand, 'List'),
+            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
+            Hint = iolist_to_binary(
+                io_lib:format("Index ~p is out of bounds", [N])),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            error(Error2)
+    end.
+
+%% @doc Find first element matching block, error if not found.
+-spec detect(list(), function()) -> term().
+detect(List, Block) when is_list(List), is_function(Block, 1) ->
+    case detect_helper(Block, List) of
+        {ok, Found} -> Found;
+        not_found ->
+            Error0 = beamtalk_error:new(does_not_understand, 'List'),
+            Error1 = beamtalk_error:with_selector(Error0, 'detect:'),
+            Error2 = beamtalk_error:with_hint(Error1, <<"No element matched the block">>),
+            error(Error2)
+    end.
+
+%% @doc Find first element matching block, return default if not found.
+-spec detect_if_none(list(), function(), term()) -> term().
+detect_if_none(List, Block, Default) when is_list(List), is_function(Block, 1) ->
+    case detect_helper(Block, List) of
+        {ok, Found} -> Found;
+        not_found when is_function(Default, 0) -> Default();
+        not_found -> Default
+    end.
+
+%% @doc Iterate over elements with side effects.
+-spec do(list(), function()) -> nil.
+do(List, Block) when is_list(List), is_function(Block, 1) ->
+    lists:foreach(Block, List),
+    nil.
+
+%% @doc Filter out elements matching block.
+-spec reject(list(), function()) -> list().
+reject(List, Block) when is_list(List), is_function(Block, 1) ->
+    lists:filter(fun(Item) -> not Block(Item) end, List).
+
+%% @doc Take N elements with validation.
+-spec take(list(), term()) -> list().
+take(List, N) when is_list(List), (not is_integer(N)) orelse N < 0 ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'take:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Argument must be a non-negative integer, got: ~p", [N])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2);
+take(List, N) when is_list(List), is_integer(N), N >= 0 ->
+    lists:sublist(List, N).
+
+%% @doc Drop N elements with validation.
+-spec drop(list(), term()) -> list().
+drop(List, N) when is_list(List), (not is_integer(N)) orelse N < 0 ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'drop:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Argument must be a non-negative integer, got: ~p", [N])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2);
+drop(List, N) when is_list(List), is_integer(N), N >= 0 ->
+    safe_nthtail(N, List).
+
+%% @doc Sort with comparator block, with validation.
+-spec sort_with(list(), term()) -> list().
+sort_with(List, Block) when is_list(List), is_function(Block, 2) ->
+    lists:sort(Block, List);
+sort_with(_List, Block) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'sort:'),
+    Hint = iolist_to_binary(
+        io_lib:format("sort: expects a 2-argument block, got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
+
+%% @doc Zip two lists into a list of maps #{key => K, value => V}.
+-spec zip(list(), list()) -> list().
+zip(List, Other) when is_list(List), is_list(Other) ->
+    zip_to_maps(List, Other).
+
+%% @doc Group elements by block result into a map.
+-spec group_by(list(), function()) -> map().
+group_by(List, Block) when is_list(List), is_function(Block, 1) ->
+    Map0 = lists:foldl(fun(Item, Acc) ->
+        Key = Block(Item),
+        Existing = maps:get(Key, Acc, []),
+        maps:put(Key, [Item | Existing], Acc)
+    end, #{}, List),
+    maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map0).
+
+%% @doc Partition list into matching and non-matching.
+-spec partition(list(), function()) -> map().
+partition(List, Block) when is_list(List), is_function(Block, 1) ->
+    {Matching, NonMatching} = lists:partition(Block, List),
+    #{<<"matching">> => Matching, <<"nonMatching">> => NonMatching}.
+
+%% @doc Intersperse separator between elements.
+-spec intersperse(list(), term()) -> list().
+intersperse([], _Sep) -> [];
+intersperse([X], _Sep) -> [X];
+intersperse([H | T], Sep) -> [H, Sep | intersperse(T, Sep)].
+
+%% Internal helpers
+
+detect_helper(_Block, []) -> not_found;
+detect_helper(Block, [H | T]) ->
+    case Block(H) of
+        true -> {ok, H};
+        _ -> detect_helper(Block, T)
+    end.
+
+safe_nthtail(0, List) -> List;
+safe_nthtail(_, []) -> [];
+safe_nthtail(N, [_ | T]) -> safe_nthtail(N - 1, T).
+
+zip_to_maps([], _) -> [];
+zip_to_maps(_, []) -> [];
+zip_to_maps([H1 | T1], [H2 | T2]) ->
+    [#{<<"key">> => H1, <<"value">> => H2} | zip_to_maps(T1, T2)].

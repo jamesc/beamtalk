@@ -313,6 +313,7 @@ impl CoreErlangGenerator {
                 | "UndefinedObject"
                 | "Block"
                 | "Symbol"
+                | "List"
         )
     }
 
@@ -326,7 +327,6 @@ impl CoreErlangGenerator {
             "Object"
                 | "Number"
                 | "Actor"
-                | "Array"
                 | "File"
                 | "SystemDictionary"
                 | "TranscriptStream"
