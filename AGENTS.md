@@ -1457,6 +1457,7 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 | `do-refactor` | `/do-refactor` | Execute a refactoring epic: all issues on one branch, CI after each |
 | **Review** | | |
 | `review-code` | `/review-code` | 3-pass code review: diff, system, adversarial (different model) |
+| `review-adr` | `/review-adr` | 3-pass ADR review: structural, reasoning, adversarial |
 
 ### Skill Locations
 
