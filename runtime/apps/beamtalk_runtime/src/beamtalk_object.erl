@@ -147,6 +147,14 @@ dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
 
+%% BT-405: Abstract method contract — mirrors Object.bt pure method body
+%% Runtime clause needed until compiled stdlib dispatch is wired up
+dispatch(subclassResponsibility, [], _Self, State) ->
+    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+    Error0 = beamtalk_error:new(user_error, ClassName),
+    Error1 = beamtalk_error:with_message(Error0, <<"This method is abstract and must be overridden by a subclass">>),
+    {error, Error1, State};
+
 %% --- Fallback: method not found ---
 
 dispatch(Selector, _Args, _Self, State) ->
@@ -172,6 +180,7 @@ has_method(yourself) -> true;
 has_method(hash) -> true;
 has_method(isNil) -> true;
 has_method(notNil) -> true;
+has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
 
 %% @private
