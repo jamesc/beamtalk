@@ -236,13 +236,28 @@ coverage-e2e: _clean-daemon-state
         exit 1
     fi
 
-# Generate combined Erlang coverage (eunit + E2E)
-# Runs eunit with --cover, then E2E with cover, then merges both into one report.
-coverage-combined: coverage-runtime coverage-e2e
+# Collect stdlib test coverage (runs stdlib tests with Erlang cover instrumentation)
+coverage-stdlib: build-rust build-erlang build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Running stdlib tests with Erlang cover instrumentation..."
+    echo "   (This is slower than normal stdlib tests due to cover overhead)"
+    STDLIB_COVER=1 cargo run --bin beamtalk --quiet -- test-stdlib || true
+    if [ -f runtime/_build/test/cover/stdlib.coverdata ]; then
+        SIZE=$(wc -c < runtime/_build/test/cover/stdlib.coverdata)
+        echo "  📁 Coverdata: runtime/_build/test/cover/stdlib.coverdata (${SIZE} bytes)"
+    else
+        echo "⚠️  No stdlib coverdata produced"
+        exit 1
+    fi
+
+# Generate combined Erlang coverage (eunit + E2E + stdlib)
+# Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
+coverage-combined: coverage-runtime coverage-e2e coverage-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
-    echo "📊 Merging eunit + E2E coverage data..."
+    echo "📊 Merging eunit + E2E + stdlib coverage data..."
     # rebar3 cover imports all .coverdata files in _build/test/cover/
     rebar3 cover --verbose
     rebar3 covertool generate
