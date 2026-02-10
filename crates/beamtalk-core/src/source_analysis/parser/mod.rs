@@ -111,6 +111,7 @@ impl BindingPower {
 /// | Level | Operators | Associativity |
 /// |-------|-----------|---------------|
 /// | 5  | `>>`                | Left |
+/// | 8  | `->`                | Left |
 /// | 10 | `=` `~=`            | Left |
 /// | 20 | `<` `>` `<=` `>=`   | Left |
 /// | 30 | `+` `-`             | Left |

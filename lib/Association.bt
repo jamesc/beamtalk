@@ -8,9 +8,9 @@
 //
 // Usage:
 //   a := #name -> 'James'
-//   a key        // => #name
-//   a value      // => 'James'
-//   a asString   // => "#name -> James"
+//   a key        // => name
+//   a value      // => James
+//   a asString   // => #name -> James
 
 sealed Object subclass: Association
   key => @primitive 'key'

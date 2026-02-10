@@ -68,7 +68,7 @@ impl CoreErlangGenerator {
                     write!(
                         self.output,
                         " in case call 'erlang':'is_function'({recv_var}) of \
-                         'true' when 'true' -> apply {recv_var}() \
+                         'true' when 'true' -> apply {recv_var} () \
                          'false' when 'true' -> \
                          call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
                     )?;
