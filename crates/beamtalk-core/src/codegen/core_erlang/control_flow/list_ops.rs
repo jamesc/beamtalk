@@ -161,9 +161,12 @@ impl CoreErlangGenerator {
         body: &Expression,
     ) -> Result<()> {
         // list reject: is opposite of filter - we need to negate the predicate
+        // BT-416: Add runtime is_list guard for non-list receivers
         // Generate: let List = ... in let Body = ... in
-        //           let Wrapper = fun(X) -> not Body(X) in
-        //           lists:filter(Wrapper, List)
+        //           case is_list(List) of
+        //             true -> let Wrapper = fun(X) -> not Body(X) in lists:filter(Wrapper, List)
+        //             false -> beamtalk_primitive:send(List, 'reject:', [Body])
+        //           end
 
         write!(self.output, "let ")?;
         let list_var = self.fresh_temp_var("temp");
@@ -175,17 +178,20 @@ impl CoreErlangGenerator {
         write!(self.output, "{body_var} = ")?;
         self.generate_expression(body)?;
 
+        write!(
+            self.output,
+            " in case call 'erlang':'is_list'({list_var}) of \
+             <'true'> when 'true' -> "
+        )?;
+
         // Bind the negation wrapper to a variable (Core Erlang requires this)
-        write!(self.output, " in let ")?;
         let wrapper_var = self.fresh_temp_var("temp");
         write!(
             self.output,
-            "{wrapper_var} = fun (X) -> call 'erlang':'not'(apply {body_var} (X))"
-        )?;
-
-        write!(
-            self.output,
-            " in call 'lists':'filter'({wrapper_var}, {list_var})"
+            "let {wrapper_var} = fun (X) -> call 'erlang':'not'(apply {body_var} (X)) \
+             in call 'lists':'filter'({wrapper_var}, {list_var}) \
+             <'false'> when 'true' -> \
+             call 'beamtalk_primitive':'send'({list_var}, 'reject:', [{body_var}]) end"
         )?;
 
         Ok(())
@@ -197,8 +203,19 @@ impl CoreErlangGenerator {
         body: &Expression,
         operation: &str,
     ) -> Result<()> {
-        // Generate: let List = <receiver> in let Body = <body> in
-        //           call 'lists':<operation>(Body, List)
+        // BT-416: Map Erlang list operation to Beamtalk selector for runtime fallback
+        let selector = match operation {
+            "foreach" => "do:",
+            "map" => "collect:",
+            "filter" => "select:",
+            _ => operation,
+        };
+
+        // Generate: let Recv = <receiver> in let Body = <body> in
+        //           case call 'erlang':'is_list'(Recv) of
+        //             <'true'>  -> call 'lists':<operation>(Body, Recv)
+        //             <'false'> -> call 'beamtalk_primitive':'send'(Recv, '<selector>', [Body])
+        //           end
 
         write!(self.output, "let ")?;
         let list_var = self.fresh_temp_var("temp");
@@ -212,7 +229,11 @@ impl CoreErlangGenerator {
 
         write!(
             self.output,
-            " in call 'lists':'{operation}'({body_var}, {list_var})"
+            " in case call 'erlang':'is_list'({list_var}) of \
+             <'true'> when 'true' -> \
+             call 'lists':'{operation}'({body_var}, {list_var}) \
+             <'false'> when 'true' -> \
+             call 'beamtalk_primitive':'send'({list_var}, '{selector}', [{body_var}]) end"
         )?;
 
         Ok(())
