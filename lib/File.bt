@@ -9,10 +9,10 @@
 
 Object subclass: File
   // File existence check
-  sealed exists: path => @primitive 'exists:'
+  class sealed exists: path => @primitive 'exists:'
 
   // Read operations
-  sealed readAll: path => @primitive 'readAll:'
+  class sealed readAll: path => @primitive 'readAll:'
 
   // Write operations
-  sealed writeAll: path contents: text => @primitive 'writeAll:contents:'
+  class sealed writeAll: path contents: text => @primitive 'writeAll:contents:'
