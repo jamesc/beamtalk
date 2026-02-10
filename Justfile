@@ -109,6 +109,12 @@ test-e2e: build-stdlib _clean-daemon-state
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-e2e test-runtime
 
+# Run compiled stdlib tests (ADR 0014 Phase 1, ~2s)
+test-stdlib: build-rust build-erlang build-stdlib
+    @echo "🧪 Running stdlib tests..."
+    @cargo run --bin beamtalk --quiet -- test-stdlib
+    @echo "✅ Stdlib tests complete"
+
 # Clean up stale daemon state (internal helper)
 _clean-daemon-state:
     @rm -f ~/.beamtalk/daemon.sock ~/.beamtalk/daemon.lock 2>/dev/null || true

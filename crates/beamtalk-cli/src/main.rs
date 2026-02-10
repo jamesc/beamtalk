@@ -112,6 +112,13 @@ enum Command {
         #[command(subcommand)]
         action: commands::workspace::cli::WorkspaceCommand,
     },
+
+    /// Run compiled stdlib tests (ADR 0014 Phase 1)
+    TestStdlib {
+        /// Directory containing .bt test files
+        #[arg(default_value = "tests/stdlib")]
+        path: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -180,6 +187,7 @@ fn main() -> Result<()> {
         }
         Command::Daemon { action } => commands::daemon::run(action),
         Command::Workspace { action } => commands::workspace::cli::run(action),
+        Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
     };
 
     // Exit with appropriate code

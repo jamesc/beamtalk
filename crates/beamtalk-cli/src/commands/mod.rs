@@ -10,5 +10,6 @@ pub mod new;
 pub mod protocol;
 pub mod repl;
 pub mod run;
+pub mod test_stdlib;
 pub mod transcript;
 pub mod workspace;
