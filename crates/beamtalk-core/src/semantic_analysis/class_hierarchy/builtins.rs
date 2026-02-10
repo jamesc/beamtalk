@@ -240,32 +240,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
-    // Array (sealed)
-    classes.insert(
-        "Array".into(),
-        ClassInfo {
-            name: "Array".into(),
-            superclass: Some("Object".into()),
-            is_sealed: true,
-            is_abstract: false,
-            state: vec![],
-            methods: vec![
-                builtin_method("size", 0, "Array"),
-                builtin_method("at:", 1, "Array"),
-                builtin_method("at:put:", 2, "Array"),
-                builtin_method("++", 1, "Array"),
-                builtin_method("=", 1, "Array"),
-                builtin_method("each:", 1, "Array"),
-                builtin_method("collect:", 1, "Array"),
-                builtin_method("select:", 1, "Array"),
-                builtin_method("inject:into:", 2, "Array"),
-                builtin_method("asList", 0, "Array"),
-                builtin_method("asSet", 0, "Array"),
-            ],
-        },
-    );
-
-    // List (sealed)
+    // List (sealed) — Erlang linked list
     classes.insert(
         "List".into(),
         ClassInfo {
@@ -276,19 +251,38 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             methods: vec![
                 builtin_method("size", 0, "List"),
-                builtin_method("head", 0, "List"),
-                builtin_method("tail", 0, "List"),
+                builtin_method("isEmpty", 0, "List"),
+                builtin_method("first", 0, "List"),
+                builtin_method("rest", 0, "List"),
+                builtin_method("last", 0, "List"),
                 builtin_method("at:", 1, "List"),
-                builtin_method("++", 1, "List"),
-                builtin_method("prepend:", 1, "List"),
-                builtin_method("=", 1, "List"),
-                builtin_method("each:", 1, "List"),
+                builtin_method("includes:", 1, "List"),
+                builtin_method("sort", 0, "List"),
+                builtin_method("sort:", 1, "List"),
+                builtin_method("reversed", 0, "List"),
+                builtin_method("unique", 0, "List"),
+                builtin_method("detect:", 1, "List"),
+                builtin_method("detect:ifNone:", 2, "List"),
+                builtin_method("do:", 1, "List"),
                 builtin_method("collect:", 1, "List"),
                 builtin_method("select:", 1, "List"),
+                builtin_method("reject:", 1, "List"),
                 builtin_method("inject:into:", 2, "List"),
-                builtin_method("reversed", 0, "List"),
-                builtin_method("asArray", 0, "List"),
-                builtin_method("asSet", 0, "List"),
+                builtin_method("take:", 1, "List"),
+                builtin_method("drop:", 1, "List"),
+                builtin_method("flatten", 0, "List"),
+                builtin_method("flatMap:", 1, "List"),
+                builtin_method("count:", 1, "List"),
+                builtin_method("anySatisfy:", 1, "List"),
+                builtin_method("allSatisfy:", 1, "List"),
+                builtin_method("zip:", 1, "List"),
+                builtin_method("groupBy:", 1, "List"),
+                builtin_method("partition:", 1, "List"),
+                builtin_method("takeWhile:", 1, "List"),
+                builtin_method("dropWhile:", 1, "List"),
+                builtin_method("intersperse:", 1, "List"),
+                builtin_method("add:", 1, "List"),
+                builtin_method("=", 1, "List"),
             ],
         },
     );

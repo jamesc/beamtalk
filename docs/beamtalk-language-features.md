@@ -961,8 +961,8 @@ Core classes implemented and tested:
 | **Boolean** | ✅ Implemented | `True` and `False` with control flow | `stdlib_boolean` |
 | **Integer** | ✅ Implemented | Arbitrary precision arithmetic | `stdlib_integer` |
 | **String** | ✅ Implemented | UTF-8 text with operations | `stdlib_string`, `string_operations` |
-| **Array** | ✅ Implemented | Fixed-size indexed collection (tuple) | `stdlib_array` |
-| **List** | ✅ Implemented | Linked list with fast prepend | `stdlib_list` |
+| **Array** | 🔮 Planned | Fixed-size indexed collection (tuple-backed, O(1) access) | — |
+| **List** | ✅ Implemented | Linked list with fast prepend (`#()` syntax) | `stdlib_list`, `collections` |
 | **Dictionary** | ✅ Implemented | Key-value map | `stdlib_dictionary`, `map_literals` |
 | **Set** | ✅ Implemented | Unordered unique elements | `stdlib_set` |
 | **Nil** | ✅ Implemented | Null object pattern | `stdlib_nil`, `stdlib_nil_object` |

@@ -48,11 +48,11 @@ class_of_symbol_test() ->
     ?assertEqual('Symbol', beamtalk_primitive:class_of('hello')),
     ?assertEqual('Symbol', beamtalk_primitive:class_of('with_underscores')).
 
-class_of_array_test() ->
-    ?assertEqual('Array', beamtalk_primitive:class_of([])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([1, 2, 3])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([a, b, c])),
-    ?assertEqual('Array', beamtalk_primitive:class_of([[1], [2], [3]])).
+class_of_list_test() ->
+    ?assertEqual('List', beamtalk_primitive:class_of([])),
+    ?assertEqual('List', beamtalk_primitive:class_of([1, 2, 3])),
+    ?assertEqual('List', beamtalk_primitive:class_of([a, b, c])),
+    ?assertEqual('List', beamtalk_primitive:class_of([[1], [2], [3]])).
 
 class_of_dictionary_test() ->
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
@@ -257,12 +257,12 @@ class_of_special_atoms_test() ->
 
 class_of_empty_collections_test() ->
     ?assertEqual('String', beamtalk_primitive:class_of(<<>>)),
-    ?assertEqual('Array', beamtalk_primitive:class_of([])),
+    ?assertEqual('List', beamtalk_primitive:class_of([])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({})).
 
 class_of_nested_structures_test() ->
-    ?assertEqual('Array', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
+    ?assertEqual('List', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
     ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => #{nested => value}})),
     ?assertEqual('Tuple', beamtalk_primitive:class_of({{a, b}, {c, d}})).
 
