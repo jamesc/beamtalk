@@ -129,10 +129,14 @@ impl CoreErlangGenerator {
         // This creates a new actor instance via gen_server:start_link
         // BT-246: Only match ClassReference, not Identifier. Variables holding class
         // objects (e.g. `cls spawn`) must go through runtime dispatch path.
+        // BT-411: In workspace mode, ClassReference spawns go through class_send
+        // to use the correct module name from the class registry.
         if let MessageSelector::Unary(name) = selector {
             if name == "spawn" && arguments.is_empty() {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    return self.generate_actor_spawn(&name.name, None);
+                if !self.workspace_mode {
+                    if let Expression::ClassReference { name, .. } = receiver {
+                        return self.generate_actor_spawn(&name.name, None);
+                    }
                 }
             }
 
@@ -159,10 +163,13 @@ impl CoreErlangGenerator {
         // This creates a new actor instance with initialization arguments
         // BT-246: Only match ClassReference, not Identifier. Variables holding class
         // objects (e.g. `cls spawnWith: args`) must go through runtime dispatch path.
+        // BT-411: In workspace mode, use class_send for correct module resolution.
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
+                if !self.workspace_mode {
+                    if let Expression::ClassReference { name, .. } = receiver {
+                        return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
+                    }
                 }
             }
 
@@ -957,10 +964,20 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        let module_name = class_method_module_name(class_name);
-        let method_name = selector.to_erlang_atom();
+        let selector_atom = selector.to_erlang_atom();
+        let class_pid_var = self.fresh_var("ClassPid");
 
-        write!(self.output, "call '{module_name}':'{method_name}'(")?;
+        // Look up the class process by name and dispatch via class_send/3.
+        // This handles both built-in class methods (new, methods, superclass)
+        // and user-defined class methods (BT-411).
+        write!(
+            self.output,
+            "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+        )?;
+        write!(
+            self.output,
+            "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+        )?;
 
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
@@ -969,7 +986,7 @@ impl CoreErlangGenerator {
             self.generate_expression(arg)?;
         }
 
-        write!(self.output, ")")?;
+        write!(self.output, "])")?;
 
         Ok(())
     }
@@ -981,6 +998,7 @@ impl CoreErlangGenerator {
 /// class names produce module names that conflict with Erlang stdlib modules
 /// (use `beamtalk_` prefix), and non-primitive stdlib classes compiled from
 /// `lib/*.bt` use the `bt_stdlib_` prefix.
+#[cfg(test)]
 fn class_method_module_name(class_name: &str) -> String {
     let module = to_module_name(class_name);
     if is_erlang_stdlib_module(&module) {
@@ -996,6 +1014,7 @@ fn class_method_module_name(class_name: &str) -> String {
 ///
 /// These classes are compiled by `build_stdlib` with a `bt_stdlib_` prefix
 /// to distinguish them from user-defined classes.
+#[cfg(test)]
 fn is_bt_stdlib_class(class_name: &str) -> bool {
     matches!(
         class_name,
@@ -1007,6 +1026,7 @@ fn is_bt_stdlib_class(class_name: &str) -> bool {
 ///
 /// When a Beamtalk class name (e.g., `File`) converts to an Erlang stdlib module
 /// name (e.g., `file`), we must prefix with `beamtalk_` to avoid collisions.
+#[cfg(test)]
 fn is_erlang_stdlib_module(name: &str) -> bool {
     matches!(
         name,

@@ -3530,7 +3530,7 @@ end
             "Workspace binding should use async_send. Got:\n{code}"
         );
 
-        // Test 2: Non-binding class (Counter) generates direct function call in REPL
+        // Test 2: Non-binding class (Point) dispatches via class_send in REPL
         let expr2 = Expression::MessageSend {
             receiver: Box::new(Expression::ClassReference {
                 name: Identifier::new("Point", Span::new(0, 5)),
@@ -3544,13 +3544,36 @@ end
         let code2 = generate_repl_expression(&expr2, "repl_eval2")
             .expect("codegen should succeed for non-binding class");
 
+        // BT-411: Non-binding classes now use class_send for both built-in
+        // and user-defined class methods
         assert!(
-            code2.contains("call 'point':'new'()"),
-            "Non-binding class should generate direct function call. Got:\n{code2}"
+            code2.contains("whereis_class") && code2.contains("class_send"),
+            "Non-binding class should use class_send dispatch. Got:\n{code2}"
         );
         assert!(
             !code2.contains("persistent_term"),
             "Non-binding class should NOT use persistent_term. Got:\n{code2}"
+        );
+
+        // Test 3: ClassReference spawn in REPL uses class_send (BT-411)
+        let expr3 = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("InitCounter", Span::new(0, 11)),
+                span: Span::new(0, 11),
+            }),
+            selector: MessageSelector::Unary("spawn".into()),
+            arguments: vec![],
+            span: Span::new(0, 17),
+        };
+
+        let code3 = generate_repl_expression(&expr3, "repl_eval3")
+            .expect("codegen should succeed for spawn");
+
+        // BT-411: In REPL mode, spawn on ClassReference goes through class_send
+        // to use the correct module name from the class registry
+        assert!(
+            code3.contains("class_send") && code3.contains("whereis_class"),
+            "REPL spawn should use class_send for correct module resolution. Got:\n{code3}"
         );
     }
 
