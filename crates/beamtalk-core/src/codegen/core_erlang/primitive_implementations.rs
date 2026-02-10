@@ -725,7 +725,11 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
         "from:to:" => {
             let p0 = params.first().map_or("_Start", String::as_str);
             let p1 = params.get(1).map_or("_End", String::as_str);
-            write!(output, "call 'beamtalk_list_ops':'from_to'(Self, {p0}, {p1})").ok()?;
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'from_to'(Self, {p0}, {p1})"
+            )
+            .ok()?;
             Some(())
         }
         "indexOf:" => {
@@ -736,7 +740,11 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
         // Iteration with index
         "eachWithIndex:" => {
             let p0 = params.first().map_or("_Block", String::as_str);
-            write!(output, "call 'beamtalk_list_ops':'each_with_index'(Self, {p0})").ok()?;
+            write!(
+                output,
+                "call 'beamtalk_list_ops':'each_with_index'(Self, {p0})"
+            )
+            .ok()?;
             Some(())
         }
         // Reflection
