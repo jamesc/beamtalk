@@ -61,7 +61,14 @@ detect(List, Block) when is_list(List), is_function(Block, 1) ->
             Error1 = beamtalk_error:with_selector(Error0, 'detect:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"No element matched the block">>),
             error(Error2)
-    end.
+    end;
+detect(List, Block) when is_list(List) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'detect:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Find first element matching block, return default if not found.
 -spec detect_if_none(list(), function(), term()) -> term().
@@ -70,18 +77,39 @@ detect_if_none(List, Block, Default) when is_list(List), is_function(Block, 1) -
         {ok, Found} -> Found;
         not_found when is_function(Default, 0) -> Default();
         not_found -> Default
-    end.
+    end;
+detect_if_none(List, Block, _Default) when is_list(List) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'detect:ifNone:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Iterate over elements with side effects.
 -spec do(list(), function()) -> nil.
 do(List, Block) when is_list(List), is_function(Block, 1) ->
     lists:foreach(Block, List),
-    nil.
+    nil;
+do(List, Block) when is_list(List) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'do:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Filter out elements matching block.
 -spec reject(list(), function()) -> list().
 reject(List, Block) when is_list(List), is_function(Block, 1) ->
-    lists:filter(fun(Item) -> not Block(Item) end, List).
+    lists:filter(fun(Item) -> not Block(Item) end, List);
+reject(List, Block) when is_list(List) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'reject:'),
+    Hint = iolist_to_binary(
+        io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Take N elements with validation.
 -spec take(list(), term()) -> list().
@@ -122,7 +150,14 @@ sort_with(_List, Block) ->
 %% @doc Zip two lists into a list of maps #{key => K, value => V}.
 -spec zip(list(), list()) -> list().
 zip(List, Other) when is_list(List), is_list(Other) ->
-    zip_to_maps(List, Other).
+    zip_to_maps(List, Other);
+zip(List, Other) when is_list(List) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'zip:'),
+    Hint = iolist_to_binary(
+        io_lib:format("zip: expects a List as argument, got: ~p", [Other])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Group elements by block result into a map.
 -spec group_by(list(), function()) -> map().
@@ -132,13 +167,27 @@ group_by(List, Block) when is_list(List), is_function(Block, 1) ->
         Existing = maps:get(Key, Acc, []),
         maps:put(Key, [Item | Existing], Acc)
     end, #{}, List),
-    maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map0).
+    maps:map(fun(_Key, Values) -> lists:reverse(Values) end, Map0);
+group_by(_List, Block) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'groupBy:'),
+    Hint = iolist_to_binary(
+        io_lib:format("groupBy: expects a 1-argument block, got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Partition list into matching and non-matching.
 -spec partition(list(), function()) -> map().
 partition(List, Block) when is_list(List), is_function(Block, 1) ->
     {Matching, NonMatching} = lists:partition(Block, List),
-    #{<<"matching">> => Matching, <<"nonMatching">> => NonMatching}.
+    #{<<"matching">> => Matching, <<"nonMatching">> => NonMatching};
+partition(_List, Block) ->
+    Error0 = beamtalk_error:new(type_error, 'List'),
+    Error1 = beamtalk_error:with_selector(Error0, 'partition:'),
+    Hint = iolist_to_binary(
+        io_lib:format("partition: expects a 1-argument block, got: ~p", [Block])),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    error(Error2).
 
 %% @doc Intersperse separator between elements.
 -spec intersperse(list(), term()) -> list().
