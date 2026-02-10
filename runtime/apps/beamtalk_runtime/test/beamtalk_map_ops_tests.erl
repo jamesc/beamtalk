@@ -80,6 +80,7 @@ dictionary_keys_and_values_do_test() ->
 %%% ============================================================================
 
 dictionary_responds_to_test() ->
+    beamtalk_extensions:init(),
     ?assertEqual(true, beamtalk_dictionary:has_method('class')),
     ?assertEqual(true, beamtalk_dictionary:has_method('keys')),
     ?assertEqual(true, beamtalk_dictionary:has_method('values')),
@@ -98,6 +99,7 @@ dictionary_responds_to_test() ->
 %%% ============================================================================
 
 dictionary_does_not_understand_test() ->
+    beamtalk_extensions:init(),
     ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Dictionary'},
         beamtalk_dictionary:dispatch('nonExistent', [], #{a => 1})).
 
