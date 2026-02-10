@@ -588,13 +588,13 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 ```
 
 ### Existing Tests
-- `tests/e2e/cases/exceptions.bt` — Should pass unchanged (handlers receive same object)
-- `tests/e2e/cases/errors.bt` — `ERROR:` assertion format may need updating
+- `tests/e2e/cases/errors.bt` — `ERROR:` assertion format may need updating for wrapped objects
+- `tests/stdlib/error_method.bt` — Method-level error behavior; should continue to pass
 - Runtime tests that catch `#beamtalk_error{}` directly — Update to match wrapped objects
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model), [ADR 0006](0006-unified-method-dispatch.md) (dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (stdlib)
 - Existing implementation: `beamtalk_exception_handler.erl`, `lib/Exception.bt`, `lib/Error.bt`
 - Design doc: `docs/internal/design-self-as-object.md` (§3.8 Error Taxonomy)
-- Test coverage: `tests/e2e/cases/exceptions.bt`, `tests/e2e/cases/errors.bt`, `tests/e2e/cases/error_method.bt`
+- Test coverage: `tests/e2e/cases/errors.bt`, `tests/stdlib/error_method.bt`
 - Prior art: [Pharo Exception handling](https://docs.huihoo.com/smalltalk/pharo/MOOC/PharoMOOC/Week5/C019-W5S04-Exceptions.pdf), [Taking Exception to Smalltalk](http://laputan.org/pub/papers/ExceptionHandlingPart1.pdf), [Elixir exceptions](https://hexdocs.pm/elixir/main/try-catch-and-rescue.html), [Pry `_ex_`](https://github.com/pry/pry)

@@ -1440,7 +1440,6 @@ This repository includes custom skills in `.github/skills/` that teach Copilot s
 |-------|---------|-------------|
 | **Coding Workflow** | | |
 | `pick-issue` | `/pick-issue` | Pick up the next Linear issue from backlog |
-| `review-code` | `/review-code` | Review current branch changes vs main |
 | `done` | `/done` | Complete work, commit, push, and create PR |
 | `resolve-pr` | `/resolve-pr` | Systematically address PR review comments |
 | `resolve-merge` | `/resolve-merge` | Update main, merge into current branch, resolve conflicts |
