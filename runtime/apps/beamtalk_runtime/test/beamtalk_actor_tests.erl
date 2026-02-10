@@ -699,30 +699,34 @@ dispatch4_async_with_self_test() ->
     gen_server:stop(Actor).
 
 %%% BT-177: Object reflection API tests
+%%% BT-427: Reflection methods now delegate to hierarchy walk, which requires bootstrap
 
 respondsTo_existing_method_test() ->
     %% Test respondsTo: with an existing method
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(0),
     
-    %% Check for existing methods
-    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [increment]})),
-    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [getValue]})),
-    ?assertEqual(true, gen_server:call(Counter, {respondsTo, ['setValue:']})),
+    %% Check for existing methods (use keyword selector with colon)
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [increment]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [getValue]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', ['setValue:']})),
     
     gen_server:stop(Counter).
 
 respondsTo_nonexistent_method_test() ->
     %% Test respondsTo: with a nonexistent method
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(0),
     
     %% Check for nonexistent methods
-    ?assertEqual(false, gen_server:call(Counter, {respondsTo, [unknownMethod]})),
-    ?assertEqual(false, gen_server:call(Counter, {respondsTo, [noSuchThing]})),
+    ?assertEqual(false, gen_server:call(Counter, {'respondsTo:', [unknownMethod]})),
+    ?assertEqual(false, gen_server:call(Counter, {'respondsTo:', [noSuchThing]})),
     
     gen_server:stop(Counter).
 
 instVarNames_test() ->
     %% Test instVarNames returns instance variable names
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
     
     %% Get instance variable names (should exclude $beamtalk_class, __class_mod__, __methods__)
@@ -735,51 +739,54 @@ instVarNames_test() ->
 
 instVarAt_existing_variable_test() ->
     %% Test instVarAt: with an existing instance variable
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
     
     %% Read the value field
-    Result = gen_server:call(Counter, {instVarAt, [value]}),
+    Result = gen_server:call(Counter, {'instVarAt:', [value]}),
     ?assertEqual(42, Result),
     
     %% Modify state and read again
     gen_server:call(Counter, {'setValue:', [99]}),
-    Result2 = gen_server:call(Counter, {instVarAt, [value]}),
+    Result2 = gen_server:call(Counter, {'instVarAt:', [value]}),
     ?assertEqual(99, Result2),
     
     gen_server:stop(Counter).
 
 instVarAt_nonexistent_variable_test() ->
     %% Test instVarAt: with a nonexistent instance variable (should return nil)
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(0),
     
     %% Read nonexistent field
-    Result = gen_server:call(Counter, {instVarAt, [nonExistent]}),
+    Result = gen_server:call(Counter, {'instVarAt:', [nonExistent]}),
     ?assertEqual(nil, Result),
     
     gen_server:stop(Counter).
 
 instVarAt_put_test() ->
     %% Test instVarAt:put: to write instance variable (BT-164)
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
     
     %% Read initial value
-    InitialValue = gen_server:call(Counter, {instVarAt, [value]}),
+    InitialValue = gen_server:call(Counter, {'instVarAt:', [value]}),
     ?assertEqual(42, InitialValue),
     
-    %% Write new value using instVarAt:put: (returns Self)
-    Self = gen_server:call(Counter, {'instVarAt:put:', [value, 99]}),
-    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Self),
+    %% Write new value using instVarAt:put: (returns value, Smalltalk-80 semantics)
+    Result = gen_server:call(Counter, {'instVarAt:put:', [value, 99]}),
+    ?assertEqual(99, Result),
     
     %% Verify the value was updated
-    NewValue = gen_server:call(Counter, {instVarAt, [value]}),
+    NewValue = gen_server:call(Counter, {'instVarAt:', [value]}),
     ?assertEqual(99, NewValue),
     
     %% Write a new instance variable that didn't exist
-    Self2 = gen_server:call(Counter, {'instVarAt:put:', [newField, <<"hello">>]}),
-    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Self2),
+    Result2 = gen_server:call(Counter, {'instVarAt:put:', [newField, <<"hello">>]}),
+    ?assertEqual(<<"hello">>, Result2),
     
     %% Verify the new field exists
-    NewFieldValue = gen_server:call(Counter, {instVarAt, [newField]}),
+    NewFieldValue = gen_server:call(Counter, {'instVarAt:', [newField]}),
     ?assertEqual(<<"hello">>, NewFieldValue),
     
     %% Verify it appears in instVarNames
@@ -790,6 +797,7 @@ instVarAt_put_test() ->
 
 reflection_combined_test() ->
     %% Combined test: use reflection to discover and access instance variables
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(123),
     
     %% Discover instance variables
@@ -798,17 +806,17 @@ reflection_combined_test() ->
     
     %% Read each discovered variable
     [VarName] = VarNames,
-    Value = gen_server:call(Counter, {instVarAt, [VarName]}),
+    Value = gen_server:call(Counter, {'instVarAt:', [VarName]}),
     ?assertEqual(123, Value),
     
     %% Check that we respond to the method we're about to call
-    ?assertEqual(true, gen_server:call(Counter, {respondsTo, [increment]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [increment]})),
     
     %% Call the method
     gen_server:call(Counter, {increment, []}),
     
     %% Read the updated value via reflection
-    NewValue = gen_server:call(Counter, {instVarAt, [value]}),
+    NewValue = gen_server:call(Counter, {'instVarAt:', [value]}),
     ?assertEqual(124, NewValue),
     
     gen_server:stop(Counter).
@@ -821,11 +829,11 @@ perform_unary_message_test() ->
     
     %% obj perform: #increment  => obj increment
     %% increment returns noreply, so the result is nil
-    nil = gen_server:call(Counter, {perform, [increment]}),
+    nil = gen_server:call(Counter, {'perform:', [increment]}),
     ?assertEqual(11, gen_server:call(Counter, {getValue, []})),
     
     %% Another increment via perform:
-    nil = gen_server:call(Counter, {perform, [increment]}),
+    nil = gen_server:call(Counter, {'perform:', [increment]}),
     ?assertEqual(12, gen_server:call(Counter, {getValue, []})),
     
     gen_server:stop(Counter).
@@ -845,7 +853,7 @@ perform_with_result_test() ->
     {ok, Counter} = test_counter:start_link(42),
     
     %% obj perform: #getValue  => obj getValue (returns value)
-    Result = gen_server:call(Counter, {perform, [getValue]}),
+    Result = gen_server:call(Counter, {'perform:', [getValue]}),
     ?assertEqual(42, Result),
     
     gen_server:stop(Counter).
@@ -865,7 +873,7 @@ perform_unknown_selector_test() ->
     {ok, Counter} = test_counter:start_link(0),
     
     %% obj perform: #unknownMethod  => doesNotUnderstand
-    Result = gen_server:call(Counter, {perform, [unknownMethod]}),
+    Result = gen_server:call(Counter, {'perform:', [unknownMethod]}),
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand, selector = unknownMethod}}, Result),
     
     gen_server:stop(Counter).
@@ -886,7 +894,7 @@ perform_async_with_future_test() ->
     
     %% Send async perform: message
     Future = beamtalk_future:new(),
-    gen_server:cast(Counter, {perform, [increment], Future}),
+    gen_server:cast(Counter, {'perform:', [increment], Future}),
     
     %% Wait for future to resolve
     ?assertEqual(nil, beamtalk_future:await(Future)),
@@ -898,15 +906,103 @@ perform_async_with_future_test() ->
 
 perform_recursive_dispatch_test() ->
     %% Test that perform: correctly dispatches through the same dispatch/4 logic
+    application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(50),
     
     %% Use perform: to call respondsTo: (a built-in reflection method)
-    Result1 = gen_server:call(Counter, {'perform:withArguments:', [respondsTo, [increment]]}),
+    Result1 = gen_server:call(Counter, {'perform:withArguments:', ['respondsTo:', [increment]]}),
     ?assertEqual(true, Result1),
     
     %% Use perform: to call instVarAt: (another built-in)
-    Result2 = gen_server:call(Counter, {'perform:withArguments:', [instVarAt, [value]]}),
+    Result2 = gen_server:call(Counter, {'perform:withArguments:', ['instVarAt:', [value]]}),
     ?assertEqual(50, Result2),
+    
+    gen_server:stop(Counter).
+
+%%% BT-427: Object method delegation tests
+%%% Actors inherit Object base methods via hierarchy walk
+
+object_describe_test() ->
+    %% Test describe on actor (inherited from Object via hierarchy walk)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(42),
+    
+    Result = gen_server:call(Counter, {describe, []}),
+    ?assert(is_binary(Result)),
+    
+    gen_server:stop(Counter).
+
+object_inspect_test() ->
+    %% Test inspect on actor (inherited from Object via hierarchy walk)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(42),
+    
+    Result = gen_server:call(Counter, {inspect, []}),
+    ?assert(is_binary(Result)),
+    
+    gen_server:stop(Counter).
+
+object_isNil_test() ->
+    %% Test isNil on actor (inherited from Object)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    ?assertEqual(false, gen_server:call(Counter, {isNil, []})),
+    
+    gen_server:stop(Counter).
+
+object_notNil_test() ->
+    %% Test notNil on actor (inherited from Object)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    ?assertEqual(true, gen_server:call(Counter, {notNil, []})),
+    
+    gen_server:stop(Counter).
+
+object_hash_test() ->
+    %% Test hash on actor (inherited from Object)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Result = gen_server:call(Counter, {hash, []}),
+    ?assert(is_integer(Result)),
+    
+    gen_server:stop(Counter).
+
+object_yourself_test() ->
+    %% Test yourself on actor (inherited from Object, returns Self)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Result = gen_server:call(Counter, {yourself, []}),
+    ?assertMatch({beamtalk_object, 'Counter', counter, _}, Result),
+    
+    gen_server:stop(Counter).
+
+object_class_test() ->
+    %% Test class on actor (inherited from Object)
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    Result = gen_server:call(Counter, {class, []}),
+    ?assertEqual('Counter', Result),
+    
+    gen_server:stop(Counter).
+
+respondsTo_inherited_methods_test() ->
+    %% Test respondsTo: reports inherited Object methods
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% Inherited methods from Object should be reported
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [describe]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [inspect]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isNil]})),
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [hash]})),
+    
+    %% Actor-specific built-in should also be reported
+    ?assertEqual(true, gen_server:call(Counter, {'respondsTo:', [isAlive]})),
     
     gen_server:stop(Counter).
 

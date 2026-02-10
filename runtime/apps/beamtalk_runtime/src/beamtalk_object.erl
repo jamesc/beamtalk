@@ -79,34 +79,14 @@ dispatch('instVarNames', [], _Self, State) ->
     {reply, beamtalk_tagged_map:user_field_keys(State), State};
 
 dispatch('instVarAt:', [FieldName], _Self, State) ->
-    case maps:is_key(FieldName, State) of
-        true ->
-            Value = maps:get(FieldName, State),
-            {reply, Value, State};
-        false ->
-            Error0 = beamtalk_error:new(does_not_understand, beamtalk_tagged_map:class_of(State, 'Object')),
-            Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:'),
-            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
-                          true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
-                       end,
-            Error2 = beamtalk_error:with_hint(Error1, <<"Field not found: ", FieldBin/binary>>),
-            {error, Error2, State}
-    end;
+    %% Return nil for non-existent fields (Smalltalk semantics)
+    Value = maps:get(FieldName, State, nil),
+    {reply, Value, State};
 
 dispatch('instVarAt:put:', [FieldName, Value], _Self, State) ->
-    case maps:is_key(FieldName, State) of
-        true ->
-            NewState = maps:put(FieldName, Value, State),
-            {reply, Value, NewState};
-        false ->
-            Error0 = beamtalk_error:new(does_not_understand, beamtalk_tagged_map:class_of(State, 'Object')),
-            Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-            FieldBin = if is_atom(FieldName) -> atom_to_binary(FieldName, utf8);
-                          true -> iolist_to_binary(io_lib:format("~p", [FieldName]))
-                       end,
-            Error2 = beamtalk_error:with_hint(Error1, <<"Field not found: ", FieldBin/binary>>),
-            {error, Error2, State}
-    end;
+    %% Allow creating new fields; returns value (Smalltalk-80 semantics)
+    NewState = maps:put(FieldName, Value, State),
+    {reply, Value, NewState};
 
 %% --- Display methods ---
 
@@ -145,6 +125,28 @@ dispatch(isNil, [], _Self, State) ->
 
 dispatch(notNil, [], _Self, State) ->
     {reply, true, State};
+
+%% --- Dynamic dispatch methods (BT-427) ---
+
+dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector) ->
+    %% Dynamic message send with no arguments
+    %% obj perform: #increment  => obj increment
+    ClassName = beamtalk_tagged_map:class_of(State),
+    beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName);
+
+dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State)
+  when is_atom(TargetSelector), is_list(ArgList) ->
+    %% Dynamic message send with argument list
+    %% obj perform: #'at:put:' withArguments: #(1, 'x')
+    ClassName = beamtalk_tagged_map:class_of(State),
+    beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName);
+
+dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
+    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+    Error0 = beamtalk_error:new(type_error, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
+    {error, Error2, State};
 
 %% BT-105: Abstract method contract — subclass must override
 dispatch(subclassResponsibility, [], _Self, State) ->

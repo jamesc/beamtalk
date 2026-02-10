@@ -46,9 +46,9 @@ object_reflection_test_() ->
         {"instVarNames filters internal fields", fun test_inst_var_names/0},
         {"instVarNames with multiple fields", fun test_inst_var_names_multi/0},
         {"instVarAt: reads field value", fun test_inst_var_at/0},
-        {"instVarAt: with non-existent field returns error", fun test_inst_var_at_missing/0},
-        {"instVarAt:put: sets field value", fun test_inst_var_at_put/0},
-        {"instVarAt:put: with non-existent field returns error", fun test_inst_var_at_put_missing/0},
+        {"instVarAt: with non-existent field returns nil", fun test_inst_var_at_missing/0},
+        {"instVarAt:put: sets field value and returns value", fun test_inst_var_at_put/0},
+        {"instVarAt:put: with non-existent field creates it", fun test_inst_var_at_put_missing/0},
         {"instVarAt:put: returns updated state", fun test_inst_var_at_put_state/0}
     ]}.
 
@@ -75,7 +75,7 @@ test_inst_var_at() ->
 test_inst_var_at_missing() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch('instVarAt:', [nonexistent], self_ref(), State),
-    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+    ?assertMatch({reply, nil, _}, Result).
 
 test_inst_var_at_put() ->
     State = counter_state(),
@@ -85,7 +85,10 @@ test_inst_var_at_put() ->
 test_inst_var_at_put_missing() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch('instVarAt:put:', [nonexistent, 42], self_ref(), State),
-    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+    %% BT-427: Smalltalk semantics — creates the field, returns value
+    ?assertMatch({reply, 42, _}, Result),
+    {reply, _, NewState} = Result,
+    ?assertEqual(42, maps:get(nonexistent, NewState)).
 
 test_inst_var_at_put_state() ->
     State = counter_state(),

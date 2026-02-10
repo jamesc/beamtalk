@@ -425,73 +425,55 @@ make_self(State) ->
 -spec dispatch(atom(), list(), #beamtalk_object{}, map()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 dispatch(Selector, Args, Self, State) ->
-    %% First, check for built-in Object reflection methods
+    %% BT-427: Actor-specific methods that can't be in Object:
+    %% - isAlive: checks process liveness
+    %% - perform:/perform:withArguments:: re-dispatches through actor's own dispatch
+    %% - respondsTo:: must check __methods__ map AND hierarchy
+    %% All other Object methods (describe, inspect, instVarNames, hash, etc.)
+    %% are discovered via hierarchy walk to Object.
     case Selector of
         isAlive when Args =:= [] ->
             %% Actor is alive if it's processing this message
             {reply, true, State};
-        respondsTo when length(Args) =:= 1 ->
-            %% Check if object responds to a selector
+        'respondsTo:' when length(Args) =:= 1 ->
+            %% Check user-defined methods first, then actor built-ins, then hierarchy
             [CheckSelector] = Args,
             Methods = maps:get('__methods__', State),
-            Result = maps:is_key(CheckSelector, Methods),
-            {reply, Result, State};
-        instVarNames when Args =:= [] ->
-            %% Return list of instance variable names (excluding internals)
-            {reply, beamtalk_tagged_map:user_field_keys(State), State};
-        instVarAt when length(Args) =:= 1 ->
-            %% Read instance variable by name
-            [Name] = Args,
-            Result = maps:get(Name, State, nil),
-            {reply, Result, State};
-        'instVarAt:put:' ->
-            %% Write instance variable by name, returns Self
-            case Args of
-                [Name, Value] ->
-                    NewState = maps:put(Name, Value, State),
-                    {reply, Self, NewState};
-                _ ->
+            case maps:is_key(CheckSelector, Methods) of
+                true -> {reply, true, State};
+                false when CheckSelector =:= isAlive ->
+                    %% isAlive is handled by actor dispatch, not in __methods__
+                    {reply, true, State};
+                false ->
+                    %% Check inherited methods via hierarchy walk
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, 'instVarAt:put:'),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: name and value">>),
-                    error(Error2)
+                    Result = try beamtalk_dispatch:responds_to(CheckSelector, ClassName) of
+                                 true -> true;
+                                 false ->
+                                     %% Class may not be registered — check Object directly
+                                     beamtalk_object:has_method(CheckSelector)
+                             catch _:_ -> beamtalk_object:has_method(CheckSelector)
+                             end,
+                    {reply, Result, State}
             end;
-        perform ->
-            %% Dynamic message send with no arguments
-            %% obj perform: #increment  => obj increment
-            case Args of
-                [TargetSelector] when is_atom(TargetSelector) ->
-                    dispatch(TargetSelector, [], Self, State);
-                _ ->
+        'perform:' when length(Args) =:= 1 ->
+            %% Dynamic message send: obj perform: #increment => obj increment
+            [TargetSelector] = Args,
+            dispatch(TargetSelector, [], Self, State);
+        'perform:withArguments:' when length(Args) =:= 2 ->
+            %% Dynamic message send: obj perform: #'at:put:' withArguments: #(1, 'x')
+            [TargetSelector, ArgList] = Args,
+            case is_atom(TargetSelector) andalso is_list(ArgList) of
+                true ->
+                    dispatch(TargetSelector, ArgList, Self, State);
+                false ->
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, perform),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 1 argument: a selector atom">>),
-                    error(Error2)
-            end;
-        'perform:withArguments:' ->
-            %% Dynamic message send with argument array
-            %% obj perform: #'at:put:' withArguments: #(1, 'x')  => obj at: 1 put: 'x'
-            case Args of
-                [TargetSelector, ArgList] when is_atom(TargetSelector) ->
-                    when_list(ArgList,
-                        fun() -> dispatch(TargetSelector, ArgList, Self, State) end,
-                        fun() ->
-                            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                            Error0 = beamtalk_error:new(type_error, ClassName),
-                            Error = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
-                            {error, Error, State}
-                        end);
-                _ ->
-                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
-                    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
-                    Error2 = beamtalk_error:with_hint(Error1, <<"Expected 2 arguments: a selector atom and an argument list">>),
-                    error(Error2)
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
+                    {error, Error, State}
             end;
         _ ->
-            %% Not a built-in method, check user-defined methods
+            %% Check user-defined methods, then delegate to hierarchy walk
             dispatch_user_method(Selector, Args, Self, State)
     end.
 
@@ -592,19 +574,43 @@ handle_dnu(Selector, Args, Self, State) ->
                     {error, Error, State}
             end;
         _ ->
-            %% No DNU handler - method not found is an error
+            %% No DNU handler — delegate to class hierarchy walk (BT-427)
+            %% This finds Object base methods (describe, inspect, respondsTo:, etc.)
             ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
-            {error, Error, State}
+            try beamtalk_dispatch:lookup(Selector, Args, Self, State, ClassName) of
+                {reply, Result, NewState} ->
+                    {reply, Result, NewState};
+                {error, _} ->
+                    %% Hierarchy walk failed (class not registered or method not found)
+                    %% Fall back to Object dispatch directly for base methods
+                    object_fallback(Selector, Args, Self, State, ClassName)
+            catch
+                _:_ ->
+                    %% Class registry not available (e.g., in unit tests without bootstrap)
+                    %% Fall back to Object dispatch directly
+                    object_fallback(Selector, Args, Self, State, ClassName)
+            end
     end.
 
 %% @private
-%% @doc Execute ThenFun if Value is a list, else execute ElseFun.
-%% Used for type checking in perform:withArguments:
--spec when_list(term(), fun(() -> term()), fun(() -> term())) -> term().
-when_list(Value, ThenFun, _ElseFun) when is_list(Value) ->
-    ThenFun();
-when_list(_Value, _ThenFun, ElseFun) ->
-    ElseFun().
+%% @doc Create a does_not_understand error result.
+-spec make_dnu_error(atom(), atom(), map()) -> {error, term(), map()}.
+make_dnu_error(Selector, ClassName, State) ->
+    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>),
+    {error, Error, State}.
+
+%% @private
+%% @doc Fall back to Object dispatch for inherited base methods.
+%% Used when hierarchy walk fails (class not registered) or class registry unavailable.
+-spec object_fallback(atom(), list(), #beamtalk_object{}, map(), atom()) ->
+    {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
+object_fallback(Selector, Args, Self, State, ClassName) ->
+    case beamtalk_object:dispatch(Selector, Args, Self, State) of
+        {error, _, _} ->
+            make_dnu_error(Selector, ClassName, State);
+        Result ->
+            Result
+    end.
+

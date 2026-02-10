@@ -139,7 +139,7 @@ init(Parent) ->
         %% Step 4: Create Actor class (inherits from Object class)
         ActorClassInfo = #{
             name => 'Actor',
-            module => 'Actor',
+            module => 'beamtalk_object',  % BT-427: Actor is abstract — delegates dispatch to Object
             superclass => 'Object',  % Metaclass superclass
             instance_methods => #{
                 % Inherits Object methods, adds:
