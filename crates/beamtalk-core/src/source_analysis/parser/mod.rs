@@ -111,6 +111,7 @@ impl BindingPower {
 /// | Level | Operators | Associativity |
 /// |-------|-----------|---------------|
 /// | 5  | `>>`                | Left |
+/// | 8  | `->`                | Left |
 /// | 10 | `=` `~=`            | Left |
 /// | 20 | `<` `>` `<=` `>=`   | Left |
 /// | 30 | `+` `-`             | Left |
@@ -129,6 +130,10 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Method lookup (lowest binary precedence)
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
+
+        // Association creation (BT-335)
+        // `#name -> 'James'` creates an Association key-value pair
+        "->" => Some(BindingPower::left_assoc(8)),
 
         // Equality
         // `~=` is the Smalltalk-style not-equal operator

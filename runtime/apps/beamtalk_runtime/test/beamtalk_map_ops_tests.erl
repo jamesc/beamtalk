@@ -111,3 +111,25 @@ dictionary_at_missing_key_test() ->
     %% maps:get raises {badkey, Key} for missing keys — same as pre-migration
     ?assertError({badkey, missing},
         beamtalk_dictionary:dispatch('at:', [missing], #{a => 1})).
+
+%%% ============================================================================
+%%% beamtalk_primitive:send integration tests
+%%% ============================================================================
+
+primitive_send_size_test() ->
+    ?assertEqual(2, beamtalk_primitive:send(#{a => 1, b => 2}, 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send(#{}, 'size', [])).
+
+primitive_send_keys_test() ->
+    ?assertEqual([a], beamtalk_primitive:send(#{a => 1}, 'keys', [])).
+
+primitive_send_at_test() ->
+    ?assertEqual(1, beamtalk_primitive:send(#{a => 1}, 'at:', [a])).
+
+primitive_send_at_put_test() ->
+    ?assertEqual(#{a => 1, b => 2},
+        beamtalk_primitive:send(#{a => 1}, 'at:put:', [b, 2])).
+
+primitive_send_includes_key_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(#{a => 1}, 'includesKey:', [a])),
+    ?assertEqual(false, beamtalk_primitive:send(#{a => 1}, 'includesKey:', [b])).
