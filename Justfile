@@ -258,7 +258,20 @@ coverage-combined: coverage-runtime coverage-e2e coverage-stdlib
     set -euo pipefail
     cd runtime
     echo "📊 Merging eunit + E2E + stdlib coverage data..."
-    # rebar3 cover imports all .coverdata files in _build/test/cover/
+    # Merge all .coverdata files into eunit.coverdata so rebar3 covertool sees them
+    # (covertool only imports eunit.coverdata, not e2e/stdlib coverdata)
+    erl -noshell -eval '
+        cover:start(),
+        Files = filelib:wildcard("_build/test/cover/*.coverdata"),
+        lists:foreach(fun(F) ->
+            io:format("  Importing: ~s~n", [F]),
+            cover:import(F)
+        end, Files),
+        ok = cover:export("_build/test/cover/eunit.coverdata"),
+        io:format("  Merged ~p files into eunit.coverdata~n", [length(Files)]),
+        cover:stop(),
+        init:stop().
+    '
     rebar3 cover --verbose
     rebar3 covertool generate
     python3 ../scripts/clean-covertool-xml.py
