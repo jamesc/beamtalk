@@ -92,9 +92,9 @@ Actor subclass: Counter
 - `:load` is sent to REPL during execution (runtime command)
 - Different systems, different syntax - follows test framework conventions (like `@param` in JSDoc)
 
-### E2E Test Format: Parser Warns on Missing Assertions ⚠️
+### Test File Format: Parser Warns on Missing Assertions ⚠️
 
-**CRITICAL:** In E2E test files (`tests/e2e/cases/*.bt`), expressions **without** `// =>` assertions are **skipped** and never executed. The parser emits warnings to help catch these mistakes.
+**CRITICAL:** In test files (`tests/stdlib/*.bt` and `tests/e2e/cases/*.bt`), expressions **without** `// =>` assertions are **skipped** and never executed. The parser emits warnings to help catch these mistakes.
 
 **Test format:**
 ```beamtalk
@@ -116,7 +116,7 @@ count                                  ← This will fail (count was never set)
 // => 3                                 ← Assertion fails because previous lines didn't run
 ```
 
-**Rules for E2E tests:**
+**Rules for test files (stdlib and E2E):**
 1. **Every expression must have `// =>` assertion** (even if `// => _` for wildcard)
 2. **No assertion = no execution** (expressions are skipped)
 3. **Missing assertions cause test failures** (BT-249: warnings now treated as errors)
@@ -149,8 +149,9 @@ x
 
 **Verification:**
 ```bash
-# Run E2E tests - missing assertions will FAIL the build
-just test-e2e
+# Run tests - missing assertions will FAIL the build
+just test-stdlib   # Stdlib tests
+just test-e2e      # E2E tests
 
 # Example error output:
 # ⚠️  mytest.bt: Line 15: Expression will not be executed (missing // => assertion): count := 0
@@ -177,7 +178,8 @@ Before using ANY Beamtalk syntax, verify it exists in **at least one** of these 
 
 #### 3. **Test Cases (Validated Syntax)**
 ✅ **Test files:**
-- `tests/e2e/cases/*.bt` - End-to-end language tests
+- `tests/stdlib/*.bt` - Compiled language feature tests (ADR 0014)
+- `tests/e2e/cases/*.bt` - End-to-end REPL integration tests
 - `test-package-compiler/cases/*/main.bt` - Compiler test cases
 - `crates/beamtalk-core/src/source_analysis/parser/mod.rs` - Parser unit tests
 
@@ -192,7 +194,7 @@ Before using ANY Beamtalk syntax, verify it exists in **at least one** of these 
 🚩 **If you're about to use syntax that doesn't appear in the sources above, STOP!**
 
 **Ask yourself:**
-1. Have I seen this exact syntax in `examples/` or `tests/e2e/cases/`?
+1. Have I seen this exact syntax in `examples/`, `tests/stdlib/`, or `tests/e2e/cases/`?
 2. Is it documented in `docs/beamtalk-language-features.md`?
 3. Does the parser have test cases for it in `parser/mod.rs`?
 
@@ -203,7 +205,7 @@ Before using ANY Beamtalk syntax, verify it exists in **at least one** of these 
 **Option 1: Search the codebase**
 ```bash
 # Find how Counter is actually defined
-grep -r "Counter" examples/*.bt tests/e2e/cases/*.bt
+grep -r "Counter" examples/*.bt tests/stdlib/*.bt tests/e2e/cases/*.bt
 
 # Find class definition syntax
 grep -r "subclass:" examples/*.bt
@@ -1497,9 +1499,13 @@ runtime/
 │       └── ebin/           # Generated .beam files (Actor, Block, Integer, etc.) created by build-stdlib
 
 tests/
+├── stdlib/                # Compiled language feature tests (ADR 0014)
+│   ├── arithmetic.bt      # ~32 test files, ~654 assertions
+│   ├── blocks.bt          # Run via `just test-stdlib` (~5s)
+│   └── ...
 └── e2e/
-    ├── cases/             # E2E test cases (*.bt)
-    └── fixtures/          # E2E fixtures
+    ├── cases/             # REPL integration tests (~23 files)
+    └── fixtures/          # Shared test fixtures
         └── counter.bt     # CANONICAL counter implementation (BT-239)
 
 examples/
@@ -1544,15 +1550,32 @@ beamtalk_stdlib (compiled stdlib)
 - Compiled by `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (rebar3 pre-hook)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
-#### 4. Real End-to-End Tests
-**Location:** `tests/e2e/cases/*.bt`
-- Actual Beamtalk source files (`.bt` extension)
-- Compiled by the real compiler (lexer → parser → codegen → erlc)
-- Executed on BEAM and validated against expected results
-- E2E fixtures in `tests/e2e/fixtures/` (including canonical `counter.bt`)
-- **These are the TRUE end-to-end tests**
+#### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
+**Location:** `tests/stdlib/*.bt` (~32 files, ~654 assertions)
+- **Pure language feature tests** compiled directly to EUnit (no REPL needed)
+- Uses same `// =>` assertion format as E2E tests
+- Runs via `just test-stdlib` (~5s vs ~50s for E2E)
+- Tests arithmetic, strings, blocks, closures, collections, object protocol, etc.
+- Supports `@load` directives for fixture-dependent tests (actors, sealed classes)
+- **Use this for any new test that doesn't need REPL/workspace features**
 
-**When discussing E2E tests, ALWAYS refer to `tests/e2e/cases/*.bt`, never `runtime/apps/beamtalk_runtime/test/` or `runtime/apps/beamtalk_workspace/test/`.**
+#### 5. End-to-End Tests (REPL Integration)
+**Location:** `tests/e2e/cases/*.bt` (~23 files)
+- Require a running REPL daemon (started automatically by test harness)
+- Test workspace bindings, REPL commands, variable persistence, auto-await
+- Test `ERROR:` assertion patterns and `@load-error` directives
+- Runs via `just test-e2e` (~50s)
+- **Only use for tests that genuinely need the REPL**
+
+**When choosing between stdlib and E2E tests:**
+| Test needs... | Where |
+|---|---|
+| Pure language features (arithmetic, strings, blocks) | `tests/stdlib/` |
+| Collections (List, Dictionary, Set, Tuple) | `tests/stdlib/` |
+| Actor spawn + messaging (with `@load`) | `tests/stdlib/` |
+| Workspace bindings (Transcript, Beamtalk) | `tests/e2e/cases/` |
+| REPL commands, variable persistence | `tests/e2e/cases/` |
+| Auto-await, `ERROR:` assertions | `tests/e2e/cases/` |
 
 #### Test Fixture Organization (BT-239)
 
@@ -1593,6 +1616,7 @@ just --list                  # See all available commands
 # Common development commands
 just build                   # Build Rust + Erlang runtime
 just test                    # Run fast tests (~10s)
+just test-stdlib             # Compiled language feature tests (~5s)
 just test-e2e                # Run E2E tests (~50s)
 just ci                      # Run all CI checks
 
@@ -1605,7 +1629,7 @@ just test-rust               # Rust tests only
 just test-runtime            # Erlang runtime tests only
 
 # Advanced
-just test-all                # All tests (unit + E2E + runtime)
+just test-all                # All tests (unit + stdlib + E2E + runtime)
 just clean                   # Clean build artifacts (works with Docker volumes)
 just coverage                # Generate coverage reports
 just fuzz [DURATION]         # Fuzz parser for crash safety (default: 60s, needs nightly)
