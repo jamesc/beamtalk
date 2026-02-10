@@ -878,6 +878,16 @@ perform_unknown_selector_test() ->
     
     gen_server:stop(Counter).
 
+perform_invalid_selector_type_test() ->
+    %% Test perform: with non-atom selector (should return type_error)
+    {ok, Counter} = test_counter:start_link(0),
+    
+    %% obj perform: "notAnAtom"  => type error
+    Result = gen_server:call(Counter, {'perform:', ["notAnAtom"]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = 'perform:'}}, Result),
+    
+    gen_server:stop(Counter).
+
 perform_withArgs_invalid_args_type_test() ->
     %% Test perform:withArguments: with non-list args (should error)
     {ok, Counter} = test_counter:start_link(0),

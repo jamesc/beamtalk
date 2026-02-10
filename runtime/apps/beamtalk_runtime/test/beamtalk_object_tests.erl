@@ -184,10 +184,23 @@ has_method_test_() ->
 
 fallback_test_() ->
     {"dispatch fallback for unknown methods", [
-        {"unknown method returns error", fun test_unknown_method/0}
+        {"unknown method returns error", fun test_unknown_method/0},
+        {"perform: unknown returns 3-tuple error", fun test_perform_unknown_returns_3tuple/0},
+        {"perform:withArguments: bad type returns 3-tuple error", fun test_perform_withargs_bad_type/0}
     ]}.
 
 test_unknown_method() ->
     State = counter_state(),
     Result = beamtalk_object:dispatch(unknownMethod, [], self_ref(), State),
     ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, _}, Result).
+
+test_perform_unknown_returns_3tuple() ->
+    State = counter_state(),
+    Result = beamtalk_object:dispatch('perform:', [nonExistentMethod], self_ref(), State),
+    %% Must return 3-tuple {error, Error, State} not 2-tuple {error, Error}
+    ?assertMatch({error, #beamtalk_error{}, _}, Result).
+
+test_perform_withargs_bad_type() ->
+    State = counter_state(),
+    Result = beamtalk_object:dispatch('perform:withArguments:', ["notAnAtom", []], self_ref(), State),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}, _}, Result).

@@ -459,7 +459,15 @@ dispatch(Selector, Args, Self, State) ->
         'perform:' when length(Args) =:= 1 ->
             %% Dynamic message send: obj perform: #increment => obj increment
             [TargetSelector] = Args,
-            dispatch(TargetSelector, [], Self, State);
+            case is_atom(TargetSelector) of
+                true ->
+                    dispatch(TargetSelector, [], Self, State);
+                false ->
+                    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+                    Error0 = beamtalk_error:new(type_error, ClassName),
+                    Error = beamtalk_error:with_selector(Error0, 'perform:'),
+                    {error, Error, State}
+            end;
         'perform:withArguments:' when length(Args) =:= 2 ->
             %% Dynamic message send: obj perform: #'at:put:' withArguments: #(1, 'x')
             [TargetSelector, ArgList] = Args,
@@ -580,10 +588,15 @@ handle_dnu(Selector, Args, Self, State) ->
             try beamtalk_dispatch:lookup(Selector, Args, Self, State, ClassName) of
                 {reply, Result, NewState} ->
                     {reply, Result, NewState};
-                {error, _} ->
-                    %% Hierarchy walk failed (class not registered or method not found)
-                    %% Fall back to Object dispatch directly for base methods
-                    object_fallback(Selector, Args, Self, State, ClassName)
+                {error, #beamtalk_error{kind = does_not_understand}} ->
+                    %% Method not found in hierarchy — fall back to Object dispatch
+                    object_fallback(Selector, Args, Self, State, ClassName);
+                {error, #beamtalk_error{kind = class_not_found}} ->
+                    %% Class not registered — fall back to Object dispatch
+                    object_fallback(Selector, Args, Self, State, ClassName);
+                {error, Error} ->
+                    %% Preserve legitimate errors from inherited methods
+                    {error, Error, State}
             catch
                 _:_ ->
                     %% Class registry not available (e.g., in unit tests without bootstrap)

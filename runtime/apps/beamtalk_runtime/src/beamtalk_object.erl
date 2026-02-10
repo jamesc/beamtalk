@@ -132,14 +132,16 @@ dispatch('perform:', [TargetSelector], Self, State) when is_atom(TargetSelector)
     %% Dynamic message send with no arguments
     %% obj perform: #increment  => obj increment
     ClassName = beamtalk_tagged_map:class_of(State),
-    beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName);
+    Result = beamtalk_dispatch:lookup(TargetSelector, [], Self, State, ClassName),
+    normalize_dispatch_result(Result, State);
 
 dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State)
   when is_atom(TargetSelector), is_list(ArgList) ->
     %% Dynamic message send with argument list
     %% obj perform: #'at:put:' withArguments: #(1, 'x')
     ClassName = beamtalk_tagged_map:class_of(State),
-    beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName);
+    Result = beamtalk_dispatch:lookup(TargetSelector, ArgList, Self, State, ClassName),
+    normalize_dispatch_result(Result, State);
 
 dispatch('perform:withArguments:', [_TargetSelector, _ArgList], _Self, State) ->
     ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
@@ -183,3 +185,26 @@ has_method(isNil) -> true;
 has_method(notNil) -> true;
 has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
+
+%% @private
+%% @doc Normalize dispatch_result() (2-tuple error) to dispatch/4 contract (3-tuple error).
+normalize_dispatch_result({error, Error}, State) ->
+    {error, Error, State};
+normalize_dispatch_result(Other, _State) ->
+    Other.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+normalize_dispatch_result_error_test() ->
+    State = #{},
+    Error = beamtalk_error:new(does_not_understand, 'Test'),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, #{}},
+                 normalize_dispatch_result({error, Error}, State)).
+
+normalize_dispatch_result_reply_test() ->
+    State = #{},
+    ?assertMatch({reply, 42, #{}},
+                 normalize_dispatch_result({reply, 42, State}, State)).
+
+-endif.
