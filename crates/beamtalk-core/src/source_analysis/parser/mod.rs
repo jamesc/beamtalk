@@ -130,6 +130,10 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
 
+        // Association creation (BT-335)
+        // `#name -> 'James'` creates an Association key-value pair
+        "->" => Some(BindingPower::left_assoc(8)),
+
         // Equality
         // `~=` is the Smalltalk-style not-equal operator
         "=" | "==" | "~=" => Some(BindingPower::left_assoc(10)),

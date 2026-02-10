@@ -1,0 +1,57 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Association class (BT-335)
+// Association is a key-value pair created with the -> binary message.
+
+// ===========================================================================
+// CREATION: -> binary message
+// ===========================================================================
+
+// Symbol key with String value
+a := #name -> 'James'
+// => _
+
+// Integer key with Integer value
+b := 1 -> 2
+// => _
+
+// String key
+c := 'hello' -> 'world'
+// => _
+
+// ===========================================================================
+// ACCESSORS: key and value
+// ===========================================================================
+
+a key
+// => name
+
+a value
+// => James
+
+b key
+// => 1
+
+b value
+// => 2
+
+// ===========================================================================
+// DISPLAY: asString / printString
+// ===========================================================================
+
+a asString
+// => #name -> James
+
+b asString
+// => 1 -> 2
+
+c asString
+// => hello -> world
+
+// ===========================================================================
+// REFLECTION: class
+// ===========================================================================
+
+a class
+// => Association

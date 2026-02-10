@@ -121,6 +121,9 @@ print_string(X) when is_map(X) ->
         'Exception' ->
             %% BT-338: Format exceptions nicely
             beamtalk_exception_handler:dispatch('printString', [], X);
+        'Association' ->
+            %% BT-335: Format associations as "key -> value"
+            beamtalk_association:format_string(X);
         _ ->
             ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
             iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
@@ -186,6 +189,9 @@ send(X, Selector, Args) when is_map(X) ->
         'Exception' ->
             %% BT-338: Exception value type - direct dispatch
             beamtalk_exception_handler:dispatch(Selector, Args, X);
+        'Association' ->
+            %% BT-335: Association value type - direct dispatch
+            bt_stdlib_association:dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary)
             beamtalk_map:dispatch(Selector, Args, X);
@@ -256,6 +262,9 @@ responds_to(X, Selector) when is_map(X) ->
         'Exception' ->
             %% BT-338: Exception value type
             beamtalk_exception_handler:has_method(Selector);
+        'Association' ->
+            %% BT-335: Association value type
+            bt_stdlib_association:has_method(Selector);
         undefined ->
             beamtalk_map:has_method(Selector);
         Class ->

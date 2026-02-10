@@ -43,6 +43,8 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Object" => generate_object_bif(output, selector, params),
+        "Association" => generate_association_bif(output, selector, params),
         _ => None,
     }
 }
@@ -440,6 +442,46 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
         // Identity
         "hash" => {
             write!(output, "call 'erlang':'phash2'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Object primitive implementations (BT-335).
+///
+/// Object is the root class — methods here are inherited by all objects.
+fn generate_object_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Association creation: `self -> value` creates an Association tagged map
+        "->" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "~{{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => {p0}}}~"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Association primitive implementations (BT-335).
+///
+/// Associations are key-value pairs represented as tagged maps.
+fn generate_association_bif(output: &mut String, selector: &str, _params: &[String]) -> Option<()> {
+    match selector {
+        "key" => {
+            write!(output, "call 'maps':'get'('key', Self)").ok()?;
+            Some(())
+        }
+        "value" => {
+            write!(output, "call 'maps':'get'('value', Self)").ok()?;
+            Some(())
+        }
+        "asString" | "printString" => {
+            write!(output, "call 'beamtalk_association':'format_string'(Self)").ok()?;
             Some(())
         }
         _ => None,
