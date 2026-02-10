@@ -630,7 +630,10 @@ fn cover_fragments(
     let cover_export_path = runtime_dir.join("_build/test/cover/stdlib.coverdata");
     let cover_dir = runtime_dir.join("_build/test/cover");
     let _ = std::fs::create_dir_all(&cover_dir);
-    info!("Cover mode enabled, will export to {}", cover_export_path.display());
+    info!(
+        "Cover mode enabled, will export to {}",
+        cover_export_path.display()
+    );
 
     let preamble = format!(
         "cover:start(), \
