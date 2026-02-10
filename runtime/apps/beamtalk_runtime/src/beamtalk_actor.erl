@@ -11,6 +11,7 @@
 %%% Actors support lifecycle methods:
 %%% - `isAlive` - Returns true/false depending on whether the actor process is running
 %%% - `monitor` - Creates an Erlang monitor on the actor process
+%%% - `stop` - Gracefully stops the actor process
 %%%
 %%% These methods are handled at the SEND site (via async_send/4 and sync_send/3)
 %%% rather than inside the actor, because a dead actor can't process messages.
@@ -260,7 +261,7 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
 %%% Message Send Helpers
 %%%
 %%% These functions wrap gen_server:cast/call with lifecycle-aware behavior:
-%%% - `isAlive` and `monitor` are handled locally (no gen_server message needed)
+%%% - `isAlive`, `monitor`, and `stop` are handled locally (no gen_server message needed)
 %%% - Dead actor detection rejects futures / returns errors immediately
 %%%
 %%% WARNING: Race condition! is_process_alive/1 is a snapshot check.
@@ -272,6 +273,7 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
 %% Handles lifecycle methods locally without involving the actor process:
 %% - `isAlive` - checks if process is alive, resolves Future with boolean
 %% - `monitor` - creates a monitor reference, resolves Future with ref
+%% - `stop` - gracefully stops the actor process, resolves Future with ok
 %%
 %% For all other messages, checks if the actor is alive first:
 %% - If alive, sends via gen_server:cast (normal async path)
@@ -281,6 +283,26 @@ async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
     Result = is_process_alive(ActorPid),
     beamtalk_future:resolve(FuturePid, Result),
+    ok;
+async_send(ActorPid, stop, [], FuturePid) ->
+    %% stop is handled locally - gracefully stops the actor process
+    try
+        gen_server:stop(ActorPid, normal, 5000),
+        beamtalk_future:resolve(FuturePid, ok)
+    catch
+        exit:noproc ->
+            %% Actor already stopped (bare atom exit) - treat as successful stop
+            beamtalk_future:resolve(FuturePid, ok);
+        exit:{noproc, _} ->
+            %% Actor already stopped (tuple exit) - treat as successful stop
+            beamtalk_future:resolve(FuturePid, ok);
+        exit:Reason ->
+            %% Other stop failures (e.g., timeout) - reject Future deterministically
+            Error0 = beamtalk_error:new(actor_dead, unknown),
+            Error1 = beamtalk_error:with_selector(Error0, stop),
+            Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))),
+            beamtalk_future:reject(FuturePid, Error2)
+    end,
     ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
     %% monitor is handled locally - creates an Erlang monitor
@@ -318,6 +340,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
 %% Handles lifecycle methods locally without involving the actor process:
 %% - `isAlive` - checks if process is alive, returns boolean
 %% - `monitor` - creates a monitor reference, returns ref
+%% - `stop` - gracefully stops the actor process, returns ok
 %%
 %% For all other messages, checks if the actor is alive first:
 %% - If alive, sends via gen_server:call (normal sync path)
@@ -325,6 +348,21 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
 -spec sync_send(pid(), atom(), list()) -> term().
 sync_send(ActorPid, isAlive, []) ->
     is_process_alive(ActorPid);
+sync_send(ActorPid, stop, []) ->
+    %% stop is handled locally - gracefully stops the actor process
+    try
+        gen_server:stop(ActorPid, normal, 5000)
+    catch
+        exit:noproc ->
+            %% Idempotent: actor already stopped (bare atom exit)
+            ok;
+        exit:{noproc, _} ->
+            %% Idempotent: actor already stopped (tuple exit)
+            ok;
+        exit:_Other ->
+            %% Preserve sync_send/3 contract: translate exits to structured errors
+            actor_dead_error(stop)
+    end;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
 sync_send(ActorPid, Selector, Args) ->
@@ -487,6 +525,12 @@ dispatch(Selector, Args, Self, State) ->
                 true -> {reply, true, State};
                 false when CheckSelector =:= isAlive ->
                     %% isAlive is handled by actor dispatch, not in __methods__
+                    {reply, true, State};
+                false when CheckSelector =:= stop ->
+                    %% stop is handled at send site, not in __methods__
+                    {reply, true, State};
+                false when CheckSelector =:= monitor ->
+                    %% monitor is handled by actor lifecycle machinery, not in __methods__
                     {reply, true, State};
                 false ->
                     %% Check inherited methods via hierarchy walk
