@@ -79,7 +79,8 @@ impl PrimitiveBindingTable {
         for class in &module.classes {
             let class_name = class.name.name.to_string();
 
-            for method in &class.methods {
+            // Walk both instance methods and class methods for @primitive bindings.
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
                 // A primitive method has exactly one expression in its body:
                 // an Expression::Primitive node.
                 if method.body.len() == 1 {
@@ -545,6 +546,36 @@ mod tests {
         assert!(
             table.find_selector("=").is_none(),
             "Ambiguous selector should return None"
+        );
+    }
+
+    #[test]
+    fn test_class_method_primitive_extraction() {
+        // BT-444: Verify that @primitive bindings in class_methods are extracted.
+        let mut class = ClassDefinition::new(
+            Identifier::new("File", span()),
+            Identifier::new("Object", span()),
+            vec![],
+            vec![], // no instance methods
+            span(),
+        );
+        class.class_methods = vec![make_primitive_method(
+            MessageSelector::Keyword(vec![KeywordPart::new("exists:", span())]),
+            vec![Identifier::new("path", span())],
+            "exists:",
+            true,
+        )];
+
+        let module = Module::with_classes(vec![class], span());
+        let mut table = PrimitiveBindingTable::new();
+        table.add_from_module(&module);
+
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table.lookup("File", "exists:"),
+            Some(&PrimitiveBinding::SelectorBased {
+                selector: "exists:".to_string(),
+            })
         );
     }
 
