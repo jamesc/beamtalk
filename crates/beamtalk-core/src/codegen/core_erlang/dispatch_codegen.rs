@@ -997,11 +997,11 @@ impl CoreErlangGenerator {
 ///
 /// Most classes use `to_module_name()` (`CamelCase` → `snake_case`), but some
 /// class names produce module names that conflict with Erlang stdlib modules
-/// (use `beamtalk_` prefix), and non-primitive stdlib classes compiled from
-/// `lib/*.bt` use the `bt_stdlib_` prefix.
+/// (use `beamtalk_` prefix), primitive stdlib classes compiled from `lib/*.bt`
+/// also use `beamtalk_` prefix, and non-primitive stdlib classes use `bt_stdlib_`.
 fn class_method_module_name(class_name: &str) -> String {
     let module = to_module_name(class_name);
-    if is_erlang_stdlib_module(&module) {
+    if is_erlang_stdlib_module(&module) || is_primitive_stdlib_class(class_name) {
         format!("beamtalk_{module}")
     } else if is_bt_stdlib_class(class_name) {
         format!("bt_stdlib_{module}")
@@ -1018,6 +1018,31 @@ fn is_bt_stdlib_class(class_name: &str) -> bool {
     matches!(
         class_name,
         "ProtoObject" | "Object" | "Actor" | "SystemDictionary" | "TranscriptStream"
+    )
+}
+
+/// Returns true if the class is a primitive stdlib class compiled from `lib/*.bt`.
+///
+/// Primitive stdlib classes use `beamtalk_` prefix (e.g., `Set` → `beamtalk_set`).
+/// These class names don't conflict with Erlang stdlib modules but still need
+/// the prefix for class-level method dispatch (e.g., `Set new`, `Set fromList:`).
+///
+/// NOTE: Must stay in sync with `build_stdlib::is_primitive_type()` and
+/// `value_type_codegen::is_primitive_type()`.
+fn is_primitive_stdlib_class(class_name: &str) -> bool {
+    matches!(
+        class_name,
+        "Integer"
+            | "Float"
+            | "String"
+            | "True"
+            | "False"
+            | "UndefinedObject"
+            | "Block"
+            | "Symbol"
+            | "List"
+            | "Dictionary"
+            | "Set"
     )
 }
 

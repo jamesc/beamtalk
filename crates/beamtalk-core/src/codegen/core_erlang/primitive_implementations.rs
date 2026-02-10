@@ -48,6 +48,7 @@ pub fn generate_primitive_bif(
         "Dictionary" => generate_dictionary_bif(output, selector, params),
         "Object" => generate_object_bif(output, selector, params),
         "Association" => generate_association_bif(output, selector, params),
+        "Set" => generate_set_bif(output, selector, params),
         _ => None,
     }
 }
@@ -829,6 +830,73 @@ fn generate_association_bif(output: &mut String, selector: &str, _params: &[Stri
         }
         "asString" => {
             write!(output, "call 'beamtalk_association':'format_string'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Set primitive implementations (BT-73).
+///
+/// Sets are represented as tagged maps: `#{'$beamtalk_class' => 'Set', elements => OrdsetData}`.
+/// Operations delegate to `beamtalk_set_ops` helper module which wraps Erlang `ordsets`.
+fn generate_set_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "fromList:" => {
+            let p0 = params.first().map_or("_List", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'from_list'({p0})").ok()?;
+            Some(())
+        }
+        "size" => {
+            write!(output, "call 'beamtalk_set_ops':'size'(Self)").ok()?;
+            Some(())
+        }
+        "isEmpty" => {
+            write!(output, "call 'beamtalk_set_ops':'is_empty'(Self)").ok()?;
+            Some(())
+        }
+        "includes:" => {
+            let p0 = params.first().map_or("_Element", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'includes'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "add:" => {
+            let p0 = params.first().map_or("_Element", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'add'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "remove:" => {
+            let p0 = params.first().map_or("_Element", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'remove'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "union:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'union'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "intersection:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'intersection'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "difference:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'difference'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "isSubsetOf:" => {
+            let p0 = params.first().map_or("_Other", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'is_subset_of'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "asList" => {
+            write!(output, "call 'beamtalk_set_ops':'as_list'(Self)").ok()?;
+            Some(())
+        }
+        "do:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            write!(output, "call 'beamtalk_set_ops':'do'(Self, {p0})").ok()?;
             Some(())
         }
         _ => None,
