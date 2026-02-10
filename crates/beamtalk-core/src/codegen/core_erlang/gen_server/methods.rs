@@ -630,6 +630,7 @@ impl CoreErlangGenerator {
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
+            self.in_class_method = true;
 
             // Generate parameter names
             for param in &method.parameters {
@@ -651,6 +652,7 @@ impl CoreErlangGenerator {
 
             self.indent -= 1;
             self.pop_scope();
+            self.in_class_method = false;
         }
         Ok(())
     }

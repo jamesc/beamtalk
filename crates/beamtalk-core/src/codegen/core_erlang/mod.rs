@@ -436,6 +436,10 @@ enum CodeGenContext {
 /// - [`gen_server`] - OTP `gen_server` scaffolding
 /// - [`intrinsics`] - Compiler intrinsics (block, `ProtoObject`, `Object`, list iteration)
 /// - [`operators`] - Binary operator code generation
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Generator flags are context switches, not configuration"
+)]
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
     module_name: String,
@@ -476,6 +480,9 @@ pub(super) struct CoreErlangGenerator {
     /// `persistent_term:get` + async actor send. When false (batch compile),
     /// workspace binding names produce a compile error.
     workspace_mode: bool,
+    /// BT-426: Whether we're currently generating a class-side method body.
+    /// When true, field access/assignment should produce a compile error.
+    in_class_method: bool,
 }
 
 impl CoreErlangGenerator {
@@ -496,6 +503,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            in_class_method: false,
         }
     }
 
@@ -516,6 +524,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            in_class_method: false,
         }
     }
 
@@ -4010,6 +4019,43 @@ end
         assert!(
             !code.contains("'filter'(fun"),
             "Wrapper fun must be let-bound, not inlined in filter call. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_class_method_rejects_field_access() {
+        // BT-426: Class methods should reject instance field access
+        let src = "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let result = generate_with_workspace(&module, "test_class_field", true);
+        assert!(
+            result.is_err(),
+            "Should reject field access in class method"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("cannot access instance field"),
+            "Error should mention field access. Got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_class_method_rejects_field_assignment() {
+        // BT-426: Class methods should reject instance field mutation
+        let src =
+            "Actor subclass: TestClass\n  state: value = 0\n\n  class broken => self.value := 42";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _diags) = crate::source_analysis::parse(tokens);
+        let result = generate_with_workspace(&module, "test_class_assign", true);
+        assert!(
+            result.is_err(),
+            "Should reject field assignment in class method"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("cannot assign to instance field"),
+            "Error should mention field assignment. Got: {err}"
         );
     }
 }

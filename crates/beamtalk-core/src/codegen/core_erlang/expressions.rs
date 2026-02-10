@@ -214,6 +214,16 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<()> {
+        // BT-426: Class methods cannot access instance fields
+        if self.in_class_method {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot access instance field '{}' in a class method",
+                    field.name
+                ),
+                location: format!("{:?}", field.span),
+            });
+        }
         // For now, assume receiver is 'self' and access from State/Self
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
@@ -259,6 +269,15 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<()> {
+        // BT-426: Reject field assignments in class method context
+        if self.in_class_method {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: format!(
+                    "cannot assign to instance field '{field_name}' in a class method"
+                ),
+                location: "class method body".to_string(),
+            });
+        }
         // BT-213: Reject field assignments in value type context
         if matches!(self.context, super::CodeGenContext::ValueType) {
             return Err(CodeGenError::UnsupportedFeature {

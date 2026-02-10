@@ -59,19 +59,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
 
         if has_initialize {
-            // BT-411: Build object, call initialize, then return object
-            writeln!(
-                self.output,
-                "let _Obj = {{'beamtalk_object', '{}', '{}', Pid}} in",
-                class_name, self.module_name
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "let _InitResult = call 'gen_server':'call'(Pid, {{'initialize', []}}) in"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "_Obj")?;
+            self.generate_spawn_initialize_block(&class_name)?;
         } else {
             writeln!(
                 self.output,
@@ -95,6 +83,36 @@ impl CoreErlangGenerator {
         self.indent -= 1;
         writeln!(self.output)?;
 
+        Ok(())
+    }
+
+    /// Generates the initialize-with-cleanup block for spawn functions (BT-425).
+    ///
+    /// Wraps the `initialize` call in a try-catch. If initialize fails,
+    /// stops the spawned process before re-raising the error to prevent leaks.
+    fn generate_spawn_initialize_block(&mut self, class_name: &str) -> Result<()> {
+        let module_name = self.module_name.clone();
+        // Build the object first
+        writeln!(
+            self.output,
+            "let _Obj = {{'beamtalk_object', '{class_name}', '{module_name}', Pid}} in",
+        )?;
+        self.write_indent()?;
+        // Core Erlang try: simple variable patterns in of/catch (no <> or guards)
+        writeln!(
+            self.output,
+            "try call 'gen_server':'call'(Pid, {{'initialize', []}})"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "of _InitOk -> _Obj")?;
+        self.write_indent()?;
+        writeln!(self.output, "catch <_InitClass, _InitErr, _InitStack> ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let _Stop = call 'gen_server':'stop'(Pid) in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(_InitErr)")?;
+        self.indent -= 1;
         Ok(())
     }
 
@@ -143,19 +161,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
 
         if has_initialize {
-            // BT-411: Build object, call initialize, then return object
-            writeln!(
-                self.output,
-                "let _Obj = {{'beamtalk_object', '{}', '{}', Pid}} in",
-                class_name, self.module_name
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "let _InitResult = call 'gen_server':'call'(Pid, {{'initialize', []}}) in"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "_Obj")?;
+            self.generate_spawn_initialize_block(&class_name)?;
         } else {
             writeln!(
                 self.output,
