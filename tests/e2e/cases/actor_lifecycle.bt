@@ -32,6 +32,10 @@ counter isAlive
 counter stop
 // => ok
 
+// Stopping an already-stopped actor is idempotent
+counter stop
+// => ok
+
 // isAlive returns false after stop
 counter isAlive
 // => false

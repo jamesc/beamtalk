@@ -290,8 +290,18 @@ async_send(ActorPid, stop, [], FuturePid) ->
         gen_server:stop(ActorPid, normal, 5000),
         beamtalk_future:resolve(FuturePid, ok)
     catch
+        exit:noproc ->
+            %% Actor already stopped (bare atom exit) - treat as successful stop
+            beamtalk_future:resolve(FuturePid, ok);
         exit:{noproc, _} ->
-            beamtalk_future:resolve(FuturePid, ok)
+            %% Actor already stopped (tuple exit) - treat as successful stop
+            beamtalk_future:resolve(FuturePid, ok);
+        exit:Reason ->
+            %% Other stop failures (e.g., timeout) - reject Future deterministically
+            Error0 = beamtalk_error:new(actor_dead, unknown),
+            Error1 = beamtalk_error:with_selector(Error0, stop),
+            Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Reason]))),
+            beamtalk_future:reject(FuturePid, Error2)
     end,
     ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
@@ -343,7 +353,15 @@ sync_send(ActorPid, stop, []) ->
     try
         gen_server:stop(ActorPid, normal, 5000)
     catch
-        exit:{noproc, _} -> ok
+        exit:noproc ->
+            %% Idempotent: actor already stopped (bare atom exit)
+            ok;
+        exit:{noproc, _} ->
+            %% Idempotent: actor already stopped (tuple exit)
+            ok;
+        exit:_Other ->
+            %% Preserve sync_send/3 contract: translate exits to structured errors
+            actor_dead_error(stop)
     end;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
@@ -510,6 +528,9 @@ dispatch(Selector, Args, Self, State) ->
                     {reply, true, State};
                 false when CheckSelector =:= stop ->
                     %% stop is handled at send site, not in __methods__
+                    {reply, true, State};
+                false when CheckSelector =:= monitor ->
+                    %% monitor is handled by actor lifecycle machinery, not in __methods__
                     {reply, true, State};
                 false ->
                     %% Check inherited methods via hierarchy walk
