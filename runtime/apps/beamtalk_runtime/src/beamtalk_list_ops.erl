@@ -205,7 +205,7 @@ from_to(List, Start, End) when is_list(List),
     lists:sublist(safe_nthtail(Start - 1, List), Len);
 from_to(List, Start, End) when is_list(List),
                                is_integer(Start), is_integer(End),
-                               End < Start ->
+                               Start >= 1, End < Start ->
     [];
 from_to(List, Start, _End) when is_list(List), not is_integer(Start) ->
     Error0 = beamtalk_error:new(type_error, 'List'),

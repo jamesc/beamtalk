@@ -191,8 +191,13 @@
 #(1, 2, 3, 4, 5) from: 2 to: 4
 // => [2,3,4]
 
+// Wildcard for single-element result (Erlang printable_list ambiguity with small integers)
 #(1, 2, 3, 4, 5) from: 1 to: 1
 // => _
+
+// Two-element subsequence verifies inclusive bounds
+#(1, 2, 3, 4, 5) from: 1 to: 2
+// => [1,2]
 
 #(1, 2, 3, 4, 5) from: 1 to: 5
 // => [1,2,3,4,5]
@@ -231,6 +236,13 @@
 
 // Verify eachWithIndex: iterates (empty list is a no-op)
 #() eachWithIndex: [:elem :idx | elem]
+// => nil
+
+// Verify eachWithIndex: passes correct 1-based indices indirectly:
+// eachWithIndex: uses same 1-based indexing as indexOf: (verified above).
+// Direct index assertion not possible in E2E since blocks can't accumulate results.
+// The block receives (elem, idx) — verify it doesn't error with 2-arg block:
+#(100, 200, 300) eachWithIndex: [:elem :idx | elem + idx]
 // => nil
 
 // --- ++ with variables ---

@@ -1167,8 +1167,10 @@ mod tests {
             &["Start".to_string(), "End".to_string()],
         );
         assert!(result.is_some());
-        assert!(output.contains("beamtalk_list_ops"));
-        assert!(output.contains("from_to"));
+        assert_eq!(
+            output,
+            "call 'beamtalk_list_ops':'from_to'(Self, Start, End)"
+        );
     }
 
     #[test]
@@ -1176,8 +1178,7 @@ mod tests {
         let mut output = String::new();
         let result = generate_primitive_bif(&mut output, "List", "indexOf:", &["Item".to_string()]);
         assert!(result.is_some());
-        assert!(output.contains("beamtalk_list_ops"));
-        assert!(output.contains("index_of"));
+        assert_eq!(output, "call 'beamtalk_list_ops':'index_of'(Self, Item)");
     }
 
     #[test]
@@ -1190,7 +1191,9 @@ mod tests {
             &["Block".to_string()],
         );
         assert!(result.is_some());
-        assert!(output.contains("beamtalk_list_ops"));
-        assert!(output.contains("each_with_index"));
+        assert_eq!(
+            output,
+            "call 'beamtalk_list_ops':'each_with_index'(Self, Block)"
+        );
     }
 }
