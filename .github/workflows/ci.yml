@@ -99,6 +99,9 @@ jobs:
       - name: Test Rust (unit + integration)
         run: just test-rust
 
+      - name: Test stdlib (compiled language features)
+        run: just test-stdlib
+
       - name: Test E2E (full pipeline)
         run: just test-e2e
 
