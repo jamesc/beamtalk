@@ -75,3 +75,13 @@
 
 'abcd' select: [:ch | ch < 'c']
 // => ab
+
+// BT-416: collect:/select: on string variables (not just literals)
+s := 'hello'
+// => _
+
+s collect: [:ch | ch uppercase]
+// => ["H","E","L","L","O"]
+
+s select: [:ch | ch > 'h']
+// => llo
