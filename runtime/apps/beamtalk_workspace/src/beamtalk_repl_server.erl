@@ -380,8 +380,8 @@ handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
     ModulesWithInfo = lists:filtermap(
         fun(Pid) ->
             try
-                Name = beamtalk_object_class:class_name(Pid),
-                ModName = beamtalk_object_class:module_name(Pid),
+                Name = gen_server:call(Pid, class_name, 1000),
+                ModName = gen_server:call(Pid, module_name, 1000),
                 SourceFile = case code:is_loaded(ModName) of
                     {file, F} when is_list(F) -> F;
                     _ -> "loaded"
