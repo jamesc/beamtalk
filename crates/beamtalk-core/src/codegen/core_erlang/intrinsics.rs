@@ -13,7 +13,7 @@
 //! - **`ProtoObject`**: `class` → Type introspection via pattern matching
 //! - **Object protocol** (split into domain-aligned groups):
 //!   - **Nil protocol**: `isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:` → Nil-testing boolean protocol
-//!   - **Error signaling**: `error:`, `subclassResponsibility` → Error construction and signaling
+//!   - **Error signaling**: `error:` → Error construction and signaling
 //!   - **Object identity**: `yourself`, `hash`, `printString` → Identity and representation
 //!   - **Object reflection**: `respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:` → Runtime introspection
 //! - **Dynamic dispatch**: `perform:`, `perform:withArguments:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
@@ -508,7 +508,7 @@ impl CoreErlangGenerator {
     ///
     /// Delegates to domain-aligned intrinsic groups:
     /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`)
-    /// - Error signaling (`error:`, `subclassResponsibility`)
+    /// - Error signaling (`error:`)
     /// - Object identity (`yourself`, `hash`, `printString`)
     /// - Object reflection (`respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`)
     ///
@@ -655,7 +655,6 @@ impl CoreErlangGenerator {
     /// **DDD Context:** Object Protocol — Error Signaling
     ///
     /// - `error:` — Smalltalk-style error signaling with receiver's class
-    /// - `subclassResponsibility` — Abstract method marker
     fn try_generate_error_signaling(
         &mut self,
         receiver: &Expression,
@@ -663,26 +662,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<()>> {
         match selector {
-            MessageSelector::Unary(name) => match name.as_str() {
-                "subclassResponsibility" if arguments.is_empty() => {
-                    // Raise a structured beamtalk_error for abstract methods
-                    let err0 = self.fresh_temp_var("Err");
-                    let err1 = self.fresh_temp_var("Err");
-                    let err2 = self.fresh_temp_var("Err");
-                    let hint = core_erlang_binary_string(
-                        "This method is abstract and must be overridden by a subclass.",
-                    );
-                    write!(
-                        self.output,
-                        "let {err0} = call 'beamtalk_error':'new'('does_not_understand', 'Object') in \
-                         let {err1} = call 'beamtalk_error':'with_selector'({err0}, 'subclassResponsibility') in \
-                         let {err2} = call 'beamtalk_error':'with_hint'({err1}, {hint}) in \
-                         call 'erlang':'error'({err2})"
-                    )?;
-                    Ok(Some(()))
-                }
-                _ => Ok(None),
-            },
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
 
@@ -712,7 +691,7 @@ impl CoreErlangGenerator {
                     _ => Ok(None),
                 }
             }
-            MessageSelector::Binary(_) => Ok(None),
+            _ => Ok(None),
         }
     }
 

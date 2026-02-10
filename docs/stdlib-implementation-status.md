@@ -64,7 +64,7 @@
 | `instVarAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
 | `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
-| `subclassResponsibility` | intrinsic | ✅ | 🧪 | Raises `beamtalk_error` |
+| `subclassResponsibility` | pure BT | ✅ | 🧪 | Calls `self error:` — pure Beamtalk method (BT-405) |
 
 ### Integer (`lib/Integer.bt`)
 
