@@ -602,6 +602,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         }
     }
@@ -734,6 +735,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         }
     }
@@ -941,6 +943,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         };
         let derived = ClassDefinition {
@@ -958,6 +961,7 @@ mod tests {
                 kind: MethodKind::Primary,
                 span: test_span(),
             }],
+            class_methods: vec![],
             span: test_span(),
         };
 

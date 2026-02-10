@@ -181,6 +181,7 @@ Module {
                     },
                 },
             ],
+            class_methods: [],
             span: Span {
                 start: 104,
                 end: 217,

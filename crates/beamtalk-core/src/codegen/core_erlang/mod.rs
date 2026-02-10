@@ -3184,6 +3184,7 @@ end
                     span: Span::new(0, 10),
                 },
             ],
+            class_methods: vec![],
             span: Span::new(0, 50),
         };
 
@@ -3329,6 +3330,7 @@ end
                 span: Span::new(0, 10),
             }],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 20),
         };
 
@@ -3344,6 +3346,7 @@ end
                 span: Span::new(0, 10),
             }],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 30),
         };
 
@@ -3420,6 +3423,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 50),
         };
 
@@ -3700,6 +3704,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3721,6 +3726,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3744,6 +3750,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let logging_counter = ClassDefinition {
@@ -3753,6 +3760,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         // Module with both classes; first class is LoggingCounter
@@ -3793,6 +3801,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3815,6 +3824,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3841,6 +3851,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3866,6 +3877,7 @@ end
             is_sealed: false,
             state: vec![],
             methods: vec![],
+            class_methods: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
