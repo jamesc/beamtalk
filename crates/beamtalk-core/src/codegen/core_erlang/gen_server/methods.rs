@@ -618,7 +618,10 @@ impl CoreErlangGenerator {
             let arity = method.selector.arity() + 1; // +1 for ClassSelf
 
             writeln!(self.output)?;
-            write!(self.output, "'class_{selector_name}'/{arity} = fun (ClassSelf")?;
+            write!(
+                self.output,
+                "'class_{selector_name}'/{arity} = fun (ClassSelf"
+            )?;
 
             // Push scope for parameter bindings
             self.push_scope();

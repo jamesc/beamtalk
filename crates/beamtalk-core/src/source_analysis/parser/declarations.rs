@@ -124,7 +124,11 @@ impl Parser {
     /// Methods are identified by having a `=>` somewhere.
     fn parse_class_body(
         &mut self,
-    ) -> (Vec<StateDeclaration>, Vec<MethodDefinition>, Vec<MethodDefinition>) {
+    ) -> (
+        Vec<StateDeclaration>,
+        Vec<MethodDefinition>,
+        Vec<MethodDefinition>,
+    ) {
         let mut state = Vec::new();
         let mut methods = Vec::new();
         let mut class_methods = Vec::new();
@@ -180,11 +184,10 @@ impl Parser {
                 offset += 1;
             } else if name == "class" {
                 // Only treat as modifier if next token is not `=>`
-                if !matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow)) {
-                    offset += 1;
-                } else {
+                if matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow)) {
                     break;
                 }
+                offset += 1;
             } else {
                 break;
             }
@@ -349,12 +352,11 @@ impl Parser {
                 "class" => {
                     // Only treat as modifier if next token is not `=>`
                     // (otherwise it's a method named `class`)
-                    if !matches!(self.peek_at(1), Some(TokenKind::FatArrow)) {
-                        _is_class_method = true;
-                        self.advance();
-                    } else {
+                    if matches!(self.peek_at(1), Some(TokenKind::FatArrow)) {
                         break;
                     }
+                    _is_class_method = true;
+                    self.advance();
                 }
                 "before" => {
                     method_kind = MethodKind::Before;

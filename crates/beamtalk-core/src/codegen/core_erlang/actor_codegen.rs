@@ -42,7 +42,7 @@ impl CoreErlangGenerator {
         let sealed_export_str = self.build_sealed_export_str(module);
 
         // BT-411: Build class method exports
-        let class_method_export_str = self.build_class_method_export_str(module);
+        let class_method_export_str = Self::build_class_method_export_str(module);
 
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
@@ -225,7 +225,7 @@ impl CoreErlangGenerator {
     }
 
     /// Builds the export string for class-side method functions (BT-411).
-    fn build_class_method_export_str(&self, module: &Module) -> String {
+    fn build_class_method_export_str(module: &Module) -> String {
         if let Some(class) = module.classes.first() {
             let class_method_exports: Vec<String> = class
                 .class_methods

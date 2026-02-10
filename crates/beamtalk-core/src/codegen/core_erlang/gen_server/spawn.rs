@@ -34,10 +34,10 @@ impl CoreErlangGenerator {
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
-        _module: &Module,
+        module: &Module,
     ) -> Result<()> {
         // BT-411: Check if class defines an initialize method
-        let has_initialize = _module
+        let has_initialize = module
             .classes
             .first()
             .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
@@ -119,10 +119,10 @@ impl CoreErlangGenerator {
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
-        _module: &Module,
+        module: &Module,
     ) -> Result<()> {
         // BT-411: Check if class defines an initialize method
-        let has_initialize = _module
+        let has_initialize = module
             .classes
             .first()
             .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));

@@ -132,11 +132,9 @@ impl CoreErlangGenerator {
         // BT-411: In workspace mode, ClassReference spawns go through class_send
         // to use the correct module name from the class registry.
         if let MessageSelector::Unary(name) = selector {
-            if name == "spawn" && arguments.is_empty() {
-                if !self.workspace_mode {
-                    if let Expression::ClassReference { name, .. } = receiver {
-                        return self.generate_actor_spawn(&name.name, None);
-                    }
+            if name == "spawn" && arguments.is_empty() && !self.workspace_mode {
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, None);
                 }
             }
 
@@ -165,11 +163,13 @@ impl CoreErlangGenerator {
         // objects (e.g. `cls spawnWith: args`) must go through runtime dispatch path.
         // BT-411: In workspace mode, use class_send for correct module resolution.
         if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if !self.workspace_mode {
-                    if let Expression::ClassReference { name, .. } = receiver {
-                        return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
-                    }
+            if parts.len() == 1
+                && parts[0].keyword == "spawnWith:"
+                && arguments.len() == 1
+                && !self.workspace_mode
+            {
+                if let Expression::ClassReference { name, .. } = receiver {
+                    return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
                 }
             }
 
