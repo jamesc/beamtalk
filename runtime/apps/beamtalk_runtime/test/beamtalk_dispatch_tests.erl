@@ -69,7 +69,8 @@ dispatch_test_() ->
           {"BT-283: flattened table memory overhead", fun test_flattened_table_memory_overhead/0},
           {"BT-283: flattened table invalidation on method add", fun test_flattened_table_invalidation_on_method_add/0},
           {"BT-283: subclass flattened table invalidation on parent change", fun test_subclass_invalidation_on_parent_change/0},
-          {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0}
+          {"BT-387: out-of-order class registration rebuilds flattened tables", fun test_out_of_order_registration/0},
+          {"BT-429: super finds extension on superclass", fun test_super_finds_extension_on_superclass/0}
          ]
      end
     }.
@@ -521,3 +522,34 @@ test_out_of_order_registration() ->
     %% Clean up test-only class processes to avoid leaking between tests
     gen_server:stop(ChildPid),
     gen_server:stop(ParentPid).
+
+%% BT-429: Test that super/5 finds extension methods registered on a superclass.
+%% Register extension on Actor class, verify it's found via super from Counter.
+test_super_finds_extension_on_superclass() ->
+    ok = ensure_counter_loaded(),
+    ok = beamtalk_extensions:init(),
+
+    %% Register an extension method on Actor (Counter's superclass)
+    TestFun = fun(_Args, State) ->
+        {super_extension_called, State}
+    end,
+
+    ok = beamtalk_extensions:register('Actor', superExtTest, TestFun, test_owner),
+
+    State = #{
+        '$beamtalk_class' => 'Counter',
+        'value' => 0
+    },
+
+    Self = make_ref(),
+
+    %% Call super from Counter — should find the extension on Actor
+    try
+        Result = beamtalk_dispatch:super(superExtTest, [], Self, State, 'Counter'),
+
+        %% Should invoke the extension registered on Actor
+        ?assertMatch({reply, {super_extension_called, _}, _}, Result)
+    after
+        %% Clean up extension (ignore any error if it's already gone)
+        catch ets:delete(beamtalk_extensions, {'Actor', superExtTest})
+    end.
