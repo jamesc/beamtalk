@@ -47,10 +47,30 @@ sealed Object subclass: String
   split: separator => @primitive 'split:'
   splitOn: pattern => @primitive 'splitOn:'
   repeat: n => @primitive 'repeat:'
+  lines => @primitive 'lines'
+  words => @primitive 'words'
+
+  // Replace
+  replaceAll: old with: new => @primitive 'replaceAll:with:'
+  replaceFirst: old with: new => @primitive 'replaceFirst:with:'
+
+  // Substring
+  take: n => @primitive 'take:'
+  drop: n => @primitive 'drop:'
+
+  // Padding
+  padLeft: width => @primitive 'padLeft:'
+  padRight: width => @primitive 'padRight:'
+  padLeft: width with: char => @primitive 'padLeft:with:'
 
   // Pure Beamtalk
   isEmpty => self length = 0
   isNotEmpty => self length > 0
+
+  // Testing
+  isBlank => @primitive 'isBlank'
+  isDigit => @primitive 'isDigit'
+  isAlpha => @primitive 'isAlpha'
 
   // Conversion
   asInteger => @primitive 'asInteger'

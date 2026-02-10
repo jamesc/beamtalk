@@ -868,10 +868,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(env_var)]
     fn resolve_port_default_without_env() {
         // When no CLI flag and no env var, should return default (49152)
-        // Note: This test assumes BEAMTALK_REPL_PORT is not set in the test environment
-        // We can't safely unset it here without serial test coordination
         let result = resolve_port(None);
         // If env var is set, it will return that; if not, default
         // The test verifies the function runs without error
