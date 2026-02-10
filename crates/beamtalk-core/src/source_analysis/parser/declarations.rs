@@ -79,18 +79,19 @@ impl Parser {
         // Parse class name
         let name = self.parse_identifier("Expected class name");
 
-        // Parse class body (state declarations and methods)
-        let (state, methods) = self.parse_class_body();
+        // Parse class body (state declarations, instance methods, and class methods)
+        let (state, methods, class_methods) = self.parse_class_body();
 
         // Determine end span: prefer methods, fallback to state, then to name
         let end = methods
             .last()
             .map(|m| m.span)
+            .or_else(|| class_methods.last().map(|m| m.span))
             .or_else(|| state.last().map(|s| s.span))
             .unwrap_or(name.span);
         let span = start.merge(end);
 
-        ClassDefinition::with_modifiers(
+        let mut class_def = ClassDefinition::with_modifiers(
             name,
             superclass,
             is_abstract,
@@ -98,7 +99,9 @@ impl Parser {
             state,
             methods,
             span,
-        )
+        );
+        class_def.class_methods = class_methods;
+        class_def
     }
 
     /// Helper to parse an identifier, reporting an error if not found.
@@ -119,9 +122,12 @@ impl Parser {
     ///
     /// State declarations start with `state:`.
     /// Methods are identified by having a `=>` somewhere.
-    fn parse_class_body(&mut self) -> (Vec<StateDeclaration>, Vec<MethodDefinition>) {
+    fn parse_class_body(
+        &mut self,
+    ) -> (Vec<StateDeclaration>, Vec<MethodDefinition>, Vec<MethodDefinition>) {
         let mut state = Vec::new();
         let mut methods = Vec::new();
+        let mut class_methods = Vec::new();
 
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
@@ -133,10 +139,16 @@ impl Parser {
                     state.push(state_decl);
                 }
             }
-            // Check for method definition (with optional modifiers)
+            // Check for method definition (with optional modifiers including `class`)
             else if self.is_at_method_definition() {
+                let is_class_method = matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
+                    && !matches!(self.peek_at(1), Some(TokenKind::FatArrow));
                 if let Some(method) = self.parse_method_definition() {
-                    methods.push(method);
+                    if is_class_method {
+                        class_methods.push(method);
+                    } else {
+                        methods.push(method);
+                    }
                 }
             } else {
                 // Not a state or method - end of class body
@@ -147,7 +159,7 @@ impl Parser {
             while self.match_token(&TokenKind::Period) {}
         }
 
-        (state, methods)
+        (state, methods, class_methods)
     }
 
     /// Checks if the current position is at the start of a method definition.
@@ -160,10 +172,19 @@ impl Parser {
     pub(super) fn is_at_method_definition(&self) -> bool {
         let mut offset = 0;
 
-        // Skip optional modifiers: before, after, around, sealed
+        // Skip optional modifiers: before, after, around, sealed, class
+        // Note: `class` is only a modifier when followed by a method selector,
+        // not when followed by `=>` (which makes it a method named `class`).
         while let Some(TokenKind::Identifier(name)) = self.peek_at(offset) {
             if matches!(name.as_str(), "before" | "after" | "around" | "sealed") {
                 offset += 1;
+            } else if name == "class" {
+                // Only treat as modifier if next token is not `=>`
+                if !matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow)) {
+                    offset += 1;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -320,10 +341,21 @@ impl Parser {
         let start = self.current_token().span();
         let mut method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
+        let mut _is_class_method = false;
 
         // Parse optional modifiers
         while let TokenKind::Identifier(name) = self.current_kind() {
             match name.as_str() {
+                "class" => {
+                    // Only treat as modifier if next token is not `=>`
+                    // (otherwise it's a method named `class`)
+                    if !matches!(self.peek_at(1), Some(TokenKind::FatArrow)) {
+                        _is_class_method = true;
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
                 "before" => {
                     method_kind = MethodKind::Before;
                     self.advance();
