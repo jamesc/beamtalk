@@ -15,8 +15,10 @@
 //!    generate inline code for (binary operators, block evaluation, spawn/await,
 //!    class/nil testing). These are structural requirements, not type-specific dispatch.
 //!
-//! 2. **Runtime dispatch**: All other messages go through the BT-223 runtime check:
+//! 2. **Runtime dispatch**: All other messages go through the unified entry point
+//!    `beamtalk_message_dispatch:send/3` (BT-430), which routes to:
 //!    - **Actors** (`beamtalk_object` records): Async via `beamtalk_actor:async_send` with futures
+//!    - **Class objects**: Sync via `beamtalk_object_class:class_send/3`
 //!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
 //! The primitive binding table from `lib/*.bt` (ADR 0007) drives stdlib method
@@ -66,8 +68,8 @@ impl CoreErlangGenerator {
     ///
     /// This is the **main entry point** for message compilation. It dispatches
     /// to specialized handlers for different message patterns, and falls back
-    /// to runtime dispatch via `beamtalk_primitive:send/3` for primitives or
-    /// async actor messaging for actor receivers.
+    /// to runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430)
+    /// which handles actors, class objects, and primitives uniformly.
     ///
     /// # Message Dispatch Strategy (ADR 0007 Phase 4)
     ///
@@ -168,31 +170,21 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
-        // BT-223: Runtime dispatch — actor vs primitive type check
+        // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         self.generate_runtime_dispatch(receiver, selector, arguments)
     }
 
-    /// Generates runtime dispatch with actor/class-object/primitive type checking (BT-223).
+    /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
     ///
     /// This is the fallback path for messages that don't match any compiler intrinsic.
-    /// Generates a nested case expression that checks:
-    /// 1. Is the receiver a `beamtalk_object` tuple? (class object vs actor)
-    /// 2. Otherwise, delegate to `beamtalk_primitive:send/3`
+    /// Routes through the unified entry point which handles actors (async with futures),
+    /// class objects (sync), and primitives (sync).
     fn generate_runtime_dispatch(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        let receiver_var = self.fresh_var("Receiver");
-        let pid_var = self.fresh_var("Pid");
-        let future_var = self.fresh_var("Future");
-
-        // Bind receiver to a variable
-        write!(self.output, "let {receiver_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in ")?;
-
         // Generate selector atom
         let selector_atom = selector.to_erlang_atom();
         if matches!(selector, MessageSelector::Binary(_)) {
@@ -201,95 +193,13 @@ impl CoreErlangGenerator {
             )));
         }
 
-        // BT-223: Runtime type check - short-circuit evaluation for actor vs primitive
-        // Use nested case expressions (like control_flow.rs) to avoid badarg on primitives
-        write!(
-            self.output,
-            "case case call 'erlang':'is_tuple'({receiver_var}) of "
-        )?;
+        write!(self.output, "call 'beamtalk_message_dispatch':'send'(")?;
+        self.generate_expression(receiver)?;
+        write!(self.output, ", '{selector_atom}', [")?;
 
-        // True branch: Receiver is a tuple, check size
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(
-            self.output,
-            "case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of "
-        )?;
-
-        // True branch: Size is 4, check first element
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(
-            self.output,
-            "call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') "
-        )?;
-
-        // Default branch: Size is not 4
-        write!(self.output, "<_> when 'true' -> 'false' end ")?;
-
-        // Default branch: Not a tuple
-        write!(self.output, "<_> when 'true' -> 'false' end of ")?;
-
-        // Case 1: Result is true (beamtalk_object) - check class object vs actor
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        // BT-246 / ADR 0013 Phase 1: Check if receiver is a class object.
-        // Class objects need synchronous dispatch via gen_server:call,
-        // not async actor dispatch. Class objects have class name ending
-        // with " class" (e.g., 'Point class').
-        let is_class_var = self.fresh_var("IsClass");
-        write!(
-            self.output,
-            "let {is_class_var} = call 'beamtalk_object_class':'is_class_object'({receiver_var}) in "
-        )?;
-        write!(self.output, "case {is_class_var} of ")?;
-
-        // Case 1a: Class object - synchronous dispatch via class_send
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        let class_pid_var = self.fresh_var("ClassPid");
-        write!(
-            self.output,
-            "let {class_pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-        )?;
-        write!(
-            self.output,
-            "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
-        )?;
-        self.generate_argument_list(arguments)?;
-        write!(self.output, "]) ")?;
-
-        // Case 1b: Actor - async dispatch with futures (existing behavior)
-        write!(self.output, "<'false'> when 'true' -> ")?;
-
-        // Extract PID from actor record (4th element)
-        write!(
-            self.output,
-            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-        )?;
-
-        // Create future
-        write!(
-            self.output,
-            "let {future_var} = call 'beamtalk_future':'new'() in "
-        )?;
-
-        // Send async message via beamtalk_actor:async_send (handles isAlive, dead actors)
-        write!(
-            self.output,
-            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
-        )?;
         self.generate_argument_list(arguments)?;
 
-        write!(self.output, "], {future_var}) in {future_var} ")?;
-        write!(self.output, "end ")?; // Close is_class_object case
-
-        // Case 2: Primitive - use synchronous dispatch
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        write!(
-            self.output,
-            "call 'beamtalk_primitive':'send'({receiver_var}, '{selector_atom}', ["
-        )?;
-        self.generate_argument_list(arguments)?;
-
-        write!(self.output, "]) end")?;
+        write!(self.output, "])")?;
 
         Ok(())
     }
