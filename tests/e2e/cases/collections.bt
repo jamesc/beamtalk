@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for collection/Array methods (BT-44)
+// E2E tests for collection/List methods (BT-44)
 
 // ===========================================================================
 // TIER 1: ESSENTIAL METHODS
@@ -149,3 +149,23 @@
 // --- inject:into: ---
 #(1, 2, 3, 4) inject: 0 into: [:sum :x | sum + x]
 // => 10
+
+// ===========================================================================
+// ADVANCED METHODS (BT-419: verify codegen→runtime plumbing)
+// ===========================================================================
+
+// --- zip: ---
+#(1, 2, 3) zip: #(4, 5, 6)
+// => _
+
+// --- groupBy: ---
+#(1, 2, 3, 4, 5, 6) groupBy: [:x | x isEven]
+// => _
+
+// --- partition: ---
+#(1, 2, 3, 4) partition: [:x | x > 2]
+// => _
+
+// --- sort: (with comparator) ---
+#(3, 1, 2) sort: [:a :b | a >= b]
+// => [3,2,1]

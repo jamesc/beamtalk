@@ -201,6 +201,8 @@ fn is_primitive_type(class_name: &str) -> bool {
             | "Block"
             | "Symbol"
             | "Tuple"
+            | "List"
+            | "Dictionary"
     )
 }
 

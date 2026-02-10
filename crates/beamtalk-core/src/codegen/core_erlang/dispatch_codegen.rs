@@ -95,6 +95,24 @@ impl CoreErlangGenerator {
                     location: format!("{receiver:?}"),
                 });
             }
+
+            // BT-335: Association creation via `->` binary message
+            if op.as_str() == "->" {
+                if arguments.len() != 1 {
+                    return Err(CodeGenError::Internal(
+                        "-> operator must have exactly one argument".to_string(),
+                    ));
+                }
+                write!(
+                    self.output,
+                    "~{{'$beamtalk_class' => 'Association', 'key' => "
+                )?;
+                self.generate_expression(receiver)?;
+                write!(self.output, ", 'value' => ")?;
+                self.generate_expression(&arguments[0])?;
+                write!(self.output, "}}~")?;
+                return Ok(());
+            }
             return self.generate_binary_op(op, receiver, arguments);
         }
 
@@ -999,7 +1017,7 @@ fn class_method_module_name(class_name: &str) -> String {
 fn is_bt_stdlib_class(class_name: &str) -> bool {
     matches!(
         class_name,
-        "ProtoObject" | "Object" | "Actor" | "Array" | "SystemDictionary" | "TranscriptStream"
+        "ProtoObject" | "Object" | "Actor" | "SystemDictionary" | "TranscriptStream"
     )
 }
 
@@ -1053,6 +1071,6 @@ mod tests {
         );
         assert_eq!(class_method_module_name("Object"), "bt_stdlib_object");
         assert_eq!(class_method_module_name("Actor"), "bt_stdlib_actor");
-        assert_eq!(class_method_module_name("Array"), "bt_stdlib_array");
+        assert_eq!(class_method_module_name("Array"), "array");
     }
 }
