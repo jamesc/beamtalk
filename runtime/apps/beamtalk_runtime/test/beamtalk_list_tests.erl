@@ -128,3 +128,85 @@ intersperse_test() ->
         beamtalk_list_ops:intersperse([1, 2, 3], 0)),
     ?assertEqual([], beamtalk_list_ops:intersperse([], 0)),
     ?assertEqual([1], beamtalk_list_ops:intersperse([1], 0)).
+
+%%% ============================================================================
+%%% Compiled dispatch integration tests
+%%% Tests via beamtalk_list:dispatch/3 (compiled from lib/List.bt)
+%%% to verify BIF mappings are wired correctly end-to-end.
+%%% ============================================================================
+
+dispatch_size_test() ->
+    ?assertEqual(3, beamtalk_list:dispatch('size', [], [1, 2, 3])),
+    ?assertEqual(0, beamtalk_list:dispatch('size', [], [])).
+
+dispatch_is_empty_test() ->
+    ?assertEqual(true, beamtalk_list:dispatch('isEmpty', [], [])),
+    ?assertEqual(false, beamtalk_list:dispatch('isEmpty', [], [1])).
+
+dispatch_first_test() ->
+    ?assertEqual(1, beamtalk_list:dispatch('first', [], [1, 2, 3])).
+
+dispatch_first_empty_test() ->
+    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'},
+        beamtalk_list:dispatch('first', [], [])).
+
+dispatch_rest_test() ->
+    ?assertEqual([2, 3], beamtalk_list:dispatch('rest', [], [1, 2, 3])),
+    ?assertEqual([], beamtalk_list:dispatch('rest', [], [])).
+
+dispatch_last_test() ->
+    ?assertEqual(3, beamtalk_list:dispatch('last', [], [1, 2, 3])).
+
+dispatch_at_test() ->
+    ?assertEqual(2, beamtalk_list:dispatch('at:', [2], [1, 2, 3])).
+
+dispatch_includes_test() ->
+    ?assertEqual(true, beamtalk_list:dispatch('includes:', [2], [1, 2, 3])),
+    ?assertEqual(false, beamtalk_list:dispatch('includes:', [4], [1, 2, 3])).
+
+dispatch_sort_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('sort', [], [3, 1, 2])).
+
+dispatch_reversed_test() ->
+    ?assertEqual([3, 2, 1], beamtalk_list:dispatch('reversed', [], [1, 2, 3])).
+
+dispatch_collect_test() ->
+    ?assertEqual([2, 4, 6],
+        beamtalk_list:dispatch('collect:', [fun(X) -> X * 2 end], [1, 2, 3])).
+
+dispatch_select_test() ->
+    ?assertEqual([2, 4],
+        beamtalk_list:dispatch('select:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
+
+dispatch_inject_into_test() ->
+    ?assertEqual(6,
+        beamtalk_list:dispatch('inject:into:', [0, fun(Acc, X) -> Acc + X end], [1, 2, 3])).
+
+dispatch_add_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('add:', [3], [1, 2])).
+
+dispatch_flatten_test() ->
+    ?assertEqual([1, 2, 3, 4], beamtalk_list:dispatch('flatten', [], [[1, 2], [3, 4]])).
+
+%%% ============================================================================
+%%% beamtalk_primitive:send integration tests
+%%% ============================================================================
+
+primitive_send_size_test() ->
+    ?assertEqual(3, beamtalk_primitive:send([1, 2, 3], 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send([], 'size', [])).
+
+primitive_send_first_test() ->
+    ?assertEqual(1, beamtalk_primitive:send([1, 2, 3], 'first', [])).
+
+primitive_send_reversed_test() ->
+    ?assertEqual([3, 2, 1], beamtalk_primitive:send([1, 2, 3], 'reversed', [])).
+
+primitive_send_includes_test() ->
+    ?assertEqual(true, beamtalk_primitive:send([1, 2, 3], 'includes:', [2])),
+    ?assertEqual(false, beamtalk_primitive:send([1, 2, 3], 'includes:', [4])).
+
+primitive_send_collect_test() ->
+    ?assertEqual([2, 4, 6],
+        beamtalk_primitive:send([1, 2, 3], 'collect:', [fun(X) -> X * 2 end])).
+

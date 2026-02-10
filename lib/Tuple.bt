@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+//
+// Tuple — immutable fixed-size collection (Erlang tuple).
+//
+// Tuples are particularly useful for Erlang interop with {ok, Value}
+// and {error, Reason} patterns common in BEAM libraries.
+//
+// Syntax: Tuples are created via Erlang interop or spawn/new messages to the Tuple class.
+
+sealed Object subclass: Tuple
+
+  // Size and access
+  size => @primitive 'size'
+  at: index => @primitive 'at:'
+
+  // Pattern matching for Erlang result types
+  isOk => @primitive 'isOk'
+  isError => @primitive 'isError'
+
+  // Unwrapping — extract value from {ok, Value} or raise error from {error, Reason}
+  unwrap => @primitive 'unwrap'
+  unwrapOr: default => @primitive 'unwrapOr:'
+  unwrapOrElse: block => @primitive 'unwrapOrElse:'
+
+  // Conversion
+  asString => @primitive 'asString'
