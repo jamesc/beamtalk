@@ -617,6 +617,35 @@ struct EunitBatchResult {
 ///
 /// This avoids the ~3s BEAM startup overhead per test file by running
 /// all modules in one `erl` invocation.
+/// Build cover instrumentation preamble and epilogue for the eval command.
+fn cover_fragments(
+    beam_paths: &beamtalk_cli::repl_startup::BeamPaths,
+    runtime_dir: &std::path::Path,
+) -> (String, String) {
+    let cover_enabled = std::env::var("STDLIB_COVER").is_ok();
+    if !cover_enabled {
+        return (String::new(), String::new());
+    }
+
+    let cover_export_path = runtime_dir.join("_build/test/cover/stdlib.coverdata");
+    let cover_dir = runtime_dir.join("_build/test/cover");
+    let _ = std::fs::create_dir_all(&cover_dir);
+    info!("Cover mode enabled, will export to {}", cover_export_path.display());
+
+    let preamble = format!(
+        "cover:start(), \
+         cover:compile_beam_directory(\"{runtime_ebin}\"), \
+         cover:compile_beam_directory(\"{workspace_ebin}\"), ",
+        runtime_ebin = beam_paths.runtime_ebin.display(),
+        workspace_ebin = beam_paths.workspace_ebin.display(),
+    );
+    let epilogue = format!(
+        "cover:export(\"{export}\"), cover:stop(), ",
+        export = cover_export_path.display(),
+    );
+    (preamble, epilogue)
+}
+
 fn run_all_eunit_tests(
     test_module_names: &[&str],
     build_dir: &Utf8Path,
@@ -638,35 +667,7 @@ fn run_all_eunit_tests(
         .collect::<Vec<_>>()
         .join(", ");
 
-    // When STDLIB_COVER=1, instrument runtime modules with Erlang's cover tool
-    let cover_enabled = std::env::var("STDLIB_COVER").is_ok();
-    let cover_export_path = runtime_dir.join("_build/test/cover/stdlib.coverdata");
-
-    let cover_preamble = if cover_enabled {
-        // Ensure cover directory exists
-        let cover_dir = runtime_dir.join("_build/test/cover");
-        let _ = std::fs::create_dir_all(&cover_dir);
-        info!("Cover mode enabled, will export to {}", cover_export_path.display());
-
-        format!(
-            "cover:start(), \
-             cover:compile_beam_directory(\"{runtime_ebin}\"), \
-             cover:compile_beam_directory(\"{workspace_ebin}\"), ",
-            runtime_ebin = beam_paths.runtime_ebin.display(),
-            workspace_ebin = beam_paths.workspace_ebin.display(),
-        )
-    } else {
-        String::new()
-    };
-
-    let cover_epilogue = if cover_enabled {
-        format!(
-            "cover:export(\"{export}\"), cover:stop(), ",
-            export = cover_export_path.display(),
-        )
-    } else {
-        String::new()
-    };
+    let (cover_preamble, cover_epilogue) = cover_fragments(&beam_paths, &runtime_dir);
 
     let eval_cmd = format!(
         "{cover_preamble}\
