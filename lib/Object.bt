@@ -38,6 +38,9 @@ ProtoObject subclass: Object
   sealed perform: selector => @primitive dynamicSend
   sealed perform: selector withArguments: args => @primitive dynamicSendWithArgs
 
+  // Association creation — key-value pair
+  -> value => @primitive '->'
+
   // Abstract method marker — raises error if not overridden by subclass
   subclassResponsibility => @primitive subclassResponsibility
 

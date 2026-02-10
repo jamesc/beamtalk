@@ -43,8 +43,11 @@ pub fn generate_primitive_bif(
         "File" => generate_file_bif(output, selector, params),
         "Exception" => generate_exception_bif(output, selector, params),
         "Symbol" => generate_symbol_bif(output, selector, params),
+        "Tuple" => generate_tuple_bif(output, selector, params),
         "List" => generate_list_bif(output, selector, params),
         "Dictionary" => generate_dictionary_bif(output, selector, params),
+        "Object" => generate_object_bif(output, selector, params),
+        "Association" => generate_association_bif(output, selector, params),
         _ => None,
     }
 }
@@ -448,6 +451,63 @@ fn generate_symbol_bif(output: &mut String, selector: &str, params: &[String]) -
     }
 }
 
+/// Tuple primitive implementations (BT-417).
+///
+/// Tuples are Erlang tuples — immutable fixed-size collections, particularly
+/// useful for Erlang interop with {ok, Value} and {error, Reason} patterns.
+fn generate_tuple_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        "size" => {
+            write!(output, "call 'erlang':'tuple_size'(Self)").ok()?;
+            Some(())
+        }
+        "at:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'at'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "isOk" => {
+            write!(
+                output,
+                "case Self of <{{'ok', _Value}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "isError" => {
+            write!(
+                output,
+                "case Self of <{{'error', _Reason}}> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+            )
+            .ok()?;
+            Some(())
+        }
+        "unwrap" => {
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap'(Self)").ok()?;
+            Some(())
+        }
+        "unwrapOr:" => {
+            let p0 = params.first()?;
+            write!(output, "call 'beamtalk_tuple_ops':'unwrap_or'(Self, {p0})").ok()?;
+            Some(())
+        }
+        "unwrapOrElse:" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, {p0})"
+            )
+            .ok()?;
+            Some(())
+        }
+        "asString" => {
+            write!(output, "call 'beamtalk_tuple_ops':'as_string'(Self)").ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
 /// List primitive implementations (BT-419).
 ///
 /// Lists are Erlang linked lists — fast prepend, sequential access.
@@ -729,6 +789,46 @@ fn generate_dictionary_bif(output: &mut String, selector: &str, params: &[String
                 "call 'beamtalk_map_ops':'keys_and_values_do'(Self, {p0})"
             )
             .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Object primitive implementations (BT-335).
+///
+/// Object is the root class — methods here are inherited by all objects.
+fn generate_object_bif(output: &mut String, selector: &str, params: &[String]) -> Option<()> {
+    match selector {
+        // Association creation: `self -> value` creates an Association tagged map
+        "->" => {
+            let p0 = params.first()?;
+            write!(
+                output,
+                "~{{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => {p0}}}~"
+            )
+            .ok()?;
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+/// Association primitive implementations (BT-335).
+///
+/// Associations are key-value pairs represented as tagged maps.
+fn generate_association_bif(output: &mut String, selector: &str, _params: &[String]) -> Option<()> {
+    match selector {
+        "key" => {
+            write!(output, "call 'maps':'get'('key', Self)").ok()?;
+            Some(())
+        }
+        "value" => {
+            write!(output, "call 'maps':'get'('value', Self)").ok()?;
+            Some(())
+        }
+        "asString" => {
+            write!(output, "call 'beamtalk_association':'format_string'(Self)").ok()?;
             Some(())
         }
         _ => None,

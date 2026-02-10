@@ -55,8 +55,24 @@ impl CoreErlangGenerator {
     ) -> Result<Option<()>> {
         match selector {
             // `value` - evaluate block with no arguments
+            // BT-335: When the receiver is a block literal, use fast inline apply.
+            // For other receivers, generate a runtime type check to handle both
+            // blocks (apply) and non-blocks (runtime dispatch via send).
             MessageSelector::Unary(name) if name == "value" => {
-                self.generate_block_value_call(receiver, &[])?;
+                if matches!(receiver, Expression::Block { .. }) {
+                    self.generate_block_value_call(receiver, &[])?;
+                } else {
+                    let recv_var = self.fresh_temp_var("ValRecv");
+                    write!(self.output, "let {recv_var} = ")?;
+                    self.generate_expression(receiver)?;
+                    write!(
+                        self.output,
+                        " in case call 'erlang':'is_function'({recv_var}) of \
+                         'true' when 'true' -> apply {recv_var} () \
+                         'false' when 'true' -> \
+                         call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
+                    )?;
+                }
                 Ok(Some(()))
             }
 

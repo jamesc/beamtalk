@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Association - Key-value pair created with the -> binary message
+//
+// Associations are the building blocks of Dictionaries and enable
+// expressive key-value construction: `#name -> 'James'`
+//
+// Usage:
+//   a := #name -> 'James'
+//   a key        // => name
+//   a value      // => James
+//   a asString   // => #name -> James
+
+sealed Object subclass: Association
+  key => @primitive 'key'
+  value => @primitive 'value'
+  asString => @primitive 'asString'
+  printString => self asString
+  describe => self asString
