@@ -48,6 +48,20 @@ pub(super) fn is_workspace_binding(name: &str) -> bool {
 }
 
 impl CoreErlangGenerator {
+    /// Generates a comma-separated argument list for function/message calls.
+    ///
+    /// This is a shared helper that eliminates the repeated pattern of iterating
+    /// over arguments with comma separation found throughout dispatch codegen.
+    fn generate_argument_list(&mut self, arguments: &[Expression]) -> Result<()> {
+        for (i, arg) in arguments.iter().enumerate() {
+            if i > 0 {
+                write!(self.output, ", ")?;
+            }
+            self.generate_expression(arg)?;
+        }
+        Ok(())
+    }
+
     /// Generates code for a message send.
     ///
     /// This is the **main entry point** for message compilation. It dispatches
@@ -62,14 +76,10 @@ impl CoreErlangGenerator {
     /// 3. **`ProtoObject` messages** → `try_generate_protoobject_message` (synchronous)
     /// 4. **Object messages** → `try_generate_object_message` → delegates to nil protocol, error signaling, object identity, object reflection
     /// 5. **Block messages** → `try_generate_block_message` (structural intrinsics)
-    /// 6. **Spawn messages** → Special `spawn/0` or `spawn/1` calls
-    /// 7. **Await messages** → Blocking future resolution
-    /// 8. **Class-level messages** → Direct function calls
+    /// 6. **Spawn/Await** → `try_handle_spawn_await` (spawn, await intrinsics)
+    /// 7. **Class references** → `try_handle_class_reference` (workspace bindings, class methods)
+    /// 8. **Self-sends** → `try_handle_self_dispatch` (synchronous actor self-dispatch)
     /// 9. **Default** → Runtime dispatch (BT-223: actor vs primitive check)
-    #[expect(
-        clippy::too_many_lines,
-        reason = "BT-223: Runtime dispatch check adds necessary complexity"
-    )]
     pub(super) fn generate_message_send(
         &mut self,
         receiver: &Expression,
@@ -143,91 +153,37 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
-        // Special case: unary "spawn" message on a ClassReference
-        // This creates a new actor instance via gen_server:start_link
-        // BT-246: Only match ClassReference, not Identifier. Variables holding class
-        // objects (e.g. `cls spawn`) must go through runtime dispatch path.
-        if let MessageSelector::Unary(name) = selector {
-            if name == "spawn" && arguments.is_empty() {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    return self.generate_actor_spawn(&name.name, None);
-                }
-            }
-
-            // Special case: "await" is a blocking operation on a future
-            if name == "await" && arguments.is_empty() {
-                return self.generate_await(receiver);
-            }
-
-            // Special case: "awaitForever" is an infinite-wait operation on a future
-            if name == "awaitForever" && arguments.is_empty() {
-                return self.generate_await_forever(receiver);
-            }
+        // Special case: spawn, spawnWith:, await, awaitForever, await:
+        if let Some(result) = self.try_handle_spawn_await(receiver, selector, arguments)? {
+            return Ok(result);
         }
 
-        // Special case: "await:" keyword message with timeout
-        // This awaits a future with an explicit timeout value
-        if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
-                return self.generate_await_with_timeout(receiver, &arguments[0]);
-            }
+        // BT-374 / ADR 0010: Workspace binding dispatch + class method calls
+        if let Some(result) = self.try_handle_class_reference(receiver, selector, arguments)? {
+            return Ok(result);
         }
 
-        // Special case: "spawnWith:" keyword message on a ClassReference
-        // This creates a new actor instance with initialization arguments
-        // BT-246: Only match ClassReference, not Identifier. Variables holding class
-        // objects (e.g. `cls spawnWith: args`) must go through runtime dispatch path.
-        if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
-                if let Expression::ClassReference { name, .. } = receiver {
-                    return self.generate_actor_spawn(&name.name, Some(&arguments[0]));
-                }
-            }
+        // BT-330: Self-sends in actor methods use direct synchronous dispatch
+        if let Some(result) = self.try_handle_self_dispatch(receiver, selector, arguments)? {
+            return Ok(result);
         }
 
-        // BT-374 / ADR 0010: Workspace binding dispatch.
-        // Check if ClassReference is a workspace binding before falling through to
-        // direct module function calls. Workspace bindings use persistent_term lookup.
-        // BT-215: Class-level message sends (e.g., Point new, Counter spawn)
-        // For non-binding classes, generate direct function calls to class methods.
-        if let Expression::ClassReference { name, .. } = receiver {
-            if is_workspace_binding(&name.name) {
-                if self.workspace_mode {
-                    return self.generate_workspace_binding_send(&name.name, selector, arguments);
-                }
-                return Err(CodeGenError::WorkspaceBindingInBatchMode {
-                    name: name.name.to_string(),
-                });
-            }
-            return self.generate_class_method_call(&name.name, selector, arguments);
-        }
+        // BT-223: Runtime dispatch — actor vs primitive type check
+        self.generate_runtime_dispatch(receiver, selector, arguments)
+    }
 
-        // BT-330: Self-sends in actor methods use direct synchronous dispatch.
-        //
-        // When receiver is `self` inside an Actor method, bypass gen_server:cast
-        // and call safe_dispatch/3 directly. This avoids the async Future return
-        // that causes badarith when the result is used in arithmetic (e.g.,
-        // `n * (self factorial: n - 1)` would get `n * Future` without this).
-        if self.context == CodeGenContext::Actor {
-            if let Expression::Identifier(id) = receiver {
-                if id.name == "self" {
-                    return self.generate_self_dispatch(selector, arguments);
-                }
-            }
-        }
-
-        // BT-296 / ADR 0007 Phase 4: Type-specific dispatch tables removed.
-        // All non-intrinsic messages go through runtime dispatch:
-        // - Actors: async via beamtalk_actor:async_send with futures
-        // - Primitives: sync via beamtalk_primitive:send/3
-
-        // BT-223: Runtime dispatch - check if receiver is actor or primitive
-        //
-        // For actors (beamtalk_object records): Use async dispatch with futures
-        // For primitives (everything else): Use beamtalk_primitive:send/3
-        //
-        // This allows the same generated code to handle both cases correctly.
-
+    /// Generates runtime dispatch with actor/class-object/primitive type checking (BT-223).
+    ///
+    /// This is the fallback path for messages that don't match any compiler intrinsic.
+    /// Generates a nested case expression that checks:
+    /// 1. Is the receiver a `beamtalk_object` tuple? (class object vs actor)
+    /// 2. Otherwise, delegate to `beamtalk_primitive:send/3`
+    fn generate_runtime_dispatch(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<()> {
         let receiver_var = self.fresh_var("Receiver");
         let pid_var = self.fresh_var("Pid");
         let future_var = self.fresh_var("Future");
@@ -297,12 +253,7 @@ impl CoreErlangGenerator {
             self.output,
             "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
         )?;
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
         write!(self.output, "]) ")?;
 
         // Case 1b: Actor - async dispatch with futures (existing behavior)
@@ -325,14 +276,7 @@ impl CoreErlangGenerator {
             self.output,
             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
         )?;
-
-        // Generate argument list
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "], {future_var}) in {future_var} ")?;
         write!(self.output, "end ")?; // Close is_class_object case
@@ -343,18 +287,103 @@ impl CoreErlangGenerator {
             self.output,
             "call 'beamtalk_primitive':'send'({receiver_var}, '{selector_atom}', ["
         )?;
-
-        // Generate argument list again
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "]) end")?;
 
         Ok(())
+    }
+
+    /// Handles spawn, spawnWith:, await, awaitForever, and await: intrinsics.
+    ///
+    /// Returns `Some(())` if the message was handled, `None` if it should
+    /// fall through to the next dispatch strategy.
+    fn try_handle_spawn_await(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        // Unary spawn/await messages
+        if let MessageSelector::Unary(name) = selector {
+            // BT-246: Only match ClassReference, not Identifier.
+            if name == "spawn" && arguments.is_empty() {
+                if let Expression::ClassReference { name, .. } = receiver {
+                    self.generate_actor_spawn(&name.name, None)?;
+                    return Ok(Some(()));
+                }
+            }
+            if name == "await" && arguments.is_empty() {
+                self.generate_await(receiver)?;
+                return Ok(Some(()));
+            }
+            if name == "awaitForever" && arguments.is_empty() {
+                self.generate_await_forever(receiver)?;
+                return Ok(Some(()));
+            }
+        }
+
+        // Keyword await:/spawnWith: messages
+        if let MessageSelector::Keyword(parts) = selector {
+            if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
+                self.generate_await_with_timeout(receiver, &arguments[0])?;
+                return Ok(Some(()));
+            }
+            // BT-246: Only match ClassReference, not Identifier.
+            if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
+                if let Expression::ClassReference { name, .. } = receiver {
+                    self.generate_actor_spawn(&name.name, Some(&arguments[0]))?;
+                    return Ok(Some(()));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Handles `ClassReference` receivers: workspace bindings and class method calls.
+    ///
+    /// Returns `Some(())` if the receiver is a `ClassReference`, `None` otherwise.
+    fn try_handle_class_reference(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        if let Expression::ClassReference { name, .. } = receiver {
+            if is_workspace_binding(&name.name) {
+                if self.workspace_mode {
+                    self.generate_workspace_binding_send(&name.name, selector, arguments)?;
+                    return Ok(Some(()));
+                }
+                return Err(CodeGenError::WorkspaceBindingInBatchMode {
+                    name: name.name.to_string(),
+                });
+            }
+            self.generate_class_method_call(&name.name, selector, arguments)?;
+            return Ok(Some(()));
+        }
+        Ok(None)
+    }
+
+    /// Handles self-sends inside actor methods (BT-330).
+    ///
+    /// Returns `Some(())` if the receiver is `self` in an Actor context, `None` otherwise.
+    fn try_handle_self_dispatch(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        if self.context == CodeGenContext::Actor {
+            if let Expression::Identifier(id) = receiver {
+                if id.name == "self" {
+                    self.generate_self_dispatch(selector, arguments)?;
+                    return Ok(Some(()));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Generates synchronous self-dispatch for actor self-sends (BT-330).
@@ -403,11 +432,7 @@ impl CoreErlangGenerator {
         let state_var = self.fresh_var("SelfState");
         let error_var = self.fresh_var("SelfError");
 
-        let current_state = if self.in_loop_body {
-            "StateAcc".to_string()
-        } else {
-            self.state_threading.current_var()
-        };
+        let current_state = self.current_state_var();
 
         // Call safe_dispatch directly (synchronous, with error isolation)
         write!(
@@ -415,13 +440,7 @@ impl CoreErlangGenerator {
             "case call '{}':'safe_dispatch'('{selector_atom}', [",
             self.module_name
         )?;
-
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "], {current_state}) of ")?;
 
@@ -467,11 +486,7 @@ impl CoreErlangGenerator {
         let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
 
-        let current_state = if self.in_loop_body {
-            "StateAcc".to_string()
-        } else {
-            self.state_threading.current_var()
-        };
+        let current_state = self.current_state_var();
 
         // Create Self object reference for dispatch/4
         write!(
@@ -485,13 +500,7 @@ impl CoreErlangGenerator {
             "case call '{}':'dispatch'('{selector_atom}', [",
             self.module_name
         )?;
-
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "], {self_var}, {current_state}) of ")?;
 
@@ -525,11 +534,7 @@ impl CoreErlangGenerator {
         let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
 
-        let current_state = if self.in_loop_body {
-            "StateAcc".to_string()
-        } else {
-            self.state_threading.current_var()
-        };
+        let current_state = self.current_state_var();
 
         // Create Self for method body access
         write!(
@@ -545,12 +550,7 @@ impl CoreErlangGenerator {
         )?;
 
         // Arguments, then Self, then State
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
         if !arguments.is_empty() {
             write!(self.output, ", ")?;
         }
@@ -739,14 +739,7 @@ impl CoreErlangGenerator {
             self.output,
             "call 'beamtalk_dispatch':'super'('{selector_atom}', [",
         )?;
-
-        // Generate arguments
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(
             self.output,
@@ -925,13 +918,7 @@ impl CoreErlangGenerator {
             self.output,
             "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
         )?;
-
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "], {future_var}) in {future_var}")?;
 
@@ -970,13 +957,7 @@ impl CoreErlangGenerator {
             self.output,
             "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
         )?;
-
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            self.generate_expression(arg)?;
-        }
+        self.generate_argument_list(arguments)?;
 
         write!(self.output, "])")?;
 
