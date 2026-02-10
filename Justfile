@@ -109,7 +109,7 @@ test-e2e: build-stdlib _clean-daemon-state
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
 test-all: test-rust test-stdlib test-e2e test-runtime
 
-# Run compiled stdlib tests (ADR 0014 Phase 1, ~2s)
+# Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-rust build-erlang build-stdlib
     @echo "🧪 Running stdlib tests..."
     @cargo run --bin beamtalk --quiet -- test-stdlib
