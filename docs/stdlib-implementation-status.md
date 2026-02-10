@@ -9,10 +9,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 293 |
-| **✅ Implemented** | 293 (100%) |
+| **Total stdlib methods** | 297 |
+| **✅ Implemented** | 297 (100%) |
 | **❌ Not Implemented** | 0 (0%) |
-| **E2E test coverage** | 208 methods (71.0%) |
+| **E2E test coverage** | 212 methods (71.4%) |
 | **Stdlib .bt files** | 22 |
 | **Runtime-only classes** | 1 (CompiledMethod) |
 | **Missing .bt files** | 0 |
@@ -194,7 +194,7 @@
 ### List (`lib/List.bt`)
 
 **Class:** `List` — superclass: `Object` — `@sealed`
-**Methods:** 33/33 implemented (100%)
+**Methods:** 37/37 implemented (100%)
 **Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
 **Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `lib/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
 
@@ -224,6 +224,10 @@
 | `count:` | @primitive BIF (foldl count) | ✅ | 🧪 | `Collection>>count:` |
 | `anySatisfy:` | @primitive BIF (`lists:any`) | ✅ | 🧪 | `Collection>>anySatisfy:` |
 | `allSatisfy:` | @primitive BIF (`lists:all`) | ✅ | 🧪 | `Collection>>allSatisfy:` |
+| `++` | @primitive → `beamtalk_list_ops:concat/2` | ✅ | 🧪 | `SequenceableCollection>>,` |
+| `from:to:` | @primitive → `beamtalk_list_ops:from_to/3` | ✅ | 🧪 | `SequenceableCollection>>copyFrom:to:` |
+| `indexOf:` | @primitive → `beamtalk_list_ops:index_of/2` | ✅ | 🧪 | `SequenceableCollection>>indexOf:` |
+| `eachWithIndex:` | @primitive → `beamtalk_list_ops:each_with_index/2` | ✅ | 🧪 | `SequenceableCollection>>withIndexDo:` |
 | `take:` | @primitive → `beamtalk_list_ops:take/2` | ✅ | 🧪 | `SequenceableCollection>>first:` |
 | `drop:` | @primitive → `beamtalk_list_ops:drop/2` | ✅ | 🧪 | `SequenceableCollection>>allButFirst:` |
 | `takeWhile:` | @primitive BIF (`lists:takewhile`) | ✅ | 🧪 | N/A |
@@ -232,8 +236,7 @@
 | `groupBy:` | @primitive → `beamtalk_list_ops:group_by/2` | ✅ | 🧪 | `Collection>>groupedBy:` |
 | `partition:` | @primitive → `beamtalk_list_ops:partition/2` | ✅ | 🧪 | `Collection>>partition:` |
 | `intersperse:` | @primitive → `beamtalk_list_ops:intersperse/2` | ✅ | 🧪 | N/A |
-| `describe` | @primitive BIF | ✅ | | N/A |
-| `printString` | @primitive BIF | ✅ | | N/A |
+| `describe` | pure BT | ✅ | | N/A |
 
 ### Block (`lib/Block.bt`)
 
