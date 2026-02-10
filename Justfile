@@ -220,7 +220,8 @@ coverage-e2e: _clean-daemon-state
     set -euo pipefail
     echo "📊 Running E2E tests with Erlang cover instrumentation..."
     echo "   (This is slower than normal E2E due to cover overhead)"
-    E2E_COVER=1 cargo test --test e2e -- --ignored
+    # Allow test failures — coverdata is exported before BEAM shuts down
+    E2E_COVER=1 cargo test --test e2e -- --ignored || true
     if [ -f runtime/_build/test/cover/e2e.coverdata ]; then
         SIZE=$(wc -c < runtime/_build/test/cover/e2e.coverdata)
         echo "  📁 Coverdata: runtime/_build/test/cover/e2e.coverdata (${SIZE} bytes)"

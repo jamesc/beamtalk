@@ -75,6 +75,11 @@ pub(super) fn print_help() {
     println!("  counter increment    # Send a message (auto-awaits result)");
     println!("  counter getValue     # Query actor state (auto-awaits)");
     println!();
+    println!("Workspace introspection:");
+    println!("  Workspace actors           # List all live actors");
+    println!("  Workspace actorAt: '<pid>' # Look up actor by PID");
+    println!("  Workspace actorsOf: Counter # All actors of a class");
+    println!();
     println!("Actor message sends return Futures, which are automatically");
     println!("awaited for synchronous REPL experience. If you store a Future");
     println!("in a binding before it resolves, you'll see #Future<pending>.");
