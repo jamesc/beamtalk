@@ -480,7 +480,7 @@ fn generate_association_bif(output: &mut String, selector: &str, _params: &[Stri
             write!(output, "call 'maps':'get'('value', Self)").ok()?;
             Some(())
         }
-        "asString" | "printString" => {
+        "asString" => {
             write!(output, "call 'beamtalk_association':'format_string'(Self)").ok()?;
             Some(())
         }

@@ -9,26 +9,32 @@
 // ===========================================================================
 
 // Symbol key with String value
-a := #name -> 'James'
+#name -> 'James'
 // => _
 
 // Integer key with Integer value
-b := 1 -> 2
+42 -> 'answer'
 // => _
 
 // String key
-c := 'hello' -> 'world'
+'city' -> 'London'
 // => _
 
 // ===========================================================================
 // ACCESSORS: key and value
 // ===========================================================================
 
+a := #name -> 'James'
+// => _
+
 a key
 // => name
 
 a value
 // => James
+
+b := 1 -> 2
+// => _
 
 b key
 // => 1
@@ -40,18 +46,40 @@ b value
 // DISPLAY: asString / printString
 // ===========================================================================
 
-a asString
+(#name -> 'James') asString
 // => #name -> James
 
-b asString
-// => 1 -> 2
+(42 -> 'answer') asString
+// => 42 -> answer
 
-c asString
-// => hello -> world
+('count' -> 5) asString
+// => count -> 5
 
 // ===========================================================================
-// REFLECTION: class
+// REFLECTION
 // ===========================================================================
 
-a class
+(#name -> 'James') class
 // => Association
+
+(#name -> 'James') respondsTo: #key
+// => true
+
+(#name -> 'James') respondsTo: #value
+// => true
+
+// ===========================================================================
+// USAGE IN COLLECTIONS
+// ===========================================================================
+
+assocs := #(#a -> 1, #b -> 2, #c -> 3)
+// => _
+
+assocs size
+// => 3
+
+assocs collect: [:assoc | assoc key]
+// => ["a","b","c"]
+
+assocs collect: [:assoc | assoc value]
+// => [1,2,3]

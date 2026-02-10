@@ -16,4 +16,5 @@ sealed Object subclass: Association
   key => @primitive 'key'
   value => @primitive 'value'
   asString => @primitive 'asString'
-  printString => @primitive 'printString'
+  printString => self asString
+  describe => self asString
