@@ -1148,4 +1148,49 @@ mod tests {
         assert!(result.is_some());
         assert_eq!(output, "call 'beamtalk_primitive':'print_string'(Self)");
     }
+
+    #[test]
+    fn test_list_concat() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "List", "++", &["Other".to_string()]);
+        assert!(result.is_some());
+        assert_eq!(output, "call 'erlang':'++'(Self, Other)");
+    }
+
+    #[test]
+    fn test_list_from_to() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(
+            &mut output,
+            "List",
+            "from:to:",
+            &["Start".to_string(), "End".to_string()],
+        );
+        assert!(result.is_some());
+        assert!(output.contains("beamtalk_list_ops"));
+        assert!(output.contains("from_to"));
+    }
+
+    #[test]
+    fn test_list_index_of() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(&mut output, "List", "indexOf:", &["Item".to_string()]);
+        assert!(result.is_some());
+        assert!(output.contains("beamtalk_list_ops"));
+        assert!(output.contains("index_of"));
+    }
+
+    #[test]
+    fn test_list_each_with_index() {
+        let mut output = String::new();
+        let result = generate_primitive_bif(
+            &mut output,
+            "List",
+            "eachWithIndex:",
+            &["Block".to_string()],
+        );
+        assert!(result.is_some());
+        assert!(output.contains("beamtalk_list_ops"));
+        assert!(output.contains("each_with_index"));
+    }
 }

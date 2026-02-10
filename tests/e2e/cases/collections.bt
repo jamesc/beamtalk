@@ -217,6 +217,10 @@
 #(10, 20, 30) indexOf: 99
 // => nil
 
+// indexOf: returns first match when duplicates exist
+#(1, 2, 3, 2) indexOf: 2
+// => 2
+
 #() indexOf: 1
 // => nil
 
@@ -228,3 +232,10 @@
 // Verify eachWithIndex: iterates (empty list is a no-op)
 #() eachWithIndex: [:elem :idx | elem]
 // => nil
+
+// --- ++ with variables ---
+a := #(1, 2, 3)
+// => _
+
+a ++ #(4, 5)
+// => [1,2,3,4,5]
