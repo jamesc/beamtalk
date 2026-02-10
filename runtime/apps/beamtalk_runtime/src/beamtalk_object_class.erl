@@ -713,7 +713,10 @@ handle_call({class_method_call, Selector, Args}, _From,
             try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
                 Result -> {reply, {ok, Result}, State}
             catch
-                error:Error -> {reply, {error, Error}, State}
+                Class:Error ->
+                    logger:error("Class method ~p:~p failed: ~p:~p",
+                                 [ClassName, Selector, Class, Error]),
+                    {reply, {error, Error}, State}
             end;
         error ->
             {reply, {error, not_found}, State}
@@ -1049,6 +1052,7 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
 %% @doc Convert a class method selector to its module function name.
 %% Class methods are generated with a 'class_' prefix, e.g.
 %% `class defaultValue => 42` becomes `class_defaultValue/1`.
+%% Uses list_to_existing_atom to prevent atom table exhaustion from unknown selectors.
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
-    list_to_atom("class_" ++ atom_to_list(Selector)).
+    list_to_existing_atom("class_" ++ atom_to_list(Selector)).

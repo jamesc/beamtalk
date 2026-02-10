@@ -82,13 +82,17 @@ impl Parser {
         // Parse class body (state declarations, instance methods, and class methods)
         let (state, methods, class_methods) = self.parse_class_body();
 
-        // Determine end span: prefer methods, fallback to state, then to name
-        let end = methods
-            .last()
-            .map(|m| m.span)
-            .or_else(|| class_methods.last().map(|m| m.span))
-            .or_else(|| state.last().map(|s| s.span))
-            .unwrap_or(name.span);
+        // Determine end span: max of last instance method, class method, state, or name
+        let mut end = name.span;
+        if let Some(s) = state.last() {
+            end = end.merge(s.span);
+        }
+        if let Some(m) = methods.last() {
+            end = end.merge(m.span);
+        }
+        if let Some(cm) = class_methods.last() {
+            end = end.merge(cm.span);
+        }
         let span = start.merge(end);
 
         let mut class_def = ClassDefinition::with_modifiers(
@@ -145,8 +149,32 @@ impl Parser {
             }
             // Check for method definition (with optional modifiers including `class`)
             else if self.is_at_method_definition() {
-                let is_class_method = matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
-                    && !matches!(self.peek_at(1), Some(TokenKind::FatArrow));
+                // Scan ahead through modifier tokens to check if `class` appears
+                let is_class_method = {
+                    let mut offset = 0;
+                    let mut found = false;
+                    loop {
+                        match self.peek_at(offset) {
+                            Some(TokenKind::Identifier(name))
+                                if matches!(
+                                    name.as_str(),
+                                    "before" | "after" | "around" | "sealed"
+                                ) =>
+                            {
+                                offset += 1;
+                            }
+                            Some(TokenKind::Identifier(name)) if name == "class" => {
+                                // Check it's not `class => ...` (method named "class")
+                                if !matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow)) {
+                                    found = true;
+                                }
+                                break;
+                            }
+                            _ => break,
+                        }
+                    }
+                    found
+                };
                 if let Some(method) = self.parse_method_definition() {
                     if is_class_method {
                         class_methods.push(method);
