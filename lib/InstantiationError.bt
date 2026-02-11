@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// InstantiationError - Errors for incorrect object creation
+//
+// Subclass of Error for instantiation-related errors:
+// instantiation_error (e.g., Actor new instead of Actor spawn)
+
+Error subclass: InstantiationError
+  describe => 'an InstantiationError'

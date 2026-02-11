@@ -100,7 +100,7 @@ dictionary_responds_to_test() ->
 
 dictionary_does_not_understand_test() ->
     beamtalk_extensions:init(),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Dictionary'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'Dictionary'}},
         'bt@stdlib@dictionary':dispatch('nonExistent', [], #{a => 1})).
 
 %%% ============================================================================

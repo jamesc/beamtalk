@@ -191,19 +191,19 @@ raise_wraps_and_throws_test() ->
         beamtalk_error:raise(Error1)
     catch
         error:Caught ->
-            ?assertMatch(#{'$beamtalk_class' := 'Exception', error := _}, Caught),
-            #{'$beamtalk_class' := 'Exception', error := Inner} = Caught,
+            ?assertMatch(#{'$beamtalk_class' := _, error := _}, Caught),
+            #{'$beamtalk_class' := _, error := Inner} = Caught,
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             ?assertEqual('Integer', Inner#beamtalk_error.class),
             ?assertEqual('foo', Inner#beamtalk_error.selector)
     end.
 
-%%% Test: raise/1 always produces Exception tagged map
+%%% Test: raise/1 produces correct exception class based on error kind (BT-452)
 raise_produces_exception_class_test() ->
     Error = beamtalk_error:new(type_error, 'String'),
     try
         beamtalk_error:raise(Error)
     catch
         error:#{'$beamtalk_class' := Class} ->
-            ?assertEqual('Exception', Class)
+            ?assertEqual('TypeError', Class)
     end.
