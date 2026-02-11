@@ -52,7 +52,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
                     apply ExtFun(Args, Self)
                 <'not_found'> when 'true' ->
-                    call 'bt_stdlib_object':'dispatch'(Selector, Args, Self)
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
             end
     end
 
@@ -69,7 +69,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         <'false'> when 'true' ->
             case call 'beamtalk_extensions':'has'('Parent', Selector) of
                 <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt_stdlib_object':'has_method'(Selector)
+                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
             end
     end
 

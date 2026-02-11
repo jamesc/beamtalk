@@ -20,8 +20,8 @@ impl CoreErlangGenerator {
     pub(super) fn generate_own_state_fields(&mut self, module: &Module) -> Result<()> {
         // Find the current class being compiled
         let current_class = module.classes.iter().find(|c| {
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         if let Some(class) = current_class {
@@ -68,8 +68,8 @@ impl CoreErlangGenerator {
 
         // Find the current class being compiled (matches module name)
         let current_class = module.classes.iter().find(|c| {
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         if let Some(class) = current_class {

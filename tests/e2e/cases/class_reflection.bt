@@ -148,7 +148,7 @@ stringClass := (Beamtalk classNamed: #String) await
 // => _
 
 stringClass module_name
-// => beamtalk_string
+// => bt@stdlib@string
 
 // ---------------------------------------------------------------------------
 // Get module name for actor class
@@ -158,7 +158,7 @@ counterClass := (Beamtalk classNamed: #Counter) await
 // => _
 
 counterClass module_name
-// => counter
+// => bt@counter
 
 // ===========================================================================
 // CLASS NAME CONSISTENCY

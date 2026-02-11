@@ -2,12 +2,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %% @doc Tests for beamtalk_set_ops helper module and compiled
-%% beamtalk_set stdlib dispatch (BT-73).
+%% bt@stdlib@set stdlib dispatch (BT-73).
 %%
 %% Tests cover:
 %% - beamtalk_set_ops: tagged map operations using ordsets
-%% - beamtalk_set:dispatch/3: compiled stdlib dispatch
-%% - beamtalk_set:has_method/1: method reflection
+%% - 'bt@stdlib@set':dispatch/3: compiled stdlib dispatch
+%% - 'bt@stdlib@set':has_method/1: method reflection
 %% - beamtalk_primitive:send/3: runtime dispatch integration
 %% - Error handling: type_error, does_not_understand
 -module(beamtalk_set_ops_tests).
@@ -199,66 +199,66 @@ do_returns_nil_test() ->
     ?assertEqual(nil, beamtalk_set_ops:do(Set, fun(_) -> ok end)).
 
 %%% ============================================================================
-%%% Compiled beamtalk_set dispatch/3
+%%% Compiled bt@stdlib@set dispatch/3
 %%% ============================================================================
 
 set_dispatch_class_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    ?assertEqual('Set', beamtalk_set:dispatch('class', [], Set)).
+    ?assertEqual('Set', 'bt@stdlib@set':dispatch('class', [], Set)).
 
 set_dispatch_class_empty_test() ->
     Set = beamtalk_set_ops:new(),
-    ?assertEqual('Set', beamtalk_set:dispatch('class', [], Set)).
+    ?assertEqual('Set', 'bt@stdlib@set':dispatch('class', [], Set)).
 
 set_dispatch_size_test() ->
     Set = beamtalk_set_ops:from_list([1, 2, 3]),
-    ?assertEqual(3, beamtalk_set:dispatch('size', [], Set)).
+    ?assertEqual(3, 'bt@stdlib@set':dispatch('size', [], Set)).
 
 set_dispatch_includes_test() ->
     Set = beamtalk_set_ops:from_list([1, 2, 3]),
-    ?assertEqual(true, beamtalk_set:dispatch('includes:', [2], Set)),
-    ?assertEqual(false, beamtalk_set:dispatch('includes:', [5], Set)).
+    ?assertEqual(true, 'bt@stdlib@set':dispatch('includes:', [2], Set)),
+    ?assertEqual(false, 'bt@stdlib@set':dispatch('includes:', [5], Set)).
 
 set_dispatch_add_test() ->
     Set = beamtalk_set_ops:from_list([1, 2]),
-    Result = beamtalk_set:dispatch('add:', [3], Set),
+    Result = 'bt@stdlib@set':dispatch('add:', [3], Set),
     ?assertEqual(true, beamtalk_set_ops:includes(Result, 3)).
 
 set_dispatch_remove_test() ->
     Set = beamtalk_set_ops:from_list([1, 2, 3]),
-    Result = beamtalk_set:dispatch('remove:', [2], Set),
+    Result = 'bt@stdlib@set':dispatch('remove:', [2], Set),
     ?assertEqual(false, beamtalk_set_ops:includes(Result, 2)).
 
 set_dispatch_union_test() ->
     A = beamtalk_set_ops:from_list([1, 2]),
     B = beamtalk_set_ops:from_list([2, 3]),
-    Result = beamtalk_set:dispatch('union:', [B], A),
+    Result = 'bt@stdlib@set':dispatch('union:', [B], A),
     ?assertEqual(3, beamtalk_set_ops:size(Result)).
 
 set_dispatch_asList_test() ->
     Set = beamtalk_set_ops:from_list([3, 1, 2]),
-    ?assertEqual([1, 2, 3], beamtalk_set:dispatch('asList', [], Set)).
+    ?assertEqual([1, 2, 3], 'bt@stdlib@set':dispatch('asList', [], Set)).
 
 %%% ============================================================================
-%%% Compiled beamtalk_set has_method/1
+%%% Compiled bt@stdlib@set has_method/1
 %%% ============================================================================
 
 set_responds_to_test() ->
     beamtalk_extensions:init(),
-    ?assertEqual(true, beamtalk_set:has_method('class')),
-    ?assertEqual(true, beamtalk_set:has_method('size')),
-    ?assertEqual(true, beamtalk_set:has_method('isEmpty')),
-    ?assertEqual(true, beamtalk_set:has_method('includes:')),
-    ?assertEqual(true, beamtalk_set:has_method('add:')),
-    ?assertEqual(true, beamtalk_set:has_method('remove:')),
-    ?assertEqual(true, beamtalk_set:has_method('union:')),
-    ?assertEqual(true, beamtalk_set:has_method('intersection:')),
-    ?assertEqual(true, beamtalk_set:has_method('difference:')),
-    ?assertEqual(true, beamtalk_set:has_method('isSubsetOf:')),
-    ?assertEqual(true, beamtalk_set:has_method('asList')),
-    ?assertEqual(true, beamtalk_set:has_method('fromList:')),
-    ?assertEqual(true, beamtalk_set:has_method('do:')),
-    ?assertEqual(false, beamtalk_set:has_method('nonExistent')).
+    ?assertEqual(true, 'bt@stdlib@set':has_method('class')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('size')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('isEmpty')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('includes:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('add:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('remove:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('union:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('intersection:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('difference:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('isSubsetOf:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('asList')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('fromList:')),
+    ?assertEqual(true, 'bt@stdlib@set':has_method('do:')),
+    ?assertEqual(false, 'bt@stdlib@set':has_method('nonExistent')).
 
 %%% ============================================================================
 %%% Does Not Understand
@@ -268,7 +268,7 @@ set_does_not_understand_test() ->
     beamtalk_extensions:init(),
     Set = beamtalk_set_ops:from_list([1, 2]),
     ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Set'},
-        beamtalk_set:dispatch('nonExistent', [], Set)).
+        'bt@stdlib@set':dispatch('nonExistent', [], Set)).
 
 %%% ============================================================================
 %%% Runtime Dispatch Integration (beamtalk_primitive)

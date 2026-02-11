@@ -307,8 +307,11 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<()>
         .file_stem()
         .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
 
-    // Use the same module naming as build command
-    let module_name = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+    // ADR 0016: User code modules use bt@ prefix
+    let module_name = format!(
+        "bt@{}",
+        beamtalk_core::codegen::core_erlang::to_module_name(stem)
+    );
 
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -521,7 +524,10 @@ fn compile_single_test_file(
         compile_fixture(&fixture_path, build_dir)?;
         // Track fixture module name for code:ensure_loaded at runtime
         if let Some(stem) = fixture_path.file_stem() {
-            let module_name = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+            let module_name = format!(
+                "bt@{}",
+                beamtalk_core::codegen::core_erlang::to_module_name(stem)
+            );
             fixture_modules.push(module_name);
         }
     }

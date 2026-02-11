@@ -88,14 +88,14 @@ counter_divide([N], State) ->
 %%%
 %%% spawn/0 tests (Counter spawn)
 %%% 
-%%% Tests use counter:spawn() from compiled tests/e2e/fixtures/counter.bt
-%%% which returns {beamtalk_object, 'Counter', counter, Pid}
+%%% Tests use 'bt@counter':spawn() from compiled tests/e2e/fixtures/counter.bt
+%%% which returns {beamtalk_object, 'Counter', 'bt@counter', Pid}
 %%% ===========================================================================
 
 spawn_zero_uses_default_state_test() ->
     %% spawn/0 passes empty map to init, which merges with defaults
-    Object = counter:spawn(),
-    ?assertMatch({beamtalk_object, 'Counter', counter, _Pid}, Object),
+    Object = 'bt@counter':spawn(),
+    ?assertMatch({beamtalk_object, 'Counter', 'bt@counter', _Pid}, Object),
     
     %% Extract pid from #beamtalk_object{} record (element 4, 1-indexed)
     Pid = element(4, Object),
@@ -107,7 +107,7 @@ spawn_zero_uses_default_state_test() ->
     gen_server:stop(Pid).
 
 spawn_zero_methods_work_test() ->
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     
     %% Increment several times
@@ -123,13 +123,13 @@ spawn_zero_methods_work_test() ->
 %%% ===========================================================================
 %%% spawn/1 tests (Counter spawnWith: #{...})
 %%% 
-%%% Tests use counter:spawn(InitArgs) with initialization arguments
+%%% Tests use 'bt@counter':spawn(InitArgs) with initialization arguments
 %%% ===========================================================================
 
 spawn_with_overrides_default_value_test() ->
     %% spawnWith: #{value => 42} passes InitArgs to init
     InitArgs = #{value => 42},
-    Object = counter:spawn(InitArgs),
+    Object = 'bt@counter':spawn(InitArgs),
     Pid = element(4, Object),
     
     %% Verify initial value was overridden
@@ -141,7 +141,7 @@ spawn_with_overrides_default_value_test() ->
 spawn_with_methods_still_work_test() ->
     %% spawnWith: #{value => 100}
     InitArgs = #{value => 100},
-    Object = counter:spawn(InitArgs),
+    Object = 'bt@counter':spawn(InitArgs),
     Pid = element(4, Object),
     
     %% Increment from 100
@@ -153,7 +153,7 @@ spawn_with_methods_still_work_test() ->
 spawn_with_preserves_unspecified_defaults_test() ->
     %% spawnWith: #{extra => foo} - should preserve value default
     InitArgs = #{extra => foo},
-    Object = counter:spawn(InitArgs),
+    Object = 'bt@counter':spawn(InitArgs),
     Pid = element(4, Object),
     
     %% Value should still be default (0)
@@ -1539,15 +1539,15 @@ setup_super_test_classes() ->
     application:ensure_all_started(beamtalk_runtime),
     
     %% Load modules and register classes explicitly
-    {module, counter} = code:ensure_loaded(counter),
+    {module, 'bt@counter'} = code:ensure_loaded('bt@counter'),
     case beamtalk_object_class:whereis_class('Counter') of
-        undefined -> counter:register_class();
+        undefined -> 'bt@counter':register_class();
         _ -> ok
     end,
     
-    {module, logging_counter} = code:ensure_loaded(logging_counter),
+    {module, 'bt@logging_counter'} = code:ensure_loaded('bt@logging_counter'),
     case beamtalk_object_class:whereis_class('LoggingCounter') of
-        undefined -> logging_counter:register_class();
+        undefined -> 'bt@logging_counter':register_class();
         _ -> ok
     end,
     ok.
@@ -1568,8 +1568,8 @@ super_calls_parent_method_test() ->
     setup_super_test_classes(),
     
     %% Create logging counter with initial state
-    Object = logging_counter:spawn(),
-    ?assertMatch({beamtalk_object, 'LoggingCounter', logging_counter, _Pid}, Object),
+    Object = 'bt@logging_counter':spawn(),
+    ?assertMatch({beamtalk_object, 'LoggingCounter', 'bt@logging_counter', _Pid}, Object),
     
     Pid = element(4, Object),
     
@@ -1590,7 +1590,7 @@ super_calls_parent_method_test() ->
 super_multiple_calls_test() ->
     setup_super_test_classes(),
     
-    Object = logging_counter:spawn(),
+    Object = 'bt@logging_counter':spawn(),
     Pid = element(4, Object),
     
     %% Call increment 3 times
@@ -1612,7 +1612,7 @@ super_with_different_method_test() ->
     setup_super_test_classes(),
     
     InitArgs = #{value => 42},
-    Object = logging_counter:spawn(InitArgs),
+    Object = 'bt@logging_counter':spawn(InitArgs),
     Pid = element(4, Object),
     
     %% getValue calls super getValue (Counter's version)
@@ -1625,7 +1625,7 @@ super_with_different_method_test() ->
 super_with_new_methods_test() ->
     setup_super_test_classes(),
     
-    Object = logging_counter:spawn(),
+    Object = 'bt@logging_counter':spawn(),
     Pid = element(4, Object),
     
     %% getLogCount is new to LoggingCounter
@@ -1647,7 +1647,7 @@ super_with_new_methods_test() ->
 super_maintains_state_test() ->
     setup_super_test_classes(),
     
-    Object = logging_counter:spawn(),
+    Object = 'bt@logging_counter':spawn(),
     Pid = element(4, Object),
     
     %% Mix calls to overridden and non-overridden methods
@@ -1667,7 +1667,7 @@ super_with_init_args_test() ->
     setup_super_test_classes(),
     
     InitArgs = #{value => 100, logCount => 5},
-    Object = logging_counter:spawn(InitArgs),
+    Object = 'bt@logging_counter':spawn(InitArgs),
     Pid = element(4, Object),
     
     %% Starting values should be overridden
@@ -1687,7 +1687,7 @@ super_with_init_args_test() ->
 %%% Extension method tests (BT-229)
 %%%
 %%% Tests that extension methods work on compiled Actor classes.
-%%% Uses counter:spawn() from compiled tests/e2e/fixtures/counter.bt.
+%%% Uses 'bt@counter':spawn() from compiled tests/e2e/fixtures/counter.bt.
 %%% ===========================================================================
 
 %% Test: Extension method dispatches on compiled Actor
@@ -1695,7 +1695,7 @@ extension_method_on_compiled_actor_test() ->
     beamtalk_extensions:init(),
     ExtFun = fun([], _Self) -> 42 end,
     beamtalk_extensions:register('Counter', testExtension, ExtFun, test_owner),
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try
         {ok, Result} = gen_server:call(Pid, {testExtension, []}),
@@ -1710,7 +1710,7 @@ extension_method_with_args_test() ->
     beamtalk_extensions:init(),
     ExtFun = fun([N], _Self) -> N * 10 end,
     beamtalk_extensions:register('Counter', 'scaleBy:', ExtFun, test_owner),
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try
         {ok, Result} = gen_server:call(Pid, {'scaleBy:', [5]}),
@@ -1725,7 +1725,7 @@ extension_coexists_with_regular_methods_test() ->
     beamtalk_extensions:init(),
     ExtFun = fun([], _Self) -> extended end,
     beamtalk_extensions:register('Counter', myExtension, ExtFun, test_owner),
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try
         {ok, 0} = gen_server:call(Pid, {getValue, []}),
@@ -1738,7 +1738,7 @@ extension_coexists_with_regular_methods_test() ->
 
 %% Test: Unregistered extension falls through to DNU error
 unregistered_extension_gives_dnu_test() ->
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try
         Result = gen_server:call(Pid, {nonExistentMethod, []}),
@@ -1752,7 +1752,7 @@ extension_error_propagation_test() ->
     beamtalk_extensions:init(),
     CrashFun = fun([], _Self) -> error(extension_crash) end,
     beamtalk_extensions:register('Counter', crashMethod, CrashFun, test_owner),
-    Object = counter:spawn(),
+    Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try
         Result = gen_server:call(Pid, {crashMethod, []}),

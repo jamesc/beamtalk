@@ -359,7 +359,7 @@ Tests runtime behavior using **real compiled Beamtalk code** and simulated patte
 **Test Fixtures:** Compiled automatically by rebar3 pre-hook
 - Source: `tests/e2e/fixtures/counter.bt` (canonical implementation - BT-239)
 - Compiled by: `runtime/apps/beamtalk_runtime/test_fixtures/compile.sh` (runs automatically)
-- Output: `runtime/_build/*/test/counter.beam`
+- Output: `runtime/_build/*/test/bt@counter.beam`
 - **No manual compilation needed** - hook runs before every `rebar3 eunit`
 
 **Compilation Workflow:**
@@ -368,7 +368,7 @@ Developer runs: cargo test OR rebar3 eunit
   └─> cargo build (if needed) - creates ./target/debug/beamtalk
   └─> rebar3 pre-hook runs: runtime/apps/beamtalk_runtime/test_fixtures/compile.sh
       └─> Uses ./target/debug/beamtalk to compile tests/e2e/fixtures/counter.bt
-      └─> Copies counter.beam to runtime/_build/*/test/
+      └─> Copies bt@counter.beam to runtime/_build/*/test/
   └─> Tests run with compiled fixtures available
 ```
 

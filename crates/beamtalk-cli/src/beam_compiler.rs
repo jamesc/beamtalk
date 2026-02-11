@@ -70,7 +70,11 @@ fn escape_erlang_string(s: &str) -> String {
 /// Module names should only contain ASCII alphanumeric characters and underscores
 /// to prevent path traversal vulnerabilities.
 fn is_valid_module_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+    // ADR 0016: @ is legal in Erlang unquoted atoms and used for namespacing
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c == '_' || c == '@' || c.is_ascii_alphanumeric())
 }
 
 /// BEAM bytecode compiler.
@@ -410,7 +414,7 @@ pub fn write_core_erlang_with_source(
     // Validate module name to prevent path traversal and injection
     if !is_valid_module_name(module_name) {
         miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
             module_name
         );
     }
@@ -448,7 +452,7 @@ pub fn write_core_erlang_with_bindings(
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
             module_name
         );
     }
@@ -856,6 +860,9 @@ end
         assert!(is_valid_module_name("test123"));
         assert!(is_valid_module_name("_private"));
         assert!(is_valid_module_name("a"));
+        // ADR 0016: @ is valid in Erlang atoms and used for namespacing
+        assert!(is_valid_module_name("bt@counter"));
+        assert!(is_valid_module_name("bt@stdlib@integer"));
     }
 
     #[test]
@@ -876,7 +883,6 @@ end
         assert!(!is_valid_module_name("foo-bar"));
         assert!(!is_valid_module_name("foo.bar"));
         assert!(!is_valid_module_name("foo bar"));
-        assert!(!is_valid_module_name("foo@bar"));
     }
 
     #[test]

@@ -34,7 +34,7 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
@@ -676,11 +676,11 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of
     ///   <'undefined'> when 'true' ->
-    ///     call 'counter':'spawn'()
+    ///     call 'bt@counter':'spawn'()
     ///   <RegistryPid> when 'true' ->
-    ///     let SpawnResult = call 'counter':'spawn'() in
+    ///     let SpawnResult = call 'bt@counter':'spawn'() in
     ///     let {'beamtalk_object', _, _, SpawnPid} = SpawnResult in
-    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'counter') in
+    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'bt@counter') in
     ///     SpawnResult
     /// end
     /// ```
@@ -688,14 +688,14 @@ impl CoreErlangGenerator {
     /// # Generated Code (non-REPL context)
     ///
     /// ```erlang
-    /// call 'counter':'spawn'()
+    /// call 'bt@counter':'spawn'()
     /// ```
     pub(super) fn generate_actor_spawn(
         &mut self,
         class_name: &str,
         init_args: Option<&Expression>,
     ) -> Result<()> {
-        let module_name = to_module_name(class_name);
+        let module_name = Self::compiled_module_name(class_name);
 
         // Check if we're in REPL context by looking for __bindings__ in scope
         let in_repl_context = self.lookup_var("__bindings__").is_some();

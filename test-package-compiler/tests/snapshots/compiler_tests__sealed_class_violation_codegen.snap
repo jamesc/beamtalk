@@ -52,7 +52,7 @@ call 'erlang':'*'(Self, 2)
                 <{'ok', ExtFun, _ExtOwner}> when 'true' ->
                     apply ExtFun(Args, Self)
                 <'not_found'> when 'true' ->
-                    call 'beamtalk_integer':'dispatch'(Selector, Args, Self)
+                    call 'bt@stdlib@integer':'dispatch'(Selector, Args, Self)
             end
     end
 
@@ -69,7 +69,7 @@ call 'erlang':'*'(Self, 2)
         <'false'> when 'true' ->
             case call 'beamtalk_extensions':'has'('MyInt', Selector) of
                 <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_integer':'has_method'(Selector)
+                <'false'> when 'true' -> call 'bt@stdlib@integer':'has_method'(Selector)
             end
     end
 

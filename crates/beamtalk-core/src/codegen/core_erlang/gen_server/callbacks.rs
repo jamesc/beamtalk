@@ -70,9 +70,8 @@ impl CoreErlangGenerator {
         // like "Counter subclass: LoggingCounter" (see tests/fixtures/logging_counter.bt).
         // Module-level expressions without a class definition take the base class path below.
         let current_class = module.classes.iter().find(|c| {
-            // Compare module names using the same conversion (PascalCase -> snake_case)
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         // Check if we have a superclass that's not Actor (base class)
@@ -91,8 +90,9 @@ impl CoreErlangGenerator {
             // so this expect cannot fail unless there's a logic error
             let class = current_class.expect("has_parent_init implies current_class is Some");
             let parent_module = {
-                use super::super::util::to_module_name;
-                to_module_name(class.superclass_name())
+                // ADR 0016: Use the same module naming logic as superclass_module_name()
+                // which handles both stdlib (bt@stdlib@*) and user (bt@*) modules
+                Self::compiled_module_name(class.superclass_name())
             };
 
             self.write_indent()?;

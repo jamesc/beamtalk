@@ -273,13 +273,13 @@ ensure_counter_loaded() ->
     case beamtalk_object_class:whereis_class('Counter') of
         undefined ->
             %% Counter not registered - register it
-            %% The counter module is compiled from test fixture
-            case code:ensure_loaded(counter) of
-                {module, counter} ->
+            %% The counter module is compiled from test fixture (ADR 0016: bt@ prefix)
+            case code:ensure_loaded('bt@counter') of
+                {module, 'bt@counter'} ->
                     %% Call the module's register_class/0 if it exists
-                    case erlang:function_exported(counter, register_class, 0) of
+                    case erlang:function_exported('bt@counter', register_class, 0) of
                         true ->
-                            counter:register_class(),
+                            'bt@counter':register_class(),
                             ok;
                         false ->
                             error(counter_no_register_function)

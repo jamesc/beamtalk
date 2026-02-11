@@ -1297,7 +1297,7 @@ mod tests {
 
     #[test]
     fn test_class_name_from_identity_overrides_module() {
-        let mut generator = CoreErlangGenerator::new("bt_stdlib_string");
+        let mut generator = CoreErlangGenerator::new("bt@stdlib@string");
         generator.class_identity = Some(util::ClassIdentity::new("String"));
         assert_eq!(generator.class_name(), "String");
     }
@@ -1624,7 +1624,7 @@ end
 
         let result = generator.generate_message_send(&receiver, &selector, &arguments);
         assert!(result.is_ok());
-        assert!(generator.output.contains("call 'counter':'spawn'()"));
+        assert!(generator.output.contains("call 'bt@counter':'spawn'()"));
     }
 
     #[test]
@@ -1646,7 +1646,7 @@ end
         assert!(result.is_ok());
         // Should call spawn/1 with the argument
         assert!(
-            generator.output.contains("call 'counter':'spawn'(42)"),
+            generator.output.contains("call 'bt@counter':'spawn'(42)"),
             "spawnWith: should generate spawn/1 call. Got: {}",
             generator.output
         );
@@ -3917,7 +3917,7 @@ end
         assert!(result.is_ok());
         assert_eq!(
             generator.output,
-            "call 'beamtalk_block':'dispatch'('blockValue', [], Self)"
+            "call 'bt@stdlib@block':'dispatch'('blockValue', [], Self)"
         );
     }
 
@@ -3931,7 +3931,7 @@ end
         assert!(result.is_ok());
         assert_eq!(
             generator.output,
-            "call 'beamtalk_integer':'dispatch'('toDo', [End, Block], Self)"
+            "call 'bt@stdlib@integer':'dispatch'('toDo', [End, Block], Self)"
         );
     }
 

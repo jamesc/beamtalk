@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// CompiledMethod - Method introspection object (BT-101)
+//
+// CompiledMethod objects are created by the >> operator and enable
+// method introspection in Beamtalk:
+//
+//   method := Counter >> #increment
+//   method selector         // => #increment
+//   method source           // => "increment => self.value := self.value + 1"
+//   method argumentCount    // => 0
+//
+// CompiledMethod is a value type (tagged map) — not instantiable via new.
+
+sealed Object subclass: CompiledMethod
+
+  selector => @primitive 'selector'
+  source => @primitive 'source'
+  argumentCount => @primitive 'argumentCount'
+  printString => @primitive 'printString'
+  asString => @primitive 'asString'

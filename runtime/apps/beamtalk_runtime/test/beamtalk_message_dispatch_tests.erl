@@ -4,7 +4,7 @@
 %%% @doc EUnit tests for beamtalk_message_dispatch module (BT-430).
 %%%
 %%% Tests unified dispatch routing for actors, class objects, and primitives.
-%%% Note: Compiled stdlib modules (beamtalk_integer etc.) require `just build-stdlib`.
+%%% Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdlib`.
 %%% These tests focus on routing logic that works without compiled stdlib.
 -module(beamtalk_message_dispatch_tests).
 -include_lib("eunit/include/eunit.hrl").
