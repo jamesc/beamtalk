@@ -62,19 +62,6 @@ File exists: '_bt_e2e_empty.txt'
 // => true
 
 // ===========================================================================
-// ERROR PATHS
-// ===========================================================================
-
-File readAll: 'does_not_exist_at_all.txt'
-// => ERROR: file_not_found
-
-File writeAll: '../escape.txt' contents: 'bad'
-// => ERROR: invalid_path
-
-File readAll: '/etc/passwd'
-// => ERROR: invalid_path
-
-// ===========================================================================
 // SECURITY: PATH VALIDATION
 // ===========================================================================
 

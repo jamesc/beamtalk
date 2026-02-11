@@ -4,19 +4,72 @@
 // Stdlib tests for error handling
 // Tests that runtime errors produce correct error kinds
 // Validates BT-458: ERROR: assertion support in stdlib test framework
+//
+// These tests were migrated from E2E where they don't need REPL features.
+// Stdlib tests match #beamtalk_error{kind} structurally (more precise than
+// E2E substring matching).
+
+// ===========================================================================
+// ARITHMETIC ERRORS
+// ===========================================================================
 
 // Division by zero (Erlang badarith)
 1 / 0
 // => ERROR: badarith
 
-// Calling non-existent method on integer (does_not_understand)
-42 nonExistentMethod
-// => ERROR: does_not_understand
-
 // Arithmetic type error (string is not a number)
 "hello" + 42
 // => ERROR: badarith
 
-// Calling non-existent method on string
+// ===========================================================================
+// DOES NOT UNDERSTAND (unknown methods)
+// ===========================================================================
+
+// Unknown method on integer
+42 nonExistentMethod
+// => ERROR: does_not_understand
+
+// Unknown method on string
 "hello" nonExistentMethod
 // => ERROR: does_not_understand
+
+// Unknown method on boolean
+true nonExistentMethod
+// => ERROR: does_not_understand
+
+// Unknown method on nil
+nil nonExistentMethod
+// => ERROR: does_not_understand
+
+// ===========================================================================
+// IMMUTABLE VALUE ERRORS (BT-359)
+// ===========================================================================
+// Value types (integers, strings) don't have mutable fields
+
+// instVarAt:put: on integer
+42 instVarAt: #x put: 99
+// => ERROR: immutable_value
+
+// instVarAt: on integer
+42 instVarAt: #x
+// => ERROR: immutable_value
+
+// instVarAt:put: on string
+"hello" instVarAt: #x put: "world"
+// => ERROR: immutable_value
+
+// ===========================================================================
+// FILE I/O ERRORS
+// ===========================================================================
+
+// Reading a non-existent file
+File readAll: "does_not_exist_at_all.txt"
+// => ERROR: file_not_found
+
+// Path traversal attack (directory escape)
+File writeAll: "../escape.txt" contents: "bad"
+// => ERROR: invalid_path
+
+// Absolute path (not allowed)
+File readAll: "/etc/passwd"
+// => ERROR: invalid_path

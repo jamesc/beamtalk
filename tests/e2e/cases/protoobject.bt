@@ -134,22 +134,6 @@ a ~= c
 // => true
 
 // ===========================================================================
-// DOESNOTUNDERSTAND TESTS
-// ===========================================================================
-//
-// When an object receives a message it doesn't understand, the runtime
-// calls `doesNotUnderstand:args:` which raises a does_not_understand error.
-// (See also errors.bt for additional doesNotUnderstand coverage)
-
-// Send unknown message to integer
-42 nonExistentMethod
-// => ERROR: does_not_understand
-
-// Send unknown message to string
-'hello' nonExistentMethod
-// => ERROR: does_not_understand
-
-// ===========================================================================
 // PERFORM:WITHARGUMENTS: TESTS
 // ===========================================================================
 //
