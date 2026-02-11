@@ -88,3 +88,13 @@ True new
 
 False new
 // => ERROR: instantiation_error
+
+UndefinedObject new
+// => ERROR: instantiation_error
+
+Block new
+// => ERROR: instantiation_error
+
+// Note: `new:` (keyword message with args) also has the instantiation_error
+// guard in codegen, but class process registration prevents E2E testing here.
+// The codegen path is exercised by the same generate_primitive_new_error function.
