@@ -756,10 +756,11 @@ impl CoreErlangGenerator {
 
     /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
     ///
-    /// Only handles `class` and `respondsTo:`, then checks extensions and
-    /// delegates everything else to the superclass. Skips instVarNames,
-    /// instVarAt:, instVarAt:put:, perform:, perform:withArguments: since
-    /// the superclass already handles them.
+    /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
+    /// locally, then checks extensions and delegates everything else to the
+    /// superclass. `perform:` must re-dispatch through this module to preserve
+    /// extension lookup and correct error attribution. Skips instVarNames,
+    /// instVarAt:, instVarAt:put: since the superclass already handles them.
     fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
@@ -797,6 +798,37 @@ impl CoreErlangGenerator {
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // perform: — re-dispatch through this module to preserve extension lookup
+        self.write_indent()?;
+        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PerfSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PerfSel, [], Self)"
+        )?;
+        self.indent -= 1;
+
+        // perform:withArguments: — re-dispatch through this module
+        self.write_indent()?;
+        writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PwaSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)"
+        )?;
         self.indent -= 1;
 
         // Default: extension check, then superclass delegation
@@ -842,7 +874,8 @@ impl CoreErlangGenerator {
 
     /// BT-447: Generates a minimal `has_method/1` for classes with no instance methods.
     ///
-    /// Checks `class` and `respondsTo:`, then extensions, then delegates to superclass.
+    /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
+    /// then extensions, then delegates to superclass.
     fn generate_minimal_has_method(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
         let super_mod = Self::superclass_module_name(class.superclass_name())
@@ -852,10 +885,10 @@ impl CoreErlangGenerator {
         self.indent += 1;
         self.write_indent()?;
 
-        // Only class and respondsTo: are handled locally
+        // class, respondsTo:, perform:, perform:withArguments: are handled locally
         writeln!(
             self.output,
-            "case call 'lists':'member'(Selector, ['class', 'respondsTo']) of"
+            "case call 'lists':'member'(Selector, ['class', 'respondsTo', 'perform', 'perform:withArguments:']) of"
         )?;
         self.indent += 1;
         self.write_indent()?;
