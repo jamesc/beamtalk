@@ -88,14 +88,10 @@ system_dictionary_loaded_after_start_test() ->
     
     %% The SystemDictionary module provides system reflection (allClasses, classNamed:, etc.)
     %% via beamtalk_system_dictionary, replacing the legacy compiled beamtalk module.
-    case code:is_loaded(beamtalk_system_dictionary) of
-        {file, _} ->
-            %% Module is loaded - verify has_method works
-            ?assertEqual(true, beamtalk_system_dictionary:has_method(allClasses));
-        false ->
-            %% Module not loaded - this is expected in development builds
-            ok
-    end,
+    %% Use ensure_loaded to verify the module is available (not just loaded as side-effect).
+    ?assertEqual({module, beamtalk_system_dictionary},
+                 code:ensure_loaded(beamtalk_system_dictionary)),
+    ?assertEqual(true, beamtalk_system_dictionary:has_method(allClasses)),
     
     %% Clean up only if we started it
     stop_runtime(Result).

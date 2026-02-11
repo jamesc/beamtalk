@@ -15,7 +15,7 @@ Transcript show: 'Hello'   // codegen → call 'transcript':'show:'(<<"Hello">>)
 Transcript cr               // codegen → call 'transcript':'cr'()
 ```
 
-**Beamtalk** is defined in `lib/SystemDictionary.bt` and backed by `beamtalk_system_dictionary.erl`:
+**Beamtalk** is a global workspace binding backed by `SystemDictionary` (defined in `lib/SystemDictionary.bt`) and implemented by `beamtalk_system_dictionary.erl`:
 ```beamtalk
 Beamtalk allClasses         // dispatched via workspace binding → beamtalk_system_dictionary
 Beamtalk classNamed: #Counter

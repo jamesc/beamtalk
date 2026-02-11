@@ -48,10 +48,10 @@ When activated, execute this workflow to complete work and push:
    If any check fails, report the errors and stop.
 
 6. **Generate commit message**: Based on the staged diff (`git diff --cached`), create a conventional commit message:
-   - Use format: `type: short description BT-{number}`
+   - Use format: `type: short description BT-{number}` (include issue ID when available)
    - Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
    - Keep first line under 72 characters
-   - Always include the issue ID (e.g., `feat: add lexer tokens BT-42`)
+   - For chore/docs/refactor branches without an issue, omit `BT-{number}` (e.g., `chore: clean up dead code`)
    - Add bullet points for details if multiple changes
 
 7. **Commit**:
@@ -71,14 +71,16 @@ When activated, execute this workflow to complete work and push:
    
    **If PR exists:** Skip creation — the push in step 8 already updated it. Note the existing PR URL for reporting.
    
-   **If no PR exists:** Use the issue ID from step 1. Fetch the Linear issue details. Create a PR:
+   **If no PR exists:** Use the issue ID from step 1 (if available). Fetch the Linear issue details. Create a PR:
    ```bash
    gh pr create --title "<Issue Title> (BT-{number})" --body "<Issue description with link to Linear issue>"
    ```
    The PR body should include:
-   - Link to Linear issue: `https://linear.app/beamtalk/issue/BT-{number}`
+   - Link to Linear issue: `https://linear.app/beamtalk/issue/BT-{number}` (if issue exists)
    - Brief summary of what was implemented
    - List of key changes
+   
+   For chore/docs/refactor branches without a Linear issue, use a descriptive title based on the commit message and omit the Linear link.
 
 10. **Update Linear acceptance criteria**: Get the Linear issue from step 1, review the acceptance criteria, and add a comment marking which criteria have been completed with checkmarks (✅). Format as a structured summary showing what was implemented.
 
