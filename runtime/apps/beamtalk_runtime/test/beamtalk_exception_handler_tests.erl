@@ -109,6 +109,9 @@ kind_to_class_internal_error_test() ->
 kind_to_class_user_error_falls_back_to_error_test() ->
     ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(user_error)).
 
+kind_to_class_signal_maps_to_error_test() ->
+    ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(signal)).
+
 kind_to_class_unknown_falls_back_to_error_test() ->
     ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(some_unknown_kind)).
 

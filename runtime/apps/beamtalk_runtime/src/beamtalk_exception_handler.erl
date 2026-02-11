@@ -60,8 +60,9 @@ kind_to_class(future_not_awaited) -> 'RuntimeError';
 kind_to_class(internal_error) -> 'RuntimeError';
 kind_to_class(type_error) -> 'TypeError';
 kind_to_class(instantiation_error) -> 'InstantiationError';
-%% user_error (signal:) stays Error — user decides semantics.
+%% signal (from signal_message/1) stays Error — user decides semantics.
 %% file_*/io_error/invalid_path/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
+kind_to_class(signal) -> 'Error';
 kind_to_class(_) -> 'Error'.
 
 %% @doc Check if a class name belongs to the exception hierarchy.
@@ -105,7 +106,7 @@ matches_class(_Other, _Error) ->
 %% Exception hierarchy:
 %%   Exception (catches all)
 %%   └── Error (catches all Error subclasses)
-%%       ├── RuntimeError (does_not_understand, arity_mismatch, immutable_value)
+%%       ├── RuntimeError (e.g. does_not_understand, arity_mismatch, immutable_value, ...)
 %%       ├── TypeError (type_error)
 %%       └── InstantiationError (instantiation_error)
 -spec matches_class_name(atom(), #beamtalk_error{}) -> boolean().
