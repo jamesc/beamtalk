@@ -75,13 +75,15 @@ impl CoreErlangGenerator {
         // Check if state was mutated (must happen after capture)
         let final_state = self.current_state_var();
 
-        let return_tuple = if final_state == "State" {
-            // No mutation - Result is the value, State is unchanged bindings
-            "{Result, State}".to_string()
-        } else {
+        let return_tuple = if final_state != "State" || self.repl_loop_mutated {
             // Mutation occurred - Result is the updated state
             // Return {nil, Result} since loops return nil but state was updated
+            // BT-245: repl_loop_mutated catches mutations inside StateAcc-threaded loops
+            // where current_state_var() is restored after the loop
             "{'nil', Result}".to_string()
+        } else {
+            // No mutation - Result is the value, State is unchanged bindings
+            "{Result, State}".to_string()
         };
 
         let module_name = &self.module_name;

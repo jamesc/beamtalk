@@ -80,6 +80,11 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Analyze which variables are mutated
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
@@ -204,6 +209,9 @@ impl CoreErlangGenerator {
                 // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
                 // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
@@ -279,6 +287,11 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Same as while_true but with false/true swapped in the case
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
