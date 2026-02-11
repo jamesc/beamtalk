@@ -197,14 +197,16 @@ impl CoreErlangGenerator {
 
     /// Generates the `new/0` function for a value type.
     ///
-    /// For primitive types (Integer, String, etc.), generates an
-    /// `instantiation_error` since primitives are native BEAM values.
-    /// For non-primitive value types, creates an instance map with
-    /// `$beamtalk_class` and default field values.
+    /// - Non-instantiable primitives (Integer, String, etc.): raises `instantiation_error`
+    /// - Collection primitives (Dictionary, List, Tuple): returns empty native value
+    /// - Other value types: creates an instance map with `$beamtalk_class` and defaults
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
-        if Self::is_primitive_type(&class_name) {
+        if Self::is_non_instantiable_primitive(&class_name) {
             return self.generate_primitive_new_error(&class_name, "new", 0);
+        }
+        if let Some(empty_val) = Self::collection_empty_value(&class_name) {
+            return self.generate_collection_new(empty_val);
         }
 
         writeln!(self.output, "'new'/0 = fun () ->")?;
@@ -237,11 +239,15 @@ impl CoreErlangGenerator {
 
     /// Generates the `new/1` function for a value type.
     ///
-    /// For primitive types, generates an `instantiation_error`.
-    /// For non-primitive value types, merges initialization arguments with defaults.
+    /// - Non-instantiable primitives: raises `instantiation_error`
+    /// - Collection primitives: raises `instantiation_error` (no meaningful merge)
+    /// - Other value types: merges initialization arguments with defaults
     fn generate_value_type_new_with_args(&mut self) -> Result<()> {
         let class_name = self.class_name().clone();
-        if Self::is_primitive_type(&class_name) {
+        if Self::is_non_instantiable_primitive(&class_name) {
+            return self.generate_primitive_new_error(&class_name, "new:", 1);
+        }
+        if Self::collection_empty_value(&class_name).is_some() {
             return self.generate_primitive_new_error(&class_name, "new:", 1);
         }
 
@@ -296,6 +302,17 @@ impl CoreErlangGenerator {
         writeln!(self.output, ") in")?;
         self.write_indent()?;
         writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+        Ok(())
+    }
+
+    /// Generates `new/0` for a collection type that returns an empty native value.
+    fn generate_collection_new(&mut self, empty_value: &str) -> Result<()> {
+        writeln!(self.output, "'new'/0 = fun () ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "{empty_value}")?;
         self.indent -= 1;
         writeln!(self.output)?;
         Ok(())
@@ -372,12 +389,15 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Returns true if the class is a primitive type backed by native BEAM values
-    /// that cannot be instantiated with `new`.
+    /// Returns true if the class is a non-instantiable primitive type.
     ///
-    /// These types have no state fields and represent native Erlang values
-    /// (integers, floats, strings, etc.), not tagged maps.
-    fn is_primitive_type(class_name: &str) -> bool {
+    /// These types have no sensible default/empty value and cannot be
+    /// instantiated with `new`. For example, `Integer new` makes no sense —
+    /// integers are created via literals (`42`).
+    ///
+    /// Collection types (Dictionary, List, Tuple) are NOT included here
+    /// because they have sensible empty values (e.g., `Dictionary new` → `#{}`).
+    fn is_non_instantiable_primitive(class_name: &str) -> bool {
         matches!(
             class_name,
             "Integer"
@@ -388,18 +408,27 @@ impl CoreErlangGenerator {
                 | "UndefinedObject"
                 | "Block"
                 | "Symbol"
-                | "Tuple"
-                | "List"
-                | "Dictionary"
                 | "CompiledMethod"
         )
+    }
+
+    /// Returns the Core Erlang literal for a collection type's empty value,
+    /// or `None` if the class is not a collection primitive.
+    fn collection_empty_value(class_name: &str) -> Option<&'static str> {
+        match class_name {
+            "Dictionary" => Some("~{}~"),
+            "List" => Some("[]"),
+            "Tuple" => Some("{}"),
+            _ => None,
+        }
     }
 
     /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
     /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
     fn is_known_stdlib_type(class_name: &str) -> bool {
-        Self::is_primitive_type(class_name)
+        Self::is_non_instantiable_primitive(class_name)
+            || Self::collection_empty_value(class_name).is_some()
             || matches!(
                 class_name,
                 "Set"

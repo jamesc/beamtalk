@@ -59,16 +59,10 @@ undefinedVar + 5
 // Primitive types are backed by native BEAM values, not maps.
 // Calling `new` on them should raise an instantiation_error.
 
-Dictionary new
-// => ERROR: instantiation_error
-
 Integer new
 // => ERROR: instantiation_error
 
 String new
-// => ERROR: instantiation_error
-
-List new
 // => ERROR: instantiation_error
 
 CompiledMethod new
@@ -78,9 +72,6 @@ Float new
 // => ERROR: instantiation_error
 
 Symbol new
-// => ERROR: instantiation_error
-
-Tuple new
 // => ERROR: instantiation_error
 
 True new
