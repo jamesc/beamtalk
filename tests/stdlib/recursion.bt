@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for recursive method dispatch BT-330
+// Tests for recursive method dispatch BT-330
+// Migrated from E2E: cross-expression variable resolution (BT-459)
 // Verifies that methods can call themselves recursively via self.
 
 // @load tests/e2e/fixtures/math_helper.bt
@@ -73,20 +74,20 @@ a := RecursiveActor spawn
 // => _
 
 // Base case (no self-send needed)
-a factorial: 1
+(a factorial: 1) await
 // => 1
 
 // Recursive self-send on Actor
-a factorial: 5
+(a factorial: 5) await
 // => 120
 
-a factorial: 10
+(a factorial: 10) await
 // => 3628800
 
 // Double recursion on Actor
-a fibonacci: 10
+(a fibonacci: 10) await
 // => 55
 
 // Cross-method self-send (self double: n, then * 2)
-a quadruple: 5
+(a quadruple: 5) await
 // => 20

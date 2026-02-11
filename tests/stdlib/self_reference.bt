@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for self-reference behavior (BT-172)
+// Tests for self-reference behavior (BT-172)
+// Migrated from E2E: cross-expression variable resolution (BT-459)
 //
 // Tests that:
 // - Methods can return self
@@ -19,7 +20,7 @@ a := SelfRefActor spawn
 // ===========================================================================
 
 // returnSelf returns the actor's self reference
-ref := a returnSelf
+ref := a returnSelf await
 // => _
 
 // The returned reference responds to class
@@ -27,11 +28,11 @@ ref class
 // => SelfRefActor
 
 // The returned reference is the same actor (can send messages through it)
-ref setValue: 99
+(ref setValue: 99) await
 // => _
 
 // Verify the state changed on the original actor (same process)
-a getValue
+a getValue await
 // => 99
 
 // ===========================================================================
@@ -40,7 +41,7 @@ a getValue
 
 // classInBlock evaluates self.class inside a block
 // self in block refers to enclosing actor, not the block itself
-a classInBlock
+a classInBlock await
 // => SelfRefActor
 
 // ===========================================================================
@@ -48,14 +49,14 @@ a classInBlock
 // ===========================================================================
 
 // perform: dispatches zero-arg methods dynamically on actors
-a perform: #getValue
+(a perform: #getValue) await
 // => 99
 
 // perform:withArguments: dispatches methods with arguments on actors
-a perform: #setValue: withArguments: #(42)
+(a perform: #setValue: withArguments: #(42)) await
 // => _
 
-a getValue
+a getValue await
 // => 42
 
 // perform: also works on primitives (synchronous dispatch)
