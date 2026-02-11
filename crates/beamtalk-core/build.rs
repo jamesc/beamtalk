@@ -19,19 +19,24 @@ fn main() {
         .expect("Cannot find workspace root");
     let lib_dir = workspace_root.join("lib");
 
+    assert!(
+        lib_dir.exists(),
+        "Expected stdlib directory at `{}` — \
+         ensure `lib/` is present at the workspace root.",
+        lib_dir.display()
+    );
+
     // Rerun when lib/ directory changes (files added/removed)
     println!("cargo:rerun-if-changed={}", lib_dir.display());
 
     let mut class_names: Vec<String> = Vec::new();
 
-    if lib_dir.exists() {
-        for entry in fs::read_dir(&lib_dir).expect("Failed to read lib/ directory") {
-            let entry = entry.expect("Failed to read directory entry");
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "bt") {
-                if let Some(stem) = path.file_stem() {
-                    class_names.push(stem.to_string_lossy().to_string());
-                }
+    for entry in fs::read_dir(&lib_dir).expect("Failed to read lib/ directory") {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "bt") {
+            if let Some(stem) = path.file_stem() {
+                class_names.push(stem.to_string_lossy().to_string());
             }
         }
     }
