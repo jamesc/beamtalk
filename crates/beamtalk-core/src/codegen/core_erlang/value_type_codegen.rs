@@ -18,6 +18,9 @@ use std::fmt::Write;
 
 use super::variable_context;
 
+// Auto-generated from lib/*.bt by build.rs — do not edit manually.
+include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
+
 impl CoreErlangGenerator {
     /// Generates a value type module (BT-213).
     ///
@@ -436,23 +439,9 @@ impl CoreErlangGenerator {
     /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
     /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
+    /// Derived automatically from `lib/*.bt` via `build.rs` (BT-472).
     fn is_known_stdlib_type(class_name: &str) -> bool {
-        Self::is_non_instantiable_primitive(class_name)
-            || Self::collection_empty_value(class_name).is_some()
-            || matches!(
-                class_name,
-                "Set"
-                    | "ProtoObject"
-                    | "Object"
-                    | "Number"
-                    | "Actor"
-                    | "File"
-                    | "Association"
-                    | "SystemDictionary"
-                    | "TranscriptStream"
-                    | "Exception"
-                    | "Error"
-            )
+        STDLIB_CLASS_NAMES.contains(&class_name)
     }
 
     /// Computes the compiled module name for a class (ADR 0016).

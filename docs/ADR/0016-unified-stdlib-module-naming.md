@@ -192,17 +192,15 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 
 ### 3. Collapse three-way codegen lists into one
 
+The stdlib class list is **auto-derived from `lib/*.bt`** at Rust compile time via `beamtalk-core/build.rs` (BT-472). Adding a new `.bt` file to `lib/` automatically makes it a known stdlib type — no manual list maintenance needed.
+
 ```rust
+// beamtalk-core/build.rs generates STDLIB_CLASS_NAMES from lib/*.bt
+include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
+
 // value_type_codegen.rs — AFTER
 fn is_known_stdlib_type(class_name: &str) -> bool {
-    matches!(class_name,
-        "Integer" | "Float" | "String" | "True" | "False"
-        | "UndefinedObject" | "Block" | "Symbol" | "Tuple"
-        | "List" | "Dictionary" | "Set"
-        | "Object" | "Number" | "Actor" | "File"
-        | "Association" | "SystemDictionary" | "TranscriptStream"
-        | "Exception" | "Error"
-    )
+    STDLIB_CLASS_NAMES.contains(&class_name)
 }
 
 fn superclass_module_name(superclass: &str) -> Option<String> {
@@ -387,7 +385,7 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 ## Consequences
 
 ### Positive
-- Three separate `is_*_type()` functions collapse into one `is_known_stdlib_type()`
+- Three separate `is_*_type()` functions collapse into one `is_known_stdlib_type()`, auto-derived from `lib/*.bt` (BT-472)
 - `module_name_from_path()` becomes a single-line function
 - `superclass_module_name()` loses its three-way branch — unified `bt@` prefix for all compiled code
 - Clear, memorable naming convention: `beamtalk_*.erl` = hand-written Erlang, `bt@*.beam` = compiled `.bt`
