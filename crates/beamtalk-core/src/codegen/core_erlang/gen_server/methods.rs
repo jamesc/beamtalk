@@ -55,10 +55,11 @@ impl CoreErlangGenerator {
             })
             .collect();
 
-        // Capture body output (generate_method_definition_body_with_reply writes flat strings)
-        let original_output = std::mem::take(&mut self.output);
+        // Capture body output using truncate (error-safe: no buffer swap)
+        let start = self.output.len();
         self.generate_method_definition_body_with_reply(method)?;
-        let body_str = std::mem::replace(&mut self.output, original_output);
+        let body_str = self.output[start..].to_string();
+        self.output.truncate(start);
 
         // Write selector header at current indent (write! positions cursor correctly)
         self.write_indent()?;
@@ -661,13 +662,15 @@ impl CoreErlangGenerator {
                 })
                 .collect();
 
-            // Capture body output
+            // Capture body output using truncate (error-safe: no buffer swap)
             let body_str = if method.body.is_empty() {
                 "'nil'".to_string()
             } else {
-                let original_output = std::mem::take(&mut self.output);
+                let start = self.output.len();
                 self.generate_class_method_body(method, &class.class_variables)?;
-                std::mem::replace(&mut self.output, original_output)
+                let captured = self.output[start..].to_string();
+                self.output.truncate(start);
+                captured
             };
 
             // Build function header with params
