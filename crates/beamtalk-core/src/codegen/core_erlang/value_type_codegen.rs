@@ -210,7 +210,6 @@ impl CoreErlangGenerator {
         }
 
         // Start building the document
-        let class_name = self.class_name().clone();
         let mut field_parts = Vec::new();
 
         // Add each field with its default value
@@ -284,10 +283,10 @@ impl CoreErlangGenerator {
             format!("{class_name} is a primitive type and cannot be instantiated with {selector}");
         let hint_binary = Self::core_erlang_binary(&hint);
 
-        let (function_head, _params) = if arity == 0 {
-            ("'new'/0 = fun () ->", "")
+        let function_head = if arity == 0 {
+            "'new'/0 = fun () ->"
         } else {
-            ("'new'/1 = fun (_InitArgs) ->", "")
+            "'new'/1 = fun (_InitArgs) ->"
         };
 
         let doc = docvec![
@@ -549,7 +548,6 @@ impl CoreErlangGenerator {
         let mut method_branches = String::new();
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            let arity = method.parameters.len() + 1; // +1 for Self
             method_branches.push_str(&format!("        <'{mangled}'> when 'true' ->\n"));
 
             if method.parameters.is_empty() {
@@ -575,8 +573,6 @@ impl CoreErlangGenerator {
                 }
                 method_branches.push_str(")\n");
             }
-
-            let _ = arity;
         }
 
         // Default case: extension fallback, then superclass delegation
