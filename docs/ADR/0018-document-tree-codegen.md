@@ -48,7 +48,7 @@ self.indent -= 1;
 
 As the language grows (pattern matching, exception handling, type annotations), this approach will become increasingly difficult to maintain.
 
-**Note:** Some specific refactoring tasks (e.g., BT-454 module renaming) can be addressed independently by extending existing abstractions like `ModuleName` in `erlang_types.rs`. The document tree is not a prerequisite for BT-454 — it's a long-term architectural improvement for the codegen subsystem as a whole.
+**Note:** Some specific refactoring tasks (e.g., module renaming) can be addressed independently by extending existing abstractions like `ModuleName` in `erlang_types.rs`. The document tree is a long-term architectural improvement for the codegen subsystem as a whole.
 
 ### What Other Rust-Based Compilers Do
 
@@ -230,7 +230,7 @@ This is a legitimate concern. The ADR proceeds despite it because:
 
 - 🧑‍💻 **Newcomer contributor**: "`indented()` closures are idiomatic Rust. No new abstraction to learn."
 - 🎩 **Smalltalk developer**: "Incremental improvement. Ship small fixes now, rethink architecture later."
-- ⚙️ **BEAM veteran**: "Centralizing module names into helpers solves the real pain point (BT-454) without touching 1,100 call sites."
+- ⚙️ **BEAM veteran**: "Centralizing module names into helpers solves the real pain point without touching 1,100 call sites."
 - 🏭 **Operator**: "Zero-risk change — each helper can be adopted one call site at a time."
 - 🎨 **Language designer**: "This is 80% of the value at 20% of the cost. But it doesn't solve composability or fragment testing."
 
@@ -329,7 +329,7 @@ Keep `write!` for existing code, use `Document` only for new code.
 
 ### Positive
 
-- **Easier refactoring**: Module name changes (BT-454), dispatch pattern changes, and new language features require changing document constructors, not hunting through `write!` calls
+- **Easier refactoring**: Module name changes, dispatch pattern changes, and new language features require changing document constructors, not hunting through `write!` calls
 - **Declarative indentation**: `nest()` eliminates manual `indent += 1` / `indent -= 1` pairs and the bugs they cause
 - **Composable fragments**: Code generation functions return `Document` values that can be composed, tested, and reused
 - **Unit testable**: Individual codegen functions can be tested without running the full pipeline
