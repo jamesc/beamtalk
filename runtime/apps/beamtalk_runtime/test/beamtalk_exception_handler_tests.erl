@@ -5,7 +5,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%%% Tests for ensure_wrapped/1 (ADR 0015)
+%%% Tests for ensure_wrapped/1 (ADR 0015) — pure, no class system needed
 
 %% Already-wrapped Exception maps pass through unchanged
 ensure_wrapped_idempotent_test() ->
@@ -36,30 +36,7 @@ ensure_wrapped_no_double_wrap_test() ->
     Wrapped2 = beamtalk_exception_handler:ensure_wrapped(Wrapped1),
     ?assertEqual(Wrapped1, Wrapped2).
 
-%%% Tests for matches_class/2 with wrapped exceptions (ADR 0015)
-
-%% matches_class handles wrapped Exception maps
-matches_class_wrapped_nil_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Integer'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class(nil, Wrapped)).
-
-matches_class_wrapped_exception_atom_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Integer'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped)).
-
-matches_class_wrapped_kind_match_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Integer'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class(does_not_understand, Wrapped)).
-
-matches_class_wrapped_kind_mismatch_test() ->
-    Error = beamtalk_error:new(type_error, 'String'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(false, beamtalk_exception_handler:matches_class(does_not_understand, Wrapped)).
-
-%%% Tests for kind_to_class/1 (BT-452)
+%%% Tests for kind_to_class/1 (BT-452) — pure, no class system needed
 
 kind_to_class_does_not_understand_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(does_not_understand)).
@@ -115,18 +92,7 @@ kind_to_class_signal_maps_to_error_test() ->
 kind_to_class_unknown_falls_back_to_error_test() ->
     ?assertEqual('Error', beamtalk_exception_handler:kind_to_class(some_unknown_kind)).
 
-%%% Tests for is_exception_class/1 (BT-452)
-
-is_exception_class_test() ->
-    ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Exception')),
-    ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Error')),
-    ?assertEqual(true, beamtalk_exception_handler:is_exception_class('RuntimeError')),
-    ?assertEqual(true, beamtalk_exception_handler:is_exception_class('TypeError')),
-    ?assertEqual(true, beamtalk_exception_handler:is_exception_class('InstantiationError')),
-    ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Dictionary')),
-    ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Integer')).
-
-%%% Tests for wrap/1 class hierarchy (BT-452)
+%%% Tests for wrap/1 class hierarchy (BT-452) — pure, no class system needed
 
 wrap_sets_runtime_error_class_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
@@ -157,38 +123,133 @@ wrap_runtime_error_kind_becomes_runtime_error_test() ->
     #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap(Error),
     ?assertEqual('RuntimeError', Class).
 
-%%% Tests for hierarchy-aware matches_class/2 (BT-452)
+%%% Tests requiring class system (BT-475)
+%%% is_exception_class/1, matches_class/2 now delegate to class hierarchy
 
-matches_class_runtime_error_catches_dnu_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Integer'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped)).
+hierarchy_test_() ->
+    {setup,
+     fun setup_class_system/0,
+     fun teardown_class_system/1,
+     [
+      %% is_exception_class/1 tests (BT-475 — derived from class system)
+      {"Exception is an exception class",
+       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Exception')) end},
+      {"Error is an exception class",
+       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('Error')) end},
+      {"RuntimeError is an exception class",
+       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('RuntimeError')) end},
+      {"TypeError is an exception class",
+       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('TypeError')) end},
+      {"InstantiationError is an exception class",
+       fun() -> ?assertEqual(true, beamtalk_exception_handler:is_exception_class('InstantiationError')) end},
+      {"Dictionary is not an exception class",
+       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Dictionary')) end},
+      {"Integer is not an exception class",
+       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('Integer')) end},
+      {"Unregistered class is not an exception class",
+       fun() -> ?assertEqual(false, beamtalk_exception_handler:is_exception_class('NonExistent')) end},
 
-matches_class_runtime_error_rejects_type_error_test() ->
-    Error = beamtalk_error:new(type_error, 'String'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(false, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped)).
+      %% matches_class/2 with nil (catch all)
+      {"nil matches any wrapped error",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class(nil, Wrapped))
+       end},
 
-matches_class_type_error_catches_type_error_test() ->
-    Error = beamtalk_error:new(type_error, 'String'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError', Wrapped)).
+      %% matches_class/2 with atom class names
+      {"Exception atom matches wrapped error",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', Wrapped))
+       end},
 
-matches_class_type_error_rejects_dnu_test() ->
-    Error = beamtalk_error:new(does_not_understand, 'Integer'),
-    Wrapped = beamtalk_exception_handler:wrap(Error),
-    ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped)).
+      %% matches_class/2 with kind atoms (backward compat removed — kinds are not class names)
+      {"kind atom does not match directly (not a class name)",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(false, beamtalk_exception_handler:matches_class(does_not_understand, Wrapped))
+       end},
 
-matches_class_error_catches_all_subclasses_test() ->
-    DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
-    TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
-    IE = beamtalk_exception_handler:wrap(beamtalk_error:new(instantiation_error, 'Actor')),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', DNU)),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', TE)),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', IE)).
+      %% Hierarchy-aware matches_class/2 (BT-452/BT-475)
+      {"RuntimeError catches does_not_understand",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
+       end},
+      {"RuntimeError rejects type_error",
+       fun() ->
+           Error = beamtalk_error:new(type_error, 'String'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(false, beamtalk_exception_handler:matches_class('RuntimeError', Wrapped))
+       end},
+      {"TypeError catches type_error",
+       fun() ->
+           Error = beamtalk_error:new(type_error, 'String'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
+       end},
+      {"TypeError rejects does_not_understand",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
+       end},
+      {"Error catches all subclasses",
+       fun() ->
+           DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
+           TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+           IE = beamtalk_exception_handler:wrap(beamtalk_error:new(instantiation_error, 'Actor')),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', DNU)),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', TE)),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Error', IE))
+       end},
+      {"Exception catches everything",
+       fun() ->
+           DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
+           TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', DNU)),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', TE))
+       end},
 
-matches_class_exception_catches_everything_test() ->
-    DNU = beamtalk_exception_handler:wrap(beamtalk_error:new(does_not_understand, 'Integer')),
-    TE = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', DNU)),
-    ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception', TE)).
+      %% Metaclass ("ClassName class") variant tests
+      {"'RuntimeError class' catches does_not_understand",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('RuntimeError class', Wrapped))
+       end},
+      {"'TypeError class' catches type_error",
+       fun() ->
+           Error = beamtalk_error:new(type_error, 'String'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('TypeError class', Wrapped))
+       end},
+      {"'Exception class' catches everything",
+       fun() ->
+           Error = beamtalk_error:new(does_not_understand, 'Integer'),
+           Wrapped = beamtalk_exception_handler:wrap(Error),
+           ?assertEqual(true, beamtalk_exception_handler:matches_class('Exception class', Wrapped))
+       end}
+     ]}.
+
+%% @private Setup class system for hierarchy tests
+setup_class_system() ->
+    case whereis(pg) of
+        undefined -> pg:start_link();
+        _ -> ok
+    end,
+    beamtalk_extensions:init(),
+    case whereis(beamtalk_bootstrap) of
+        undefined -> beamtalk_bootstrap:start_link();
+        _ -> ok
+    end,
+    beamtalk_stdlib:init(),
+    ok.
+
+%% @private Teardown class system
+teardown_class_system(_) ->
+    ok.

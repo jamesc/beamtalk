@@ -36,7 +36,7 @@
 
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
-use std::fmt::Write;
+use crate::docvec;
 
 /// BT-374 / ADR 0010: Compile-time known workspace binding names.
 ///
@@ -54,14 +54,22 @@ impl CoreErlangGenerator {
     ///
     /// This is a shared helper that eliminates the repeated pattern of iterating
     /// over arguments with comma separation found throughout dispatch codegen.
-    fn generate_argument_list(&mut self, arguments: &[Expression]) -> Result<()> {
+    /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
+    ///
+    /// Uses `capture_expression` for each argument, joining with commas.
+    fn capture_argument_list_doc(
+        &mut self,
+        arguments: &[Expression],
+    ) -> Result<super::document::Document<'static>> {
+        use super::document::Document;
+        let mut parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
-                write!(self.output, ", ")?;
+                parts.push(Document::String(", ".to_string()));
             }
-            self.generate_expression(arg)?;
+            parts.push(Document::String(self.capture_expression(arg)?));
         }
-        Ok(())
+        Ok(Document::Vec(parts))
     }
 
     /// Generates code for a message send.
@@ -115,14 +123,16 @@ impl CoreErlangGenerator {
                         "-> operator must have exactly one argument".to_string(),
                     ));
                 }
-                write!(
-                    self.output,
-                    "~{{'$beamtalk_class' => 'Association', 'key' => "
-                )?;
-                self.generate_expression(receiver)?;
-                write!(self.output, ", 'value' => ")?;
-                self.generate_expression(&arguments[0])?;
-                write!(self.output, "}}~")?;
+                let key_str = self.capture_expression(receiver)?;
+                let val_str = self.capture_expression(&arguments[0])?;
+                let doc = docvec![
+                    "~{'$beamtalk_class' => 'Association', 'key' => ",
+                    key_str,
+                    ", 'value' => ",
+                    val_str,
+                    "}~"
+                ];
+                self.write_document(&doc);
                 return Ok(());
             }
             return self.generate_binary_op(op, receiver, arguments);
@@ -192,7 +202,6 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        // Generate selector atom
         let selector_atom = selector.to_erlang_atom();
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(CodeGenError::Internal(format!(
@@ -200,13 +209,17 @@ impl CoreErlangGenerator {
             )));
         }
 
-        write!(self.output, "call 'beamtalk_message_dispatch':'send'(")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, ", '{selector_atom}', [")?;
+        let receiver_str = self.capture_expression(receiver)?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        self.generate_argument_list(arguments)?;
-
-        write!(self.output, "])")?;
+        let doc = docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            receiver_str,
+            format!(", '{selector_atom}', ["),
+            args_doc,
+            "])"
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -324,21 +337,14 @@ impl CoreErlangGenerator {
             if id.name == "self" {
                 let selector_atom = selector.to_erlang_atom();
 
-                // Check if this is a call to another class method
                 if self.class_method_selectors.contains(&selector_atom) {
                     // Route to class_<selector>(ClassSelf, ClassVars, ...)
-                    // Extract ClassVarsN and result, leaving scope open for continuation.
                     let call_result = self.fresh_temp_var("CMR");
                     let cv = self.current_class_var();
-                    write!(
-                        self.output,
-                        "let {call_result} = call '{}':'class_{selector_atom}'(ClassSelf, {cv}",
-                        self.module_name
-                    )?;
-                    for arg in arguments {
-                        write!(self.output, ", ")?;
-                        self.generate_expression(arg)?;
-                    }
+                    let module = self.module_name.clone();
+                    let args_doc = self.capture_argument_list_doc(arguments)?;
+                    let comma = if arguments.is_empty() { "" } else { ", " };
+
                     let new_cv = self.next_class_var();
                     let inner_cv = self.fresh_temp_var("CV");
                     let inner_res = self.fresh_temp_var("MR");
@@ -346,38 +352,39 @@ impl CoreErlangGenerator {
                     let result = self.fresh_temp_var("Unwrapped");
                     let wrapped_res = self.fresh_temp_var("WR");
                     let plain_res = self.fresh_temp_var("PR");
-                    // Bind new ClassVars and unwrapped result, leave scope open
-                    write!(
-                        self.output,
-                        ") in \
-                         let {new_cv} = case {call_result} of \
-                         <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
-                         <{plain_cv}> when 'true' -> {cv} \
-                         end in \
-                         let {result} = case {call_result} of \
-                         <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
-                         <{plain_res}> when 'true' -> {plain_res} \
-                         end in "
-                    )?;
+
+                    let doc = docvec![
+                        format!(
+                            "let {call_result} = call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
+                        ),
+                        format!("{comma}"),
+                        args_doc,
+                        format!(
+                            ") in \
+                             let {new_cv} = case {call_result} of \
+                             <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
+                             <{plain_cv}> when 'true' -> {cv} \
+                             end in \
+                             let {result} = case {call_result} of \
+                             <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
+                             <{plain_res}> when 'true' -> {plain_res} \
+                             end in "
+                        )
+                    ];
+                    self.write_document(&doc);
                     // NOTE: scope is OPEN — caller provides continuation
                     self.last_open_scope_result = Some(result);
                 } else {
                     // Built-in export (spawn, new, superclass, etc.)
-                    // BT-413: Map selectors to actual function names — module-level
-                    // functions use arity (new/0, new/1), not colon naming (new:).
-                    // spawnWith: maps to spawn/1 in the runtime (class_send → {spawn, [Map]}).
                     let fun_name = match selector_atom.as_str() {
                         "spawnWith:" => "spawn".to_string(),
                         _ => selector_atom.replace(':', ""),
                     };
-                    write!(self.output, "call '{}':'{fun_name}'(", self.module_name)?;
-                    for (i, arg) in arguments.iter().enumerate() {
-                        if i > 0 {
-                            write!(self.output, ", ")?;
-                        }
-                        self.generate_expression(arg)?;
-                    }
-                    write!(self.output, ")")?;
+                    let module = self.module_name.clone();
+                    let args_doc = self.capture_argument_list_doc(arguments)?;
+
+                    let doc = docvec![format!("call '{module}':'{fun_name}'("), args_doc, ")"];
+                    self.write_document(&doc);
                 }
                 return Ok(Some(()));
             }
@@ -430,37 +437,128 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
         let error_var = self.fresh_var("SelfError");
-
         let current_state = self.current_state_var();
+        let module = self.module_name.clone();
 
-        // Call safe_dispatch directly (synchronous, with error isolation)
-        write!(
-            self.output,
-            "case call '{}':'safe_dispatch'('{selector_atom}', [",
-            self.module_name
-        )?;
-        self.generate_argument_list(arguments)?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        write!(self.output, "], {current_state}) of ")?;
+        let doc = docvec![
+            format!("case call '{module}':'safe_dispatch'('{selector_atom}', ["),
+            args_doc,
+            format!("], {current_state}) of "),
+            format!("<{{'reply', {result_var}, {state_var}}}> when 'true' -> {result_var} "),
+            format!(
+                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
+            ),
+            "end"
+        ];
 
-        // Success: extract result value
-        write!(
-            self.output,
-            "<{{'reply', {result_var}, {state_var}}}> when 'true' -> {result_var} "
-        )?;
-
-        // Error: re-raise for proper error propagation
-        write!(
-            self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-        )?;
-
-        write!(self.output, "end")?;
-
+        self.write_document(&doc);
         Ok(())
     }
 
-    /// Generates optimized self-dispatch for sealed classes (BT-403).
+    /// BT-245: Generates self-dispatch with state threading (open binding pattern).
+    ///
+    /// Like `generate_self_dispatch`, but captures the new state from the dispatch
+    /// result and advances the state version. The let binding is left open so
+    /// subsequent expressions see the updated state.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// let _SD0 = case call 'module':'safe_dispatch'('sel', [Args], State) of
+    ///   <{'reply', R, S}> when 'true' -> {R, S}
+    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    /// end in let State1 = call 'erlang':'element'(2, _SD0) in
+    /// ```
+    ///
+    /// The expression value `call 'erlang':'element'(1, _SD0)` is NOT emitted —
+    /// it's discarded since this is used for non-last expressions in block bodies.
+    ///
+    /// Uses Document/docvec! (ADR 0018) for composable rendering.
+    pub(super) fn generate_self_dispatch_open(&mut self, expr: &Expression) -> Result<()> {
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            let selector_atom = selector.to_erlang_atom();
+            let dispatch_var = self.fresh_temp_var("SD");
+            let result_var = self.fresh_var("SDResult");
+            let state_var = self.fresh_var("SDState");
+            let error_var = self.fresh_var("SDError");
+            let current_state = self.current_state_var();
+
+            // Capture arguments via bridge (ADR 0018 Phase 0)
+            let args_doc = self.capture_argument_list_doc(arguments)?;
+
+            // Build the dispatch call (varies by sealed optimization level)
+            let call_doc = if self.is_class_sealed() {
+                let selector_name = selector.name().to_string();
+                if self.sealed_method_selectors.contains(&selector_name) {
+                    // Level 1: Direct __sealed_ call
+                    let self_var = self.fresh_temp_var("SealedSelf");
+                    let module = self.module_name.clone();
+                    let comma = if arguments.is_empty() { "" } else { ", " };
+                    docvec![
+                        format!(
+                            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+                        ),
+                        format!(
+                            "let {dispatch_var} = case call '{module}':'__sealed_{selector_name}'("
+                        ),
+                        args_doc,
+                        format!("{comma}{self_var}, {current_state}) of ")
+                    ]
+                } else {
+                    // Level 2: Direct dispatch/4 call
+                    let self_var = self.fresh_temp_var("SealedSelf");
+                    let module = self.module_name.clone();
+                    docvec![
+                        format!(
+                            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
+                        ),
+                        format!(
+                            "let {dispatch_var} = case call '{module}':'dispatch'('{selector_atom}', ["
+                        ),
+                        args_doc,
+                        format!("], {self_var}, {current_state}) of ")
+                    ]
+                }
+            } else {
+                // Normal: safe_dispatch/3
+                let module = self.module_name.clone();
+                docvec![
+                    format!(
+                        "let {dispatch_var} = case call '{module}':'safe_dispatch'('{selector_atom}', ["
+                    ),
+                    args_doc,
+                    format!("], {current_state}) of ")
+                ]
+            };
+
+            // Result/error clauses + state extraction
+            let new_state = self.next_state_var();
+            let doc = docvec![
+                call_doc,
+                format!(
+                    "<{{'reply', {result_var}, {state_var}}}> when 'true' -> {{{result_var}, {state_var}}} "
+                ),
+                format!(
+                    "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
+                ),
+                "end in ",
+                format!("let {new_state} = call 'erlang':'element'(2, {dispatch_var}) in ")
+            ];
+
+            self.write_document(&doc);
+            self.last_dispatch_var = Some(dispatch_var);
+            return Ok(());
+        }
+        // Fallback
+        self.generate_expression(expr)
+    }
     ///
     /// Two levels of optimization:
     /// 1. **Known sealed method**: Direct function call to `__sealed_{selector}`,
@@ -484,39 +582,24 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_var("SealedResult");
         let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
-
         let current_state = self.current_state_var();
+        let module = self.module_name.clone();
 
-        // Create Self object reference for dispatch/4
-        write!(
-            self.output,
-            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-        )?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        // Call dispatch/4 directly (skip safe_dispatch try/catch)
-        write!(
-            self.output,
-            "case call '{}':'dispatch'('{selector_atom}', [",
-            self.module_name
-        )?;
-        self.generate_argument_list(arguments)?;
+        let doc = docvec![
+            format!("let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "),
+            format!("case call '{module}':'dispatch'('{selector_atom}', ["),
+            args_doc,
+            format!("], {self_var}, {current_state}) of "),
+            format!("<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "),
+            format!(
+                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
+            ),
+            "end"
+        ];
 
-        write!(self.output, "], {self_var}, {current_state}) of ")?;
-
-        // Success: extract result value
-        write!(
-            self.output,
-            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
-        )?;
-
-        // Error: re-raise for proper error propagation
-        write!(
-            self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-        )?;
-
-        write!(self.output, "end")?;
-
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -532,43 +615,25 @@ impl CoreErlangGenerator {
         let result_var = self.fresh_var("SealedResult");
         let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
-
         let current_state = self.current_state_var();
+        let module = self.module_name.clone();
 
-        // Create Self for method body access
-        write!(
-            self.output,
-            "let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "
-        )?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+        let comma = if arguments.is_empty() { "" } else { ", " };
 
-        // Direct call to sealed method function: __sealed_{selector}(args..., Self, State)
-        write!(
-            self.output,
-            "case call '{}':'__sealed_{selector_name}'(",
-            self.module_name
-        )?;
+        let doc = docvec![
+            format!("let {self_var} = call 'beamtalk_actor':'make_self'({current_state}) in "),
+            format!("case call '{module}':'__sealed_{selector_name}'("),
+            args_doc,
+            format!("{comma}{self_var}, {current_state}) of "),
+            format!("<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "),
+            format!(
+                "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
+            ),
+            "end"
+        ];
 
-        // Arguments, then Self, then State
-        self.generate_argument_list(arguments)?;
-        if !arguments.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "{self_var}, {current_state}) of ")?;
-
-        // Success: extract result value
-        write!(
-            self.output,
-            "<{{'reply', {result_var}, _}}> when 'true' -> {result_var} "
-        )?;
-
-        // Error: re-raise
-        write!(
-            self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
-        )?;
-
-        write!(self.output, "end")?;
-
+        self.write_document(&doc);
         Ok(())
     }
     ///
@@ -641,6 +706,20 @@ impl CoreErlangGenerator {
         } else {
             false
         }
+    }
+
+    /// BT-245: Checks if an expression is a self-send in actor context.
+    /// These may mutate actor state and need state threading in loop bodies.
+    pub(super) fn is_actor_self_send(&self, expr: &Expression) -> bool {
+        if self.context != super::CodeGenContext::Actor {
+            return false;
+        }
+        if let Expression::MessageSend { receiver, .. } = expr {
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                return id.name == "self";
+            }
+        }
+        false
     }
 
     /// Checks if an expression is an `error:` message send.
@@ -721,21 +800,19 @@ impl CoreErlangGenerator {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
+                let val_str = self.capture_expression(value)?;
 
-                // let _Val = <value> in
-                write!(self.output, "let {val_var} = ")?;
-                self.generate_expression(value)?;
-
-                // Increment state version for the new state after assignment
                 let new_state = self.next_state_var();
 
-                // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
-                // Note: we do NOT close with the value - subsequent expressions are the body
-                write!(
-                    self.output,
-                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                    field.name
-                )?;
+                let doc = docvec![
+                    format!("let {val_var} = "),
+                    val_str,
+                    format!(
+                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                        field.name
+                    )
+                ];
+                self.write_document(&doc);
 
                 return Ok(());
             }
@@ -769,22 +846,17 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<()> {
-        // Use the domain service method for selector-to-atom conversion
         let selector_atom = selector.to_erlang_atom();
         let class_name = self.class_name();
+        let current_state = self.current_state_var();
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        // Generate: call 'beamtalk_dispatch':'super'('selector', [Args], Self, State, 'ClassName')
-        write!(
-            self.output,
-            "call 'beamtalk_dispatch':'super'('{selector_atom}', [",
-        )?;
-        self.generate_argument_list(arguments)?;
-
-        write!(
-            self.output,
-            "], Self, {}, '{class_name}')",
-            self.current_state_var()
-        )?;
+        let doc = docvec![
+            format!("call 'beamtalk_dispatch':'super'('{selector_atom}', ["),
+            args_doc,
+            format!("], Self, {current_state}, '{class_name}')")
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -825,58 +897,34 @@ impl CoreErlangGenerator {
         init_args: Option<&Expression>,
     ) -> Result<()> {
         let module_name = Self::compiled_module_name(class_name);
-
-        // Check if we're in REPL context by looking for __bindings__ in scope
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
+        let args_str = match init_args {
+            Some(args) => self.capture_expression(args)?,
+            None => String::new(),
+        };
+
         if in_repl_context {
-            // REPL context - generate conditional code checking for actor registry
-            // Both branches must return the same #beamtalk_object{} record type
-            write!(
-                self.output,
-                "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of "
-            )?;
-
-            // Pattern 1: No registry (undefined) - call module:spawn() directly
-            write!(self.output, "<'undefined'> when 'true' -> ")?;
-            write!(self.output, "call '{module_name}':'spawn'(")?;
-            if let Some(args) = init_args {
-                self.generate_expression(args)?;
-            }
-            write!(self.output, ") ")?;
-
-            // Pattern 2: Registry present - call Module:spawn() then register
-            // Module:spawn() handles initialize protocol and returns #beamtalk_object{}.
-            // We extract the Pid and register with the REPL actor registry.
-            write!(self.output, "<RegistryPid> when 'true' -> ")?;
-            write!(
-                self.output,
-                "let SpawnResult = call '{module_name}':'spawn'("
-            )?;
-            if let Some(args) = init_args {
-                self.generate_expression(args)?;
-            }
-            write!(self.output, ") in ")?;
-
-            // Extract Pid (4th element) from #beamtalk_object{class, mod, pid} tuple
-            write!(
-                self.output,
-                "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in "
-            )?;
-            write!(
-                self.output,
-                "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, '{class_name}', '{module_name}') in "
-            )?;
-            write!(self.output, "SpawnResult ")?;
-
-            write!(self.output, "end")?; // end outer case
+            let doc = docvec![
+                "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
+                format!("<'undefined'> when 'true' -> call '{module_name}':'spawn'("),
+                args_str.clone(),
+                format!(
+                    ") <RegistryPid> when 'true' -> let SpawnResult = call '{module_name}':'spawn'("
+                ),
+                args_str,
+                ") in ",
+                "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in ",
+                format!(
+                    "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, '{class_name}', '{module_name}') in "
+                ),
+                "SpawnResult ",
+                "end"
+            ];
+            self.write_document(&doc);
         } else {
-            // Non-REPL context (normal compilation) - direct module spawn call
-            write!(self.output, "call '{module_name}':'spawn'(")?;
-            if let Some(args) = init_args {
-                self.generate_expression(args)?;
-            }
-            write!(self.output, ")")?;
+            let doc = docvec![format!("call '{module_name}':'spawn'("), args_str, ")"];
+            self.write_document(&doc);
         }
 
         Ok(())
@@ -897,12 +945,13 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        write!(
-            self.output,
-            "call 'beamtalk_object_class':'method'('{class_name}', "
-        )?;
-        self.generate_expression(&arguments[0])?;
-        write!(self.output, ")")?;
+        let arg_str = self.capture_expression(&arguments[0])?;
+        let doc = docvec![
+            format!("call 'beamtalk_object_class':'method'('{class_name}', "),
+            arg_str,
+            ")"
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -932,34 +981,20 @@ impl CoreErlangGenerator {
         let pid_var = self.fresh_var("BindingPid");
         let future_var = self.fresh_var("Future");
         let selector_atom = selector.to_erlang_atom();
-
-        // Look up binding object from persistent_term (beamtalk_object tuple)
         let binding_var = self.fresh_var("BindingObj");
-        write!(
-            self.output,
-            "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
-        )?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        // Extract PID from beamtalk_object record (4th element)
-        write!(
-            self.output,
-            "let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "
-        )?;
-
-        // Create future for async result
-        write!(
-            self.output,
-            "let {future_var} = call 'beamtalk_future':'new'() in "
-        )?;
-
-        // Send async message via beamtalk_actor:async_send
-        write!(
-            self.output,
-            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["
-        )?;
-        self.generate_argument_list(arguments)?;
-
-        write!(self.output, "], {future_var}) in {future_var}")?;
+        let doc = docvec![
+            format!(
+                "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
+            ),
+            format!("let {pid_var} = call 'erlang':'element'(4, {binding_var}) in "),
+            format!("let {future_var} = call 'beamtalk_future':'new'() in "),
+            format!("let _ = call 'beamtalk_actor':'async_send'({pid_var}, '{selector_atom}', ["),
+            args_doc,
+            format!("], {future_var}) in {future_var}")
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -984,21 +1019,19 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         let selector_atom = selector.to_erlang_atom();
         let class_pid_var = self.fresh_var("ClassPid");
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
-        // Look up the class process by name and dispatch via class_send/3.
-        // This handles both built-in class methods (new, methods, superclass)
-        // and user-defined class methods (BT-411).
-        write!(
-            self.output,
-            "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
-        )?;
-        write!(
-            self.output,
-            "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
-        )?;
-        self.generate_argument_list(arguments)?;
-
-        write!(self.output, "])")?;
+        let doc = docvec![
+            format!(
+                "let {class_pid_var} = call 'beamtalk_object_class':'whereis_class'('{class_name}') in "
+            ),
+            format!(
+                "call 'beamtalk_object_class':'class_send'({class_pid_var}, '{selector_atom}', ["
+            ),
+            args_doc,
+            "])"
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }

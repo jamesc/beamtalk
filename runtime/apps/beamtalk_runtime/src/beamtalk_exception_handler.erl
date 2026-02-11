@@ -42,8 +42,9 @@
 %% Used by wrap/1 to set `$beamtalk_class` based on the error's kind field.
 %% Falls back to 'Error' for unknown kinds (safe bootstrap default).
 %%
-%% NOTE: When adding new error subclasses (e.g., IOError), update BOTH
-%% this function AND is_exception_class/1 below.
+%% NOTE: When adding new error subclasses (e.g., IOError), add a clause here.
+%% is_exception_class/1 and matches_class_name/2 derive hierarchy from the
+%% class system automatically (BT-475).
 -spec kind_to_class(atom()) -> atom().
 kind_to_class(does_not_understand) -> 'RuntimeError';
 kind_to_class(arity_mismatch) -> 'RuntimeError';
@@ -67,15 +68,12 @@ kind_to_class(_) -> 'Error'.
 
 %% @doc Check if a class name belongs to the exception hierarchy.
 %%
-%% Used by dispatch routing to identify exception objects regardless of
-%% their specific subclass (RuntimeError, TypeError, etc.).
+%% Delegates to the class system's superclass chain (BT-475).
+%% Returns true if ClassName is 'Exception' or any subclass of 'Exception'.
+%% Returns false if class is not registered (safe during bootstrap).
 -spec is_exception_class(atom()) -> boolean().
-is_exception_class('Exception') -> true;
-is_exception_class('Error') -> true;
-is_exception_class('RuntimeError') -> true;
-is_exception_class('TypeError') -> true;
-is_exception_class('InstantiationError') -> true;
-is_exception_class(_) -> false.
+is_exception_class(ClassName) ->
+    beamtalk_object_class:inherits_from(ClassName, 'Exception').
 
 %% @doc Check if an error matches the requested exception class.
 %%
@@ -101,37 +99,34 @@ matches_class(_Other, _Error) ->
     %% Unknown filter type — catch all for safety
     true.
 
-%% @private Match by class name atom with hierarchy-aware matching (BT-452).
+%% @private Match by class name atom with hierarchy-aware matching (BT-475).
 %%
-%% Exception hierarchy:
-%%   Exception (catches all)
-%%   └── Error (catches all Error subclasses)
-%%       ├── RuntimeError (e.g. does_not_understand, arity_mismatch, immutable_value, ...)
-%%       ├── TypeError (type_error)
-%%       └── InstantiationError (instantiation_error)
--spec matches_class_name(atom(), #beamtalk_error{}) -> boolean().
-matches_class_name('Exception class', _Error) -> true;
-matches_class_name('Exception', _Error) -> true;
-matches_class_name('Error class', _Error) -> true;
-matches_class_name('Error', _Error) -> true;
-matches_class_name('RuntimeError class', Error) ->
-    matches_class_name('RuntimeError', Error);
-matches_class_name('RuntimeError', #beamtalk_error{kind = Kind}) ->
-    kind_to_class(Kind) =:= 'RuntimeError';
-matches_class_name('TypeError class', Error) ->
-    matches_class_name('TypeError', Error);
-matches_class_name('TypeError', #beamtalk_error{kind = Kind}) ->
-    kind_to_class(Kind) =:= 'TypeError';
-matches_class_name('InstantiationError class', Error) ->
-    matches_class_name('InstantiationError', Error);
-matches_class_name('InstantiationError', #beamtalk_error{kind = Kind}) ->
-    kind_to_class(Kind) =:= 'InstantiationError';
+%% Derives the error's class from kind_to_class/1, then uses the class
+%% system's superclass chain to check if it matches the requested filter.
+%% Handles both "ClassName" and "ClassName class" variants (metaclass refs).
+%% Raw Erlang errors (not #beamtalk_error{}) are wrapped first.
+-spec matches_class_name(atom(), term()) -> boolean().
 matches_class_name(ClassName, #beamtalk_error{kind = Kind}) ->
-    %% Fall back to direct kind match for backward compatibility
-    Kind =:= ClassName;
-matches_class_name(_ClassName, _RawError) ->
-    %% Unknown class name — doesn't match
+    %% Strip " class" suffix if present (metaclass reference from class objects)
+    BaseName = strip_class_suffix(ClassName),
+    ErrorClass = kind_to_class(Kind),
+    beamtalk_object_class:inherits_from(ErrorClass, BaseName);
+matches_class_name(ClassName, RawError) when not is_map(RawError) ->
+    %% Raw Erlang error (e.g. badarith) — wrap to get a kind, then match
+    #{'$beamtalk_class' := _, error := Inner} = wrap(RawError),
+    matches_class_name(ClassName, Inner);
+matches_class_name(_ClassName, _Other) ->
     false.
+
+%% @private Strip " class" suffix from metaclass names.
+%% e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
+-spec strip_class_suffix(atom()) -> atom().
+strip_class_suffix(ClassName) ->
+    Str = atom_to_list(ClassName),
+    case lists:suffix(" class", Str) of
+        true -> list_to_atom(lists:sublist(Str, length(Str) - 6));
+        false -> ClassName
+    end.
 
 %% @doc Wrap a `#beamtalk_error{}` record as an Exception tagged map.
 %%

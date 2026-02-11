@@ -1004,6 +1004,12 @@ fn generate_set_bif(output: &mut String, selector: &str, params: &[String]) -> O
             write!(output, "call 'beamtalk_set_ops':'do'(Self, {p0})").ok()?;
             Some(())
         }
+        "printString" => {
+            // BT-477: Delegate to beamtalk_primitive:print_string/1 which
+            // formats Sets as "Set(element1, element2, ...)"
+            write!(output, "call 'beamtalk_primitive':'print_string'(Self)").ok()?;
+            Some(())
+        }
         _ => None,
     }
 }

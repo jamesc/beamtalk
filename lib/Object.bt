@@ -23,8 +23,8 @@ ProtoObject subclass: Object
   ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
   ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
 
-  // Display — pure Beamtalk / structural intrinsics
-  printString => @primitive printString
+  // Display — pure Beamtalk polymorphic dispatch (BT-477)
+  printString => 'a ' ++ self class printString
   inspect => self describe
   describe => 'an Object'
 
