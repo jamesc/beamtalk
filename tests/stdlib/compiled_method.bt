@@ -53,8 +53,15 @@ Counter >> #nonExistent
 // => getValue => ^self.value
 
 // ===========================================================================
-// PRINT STRING — blocked on printString dispatch bug (follow-up issue)
+// PRINT STRING
 // ===========================================================================
 
-// (Counter >> #getValue) printString
-// // => a CompiledMethod(getValue)
+(Counter >> #getValue) printString
+// => a CompiledMethod(getValue)
+
+// ===========================================================================
+// AS STRING
+// ===========================================================================
+
+(Counter >> #getValue) asString
+// => a CompiledMethod(getValue)
