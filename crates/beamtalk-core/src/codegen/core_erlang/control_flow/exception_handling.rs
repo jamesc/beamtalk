@@ -49,7 +49,7 @@
 
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
@@ -73,44 +73,31 @@ impl CoreErlangGenerator {
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
 
-        // let _BlockFun = <receiver> in
-        write!(self.output, "let {block_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in ")?;
+        // Capture expression outputs (ADR 0018 bridge pattern)
+        let receiver_code = self.capture_expression(receiver)?;
+        let ex_class_code = self.capture_expression(ex_class)?;
+        let handler_code = self.capture_expression(handler)?;
 
-        // let _ExClass = <exClass> in
-        write!(self.output, "let {ex_class_var} = ")?;
-        self.generate_expression(ex_class)?;
-        write!(self.output, " in ")?;
+        let doc = docvec![
+            format!("let {block_var} = "),
+            receiver_code,
+            format!(" in let {ex_class_var} = "),
+            ex_class_code,
+            format!(" in let {handler_var} = "),
+            handler_code,
+            format!(" in try apply {block_var} () "),
+            format!("of {result_var} -> {result_var} "),
+            format!(
+                "catch <{type_var}, {error_var}, {stack_var}> -> \
+                 let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in \
+                 let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
+                 case {match_var} of \
+                 <'true'> when 'true' -> apply {handler_var} ({ex_obj_var}) \
+                 <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
+            ),
+        ];
 
-        // let _HandlerFun = <handler> in
-        write!(self.output, "let {handler_var} = ")?;
-        self.generate_expression(handler)?;
-        write!(self.output, " in ")?;
-
-        // try apply _BlockFun ()
-        write!(self.output, "try apply {block_var} () ")?;
-
-        // of _Result -> _Result
-        write!(self.output, "of {result_var} -> {result_var} ")?;
-
-        // catch <Type, Error, Stack> ->
-        //   let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Error) in
-        //   let _Match = call 'beamtalk_exception_handler':'matches_class'(ExClass, Error) in
-        //   case _Match of
-        //     <'true'> -> apply _HandlerFun (_ExObj)
-        //     <'false'> -> primop 'raw_raise'(Type, Error, Stack)
-        //   end
-        write!(
-            self.output,
-            "catch <{type_var}, {error_var}, {stack_var}> -> \
-             let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in \
-             let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
-             case {match_var} of \
-             <'true'> when 'true' -> apply {handler_var} ({ex_obj_var}) \
-             <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
-        )?;
-
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -130,36 +117,25 @@ impl CoreErlangGenerator {
         let error_var = self.fresh_temp_var("Error");
         let stack_var = self.fresh_temp_var("Stack");
 
-        // let _BlockFun = <receiver> in
-        write!(self.output, "let {block_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in ")?;
+        // Capture expression outputs (ADR 0018 bridge pattern)
+        let receiver_code = self.capture_expression(receiver)?;
+        let cleanup_code = self.capture_expression(cleanup)?;
 
-        // let _CleanupFun = <cleanup> in
-        write!(self.output, "let {cleanup_var} = ")?;
-        self.generate_expression(cleanup)?;
-        write!(self.output, " in ")?;
+        let doc = docvec![
+            format!("let {block_var} = "),
+            receiver_code,
+            format!(" in let {cleanup_var} = "),
+            cleanup_code,
+            format!(" in try let {try_result_var} = apply {block_var} () in {try_result_var} "),
+            format!("of {result_var} -> let _ = apply {cleanup_var} () in {result_var} "),
+            format!(
+                "catch <{type_var}, {error_var}, {stack_var}> -> \
+                 do apply {cleanup_var} () \
+                 primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
+            ),
+        ];
 
-        // try let _TryResult = apply _BlockFun () in _TryResult
-        write!(
-            self.output,
-            "try let {try_result_var} = apply {block_var} () in {try_result_var} "
-        )?;
-
-        // of _Result -> let _ = apply _CleanupFun () in _Result
-        write!(
-            self.output,
-            "of {result_var} -> let _ = apply {cleanup_var} () in {result_var} "
-        )?;
-
-        // catch <Type, Error, Stack> -> do apply _CleanupFun () primop 'raw_raise'(Type, Error, Stack)
-        write!(
-            self.output,
-            "catch <{type_var}, {error_var}, {stack_var}> -> \
-             do apply {cleanup_var} () \
-             primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-        )?;
-
+        self.write_document(&doc);
         Ok(())
     }
 }
