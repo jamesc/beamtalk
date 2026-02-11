@@ -85,7 +85,8 @@
     is_class_name/1,
     class_display_name/1,
     class_send/3,
-    class_object_tag/1
+    class_object_tag/1,
+    inherits_from/2
 ]).
 
 %% gen_server callbacks
@@ -991,8 +992,11 @@ invalidate_subclass_flattened_tables(ChangedClass) ->
     end, AllClasses),
     ok.
 
-%% @private
 %% @doc Check if a class inherits from a given ancestor (walks superclass chain).
+%%
+%% Returns true if ClassName is equal to or a subclass of Ancestor.
+%% Returns false if the class is not registered (safe during bootstrap).
+%% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
 inherits_from(none, _Ancestor) ->
     false;
