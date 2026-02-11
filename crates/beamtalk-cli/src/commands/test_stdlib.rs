@@ -99,8 +99,18 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
             if let Some(expected) = next_line.strip_prefix("// =>") {
                 let expected = expected.trim();
                 let expected = if let Some(kind) = expected.strip_prefix("ERROR:") {
+                    let kind = kind.trim();
+                    if kind.is_empty() {
+                        warnings.push(format!(
+                            "Line {expr_line}: Expression will not be executed \
+                             (invalid // => ERROR: assertion with missing error kind): \
+                             {expression}"
+                        ));
+                        i += 1;
+                        continue;
+                    }
                     Expected::Error {
-                        kind: kind.trim().to_string(),
+                        kind: kind.to_string(),
                     }
                 } else {
                     Expected::Value(expected.to_string())
@@ -220,6 +230,54 @@ fn extract_assignment_var(expression: &str) -> Option<String> {
 ///
 /// Results are formatted to strings before comparison (matching E2E
 /// semantics where the REPL returns string representations).
+/// Generate the `EUnit` try/catch block for an ERROR: assertion.
+fn write_error_assertion(
+    erl: &mut String,
+    i: usize,
+    eval_mod: &str,
+    kind: &str,
+    bindings_in: &str,
+    bindings_out: &str,
+) {
+    // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
+    // Also handles plain atom errors (e.g., badarith, badarity)
+    // Variables are suffixed with index to avoid Erlang scoping conflicts.
+    // Assertions are outside the try/catch to avoid the catch clause
+    // swallowing EUnit assertion exceptions.
+    // The case uses CaughtKind/CaughtReason (fresh variables) since
+    // Erlang considers variables bound in catch as unsafe outside try.
+    let _ = writeln!(
+        erl,
+        "    {bindings_out} =\n\
+         \x20   begin\n\
+         \x20       TryResult{i} = try '{eval_mod}':eval({bindings_in}) of\n\
+         \x20           {{_V{i}, B{i}}} ->\n\
+         \x20               {{ok, B{i}}}\n\
+         \x20       catch\n\
+         \x20           error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           error:'{kind}' ->\n\
+         \x20               atom_error;\n\
+         \x20           error:Reason{i} ->\n\
+         \x20               {{other_error, Reason{i}}}\n\
+         \x20       end,\n\
+         \x20       case TryResult{i} of\n\
+         \x20           {{ok, _}} ->\n\
+         \x20               ?assert(false, <<\"Expected error '{kind}' but expression succeeded\">>),\n\
+         \x20               {bindings_in};\n\
+         \x20           {{beamtalk_error, CaughtKind{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtKind{i}),\n\
+         \x20               {bindings_in};\n\
+         \x20           atom_error ->\n\
+         \x20               {bindings_in};\n\
+         \x20           {{other_error, CaughtReason{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtReason{i}),\n\
+         \x20               {bindings_in}\n\
+         \x20       end\n\
+         \x20   end,"
+    );
+}
+
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -281,26 +339,7 @@ fn generate_eunit_wrapper(
 
         match &case.expected {
             Expected::Error { kind } => {
-                // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
-                // Also handles plain atom errors (e.g., badarith, badarity)
-                // Variables are suffixed with index to avoid Erlang scoping conflicts
-                let _ = writeln!(
-                    erl,
-                    "    {bindings_out} = try '{eval_mod}':eval({bindings_in}) of\n\
-                     \x20       {{_V{i}, B{i}}} ->\n\
-                     \x20           ?assert(false, <<\"Expected error '{kind}' but expression succeeded\">>),\n\
-                     \x20           B{i}\n\
-                     \x20   catch\n\
-                     \x20       error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
-                     \x20           ?assertEqual('{kind}', Kind{i}),\n\
-                     \x20           {bindings_in};\n\
-                     \x20       error:'{kind}' ->\n\
-                     \x20           {bindings_in};\n\
-                     \x20       error:Reason{i} ->\n\
-                     \x20           ?assertEqual('{kind}', Reason{i}),\n\
-                     \x20           {bindings_in}\n\
-                     \x20   end,"
-                );
+                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
             }
             Expected::Value(v) => {
                 // Normal eval: call the module and extract result + bindings
@@ -664,7 +703,8 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        miette::bail!("erlc batch compilation failed:\n{}", stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!("erlc batch compilation failed:\n{}{}", stdout, stderr);
     }
 
     Ok(())
@@ -1036,6 +1076,10 @@ mod tests {
         assert!(wrapper.contains("does_not_understand"));
         // Error assertions should not call format_result in the assertion
         assert!(!wrapper.contains("format_result(Result"));
+        // Assertions must be outside try/catch (not caught by own catch clause)
+        assert!(wrapper.contains("case TryResult0 of"));
+        assert!(wrapper.contains("{ok, _}"));
+        assert!(wrapper.contains("CaughtKind0"));
     }
 
     #[test]
@@ -1060,5 +1104,23 @@ mod tests {
         assert!(wrapper.contains("format_result(Result0)"));
         // Second case: error try/catch
         assert!(wrapper.contains("try 'test_mix_1':eval("));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_empty_kind() {
+        let content = "42 foo\n// => ERROR:\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_whitespace_only_kind() {
+        let content = "42 foo\n// => ERROR:   \n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
     }
 }
