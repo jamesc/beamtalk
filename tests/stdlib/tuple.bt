@@ -36,3 +36,7 @@ Tuple new
 
 (Tuple new) class
 // => Tuple
+
+// Tuple new: is not supported (no meaningful init-from-map)
+Tuple new: #{#a => 1}
+// => ERROR: instantiation_error

@@ -17,6 +17,19 @@ Dictionary new
 (Dictionary new) class
 // => Dictionary
 
+// Dictionary new: initializes with given entries
+Dictionary new: #{#x => 10, #y => 20}
+// => _
+
+(Dictionary new: #{#x => 10, #y => 20}) size
+// => 2
+
+(Dictionary new: #{#x => 10}) at: #x
+// => 10
+
+(Dictionary new: #{#x => 10}) class
+// => Dictionary
+
 // ===========================================================================
 // CLASS
 // ===========================================================================

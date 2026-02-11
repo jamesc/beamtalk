@@ -240,13 +240,19 @@ impl CoreErlangGenerator {
     /// Generates the `new/1` function for a value type.
     ///
     /// - Non-instantiable primitives: raises `instantiation_error`
-    /// - Collection primitives: raises `instantiation_error` (no meaningful merge)
+    /// - Dictionary: returns `InitArgs` directly (dictionary IS a map)
+    /// - List, Tuple: raises `instantiation_error` (no meaningful init-from-map)
     /// - Other value types: merges initialization arguments with defaults
     fn generate_value_type_new_with_args(&mut self) -> Result<()> {
         let class_name = self.class_name().clone();
         if Self::is_non_instantiable_primitive(&class_name) {
             return self.generate_primitive_new_error(&class_name, "new:", 1);
         }
+        // Dictionary new: #{key => val} returns the map directly
+        if class_name == "Dictionary" {
+            return self.generate_collection_new_with_args();
+        }
+        // List and Tuple have no meaningful init-from-map pattern
         if Self::collection_empty_value(&class_name).is_some() {
             return self.generate_primitive_new_error(&class_name, "new:", 1);
         }
@@ -313,6 +319,17 @@ impl CoreErlangGenerator {
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "{empty_value}")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
+        Ok(())
+    }
+
+    /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
+    fn generate_collection_new_with_args(&mut self) -> Result<()> {
+        writeln!(self.output, "'new'/1 = fun (InitArgs) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "InitArgs")?;
         self.indent -= 1;
         writeln!(self.output)?;
         Ok(())

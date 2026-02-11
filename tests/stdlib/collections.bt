@@ -17,6 +17,10 @@ List new
 (List new) class
 // => List
 
+// List new: is not supported (no meaningful init-from-map)
+List new: #{#a => 1}
+// => ERROR: instantiation_error
+
 // ===========================================================================
 // TIER 1: ESSENTIAL METHODS
 // ===========================================================================

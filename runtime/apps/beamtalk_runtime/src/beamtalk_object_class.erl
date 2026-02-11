@@ -592,20 +592,27 @@ handle_call({new, Args}, _From, #class_state{
             %% Value types support new/new:. Actor classes should use {spawn, Args}
             %% protocol via class_send. If 'new' is called on an actor, the
             %% generated new/0 returns an appropriate error.
-            Result = case Args of
-                [] ->
-                    erlang:apply(Module, new, []);
-                [InitMap] when is_map(InitMap) ->
-                    case erlang:function_exported(Module, new, 1) of
-                        true ->
-                            erlang:apply(Module, new, [InitMap]);
-                        false ->
-                            erlang:apply(Module, new, [])
-                    end;
-                _ ->
-                    erlang:apply(Module, new, [])
-            end,
-            {reply, {ok, Result}, State}
+            %% BT-422: Wrap in try/catch to prevent class gen_server crash
+            %% when new/0 or new/1 raises (e.g., instantiation_error for primitives).
+            try
+                Result = case Args of
+                    [] ->
+                        erlang:apply(Module, new, []);
+                    [InitMap] when is_map(InitMap) ->
+                        case erlang:function_exported(Module, new, 1) of
+                            true ->
+                                erlang:apply(Module, new, [InitMap]);
+                            false ->
+                                erlang:apply(Module, new, [])
+                        end;
+                    _ ->
+                        erlang:apply(Module, new, [])
+                end,
+                {reply, {ok, Result}, State}
+            catch
+                error:Error ->
+                    {reply, {error, Error}, State}
+            end
     end;
 
 handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
