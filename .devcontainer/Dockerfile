@@ -50,7 +50,7 @@ RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
 
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
-    && node --version && npm --version && gh --version && streamlinear-cli --version 2>/dev/null || true
+    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true)
 
 # Set up Erlang paths
 ENV PATH="/usr/lib/erlang/bin:${PATH}"
