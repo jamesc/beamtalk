@@ -108,6 +108,10 @@ impl CoreErlangGenerator {
         // All value types export dispatch/3 and has_method/1
         // for runtime dispatch via superclass delegation chain
         exports.push("'dispatch'/3".to_string());
+        // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
+        // The dispatch service checks function_exported(Module, dispatch, 4) and
+        // skips modules that only have dispatch/3.
+        exports.push("'dispatch'/4".to_string());
         exports.push("'has_method'/1".to_string());
 
         // All classes export superclass/0 for reflection
@@ -159,6 +163,10 @@ impl CoreErlangGenerator {
         // Generate dispatch/3 and has_method/1 for all value types
         // (superclass delegation chain — same pattern as actors)
         self.generate_primitive_dispatch(class)?;
+        writeln!(self.output)?;
+        // BT-446: Generate dispatch/4 for actor hierarchy walk.
+        // The dispatch service only calls modules that export dispatch/4.
+        self.generate_dispatch_4(class)?;
         writeln!(self.output)?;
         self.generate_primitive_has_method(class)?;
         writeln!(self.output)?;
@@ -646,6 +654,285 @@ impl CoreErlangGenerator {
 
         self.indent -= 1;
         writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates the `dispatch/4` function for a value type (BT-446).
+    ///
+    /// The dispatch service (`beamtalk_dispatch:invoke_method/6`) only calls
+    /// modules that export `dispatch/4`. Without this, compiled value type
+    /// modules are skipped during the actor hierarchy walk, preventing actors
+    /// from inheriting Object-level methods.
+    ///
+    /// For Object specifically, this generates state-aware implementations
+    /// for reflection primitives (instVarAt:, printString, etc.) that need
+    /// access to the actor's state map. For all other value types, this is
+    /// a simple wrapper that delegates to dispatch/3.
+    fn generate_dispatch_4(&mut self, _class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let mod_name = self.module_name.clone();
+
+        writeln!(self.output, "'dispatch'/4 = fun (Selector, Args, Self, State) ->")?;
+        self.indent += 1;
+
+        if class_name == "Object" {
+            self.generate_object_dispatch_4(&mod_name)?;
+        } else {
+            // Simple wrapper: delegate to dispatch/3, wrap result in {reply, _, State}
+            self.generate_dispatch_4_wrapper(&mod_name)?;
+        }
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// Generates Object's dispatch/4 with state-aware reflection primitives.
+    ///
+    /// Actor instances inherit Object methods via the hierarchy walk. These
+    /// methods need access to the actor's State map for proper reflection
+    /// (field access, class name, etc.).
+    fn generate_object_dispatch_4(&mut self, mod_name: &str) -> Result<()> {
+        self.write_indent()?;
+        writeln!(self.output, "case Selector of")?;
+        self.indent += 1;
+
+        // --- class: return actual class from State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'class'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', call 'beamtalk_tagged_map':'class_of'(State), State}}"
+        )?;
+        self.indent -= 1;
+
+        // --- respondsTo: check against actual class ---
+        self.write_indent()?;
+        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <RtSel4> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <RtClass4> = call 'beamtalk_tagged_map':'class_of'(State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', call 'beamtalk_dispatch':'responds_to'(RtSel4, RtClass4), State}}"
+        )?;
+        self.indent -= 1;
+
+        // --- instVarNames: return actual field names from State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', call 'beamtalk_reflection':'field_names'(State), State}}"
+        )?;
+        self.indent -= 1;
+
+        // --- instVarAt: read field value from State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvaName4> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', call 'beamtalk_reflection':'read_field'(IvaName4, State), State}}"
+        )?;
+        self.indent -= 1;
+
+        // --- instVarAt:put: write field value, return new State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvapName4> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvapVal4> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvapTuple4> = call 'beamtalk_reflection':'write_field'(IvapName4, IvapVal4, State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvapResult4> = call 'erlang':'element'(1, IvapTuple4) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvapNewState4> = call 'erlang':'element'(2, IvapTuple4) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', IvapResult4, IvapNewState4}}"
+        )?;
+        self.indent -= 1;
+
+        // --- printString: use class name from State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'printString'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PsStr4> = call 'erlang':'iolist_to_binary'([{}|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in",
+            Self::core_erlang_binary("a ")
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'reply', PsStr4, State}}")?;
+        self.indent -= 1;
+
+        // --- inspect: use class + fields from State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'inspect'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "{{'reply', call 'beamtalk_reflection':'inspect_string'(State), State}}"
+        )?;
+        self.indent -= 1;
+
+        // --- perform: dynamic dispatch with State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PerfSel4> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PerfClass4> = call 'beamtalk_tagged_map':'class_of'(State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PerfResult4> = call 'beamtalk_dispatch':'lookup'(PerfSel4, [], Self, State, PerfClass4) in"
+        )?;
+        self.write_indent()?;
+        // Normalize {error, Error} to {error, Error, State}
+        writeln!(
+            self.output,
+            "case PerfResult4 of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', PerfErr4}}> when 'true' -> {{'error', PerfErr4, State}}")?;
+        self.write_indent()?;
+        writeln!(self.output, "<PerfOther4> when 'true' -> PerfOther4")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // --- perform:withArguments: dynamic dispatch with State ---
+        self.write_indent()?;
+        writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaSel4> = call 'erlang':'hd'(Args) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaArgs4> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaClass4> = call 'beamtalk_tagged_map':'class_of'(State) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case PwaResult4 of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'error', PwaErr4}}> when 'true' -> {{'error', PwaErr4, State}}")?;
+        self.write_indent()?;
+        writeln!(self.output, "<PwaOther4> when 'true' -> PwaOther4")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // --- Default: delegate to dispatch/3 with try-catch ---
+        self.write_indent()?;
+        writeln!(self.output, "<_OtherSel4> when 'true' ->")?;
+        self.indent += 1;
+        self.generate_dispatch_4_wrapper(mod_name)?;
+        self.indent -= 1;
+
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+
+        Ok(())
+    }
+
+    /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
+    ///
+    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., does_not_understand
+    /// calling erlang:error) into {error, Error, State} tuples expected by the
+    /// dispatch service.
+    fn generate_dispatch_4_wrapper(&mut self, mod_name: &str) -> Result<()> {
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "try call '{mod_name}':'dispatch'(Selector, Args, Self)"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "of <D4Result> -> {{'reply', D4Result, State}}"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "catch <_D4Type, D4Error, _D4Stack> -> {{'error', D4Error, State}}"
+        )?;
 
         Ok(())
     }

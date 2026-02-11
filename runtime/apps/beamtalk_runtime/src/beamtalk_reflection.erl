@@ -19,7 +19,7 @@
 %%% @see beamtalk_tagged_map
 -module(beamtalk_reflection).
 
--export([field_names/1, read_field/2, write_field/3]).
+-export([field_names/1, read_field/2, write_field/3, inspect_string/1]).
 
 %%% ============================================================================
 %%% Public API
@@ -49,3 +49,18 @@ read_field(Name, State) when is_atom(Name), is_map(State) ->
 write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
     NewState = maps:put(Name, Value, State),
     {Value, NewState}.
+
+%% @doc Generates an inspect string for an object: "a ClassName (field1: val1, field2: val2)".
+%%
+%% BT-446: Extracted from beamtalk_object:dispatch/4 so that compiled
+%% Object modules can call it from generated dispatch/4 code.
+-spec inspect_string(map()) -> binary().
+inspect_string(State) when is_map(State) ->
+    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+    UserFields = field_names(State),
+    FieldStrs = [io_lib:format("~p: ~p", [K, maps:get(K, State)]) || K <- UserFields],
+    FieldsPart = case FieldStrs of
+        [] -> <<"">>;
+        _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
+    end,
+    iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]).
