@@ -9,10 +9,11 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
+use super::document::{INDENT, line, nest};
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates a full actor module with `gen_server` behaviour.
@@ -55,60 +56,65 @@ impl CoreErlangGenerator {
                             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
                             'superclass'/0";
 
-        if has_classes {
-            writeln!(
-                self.output,
-                "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}, 'register_class'/0]",
-                self.module_name
-            )?;
-            writeln!(
-                self.output,
+        // Module header with exports and attributes
+        let module_header = if has_classes {
+            docvec![
+                format!(
+                    "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}, 'register_class'/0]",
+                    self.module_name
+                ),
+                "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
-                 'on_load' = [{{'register_class', 0}}]]"
-            )?;
+                 'on_load' = [{'register_class', 0}]]",
+                "\n",
+            ]
         } else {
-            writeln!(
-                self.output,
-                "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}]",
-                self.module_name
-            )?;
-            writeln!(self.output, "  attributes ['behaviour' = ['gen_server']]")?;
-        }
-        writeln!(self.output)?;
+            docvec![
+                format!(
+                    "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}]",
+                    self.module_name
+                ),
+                "\n",
+                "  attributes ['behaviour' = ['gen_server']]",
+                "\n",
+            ]
+        };
+        self.write_document(&module_header);
+        self.output.push('\n');
 
         // Generate start_link/1 (standard gen_server entry point)
         self.generate_start_link()?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         if is_abstract {
             // BT-105: Abstract classes cannot be spawned — generate error methods
             self.generate_abstract_spawn_error_method()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
             self.generate_abstract_spawn_with_args_error_method()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
         } else {
             // Generate spawn/0 function (class method to instantiate actors)
             self.generate_spawn_function(module)?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             // Generate spawn/1 function (class method with init args)
             self.generate_spawn_with_args_function(module)?;
-            writeln!(self.output)?;
+            self.output.push('\n');
         }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
         self.generate_actor_new_error_method()?;
-        writeln!(self.output)?;
+        self.output.push('\n');
         self.generate_actor_new_with_args_error_method()?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         // Generate superclass/0 class method for reflection
         self.generate_superclass_function(module)?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         // Generate init/1 function
         self.generate_init_function(module)?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
         // These callbacks are only needed for instantiable actors that receive messages.
@@ -116,36 +122,36 @@ impl CoreErlangGenerator {
             // BT-403: Abstract classes need minimal gen_server callbacks
             // (required by gen_server behaviour but will never be called)
             self.generate_abstract_callbacks()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
         } else {
             // Generate handle_cast/2 function with error handling
             self.generate_handle_cast()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             // Generate handle_call/3 function with error handling
             self.generate_handle_call()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             // Generate code_change/3 function
             self.generate_code_change()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             // Generate terminate/2 function (per BT-29)
             self.generate_terminate(module)?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
             self.generate_safe_dispatch()?;
-            writeln!(self.output)?;
+            self.output.push('\n');
         }
 
         // Generate dispatch function with DNU fallback
         self.generate_dispatch(module)?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         // Generate method table
         self.generate_method_table(module)?;
-        writeln!(self.output)?;
+        self.output.push('\n');
 
         // Generate has_method/1 for reflection (BT-242)
         self.generate_has_method(module)?;
@@ -164,12 +170,12 @@ impl CoreErlangGenerator {
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
-            writeln!(self.output)?;
+            self.output.push('\n');
             self.generate_register_class(module)?;
         }
 
         // Module end
-        writeln!(self.output, "end")?;
+        self.output.push_str("end\n");
 
         Ok(())
     }
@@ -250,51 +256,36 @@ impl CoreErlangGenerator {
     ///
     /// Abstract classes can't be instantiated, so these callbacks will never
     /// be called. But `gen_server` behaviour requires them to be exported.
+    #[allow(clippy::unnecessary_wraps)]
     fn generate_abstract_callbacks(&mut self) -> Result<()> {
-        // handle_cast - never called for abstract classes
-        writeln!(
-            self.output,
-            "'handle_cast'/2 = fun (_Msg, State) -> {{'noreply', State}}"
-        )?;
-        writeln!(self.output)?;
-
-        // handle_call - never called for abstract classes
-        writeln!(
-            self.output,
-            "'handle_call'/3 = fun (_Msg, _From, State) -> {{'reply', 'nil', State}}"
-        )?;
-        writeln!(self.output)?;
-
-        // code_change
-        writeln!(
-            self.output,
-            "'code_change'/3 = fun (_OldVsn, State, _Extra) -> {{'ok', State}}"
-        )?;
-        writeln!(self.output)?;
-
-        // terminate
-        writeln!(self.output, "'terminate'/2 = fun (_Reason, _State) -> 'ok'")?;
-        writeln!(self.output)?;
-
-        // safe_dispatch - abstract classes use dispatch directly (no error isolation needed)
-        writeln!(
-            self.output,
-            "'safe_dispatch'/3 = fun (Selector, Args, State) ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Self = call 'beamtalk_actor':'make_self'(State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call '{}':'dispatch'(Selector, Args, Self, State)",
-            self.module_name
-        )?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let module_name = &self.module_name;
+        let doc = docvec![
+            // handle_cast - never called for abstract classes
+            "'handle_cast'/2 = fun (_Msg, State) -> {'noreply', State}",
+            "\n\n",
+            // handle_call - never called for abstract classes
+            "'handle_call'/3 = fun (_Msg, _From, State) -> {'reply', 'nil', State}",
+            "\n\n",
+            // code_change
+            "'code_change'/3 = fun (_OldVsn, State, _Extra) -> {'ok', State}",
+            "\n\n",
+            // terminate
+            "'terminate'/2 = fun (_Reason, _State) -> 'ok'",
+            "\n\n",
+            // safe_dispatch - abstract classes use dispatch directly (no error isolation needed)
+            "'safe_dispatch'/3 = fun (Selector, Args, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    line(),
+                    format!("call '{module_name}':'dispatch'(Selector, Args, Self, State)"),
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -318,13 +309,8 @@ impl CoreErlangGenerator {
                 continue;
             }
 
-            writeln!(self.output)?;
-
-            // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
-            let arity = method.selector.arity() + 2; // + Self + State
-            writeln!(self.output, "'__sealed_{selector_name}'/{arity}  = fun (",)?;
-
             // Reset state version for this method
+            let arity = method.selector.arity() + 2; // + Self + State
             self.reset_state_version();
             self.push_scope();
             self.current_method_params.clear();
@@ -342,15 +328,24 @@ impl CoreErlangGenerator {
             let mut all_params: Vec<String> = params.clone();
             all_params.push("Self".to_string());
             all_params.push("State".to_string());
-            write!(self.output, "{}", all_params.join(", "))?;
-            writeln!(self.output, ") ->")?;
+
+            // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
+            let header = docvec![
+                "\n",
+                format!("'__sealed_{selector_name}'/{arity}  = fun ("),
+                "\n",
+                all_params.join(", "),
+                ") ->",
+                "\n",
+            ];
+            self.write_document(&header);
 
             self.indent += 1;
             self.write_indent()?;
 
             // Generate method body with reply tuple (reuse existing codegen)
             self.generate_method_definition_body_with_reply(method)?;
-            writeln!(self.output)?;
+            self.output.push('\n');
 
             self.indent -= 1;
             self.pop_scope();
