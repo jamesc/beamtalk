@@ -254,7 +254,7 @@ fn write_error_assertion(
          \x20           {{_V{i}, B{i}}} ->\n\
          \x20               {{ok, B{i}}}\n\
          \x20       catch\n\
-         \x20           error:#{{\'$beamtalk_class\' := \'Exception\', error := {{beamtalk_error, Kind{i}, _, _, _, _, _}}}} ->\n\
+         \x20           error:#{{\'$beamtalk_class\' := _, error := {{beamtalk_error, Kind{i}, _, _, _, _, _}}}} ->\n\
          \x20               {{beamtalk_error, Kind{i}}};\n\
          \x20           error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
          \x20               {{beamtalk_error, Kind{i}}};\n\

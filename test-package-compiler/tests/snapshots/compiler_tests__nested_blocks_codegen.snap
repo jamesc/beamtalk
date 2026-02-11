@@ -36,135 +36,135 @@ module 'nested_blocks' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
                     let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
                     call 'beamtalk_error':'raise'(SpawnErr1)
             end
-        end
+    end
 
 
 'new'/0 = fun () ->
-        let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-        let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
-        let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
-        call 'beamtalk_error':'raise'(Error2)
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'beamtalk_error':'raise'(Error2)
 
 'new'/1 = fun (_InitArgs) ->
-        let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-        let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
-        let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
-        call 'beamtalk_error':'raise'(Error2)
+    let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
+    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
+    let Error2 = call 'beamtalk_error':'with_hint'(Error1, #{#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#) in
+    call 'beamtalk_error':'raise'(Error2)
 
 'superclass'/0 = fun () -> 'nil'
 
 
 'init'/1 = fun (InitArgs) ->
-        let DefaultState = ~{
-            '$beamtalk_class' => 'NestedBlocks',
-            '__class_mod__' => 'nested_blocks',
-            '__methods__' => call 'nested_blocks':'method_table'()
-        }~
-        in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
-        in {'ok', FinalState}
+    let DefaultState = ~{
+        '$beamtalk_class' => 'NestedBlocks',
+        '__class_mod__' => 'nested_blocks',
+        '__methods__' => call 'nested_blocks':'method_table'()
+    }~
+    in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
+    in {'ok', FinalState}
 
 
 'handle_cast'/2 = fun (Msg, State) ->
-        case Msg of
-            <{Selector, Args, FuturePid}> when 'true' ->
-                case call 'nested_blocks':'safe_dispatch'(Selector, Args, State) of
-                    <{'reply', Result, NewState}> when 'true' ->
-                        let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
-                        in {'noreply', NewState}
-                    <{'error', Error, NewState}> when 'true' ->
-                        let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
-                        in {'noreply', NewState}
-                end
-        end
+    case Msg of
+        <{Selector, Args, FuturePid}> when 'true' ->
+            case call 'nested_blocks':'safe_dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})
+                    in {'noreply', NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})
+                    in {'noreply', NewState}
+            end
+    end
 
 
 'handle_call'/3 = fun (Msg, _From, State) ->
-        case Msg of
-            <{Selector, Args}> when 'true' ->
-                case call 'nested_blocks':'safe_dispatch'(Selector, Args, State) of
-                    <{'reply', Result, NewState}> when 'true' ->
-                        {'reply', {'ok', Result}, NewState}
-                    <{'error', Error, NewState}> when 'true' ->
-                        {'reply', {'error', Error}, NewState}
-                end
-        end
+    case Msg of
+        <{Selector, Args}> when 'true' ->
+            case call 'nested_blocks':'safe_dispatch'(Selector, Args, State) of
+                <{'reply', Result, NewState}> when 'true' ->
+                    {'reply', {'ok', Result}, NewState}
+                <{'error', Error, NewState}> when 'true' ->
+                    {'reply', {'error', Error}, NewState}
+            end
+    end
 
 
 'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-        %% TODO: Add state migration logic
-        {'ok', State}
+    %% TODO: Add state migration logic
+    {'ok', State}
 
 
 'terminate'/2 = fun (Reason, State) ->
-        %% Call terminate method if defined (Flavors pattern)
-        let Self = call 'beamtalk_actor':'make_self'(State) in
-        case call 'nested_blocks':'dispatch'('terminate', [Reason], Self, State) of
-            <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
-            <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
-            <_TermOther> when 'true' -> 'ok'
-        end
+    %% Call terminate method if defined (Flavors pattern)
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    case call 'nested_blocks':'dispatch'('terminate', [Reason], Self, State) of
+        <{'reply', _TermResult, _TermState}> when 'true' -> 'ok'
+        <{'error', _TermError, _TermState2}> when 'true' -> 'ok'
+        <_TermOther> when 'true' -> 'ok'
+    end
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-        let Self = call 'beamtalk_actor':'make_self'(State) in
-        try call 'nested_blocks':'dispatch'(Selector, Args, Self, State)
-        of Result -> Result
-        catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
+    let Self = call 'beamtalk_actor':'make_self'(State) in
+    try call 'nested_blocks':'dispatch'(Selector, Args, Self, State)
+    of Result -> Result
+    catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
-        case Selector of
-            <'outerBlock'> when 'true' ->
-                let _Result = fun (_x1) -> call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
-            <'deeplyNested'> when 'true' ->
-                let _Result = fun () -> fun () -> 42 in {'reply', _Result, State}
-            <'blockWithNested'> when 'true' ->
-                case Args of
-                    <[_x2]> when 'true' ->
-                        let Inner = fun (_y3) -> call 'erlang':'*'(_y3, 2) in let _Result = let _Fun4 = Inner in apply _Fun4 (_x2) in {'reply', _Result, State}
-                    <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
-                end
-            <OtherSelector> when 'true' ->
-                %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-                let ExtLookup = try call 'beamtalk_extensions':'lookup'('NestedBlocks', OtherSelector)
-                    of ExtLookupResult -> ExtLookupResult
-                    catch <_EType, _EReason, _EStack> -> 'not_found'
-                in
-                case ExtLookup of
-                    <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                        let ExtResult = apply ExtFun(Args, Self) in
-                        {'reply', ExtResult, State}
-                    <'not_found'> when 'true' ->
-                        %% ADR 0006: Try hierarchy walk before DNU
-                        case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'NestedBlocks') of
-                            <{'reply', InheritedResult, InheritedState}> when 'true' ->
-                                {'reply', InheritedResult, InheritedState}
-                            <{'error', _DispatchError}> when 'true' ->
-                                %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
-                                let DnuSelector = 'doesNotUnderstand:args:' in
-                                let Methods = call 'maps':'get'('__methods__', State) in
-                                case call 'maps':'is_key'(DnuSelector, Methods) of
-                                    <'true'> when 'true' ->
-                                        call 'nested_blocks':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
-                                    <'false'> when 'true' ->
-                                        %% No DNU handler - return #beamtalk_error{} record
-                                        let ClassName = call 'maps':'get'('$beamtalk_class', State) in
-                                        let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
-                                        let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
-                                        let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
-                                        let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
-                                        {'error', Error, State}
-                                end
-                        end
-                end
-        end
+    case Selector of
+        <'outerBlock'> when 'true' ->
+            let _Result = fun (_x1) -> call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
+        <'deeplyNested'> when 'true' ->
+            let _Result = fun () -> fun () -> 42 in {'reply', _Result, State}
+        <'blockWithNested'> when 'true' ->
+            case Args of
+                <[_x2]> when 'true' ->
+                    let Inner = fun (_y3) -> call 'erlang':'*'(_y3, 2) in let _Result = let _Fun4 = Inner in apply _Fun4 (_x2) in {'reply', _Result, State}
+                <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
+            end
+        <OtherSelector> when 'true' ->
+            %% BT-229/ADR 0005: Check extension registry before hierarchy walk
+            let ExtLookup = try call 'beamtalk_extensions':'lookup'('NestedBlocks', OtherSelector)
+                of ExtLookupResult -> ExtLookupResult
+                catch <_EType, _EReason, _EStack> -> 'not_found'
+            in
+            case ExtLookup of
+                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                    let ExtResult = apply ExtFun(Args, Self) in
+                    {'reply', ExtResult, State}
+                <'not_found'> when 'true' ->
+                    %% ADR 0006: Try hierarchy walk before DNU
+                    case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, 'NestedBlocks') of
+                        <{'reply', InheritedResult, InheritedState}> when 'true' ->
+                            {'reply', InheritedResult, InheritedState}
+                        <{'error', _DispatchError}> when 'true' ->
+                            %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
+                            let DnuSelector = 'doesNotUnderstand:args:' in
+                            let Methods = call 'maps':'get'('__methods__', State) in
+                            case call 'maps':'is_key'(DnuSelector, Methods) of
+                                <'true'> when 'true' ->
+                                    call 'nested_blocks':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
+                                <'false'> when 'true' ->
+                                    %% No DNU handler - return #beamtalk_error{} record
+                                    let ClassName = call 'maps':'get'('$beamtalk_class', State) in
+                                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
+                                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
+                                    let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
+                                    let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
+                                    {'error', Error, State}
+                            end
+                    end
+            end
+    end
 
 
 'method_table'/0 = fun () ->
-        ~{'outerBlock' => 0, 'deeplyNested' => 0, 'blockWithNested' => 1}~
+    ~{'outerBlock' => 0, 'deeplyNested' => 0, 'blockWithNested' => 1}~
 
 
 'has_method'/1 = fun (Selector) ->
-        call 'lists':'member'(Selector, ['outerBlock', 'deeplyNested', 'blockWithNested'])
+    call 'lists':'member'(Selector, ['outerBlock', 'deeplyNested', 'blockWithNested'])
 
 end
