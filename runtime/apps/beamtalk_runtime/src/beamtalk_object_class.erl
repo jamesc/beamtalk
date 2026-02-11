@@ -921,9 +921,11 @@ code_change(OldVsn, State, Extra) ->
     {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
     %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
     FinalState = rebuild_all_flattened_tables(NewState),
+    %% BT-474: Reset is_constructible cache — module exports may have changed
+    FinalState2 = FinalState#class_state{is_constructible = undefined},
     %% Invalidate subclass tables in case hot_reload modified our methods
-    invalidate_subclass_flattened_tables(FinalState#class_state.name),
-    {ok, FinalState}.
+    invalidate_subclass_flattened_tables(FinalState2#class_state.name),
+    {ok, FinalState2}.
 
 %%====================================================================
 %% Internal functions
