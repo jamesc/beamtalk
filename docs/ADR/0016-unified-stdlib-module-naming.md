@@ -225,10 +225,10 @@ fn superclass_module_name(superclass: &str) -> Option<String> {
 
 ```erlang
 {env, [
-    {classes, [{'bt@stdlib@integer', 'Integer', 'Number'},
-               {'bt@stdlib@number', 'Number', 'Object'},
-               {'bt@stdlib@set', 'Set', 'Object'},
-               {'bt@stdlib@association', 'Association', 'Object'},
+    {classes, [{bt@stdlib@integer, 'Integer', 'Number'},
+               {bt@stdlib@number, 'Number', 'Object'},
+               {bt@stdlib@set, 'Set', 'Object'},
+               {bt@stdlib@association, 'Association', 'Object'},
                ...]}
 ]}
 ```
@@ -246,7 +246,7 @@ send(X, Selector, Args) when is_integer(X) ->
 
 %% After:
 send(X, Selector, Args) when is_integer(X) ->
-    'bt@stdlib@integer':dispatch(X, Selector, Args);  % ✅ Quoted atom with @
+    bt@stdlib@integer:dispatch(X, Selector, Args);  % Unquoted — @ is legal in Erlang atoms
 ```
 
 The dispatch logic (type guard matching, tagged-map detection, fallback to `beamtalk_object`) is unchanged. Only the module atoms that appear after the `->` change.
@@ -286,7 +286,7 @@ Elixir uses `Elixir.ModuleName` as the Erlang module atom for all compiled modul
 
 **Our choice:** We use `@` instead of `.` because:
 1. Gleam proves `@` works well in the BEAM ecosystem (5+ years of production use)
-2. Less visual noise than dots in quoted atoms: `'bt@stdlib@integer'` vs `'bt.stdlib.integer'`
+2. Less visual noise than dots: `bt@stdlib@integer` vs `'bt.stdlib.integer'` (dots require quoting, `@` does not)
 3. Clearer separation from Erlang's `:` operator (`Module:function` calls)
 
 ## User Impact
@@ -325,9 +325,9 @@ No change to build commands or test commands. `just build-stdlib` produces `bt@s
 
 | Cohort | Best argument | Assessment |
 |--------|--------------|------------|
-| 🐍 **Python/Ruby developer** | Quoted atoms with `@` look alien: `'bt@stdlib@integer':dispatch()`. Why not just `bt_stdlib_integer`? The quoting adds visual noise without obvious benefit. | **Weak-to-Moderate.** The quotes ARE visual noise in Erlang code, but module names rarely appear in user-facing errors (we show class names, not module names). Runtime developers see this daily, but they benefit from the clear compiled-vs-handwritten distinction. The `@` separator is unfamiliar at first but becomes recognizable quickly (Gleam developers report no confusion after initial exposure). |
+| 🐍 **Python/Ruby developer** | The `@` separator looks unfamiliar: `bt@stdlib@integer:dispatch()`. Why not just `bt_stdlib_integer`? | **Weak.** Module names rarely appear in user-facing errors (we show class names, not module names). Runtime developers see this daily, but they benefit from the clear compiled-vs-handwritten distinction. The `@` separator is unfamiliar at first but becomes recognizable quickly (Gleam developers report no confusion after initial exposure). No quoting needed — `@` is legal in unquoted Erlang atoms. |
 | 📦 **Package author** | I'm publishing `beamtalk-json`. Do I use `bt@json@parser` or `beamtalk_json_parser`? If every package uses `bt@`, how do we avoid collisions? | **Weak.** Package authors would follow the pattern: `bt@json@parser`, `bt@web@handler`. Collisions are prevented by the middle namespace segment (package name). This is exactly how Gleam works: `gleam@json`, `gleam@http`. The pattern is proven and scales. Documentation should make this clear with examples. |
-| 🔧 **Erlang FFI author** | I'm writing Erlang code that calls Beamtalk modules. Quoted atoms everywhere: `'bt@stdlib@list':foldl/3`. This is tedious and error-prone. | **Moderate.** This is a real cost for FFI authors. However, FFI is rare (most users write pure Beamtalk). When FFI is needed, the quoting is annoying but not ambiguous — the compiler will catch typos. Trade-off: FFI ergonomics vs namespace clarity. We choose clarity because FFI is the exception, not the rule. |
+| 🔧 **Erlang FFI author** | I'm writing Erlang code that calls Beamtalk modules: `bt@stdlib@list:foldl/3`. The `@` looks unusual in Erlang code. | **Weak.** Since `@` is legal in unquoted Erlang atoms, no quoting is needed — `bt@stdlib@list:foldl(Fun, Acc, List)` works directly. FFI is rare (most users write pure Beamtalk). The unfamiliarity fades quickly (Gleam FFI authors have no issues). Trade-off: FFI ergonomics vs namespace clarity. We choose clarity because FFI is the exception, not the rule. |
 
 ### Verdict
 
@@ -398,19 +398,19 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 - **Package-ready** — Natural extension to third-party packages: `bt@json@parser`, `bt@web@handler`
 
 ### Negative
-- **Erlang atom quoting** — Atoms with `@` must be quoted: `'bt@stdlib@integer'` vs unquoted `bt_stdlib_integer`. Adds visual noise in Erlang code (especially for FFI authors).
+- **No atom quoting needed** — `@` is legal in unquoted Erlang atoms (along with alphanumerics and `_`), so `bt@stdlib@integer` works without quoting in all contexts (source, shell, observer). This is a key advantage over `.` (which requires quoting: `'bt.stdlib.integer'`).
 - **Two-character separator** — `@stdlib@` vs `_stdlib_` is slightly longer (1 extra char)
 - **Documentation fragmentation** — All existing examples, tutorials, blog posts using old module names become outdated. Search engines will index both naming schemes during transition period. Requires documentation sweep and redirects.
 - Mechanical churn across ~10 files (low risk but nonzero)
 - `beamtalk_primitive.erl` needs ~24 module atom updates (12 in `send/3`, 12 in `responds_to/2`)
-- Codegen must emit quoted atoms for module names
+- Codegen emits `bt@stdlib@*` atoms as unquoted module names in Core Erlang
 - Snapshot tests for codegen need updating (module names appear in generated Core Erlang)
 - Dialyzer PLT may need a clean rebuild after the rename
 - **User code compilation changes** — User `.bt` files now compile to `bt@module` instead of plain `module`. Affects module name lookup and loading.
 - **Tooling compatibility risk** — Must verify `@` in atoms works correctly with all BEAM ecosystem tools: rebar3 plugins, observer GUI, dialyzer, cover, etc. Gleam's 5+ years of production use suggests low risk, but worth explicit testing.
 
 ### Neutral
-- **Performance:** No user-visible behavior change (module names don't appear in Beamtalk code). No performance impact for module dispatch (atom comparison works identically for quoted and unquoted atoms — the BEAM VM stores all atoms in a global atom table regardless of quoting). Quoted atoms have identical lookup performance to unquoted atoms. **Note:** This is a fundamental BEAM VM design property, not an assumption. See Erlang Efficiency Guide: "Atoms are stored in a global atom table and are accessed by an index."
+- **Performance:** No user-visible behavior change (module names don't appear in Beamtalk code). No performance impact for module dispatch (atom comparison is identical regardless of how the atom was written — the BEAM VM stores all atoms in a global atom table). **Note:** This is a fundamental BEAM VM design property, not an assumption. See Erlang Efficiency Guide: "Atoms are stored in a global atom table and are accessed by an index."
 - `beamtalk_stdlib.erl` loading logic unchanged — it reads `{Module, ClassName, Super}` tuples generically
 - `is_bootstrap_class/1` skip logic unchanged — it checks class names, not module names
 - Test infrastructure (stdlib test runner) already bootstraps class system correctly regardless of naming
@@ -439,10 +439,10 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 1. Update `build_stdlib.rs`: delete `is_primitive_type()`, simplify `module_name_from_path()` to emit `bt@stdlib@{snake}`
 2. Update user code compiler to emit `bt@{snake}` module names
 3. Update `value_type_codegen.rs`: merge type lists, update `superclass_module_name()` to emit `bt@stdlib@` and `bt@` prefixes
-4. Update Core Erlang codegen to emit quoted atoms for module names
+4. Update Core Erlang codegen to emit `bt@` prefixed module names
 5. Run `just build-stdlib` to regenerate BEAM files and `.app.src` with new names
-6. Update `beamtalk_primitive.erl` module atoms in `send/3`, `has_method/1`, and `class_name_to_module/1` to use quoted atoms
-7. **Verify tooling compatibility**: Test with rebar3 shell, observer, dialyzer, cover to confirm quoted atoms with `@` work correctly
+6. Update `beamtalk_primitive.erl` module atoms in `send/3`, `has_method/1`, and `class_name_to_module/1` to use `@` separator
+7. **Verify tooling compatibility**: Test with rebar3 shell, observer, dialyzer, cover to confirm `@` atoms work correctly
 8. Run `just ci` — fix snapshot tests as needed
 9. Clean dialyzer PLT and rebuild: `cd runtime && rebar3 clean && rebar3 dialyzer`
 10. **Documentation sweep**: Update all examples, tutorials, and docs to use new module names
@@ -478,7 +478,7 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 2. Run `just build-stdlib` to regenerate with new names
 3. Run `just ci` to identify and fix snapshot tests
 4. Update `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl` dispatch clauses
-5. **Test tooling**: Verify observer, rebar3 shell, dialyzer work correctly with quoted atoms
+5. **Test tooling**: Verify observer, rebar3 shell, dialyzer work correctly with `@` atoms
 6. Rebuild dialyzer PLT: `cd runtime && rebar3 clean && rebar3 dialyzer`
 7. **Update documentation**: Sweep all docs, examples, tutorials for old module names
 
