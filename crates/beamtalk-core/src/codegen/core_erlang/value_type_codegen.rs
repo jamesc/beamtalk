@@ -197,8 +197,16 @@ impl CoreErlangGenerator {
 
     /// Generates the `new/0` function for a value type.
     ///
-    /// Creates an instance map with `$beamtalk_class` and default field values.
+    /// For primitive types (Integer, String, etc.), generates an
+    /// `instantiation_error` since primitives are native BEAM values.
+    /// For non-primitive value types, creates an instance map with
+    /// `$beamtalk_class` and default field values.
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        if Self::is_primitive_type(&class_name) {
+            return self.generate_primitive_new_error(&class_name, "new", 0);
+        }
+
         writeln!(self.output, "'new'/0 = fun () ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -229,8 +237,14 @@ impl CoreErlangGenerator {
 
     /// Generates the `new/1` function for a value type.
     ///
-    /// Merges initialization arguments with default values.
+    /// For primitive types, generates an `instantiation_error`.
+    /// For non-primitive value types, merges initialization arguments with defaults.
     fn generate_value_type_new_with_args(&mut self) -> Result<()> {
+        let class_name = self.class_name().clone();
+        if Self::is_primitive_type(&class_name) {
+            return self.generate_primitive_new_error(&class_name, "new:", 1);
+        }
+
         writeln!(self.output, "'new'/1 = fun (InitArgs) ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -244,6 +258,46 @@ impl CoreErlangGenerator {
         self.indent -= 1;
         writeln!(self.output)?;
 
+        Ok(())
+    }
+
+    /// Generates a `new` or `new:` function that raises `instantiation_error`
+    /// for primitive types that cannot be instantiated with `new`.
+    fn generate_primitive_new_error(
+        &mut self,
+        class_name: &str,
+        selector: &str,
+        arity: usize,
+    ) -> Result<()> {
+        let hint =
+            format!("{class_name} is a primitive type and cannot be instantiated with {selector}");
+        if arity == 0 {
+            writeln!(self.output, "'new'/0 = fun () ->")?;
+        } else {
+            writeln!(self.output, "'new'/1 = fun (_InitArgs) ->")?;
+        }
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, '{selector}') in",
+        )?;
+        self.write_indent()?;
+        write!(
+            self.output,
+            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
+        )?;
+        self.generate_binary_string(&hint)?;
+        writeln!(self.output, ") in")?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        self.indent -= 1;
+        writeln!(self.output)?;
         Ok(())
     }
 
@@ -318,13 +372,14 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Returns true if the class is a known stdlib type (ADR 0016).
+    /// Returns true if the class is a primitive type backed by native BEAM values
+    /// that cannot be instantiated with `new`.
     ///
-    /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
-    fn is_known_stdlib_type(class_name: &str) -> bool {
+    /// These types have no state fields and represent native Erlang values
+    /// (integers, floats, strings, etc.), not tagged maps.
+    fn is_primitive_type(class_name: &str) -> bool {
         matches!(
             class_name,
-            // Primitive types (native Erlang values)
             "Integer"
                 | "Float"
                 | "String"
@@ -336,19 +391,29 @@ impl CoreErlangGenerator {
                 | "Tuple"
                 | "List"
                 | "Dictionary"
-                | "Set"
-                // Non-primitive stdlib types
-                | "ProtoObject"
-                | "Object"
-                | "Number"
-                | "Actor"
-                | "File"
-                | "Association"
-                | "SystemDictionary"
-                | "TranscriptStream"
-                | "Exception"
-                | "Error"
+                | "CompiledMethod"
         )
+    }
+
+    /// Returns true if the class is a known stdlib type (ADR 0016).
+    ///
+    /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
+    fn is_known_stdlib_type(class_name: &str) -> bool {
+        Self::is_primitive_type(class_name)
+            || matches!(
+                class_name,
+                "Set"
+                    | "ProtoObject"
+                    | "Object"
+                    | "Number"
+                    | "Actor"
+                    | "File"
+                    | "Association"
+                    | "SystemDictionary"
+                    | "TranscriptStream"
+                    | "Exception"
+                    | "Error"
+            )
     }
 
     /// Computes the compiled module name for a class (ADR 0016).
