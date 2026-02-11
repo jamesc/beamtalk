@@ -75,6 +75,7 @@
     instance_variables/1,
     is_sealed/1,
     is_abstract/1,
+    is_constructible/1,
     add_before/3,
     add_after/3,
     super_dispatch/3,
@@ -113,6 +114,7 @@
     superclass :: class_name() | none,
     is_sealed = false :: boolean(),
     is_abstract = false :: boolean(),
+    is_constructible = undefined :: boolean() | undefined,
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     instance_variables = [] :: [atom()],
@@ -363,6 +365,14 @@ is_sealed(ClassPid) ->
 is_abstract(ClassPid) ->
     gen_server:call(ClassPid, is_abstract).
 
+%% @doc Check if a class can be instantiated via new/new:.
+%%
+%% BT-474: Domain query replacing the try-new/0 probe. Returns false for
+%% actors (use spawn) and non-instantiable primitives (Integer, String, etc.).
+-spec is_constructible(pid()) -> boolean().
+is_constructible(ClassPid) ->
+    gen_server:call(ClassPid, is_constructible).
+
 %% @doc Add a before daemon (Flavors pattern).
 -spec add_before(pid(), selector(), fun()) -> ok.
 add_before(ClassPid, Selector, Fun) ->
@@ -498,6 +508,8 @@ init({ClassName, ClassInfo}) ->
     
     %% Extract class info
     Superclass = maps:get(superclass, ClassInfo, none),
+    Module = maps:get(module, ClassInfo, ClassName),
+    IsAbstract = maps:get(is_abstract, ClassInfo, false),
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
     
@@ -506,12 +518,15 @@ init({ClassName, ClassInfo}) ->
     FlattenedClassMethods = build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
     
     %% Build state
+    %% BT-474: is_constructible starts as undefined — computed lazily on first
+    %% {new, Args} call. Can't probe Module:new() during on_load init because
+    %% the module isn't fully available yet.
     State = #class_state{
         name = ClassName,
-        module = maps:get(module, ClassInfo, ClassName),
+        module = Module,
         superclass = Superclass,
         is_sealed = maps:get(is_sealed, ClassInfo, false),
-        is_abstract = maps:get(is_abstract, ClassInfo, false),
+        is_abstract = IsAbstract,
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         instance_variables = maps:get(instance_variables, ClassInfo, []),
@@ -594,7 +609,11 @@ handle_call({new, Args}, _From, #class_state{
     module = Module,
     dynamic_methods = DynamicMethods,
     instance_variables = InstanceVars
-} = State) ->
+} = State0) ->
+    %% BT-474: Lazily compute is_constructible on first {new, Args} call.
+    %% Can't compute during init because module isn't available during on_load.
+    State = ensure_is_constructible(State0),
+    #class_state{is_constructible = IsConstructible} = State,
     %% Check if this is a dynamic class
     case Module of
         beamtalk_dynamic_object ->
@@ -659,20 +678,21 @@ handle_call({new, Args}, _From, #class_state{
                                 erlang:apply(Module, new, [])
                         end;
                     _ ->
-                        %% BT-473: Reject non-map arguments to new:
+                        %% BT-474: Use cached is_constructible query instead of
+                        %% probing via try new/0. No throwaway object creation.
                         %% Priority: instantiation_error (can't construct) before
                         %% type_error (wrong argument type).
-                        %% Try new/0 first — if it raises instantiation_error,
-                        %% that's the real problem. If it succeeds, the class
-                        %% IS constructible but got wrong arg type → type_error.
-                        try erlang:apply(Module, new, []) of
-                            _ ->
+                        case IsConstructible of
+                            false ->
+                                %% Class can't be instantiated — delegate to new/0
+                                %% for its native instantiation_error.
+                                erlang:apply(Module, new, []);
+                            true ->
+                                %% Class IS constructible but got wrong arg type.
                                 Error0 = beamtalk_error:new(type_error, ClassName),
                                 Error1 = beamtalk_error:with_selector(Error0, 'new:'),
                                 Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
                                 error(Error2)
-                        catch
-                            error:NewError -> error(NewError)
                         end
                 end,
                 {reply, {ok, Result}, State}
@@ -748,6 +768,10 @@ handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
 
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
     {reply, Abstract, State};
+
+handle_call(is_constructible, _From, State0) ->
+    State = ensure_is_constructible(State0),
+    {reply, State#class_state.is_constructible, State};
 
 handle_call({add_before, Selector, Fun}, _From, State) ->
     Befores = maps:get(Selector, State#class_state.before_methods, []),
@@ -904,9 +928,11 @@ code_change(OldVsn, State, Extra) ->
     {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
     %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
     FinalState = rebuild_all_flattened_tables(NewState),
+    %% BT-474: Reset is_constructible cache — module exports may have changed
+    FinalState2 = FinalState#class_state{is_constructible = undefined},
     %% Invalidate subclass tables in case hot_reload modified our methods
-    invalidate_subclass_flattened_tables(FinalState#class_state.name),
-    {ok, FinalState}.
+    invalidate_subclass_flattened_tables(FinalState2#class_state.name),
+    {ok, FinalState2}.
 
 %%====================================================================
 %% Internal functions
@@ -931,6 +957,53 @@ abstract_class_error(ClassName, Selector) ->
     Error0 = beamtalk_error:new(instantiation_error, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>).
+
+%% @private
+%% @doc Ensure is_constructible is computed and cached in state (BT-474).
+%%
+%% Lazily computes whether a class can be instantiated via new/new: on first
+%% access. Cannot be computed during init because the module isn't fully
+%% available during on_load. After first computation, the result is cached
+%% in class_state for all subsequent calls.
+%%
+%% Returns false for:
+%% - Abstract classes (cannot be instantiated at all)
+%% - Actors (have spawn/0 — must use spawn/spawnWith:)
+%% - Non-instantiable primitives (Integer, String, etc. — new/0 raises)
+-spec ensure_is_constructible(#class_state{}) -> #class_state{}.
+ensure_is_constructible(#class_state{is_constructible = C} = State) when C =/= undefined ->
+    State;
+ensure_is_constructible(#class_state{
+    module = Module,
+    is_abstract = IsAbstract
+} = State) ->
+    Result = compute_is_constructible(Module, IsAbstract),
+    State#class_state{is_constructible = Result}.
+
+%% @private
+-spec compute_is_constructible(atom(), boolean()) -> boolean().
+compute_is_constructible(_Module, true) ->
+    false;
+compute_is_constructible(beamtalk_dynamic_object, false) ->
+    true;
+compute_is_constructible(Module, false) ->
+    %% Actors export spawn/0; their new/0 raises instantiation_error
+    case erlang:function_exported(Module, spawn, 0) of
+        true -> false;
+        false ->
+            %% Value type: check if new/0 succeeds or raises.
+            %% Non-instantiable primitives (Integer, String, etc.) generate
+            %% error stubs. We probe once here, not on every error path.
+            case erlang:function_exported(Module, new, 0) of
+                false -> false;
+                true ->
+                    try erlang:apply(Module, new, []) of
+                        _ -> true
+                    catch
+                        error:_ -> false
+                    end
+            end
+    end.
 
 %% @private
 %% @doc Rebuild both instance and class flattened method tables from State.
