@@ -1,10 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for error handling (REPL-specific)
-// Pure runtime errors (badarith, does_not_understand, immutable_value, etc.)
-// are tested in tests/stdlib/errors.bt for faster execution.
-// This file tests errors that require REPL features.
+// E2E tests for error handling
+// Each expression tests that specific errors are caught correctly
+
+// Division by zero
+// Note: Erlang returns 'badarith' for division by zero
+1 / 0
+// => ERROR: badarith
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -44,6 +47,10 @@ undefinedVar + 5
 // ===========================================================================
 // RUNTIME ERRORS
 // ===========================================================================
+
+// Calling non-existent method on integer
+42 nonExistentMethod
+// => ERROR: does not understand
 
 // Wrong number of block arguments (too few)
 [:x :y | x + y] value: 5

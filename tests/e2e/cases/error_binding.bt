@@ -12,7 +12,7 @@
 
 // Trigger an error (undefined method on integer)
 42 nonExistentMethod
-// => ERROR: does_not_understand
+// => ERROR: does not understand
 
 // _error should be bound to the Exception object
 _error kind
@@ -32,7 +32,7 @@ _error class
 
 // Trigger an error with a known selector
 42 badMethod
-// => ERROR: does_not_understand
+// => ERROR: does not understand
 
 // _error selector should be the failed method name
 _error selector
@@ -50,10 +50,10 @@ _error selector
 _error kind
 // => does_not_understand
 
-// Trigger a new error to replace _error
-'hello' / 2
-// => ERROR: does_not_understand
+// Trigger a new error (division by zero)
+1 / 0
+// => ERROR: badarith
 
 // _error now holds the new error
 _error kind
-// => does_not_understand
+// => runtime_error
