@@ -1165,6 +1165,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 | **BT-332** | Getting Started with Beamtalk | TBD | ~0% | High |
 | **BT-299** | ADR Creation for Existing Design Documents | TBD | ~0% | High |
 | **BT-325** | Towers of Hanoi Language Showcase | TBD | ~0% | Medium |
+| **BT-450** | Signal-Time Exception Objects (ADR 0015) | 2 issues | ~0% | High |
 
 #### Epic Completed
 
