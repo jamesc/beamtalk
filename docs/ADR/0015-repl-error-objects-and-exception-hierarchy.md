@@ -720,6 +720,17 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 - `tests/stdlib/error_method.bt` — Method-level error behavior; should continue to pass
 - Runtime tests that catch `#beamtalk_error{}` directly — Update to match wrapped objects
 
+## Implementation Tracking
+
+**Epic:** [BT-450](https://linear.app/beamtalk/issue/BT-450) — Signal-Time Exception Objects (ADR 0015)
+
+| Issue | Title | Size | Status |
+|-------|-------|------|--------|
+| [BT-451](https://linear.app/beamtalk/issue/BT-451) | Signal-time wrapping: raise/1, runtime + codegen migration, REPL _error binding | L | Planned |
+| [BT-452](https://linear.app/beamtalk/issue/BT-452) | Error class hierarchy: RuntimeError, TypeError, InstantiationError + kind_to_class mapping | M | Planned (blocked by BT-451) |
+
+**Supersedes:** BT-30 (Prototype object-wrapped exceptions), BT-237 (REPL error formatting)
+
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model), [ADR 0006](0006-unified-method-dispatch.md) (dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (stdlib)
 - Existing implementation: `beamtalk_exception_handler.erl`, `lib/Exception.bt`, `lib/Error.bt`
