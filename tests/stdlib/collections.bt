@@ -4,6 +4,24 @@
 // E2E tests for collection/List methods (BT-44)
 
 // ===========================================================================
+// CREATION (BT-422)
+// ===========================================================================
+
+// List new returns an empty list
+List new
+// => _
+
+(List new) size
+// => 0
+
+(List new) class
+// => List
+
+// List new: is not supported (no meaningful init-from-map)
+List new: #{#a => 1}
+// => ERROR: instantiation_error
+
+// ===========================================================================
 // TIER 1: ESSENTIAL METHODS
 // ===========================================================================
 

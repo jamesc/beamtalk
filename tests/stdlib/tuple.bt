@@ -25,3 +25,18 @@
 // Placeholder to satisfy E2E test parser
 1 + 1
 // => 2
+
+// ===========================================================================
+// CREATION (BT-422)
+// ===========================================================================
+
+// Tuple new returns an empty tuple
+Tuple new
+// => _
+
+(Tuple new) class
+// => Tuple
+
+// Tuple new: is not supported (no meaningful init-from-map)
+Tuple new: #{#a => 1}
+// => ERROR: instantiation_error
