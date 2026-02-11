@@ -8,6 +8,7 @@
         {classes, [{'bt@stdlib@actor', 'Actor', 'Object'},
         {'bt@stdlib@association', 'Association', 'Object'},
         {'bt@stdlib@block', 'Block', 'Object'},
+        {'bt@stdlib@compiled_method', 'CompiledMethod', 'Object'},
         {'bt@stdlib@dictionary', 'Dictionary', 'Object'},
         {'bt@stdlib@error', 'Error', 'Exception'},
         {'bt@stdlib@exception', 'Exception', 'Object'},

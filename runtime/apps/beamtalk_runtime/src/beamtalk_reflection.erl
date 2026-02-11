@@ -7,7 +7,7 @@
 %%%
 %%% This domain service provides uniform access to instance variables
 %%% (fields) on Beamtalk objects. It extracts the reflection logic that
-%%% was previously inline in `beamtalk_object:dispatch/4`, giving a
+%%% was previously inline in `beamtalk_object_ops:dispatch/4`, giving a
 %%% single source of truth for field read/write semantics.
 %%%
 %%% Follows Smalltalk-80 conventions:
@@ -52,7 +52,7 @@ write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
 
 %% @doc Generates an inspect string for an object: "a ClassName (field1: val1, field2: val2)".
 %%
-%% BT-446: Extracted from beamtalk_object:dispatch/4 so that compiled
+%% BT-446: Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 %% Object modules can call it from generated dispatch/4 code.
 -spec inspect_string(map()) -> binary().
 inspect_string(State) when is_map(State) ->

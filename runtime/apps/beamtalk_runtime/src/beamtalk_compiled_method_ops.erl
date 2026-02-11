@@ -27,7 +27,7 @@
 %%% | `respondsTo:`    | [S]  | Check if responds to selector S    |
 %%%
 %%% **DDD Context:** Runtime Context
--module(beamtalk_compiled_method).
+-module(beamtalk_compiled_method_ops).
 -export([dispatch/3, has_method/1]).
 
 -include("beamtalk.hrl").

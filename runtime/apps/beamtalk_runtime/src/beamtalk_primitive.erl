@@ -188,7 +188,7 @@ send(X, Selector, Args) when is_map(X) ->
     %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            beamtalk_compiled_method:dispatch(Selector, Args, X);
+            'bt@stdlib@compiled_method':dispatch(Selector, Args, X);
         'Exception' ->
             %% BT-338: Exception value type - direct dispatch
             beamtalk_exception_handler:dispatch(Selector, Args, X);
@@ -264,7 +264,7 @@ responds_to(X, Selector) when is_float(X) ->
 responds_to(X, Selector) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            beamtalk_compiled_method:has_method(Selector);
+            'bt@stdlib@compiled_method':has_method(Selector);
         'Exception' ->
             %% BT-338: Exception value type
             beamtalk_exception_handler:has_method(Selector);
@@ -314,9 +314,9 @@ value_type_send(Self, Class, Selector, Args) ->
             erlang:apply(Module, Selector, [Self | Args]);
         false ->
             %% Fall back to Object base methods (class, printString, etc.)
-            case beamtalk_object:has_method(Selector) of
+            case beamtalk_object_ops:has_method(Selector) of
                 true ->
-                    case beamtalk_object:dispatch(Selector, Args, Self, Self) of
+                    case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
                         {reply, Result, _State} -> Result;
                         {error, Error, _State} -> error(Error)
                     end;
@@ -347,7 +347,7 @@ value_type_responds_to(Class, Selector) ->
         false -> []
     end,
     lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
-        orelse beamtalk_object:has_method(Selector).
+        orelse beamtalk_object_ops:has_method(Selector).
 
 %% @doc Convert a CamelCase class name atom to a module name atom.
 %%
