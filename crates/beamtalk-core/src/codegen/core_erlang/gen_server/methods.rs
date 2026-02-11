@@ -639,12 +639,6 @@ impl CoreErlangGenerator {
             // BT-412: +2 for ClassSelf and ClassVars parameters
             let arity = method.selector.arity() + 2;
 
-            writeln!(self.output)?;
-            write!(
-                self.output,
-                "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars"
-            )?;
-
             // Push scope for parameter bindings
             self.push_scope();
             self.current_method_params.clear();
@@ -656,25 +650,43 @@ impl CoreErlangGenerator {
             self.bind_var("self", "ClassSelf");
             self.in_class_method = true;
 
-            // Generate parameter names
-            for param in &method.parameters {
-                let var_name = self.fresh_var(&param.name);
-                write!(self.output, ", {var_name}")?;
-                self.current_method_params.push(var_name);
-            }
-            writeln!(self.output, ") ->")?;
-            self.indent += 1;
+            // Collect parameter names (mutates scope via fresh_var)
+            let param_vars: Vec<String> = method
+                .parameters
+                .iter()
+                .map(|p| {
+                    let var_name = self.fresh_var(&p.name);
+                    self.current_method_params.push(var_name.clone());
+                    var_name
+                })
+                .collect();
 
-            // Generate method body
-            self.write_indent()?;
-            if method.body.is_empty() {
-                write!(self.output, "'nil'")?;
+            // Capture body output
+            let body_str = if method.body.is_empty() {
+                "'nil'".to_string()
             } else {
+                let original_output = std::mem::take(&mut self.output);
                 self.generate_class_method_body(method, &class.class_variables)?;
-            }
-            writeln!(self.output)?;
+                std::mem::replace(&mut self.output, original_output)
+            };
 
-            self.indent -= 1;
+            // Build function header with params
+            let params_suffix = if param_vars.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", param_vars.join(", "))
+            };
+
+            let doc = docvec![
+                "\n",
+                format!(
+                    "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars{params_suffix}) ->"
+                ),
+                nest(INDENT, docvec![line(), body_str,]),
+                "\n",
+            ];
+            self.write_document(&doc);
+
             self.pop_scope();
             self.in_class_method = false;
         }
