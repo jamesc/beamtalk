@@ -1,72 +1,68 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for File I/O operations
-// Tests basic file reading and writing
+// File I/O tests
+// Migrated from E2E - sequential file operations that don't need REPL.
 
 // ===========================================================================
 // FILE EXISTENCE CHECKS
 // ===========================================================================
 
-File exists: '_bt_e2e_nonexistent_xyzzy.txt'
+File exists: "_bt_stdlib_nonexistent_xyzzy.txt"
 // => false
 
 // ===========================================================================
-// FILE WRITING
+// FILE WRITING AND READING
 // ===========================================================================
 
-File writeAll: '_bt_e2e_test_output.txt' contents: 'Hello, Beamtalk!'
+File writeAll: "_bt_stdlib_test.txt" contents: "Hello, Beamtalk!"
 // => nil
 
-// ===========================================================================
-// FILE READING
-// ===========================================================================
-
-File readAll: '_bt_e2e_test_output.txt'
+File readAll: "_bt_stdlib_test.txt"
 // => Hello, Beamtalk!
 
-File exists: '_bt_e2e_test_output.txt'
+File exists: "_bt_stdlib_test.txt"
 // => true
 
 // ===========================================================================
 // OVERWRITE EXISTING FILE
 // ===========================================================================
 
-File writeAll: '_bt_e2e_test_output.txt' contents: 'New content'
+File writeAll: "_bt_stdlib_test.txt" contents: "New content"
 // => nil
 
-File readAll: '_bt_e2e_test_output.txt'
+File readAll: "_bt_stdlib_test.txt"
 // => New content
 
 // ===========================================================================
 // SPECIAL CHARACTERS
 // ===========================================================================
 
-File writeAll: '_bt_e2e_special.txt' contents: 'Hello, World! @#$%'
+File writeAll: "_bt_stdlib_special.txt" contents: "Hello, World! @#$%"
 // => nil
 
-File readAll: '_bt_e2e_special.txt'
+File readAll: "_bt_stdlib_special.txt"
 // => Hello, World! @#$%
 
 // ===========================================================================
 // EMPTY FILE
 // ===========================================================================
 
-File writeAll: '_bt_e2e_empty.txt' contents: ''
+File writeAll: "_bt_stdlib_empty.txt" contents: ""
 // => nil
 
-File readAll: '_bt_e2e_empty.txt'
+File readAll: "_bt_stdlib_empty.txt"
 // =>
 
-File exists: '_bt_e2e_empty.txt'
+File exists: "_bt_stdlib_empty.txt"
 // => true
 
 // ===========================================================================
 // SECURITY: PATH VALIDATION
 // ===========================================================================
 
-File exists: '/etc/passwd'
+File exists: "/etc/passwd"
 // => false
 
-File exists: '../passwords.txt'
+File exists: "../passwords.txt"
 // => false

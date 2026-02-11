@@ -1,18 +1,59 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Manual test demonstrating ProtoObject behavior
+// ProtoObject behavior tests - the root of the class hierarchy
+// Tests class reflection, identity, and perform: dispatch
 
-// Test 1: class message returns atoms (not futures)
+// ===========================================================================
+// CLASS REFLECTION
+// ===========================================================================
+
 42 class
 // => Integer
 
-'hello' class
+"hello" class
 // => String
 
-// Test 2: Identity comparisons work immediately (not futures)
+true class
+// => True
+
+false class
+// => False
+
+nil class
+// => Nil
+
+// ===========================================================================
+// IDENTITY COMPARISON (==, ~=)
+// ===========================================================================
+
 42 == 42
 // => true
 
 42 ~= 43
 // => true
+
+nil == nil
+// => true
+
+nil == false
+// => false
+
+nil ~= false
+// => true
+
+nil ~= nil
+// => false
+
+// ===========================================================================
+// PERFORM:WITHARGUMENTS: - dynamic dispatch
+// ===========================================================================
+
+42 perform: #+ withArguments: #(3)
+// => 45
+
+42 perform: #asString withArguments: #()
+// => 42
+
+"hello" perform: #++ withArguments: #(" world")
+// => hello world
