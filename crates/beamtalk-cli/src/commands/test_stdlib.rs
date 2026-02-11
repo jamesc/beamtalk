@@ -256,6 +256,8 @@ fn write_error_assertion(
          \x20       catch\n\
          \x20           error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
          \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           throw:{{future_rejected, {{beamtalk_error, Kind{i}, _, _, _, _, _}}}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
          \x20           error:'{kind}' ->\n\
          \x20               atom_error;\n\
          \x20           error:Reason{i} ->\n\
@@ -1080,6 +1082,8 @@ mod tests {
         assert!(wrapper.contains("case TryResult0 of"));
         assert!(wrapper.contains("{ok, _}"));
         assert!(wrapper.contains("CaughtKind0"));
+        // Error wrapper catches future_rejected throws (actor errors via await)
+        assert!(wrapper.contains("throw:{future_rejected, {beamtalk_error,"));
     }
 
     #[test]

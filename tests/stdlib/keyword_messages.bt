@@ -3,7 +3,7 @@
 
 // Keyword message tests (block value: dispatch)
 // Migrated from E2E - pure block tests that don't need REPL.
-// Actor-based keyword tests remain in tests/e2e/cases/keyword_messages.bt.
+// Actor keyword dispatch (BT-327) and higher-order blocks also migrated (BT-459).
 
 // ===========================================================================
 // SINGLE KEYWORD MESSAGES
@@ -73,3 +73,53 @@
 
 [:a :b | a + b] value: 2 * 3 value: 4 + 1
 // => 11
+
+// ===========================================================================
+// HIGHER-ORDER BLOCKS (variable persistence across expressions)
+// ===========================================================================
+
+// Block that returns a block
+makeMultiplier := [:factor | [:n | n * factor]]
+// => a Block/1
+
+times3 := makeMultiplier value: 3
+// => a Block/1
+
+times3 value: 7
+// => 21
+
+// Passing block as argument
+applyBlock := [:block :arg | block value: arg]
+// => a Block/2
+
+applyBlock value: [:x | x + 100] value: 42
+// => 142
+
+// ===========================================================================
+// 4+ KEYWORD MESSAGES ON OBJECTS (BT-327)
+// ===========================================================================
+
+// @load tests/e2e/fixtures/multi_keyword.bt
+
+mk := MultiKeyword spawn
+// => _
+
+// 4-keyword method: sum four arguments
+(mk add: 1 and: 2 and: 3 and: 4) await
+// => 10
+
+// 4-keyword method: verify argument order (weighted sum)
+(mk first: 1 second: 2 third: 3 fourth: 4) await
+// => 1234
+
+// Different argument values to confirm ordering
+(mk first: 9 second: 0 third: 5 fourth: 7) await
+// => 9057
+
+// 5-keyword method: sum five arguments
+(mk add: 10 and: 20 and: 30 and: 40 and: 50) await
+// => 150
+
+// Verify state was updated by add:and:and:and:and:
+mk getResult await
+// => 150

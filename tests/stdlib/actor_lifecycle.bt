@@ -1,7 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for actor lifecycle (BT-172, BT-397)
+// Tests for actor lifecycle (BT-172, BT-397)
+// Migrated from E2E: cross-expression variable resolution (BT-459)
 //
 // Tests that:
 // - isAlive returns true for running actors
@@ -17,29 +18,29 @@ counter := Counter spawn
 // => _
 
 // isAlive returns true for a running actor
-counter isAlive
+counter isAlive await
 // => true
 
 // Actor still works after isAlive check
-counter increment
+counter increment await
 // => 1
 
 // isAlive still true after message processing
-counter isAlive
+counter isAlive await
 // => true
 
 // Stop the actor gracefully
-counter stop
+counter stop await
 // => ok
 
 // Stopping an already-stopped actor is idempotent
-counter stop
+counter stop await
 // => ok
 
 // isAlive returns false after stop
-counter isAlive
+counter isAlive await
 // => false
 
 // Sending a message to a stopped actor returns actor_dead error
-counter increment
-// => ERROR: actor process has terminated
+counter increment await
+// => ERROR: actor_dead

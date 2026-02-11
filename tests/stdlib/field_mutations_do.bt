@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for field mutations (BT-98)
+// Migrated from E2E: cross-expression variable resolution (BT-459)
+
+// @load tests/e2e/fixtures/field_mutation_counter.bt
+
+counter := FieldMutationCounter spawn
+// => _
+
+counter getValue await
+// => 0
+
+(counter setValue: 5) await
+// => _
+
+counter getValue await
+// => 5
+
+(counter setValue: 10) await
+// => _
+
+counter getValue await
+// => 10

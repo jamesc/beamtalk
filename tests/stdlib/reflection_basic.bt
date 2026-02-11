@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test basic reflection API (BT-97)
+// Migrated from E2E: cross-expression variable resolution (BT-459)
 // @load tests/e2e/fixtures/counter.bt
 
 // Create counter instance
@@ -20,38 +21,38 @@ c respondsTo: #increment
 c respondsTo: #nonExistent
 // => false
 
-// Test instVarNames - returns atoms (displayed as strings in E2E)
-c instVarNames
+// Test instVarNames
+(c instVarNames) await
 // => ["value"]
 
 // Test instVarAt: - read field value
-c instVarAt: #value
+(c instVarAt: #value) await
 // => 0
 
 // Increment to change state
-c increment
+c increment await
 // => 1
 
 // Test instVarAt: after state change
-c instVarAt: #value
+(c instVarAt: #value) await
 // => 1
 
 // Test instVarAt:put: - set field value
-c instVarAt: #value put: 42
+(c instVarAt: #value put: 42) await
 // => 42
 
 // Verify field was set
-c getValue
+c getValue await
 // => 42
 
 // Test perform: - dynamic dispatch (zero-arity method)
-c perform: #getValue
+(c perform: #getValue) await
 // => 42
 
 // Test perform: with another method
-c perform: #increment
+(c perform: #increment) await
 // => 43
 
 // Verify increment worked via getValue
-c getValue
+c getValue await
 // => 43
