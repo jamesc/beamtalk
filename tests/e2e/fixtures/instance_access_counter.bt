@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-413: Test fixture for instance-side class variable access (Actor)
+Actor subclass: InstanceAccessCounter
+  classVar: instanceCount = 0
+  state: count = 0
+
+  class create =>
+    self.instanceCount := self.instanceCount + 1
+    self spawn
+
+  // Class method accessor for class variable
+  class instanceCount => self.instanceCount
+
+  increment =>
+    self.count := self.count + 1
+
+  getCount => self.count
+
+  // BT-413: Instance method accessing class variable via self class
+  totalCounters => self class instanceCount
