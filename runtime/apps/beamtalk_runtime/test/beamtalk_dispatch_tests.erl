@@ -29,6 +29,10 @@ setup() ->
     %% The beamtalk_runtime app should handle starting necessary supervisors
     application:ensure_all_started(beamtalk_runtime),
     
+    %% BT-446: Ensure stdlib classes are registered (may have been killed by
+    %% earlier test teardowns since class processes are unlinked)
+    beamtalk_stdlib:init(),
+    
     %% Initialize extensions registry
     beamtalk_extensions:init(),
     

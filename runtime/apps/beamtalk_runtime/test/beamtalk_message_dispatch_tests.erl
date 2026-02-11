@@ -21,6 +21,8 @@ actor_setup() ->
     end,
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
+    %% BT-446: Bootstrap only starts pg. Classes registered by compiled stdlib.
+    beamtalk_stdlib:init(),
     ok.
 
 actor_teardown(_) ->
