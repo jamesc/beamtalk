@@ -400,11 +400,20 @@ impl CoreErlangGenerator {
     /// perform:, perform:withArguments:), checks the extension registry for unknown
     /// selectors, and delegates to superclass dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
+    ///
+    /// BT-447: For classes with zero instance methods (e.g., File), generates a
+    /// minimal stub that handles only `class` and `respondsTo:`, delegating
+    /// everything else to the superclass.
     #[allow(clippy::too_many_lines)]
     fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
+
+        // BT-447: Class-methods-only classes skip protocol boilerplate
+        if class.methods.is_empty() && superclass_mod.is_some() {
+            return self.generate_minimal_dispatch(class);
+        }
 
         writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, Self) ->")?;
         self.indent += 1;
@@ -658,6 +667,11 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
 
+        // BT-447: Class-methods-only classes delegate directly to superclass
+        if class.methods.is_empty() && superclass_mod.is_some() {
+            return self.generate_minimal_has_method(class);
+        }
+
         writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
         self.indent += 1;
         self.write_indent()?;
@@ -725,6 +739,176 @@ impl CoreErlangGenerator {
             writeln!(self.output, "<'false'> when 'true' -> 'false'")?;
         }
 
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
+    ///
+    /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
+    /// locally, then checks extensions and delegates everything else to the
+    /// superclass. `perform:` must re-dispatch through this module to preserve
+    /// extension lookup and correct error attribution. Skips instVarNames,
+    /// instVarAt:, instVarAt:put: since the superclass already handles them.
+    fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let mod_name = self.module_name.clone();
+        let super_mod = Self::superclass_module_name(class.superclass_name())
+            .expect("minimal dispatch requires superclass");
+
+        writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, Self) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Selector of")?;
+        self.indent += 1;
+
+        // class
+        self.write_indent()?;
+        writeln!(self.output, "<'class'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "'{class_name}'")?;
+        self.indent -= 1;
+
+        // respondsTo:
+        self.write_indent()?;
+        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "<_> when 'true' -> 'false'")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // perform: — re-dispatch through this module to preserve extension lookup
+        self.write_indent()?;
+        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PerfSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PerfSel, [], Self)"
+        )?;
+        self.indent -= 1;
+
+        // perform:withArguments: — re-dispatch through this module
+        self.write_indent()?;
+        writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "let <PwaSel> = call 'erlang':'hd'(Args) in")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)"
+        )?;
+        self.indent -= 1;
+
+        // Default: extension check, then superclass delegation
+        self.write_indent()?;
+        writeln!(self.output, "<_Other> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "apply ExtFun(Args, Self)")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'not_found'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "call '{super_mod}':'dispatch'(Selector, Args, Self)"
+        )?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+
+        // Close outer case
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+
+        self.indent -= 1;
+        writeln!(self.output)?;
+
+        Ok(())
+    }
+
+    /// BT-447: Generates a minimal `has_method/1` for classes with no instance methods.
+    ///
+    /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
+    /// then extensions, then delegates to superclass.
+    fn generate_minimal_has_method(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let super_mod = Self::superclass_module_name(class.superclass_name())
+            .expect("minimal has_method requires superclass");
+
+        writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+
+        // class, respondsTo:, perform:, perform:withArguments: are handled locally
+        writeln!(
+            self.output,
+            "case call 'lists':'member'(Selector, ['class', 'respondsTo', 'perform', 'perform:withArguments:']) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
+        self.write_indent()?;
+        writeln!(self.output, "<'false'> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "case call 'beamtalk_extensions':'has'('{class_name}', Selector) of"
+        )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)"
+        )?;
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "end")?;
