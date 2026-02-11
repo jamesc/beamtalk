@@ -1,8 +1,7 @@
 # ADR 0007: Compilable Standard Library with Primitive Injection
 
 ## Status
-
-Accepted
+Implemented (2026-02-07) — Epic BT-286
 
 ## Context
 
@@ -365,7 +364,7 @@ spawn => @primitive actorSpawn
 
 3. **Single binding mode: named intrinsics** — Each primitive method maps to exactly one named intrinsic from the compiler's finite registry. No raw Erlang MFA calls. This ensures all primitive operations go through the runtime safety layer (type checking, structured errors, extension registry).
 
-4. **Two categories of intrinsics, one keyword** — Runtime-dispatch primitives use the **selector itself** in quotes (`@primitive '+'`, `@primitive 'size'`). The compiler resolves these using the class context — `'+'` inside Integer routes to `beamtalk_integer:dispatch`, `'size'` inside String routes to `beamtalk_string:dispatch`. Structural intrinsics use unquoted descriptive names (`basicNew`, `actorSpawn`, `conditional`) because they don't map to a single selector. This mirrors Rust's approach where each `#[rustc_intrinsic]` function has an explicit name matched against a finite registry in the compiler. The structural intrinsic registry is ~20 entries; everything else uses the selector.
+4. ~~**Two categories of intrinsics, one keyword**~~ **SUPERSEDED by Amendment (2026-02-11): see `@intrinsic` keyword below.** The original design used one keyword with quoting to distinguish categories. This proved confusing in practice — see the amendment at the end of this document for the replacement: `@primitive 'selector'` for runtime dispatch, `@intrinsic name` for structural intrinsics.
 
 5. **Stdlib becomes compilable** — The compiler processes `lib/*.bt` files through the normal pipeline. Pragma methods compile to intrinsic-generated code that routes through the runtime safety layer.
 
@@ -1279,7 +1278,7 @@ If this ADR is accepted, the following documents need updating:
 
 2. ~~**Atom table pressure from intrinsic names.**~~ **RESOLVED:** Intrinsic names (`basicNew`, `conditional`, etc.) are **Rust strings in the compiler**, used at compile time to look up code generation functions. They never appear as Erlang atoms in generated Core Erlang. The generated code contains atoms that already exist (`'+'`, `'beamtalk_integer'`, `'dispatch'`, etc.). Zero atom table impact.
 
-3. ~~**Should runtime-dispatch pragmas use a different keyword than structural intrinsics?**~~ **RESOLVED: No — one keyword.** The distinction between "routes through runtime dispatch" and "compiler generates structural code" is an implementation detail inside the compiler. From the stdlib maintainer's perspective, both mean "the compiler handles this method's body." Two keywords adds complexity for ~3 people without user-visible benefit. The compiler internally distinguishes the two cases by checking whether the name is in its structural intrinsic registry — no syntax distinction needed.
+3. ~~**Should runtime-dispatch pragmas use a different keyword than structural intrinsics?**~~ ~~**RESOLVED: No — one keyword.**~~ **SUPERSEDED (2026-02-11): Yes — `@intrinsic` for structural intrinsics.** Experience showed that the quote-based distinction was confusing in practice (187 quoted vs 25 unquoted uses, visually near-identical). See the amendment at the end of this document.
 
 4. ~~**Intrinsic naming convention.**~~ **RESOLVED: Use the selector itself for runtime-dispatch primitives.** The pragma is always inside a class definition, so the compiler knows the class context. Instead of `intAdd`, `stringSize`, etc., runtime-dispatch primitives use the **selector itself**:
 
@@ -1306,6 +1305,81 @@ If this ADR is accepted, the following documents need updating:
    **Result:** The intrinsic registry shrinks from ~50 entries to ~20 structural intrinsics. All runtime-dispatch primitives use the selector itself — self-documenting, no naming convention to learn. Structural intrinsic names are unquoted identifiers; selector-based names are quoted atoms. The compiler distinguishes the two cases automatically by checking quotes: `'+'` = selector (runtime dispatch), `basicNew` = structural intrinsic.
 
 5. ~~**Where's `yourself`?**~~ **RESOLVED: Add it.** `yourself => self` belongs in `lib/Object.bt`. It's pure Beamtalk (no pragma needed) and is the canonical Smalltalk "this is a real class library" signal. It also has practical use in message cascades. Will be included in the Phase 2 stdlib conversion.
+
+---
+
+## Amendment: Separate `@intrinsic` keyword (2026-02-11)
+
+### Problem
+
+The original design used **one keyword** (`@primitive`) with **two meanings**, distinguished only by quoting:
+
+```beamtalk
+size => @primitive 'size'       // selector-based: runtime dispatch
+new  => @primitive basicNew     // structural intrinsic: compiler-generated code
+```
+
+In practice, stdlib has **187** quoted `@primitive 'x'` (runtime dispatch) and **25** unquoted `@primitive x` (compiler intrinsics). The visual difference is a pair of quotes — easy to miss, impossible to grep for intent, and confusing when writing new stdlib classes.
+
+**Concrete confusion:** `@primitive 'printString'` and `@primitive printString` would mean entirely different things, but a stdlib author has no syntactic signal to indicate which is which.
+
+### Decision
+
+Introduce `@intrinsic` as a separate keyword for structural intrinsics. `@primitive` retains its meaning for selector-based runtime dispatch.
+
+**Before (ambiguous):**
+```beamtalk
++ other => @primitive '+'          // runtime dispatch
+size => @primitive 'size'          // runtime dispatch
+new => @primitive basicNew         // compiler intrinsic (looks the same!)
+whileTrue: body => @primitive whileTrue  // compiler intrinsic
+```
+
+**After (explicit):**
+```beamtalk
++ other => @primitive '+'          // runtime dispatch (unchanged)
+size => @primitive 'size'          // runtime dispatch (unchanged)
+new => @intrinsic basicNew         // compiler intrinsic (clearly different)
+whileTrue: body => @intrinsic whileTrue  // compiler intrinsic (clearly different)
+```
+
+### Scope
+
+The 25 structural intrinsic names that move from `@primitive` to `@intrinsic`:
+
+| Category | Intrinsic Names |
+|----------|----------------|
+| **Object lifecycle** | `basicNew`, `basicNewWith`, `actorSpawn`, `actorSpawnWith` |
+| **Block evaluation** | `blockValue`, `blockValue1`, `blockValue2`, `blockValue3` |
+| **Control flow** | `whileTrue`, `whileFalse`, `repeat`, `timesRepeat`, `toDo`, `toByDo` |
+| **Exception handling** | `onDo`, `ensure`, `error` |
+| **Reflection** | `respondsTo`, `instVarNames`, `instVarAt`, `instVarAtPut`, `dynamicSend`, `dynamicSendWithArgs` |
+| **Object protocol** | `printString`, `hash` |
+
+All 187 quoted `@primitive 'selector'` uses are **unchanged**.
+
+### Implementation
+
+1. **Parser**: Add `@intrinsic` as a new pragma keyword, producing a distinct AST node (or a flag on `Primitive`)
+2. **Codegen**: `PrimitiveBinding::StructuralIntrinsic` matches `@intrinsic`; `PrimitiveBinding::SelectorBased` matches `@primitive`
+3. **Stdlib files**: Change 25 unquoted `@primitive x` → `@intrinsic x` across `lib/*.bt`
+4. **Deprecation**: Unquoted `@primitive x` emits a warning for one release, then becomes an error
+
+### Consequences
+
+**Positive:**
+- Unambiguous: you can grep `@intrinsic` vs `@primitive` and know the intent
+- Stdlib authors don't need to remember quoting rules
+- Follows Rust precedent: `#[rustc_intrinsic]` is distinct from `#[lang = "add"]`
+
+**Negative:**
+- One more keyword to learn (but only for stdlib maintainers)
+- 25 lines change in `lib/*.bt`
+
+**Neutral:**
+- Selector-based primitives are always written as `@primitive 'selector'`; unquoted `@primitive x` is deprecated in favor of `@intrinsic x`, so there is no change for existing quoted `@primitive` usage.
+
+---
 
 ## References
 
