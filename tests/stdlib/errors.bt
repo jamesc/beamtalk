@@ -91,7 +91,8 @@ UndefinedObject new
 Block new
 // => ERROR: instantiation_error
 
-// new: (keyword message with args) also raises instantiation_error
+// new: on non-instantiable primitives still raises instantiation_error
+// because the class can't be constructed at all (BT-473: checked first).
 // BT-422: gen_server crash fix ensures class process survives the error.
 
 Integer new: 42
@@ -99,6 +100,21 @@ Integer new: 42
 
 String new: "hello"
 // => ERROR: instantiation_error
+
+// ===========================================================================
+// NON-MAP ARGUMENT TO new: (BT-473)
+// ===========================================================================
+// Passing a non-Dictionary argument to new: should raise type_error,
+// not silently fall back to new/0.
+
+Dictionary new: 42
+// => ERROR: type_error
+
+Dictionary new: "hello"
+// => ERROR: type_error
+
+Dictionary new: true
+// => ERROR: type_error
 
 // ===========================================================================
 // FILE I/O ERRORS

@@ -187,6 +187,9 @@ print_string(X) when is_map(X) ->
             Elements = maps:get(elements, X, []),
             ElemStrs = [print_string(E) || E <- Elements],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
+        'CompiledMethod' ->
+            %% BT-457: Delegate to ops module for "a CompiledMethod(selector)" format
+            beamtalk_compiled_method_ops:dispatch('printString', [], X);
         _ ->
             ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
             iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])

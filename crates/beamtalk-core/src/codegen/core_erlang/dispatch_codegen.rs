@@ -363,11 +363,14 @@ impl CoreErlangGenerator {
                     self.last_open_scope_result = Some(result);
                 } else {
                     // Built-in export (spawn, new, superclass, etc.)
-                    write!(
-                        self.output,
-                        "call '{}':'{selector_atom}'(",
-                        self.module_name
-                    )?;
+                    // BT-413: Map selectors to actual function names — module-level
+                    // functions use arity (new/0, new/1), not colon naming (new:).
+                    // spawnWith: maps to spawn/1 in the runtime (class_send → {spawn, [Map]}).
+                    let fun_name = match selector_atom.as_str() {
+                        "spawnWith:" => "spawn".to_string(),
+                        _ => selector_atom.replace(':', ""),
+                    };
+                    write!(self.output, "call '{}':'{fun_name}'(", self.module_name)?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
                             write!(self.output, ", ")?;

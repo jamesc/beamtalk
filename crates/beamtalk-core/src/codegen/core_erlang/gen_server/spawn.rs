@@ -138,13 +138,16 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'spawn'/1 = fun (InitArgs) ->
-    ///     case call 'gen_server':'start_link'('counter', InitArgs, []) of
-    ///         <{'ok', Pid}> when 'true' ->
-    ///             {'beamtalk_object', 'Counter', 'counter', Pid};
-    ///         <{'error', Reason}> when 'true' ->
-    ///             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Counter') in
-    ///             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
-    ///             call 'beamtalk_error':'raise'(SpawnErr1)
+    ///     case call 'erlang':'is_map'(InitArgs) of
+    ///       <'false'> when 'true' ->
+    ///         %% BT-473: type_error for non-map arguments
+    ///       <'true'> when 'true' ->
+    ///         case call 'gen_server':'start_link'('counter', InitArgs, []) of
+    ///             <{'ok', Pid}> when 'true' ->
+    ///                 {'beamtalk_object', 'Counter', 'counter', Pid};
+    ///             <{'error', Reason}> when 'true' ->
+    ///                 %% instantiation_error
+    ///         end
     ///     end
     /// ```
     #[allow(clippy::unnecessary_wraps)]
@@ -169,34 +172,71 @@ impl CoreErlangGenerator {
             )]
         };
 
+        // BT-473: Validate InitArgs is a map before passing to gen_server
+        let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
         let doc = docvec![
             "'spawn'/1 = fun (InitArgs) ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    format!(
-                        "case call 'gen_server':'start_link'('{module_name}', InitArgs, []) of"
-                    ),
+                    "case call 'erlang':'is_map'(InitArgs) of",
                     nest(
                         INDENT,
                         docvec![
                             line(),
-                            "<{'ok', Pid}> when 'true' ->",
-                            nest(INDENT, docvec![line(), ok_body,]),
-                            line(),
-                            "<{'error', Reason}> when 'true' ->",
+                            "<'false'> when 'true' ->",
                             nest(
                                 INDENT,
                                 docvec![
                                     line(),
                                     format!(
-                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', '{class_name}') in"
                                     ),
                                     line(),
-                                    "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
+                                    "let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in",
                                     line(),
-                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                    format!(
+                                        "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, {hint_binary}) in"
+                                    ),
+                                    line(),
+                                    "call 'beamtalk_error':'raise'(TypeErr2)",
+                                ]
+                            ),
+                            line(),
+                            "<'true'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    format!(
+                                        "case call 'gen_server':'start_link'('{module_name}', InitArgs, []) of"
+                                    ),
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'ok', Pid}> when 'true' ->",
+                                            nest(INDENT, docvec![line(), ok_body,]),
+                                            line(),
+                                            "<{'error', Reason}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    format!(
+                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                                                    ),
+                                                    line(),
+                                                    "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
+                                                    line(),
+                                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
                                 ]
                             ),
                         ]
@@ -380,12 +420,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 result.push(',');
             }
-            write!(
-                result,
-                "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                byte
-            )
-            .unwrap();
+            write!(result, "#<{byte}>(8,1,'integer',['unsigned'|['big']])").unwrap();
         }
         result.push_str("}#");
         result
