@@ -5,7 +5,7 @@ Proposed (2026-02-11)
 
 ## Context
 
-Beamtalk generates Core Erlang text (ADR 0003) via **direct string emission** — 1,100+ `write!`/`writeln!` macro calls across 22 files in `crates/beamtalk-core/src/codegen/core_erlang/`. The current architecture uses a single `String` output buffer with manual indentation tracking:
+Beamtalk generates Core Erlang text (ADR 0003) via **direct string emission** — 1,100+ `write!`/`writeln!` macro calls across 28 files in `crates/beamtalk-core/src/codegen/core_erlang/`. The current architecture uses a single `String` output buffer with manual indentation tracking:
 
 ```rust
 // Current approach: imperative string building
@@ -36,7 +36,7 @@ self.indent -= 1;
 
 **3. Testing requires full string comparison.** The codegen subsystem has 196 snapshot tests and 170 unit tests, with 84 assertions that directly inspect `self.output` string content. There's no way to unit-test individual code generation fragments (e.g., "does this method table generate correctly?") without running the full pipeline.
 
-**4. The codebase is large and growing.** 1,100+ `write!`/`writeln!` calls across 22 files, with the heaviest files being:
+**4. The codebase is large and growing.** 1,100+ `write!`/`writeln!` calls across 28 files, with the heaviest files being:
 
 | File | `write!` calls | Purpose |
 |------|---------------|---------|
@@ -169,7 +169,7 @@ Core Erlang has fixed formatting (no "fit on one line vs. break" decisions), so 
 
 **Universal pattern:** Compilers that emit text-based output use document trees. Direct string concatenation is the exception, not the norm.
 
-**Gleam's evolution:** Gleam started with simpler codegen and grew into the `Document` approach as complexity increased. Beamtalk is at a similar inflection point — 1,100+ write calls across 22 files.
+**Gleam's evolution:** Gleam started with simpler codegen and grew into the `Document` approach as complexity increased. Beamtalk is at a similar inflection point — 1,100+ write calls across 28 files.
 
 **Why not a full Core Erlang IR?** The prior art compilers listed above all use document trees rather than typed target-language IRs for their text backends. A typed Core Erlang IR (Alternative 2, below) would only become valuable if beamtalk needed to *transform* or *optimize* the generated Core Erlang before emission — which it currently doesn't, since `erlc` handles all optimization passes.
 
@@ -338,7 +338,7 @@ Keep `write!` for existing code, use `Document` only for new code.
 
 ### Negative
 
-- **Migration effort**: ~1,100 `write!` call sites across 22 files need conversion over time (mitigated: organic migration during feature work, not a dedicated project)
+- **Migration effort**: ~1,100 `write!` call sites across 28 files need conversion over time (mitigated: organic migration during feature work, not a dedicated project)
 - **New concept**: Contributors must learn the `Document` type and `docvec!` macro (mitigated: simple API, well-documented pattern)
 - **Regression risk**: Any large refactoring risks introducing bugs (mitigated: 196 snapshot tests catch output changes)
 - **Test migration**: 170 codegen unit tests with 84 assertions that directly inspect `self.output` content will need updating as each file migrates to return `Document` values
@@ -350,7 +350,7 @@ Keep `write!` for existing code, use `Document` only for new code.
 - **Generated output unchanged**: Byte-for-byte identical Core Erlang output (verified by snapshot tests)
 - **Performance**: Document tree adds one allocation + render pass. Negligible compared to `erlc` compilation time
 - **Future backends**: If Beamtalk ever adds an Erlang source backend (ADR 0003 leaves this open), the `Document` type would be reusable
-- **Source maps**: If source-level debugging is added later, the document tree enables it more naturally than `write!` — an `Annotated(Span, Box<Document>)` variant can carry source positions through construction, and the renderer emits Core Erlang line annotations centrally. The current `write!` approach would require manually inserting line annotations across 22 files. Gleam demonstrates this pattern with `-file()` annotations emitted via `docvec!`
+- **Source maps**: If source-level debugging is added later, the document tree enables it more naturally than `write!` — an `Annotated(Span, Box<Document>)` variant can carry source positions through construction, and the renderer emits Core Erlang line annotations centrally. The current `write!` approach would require manually inserting line annotations across 28 files. Gleam demonstrates this pattern with `-file()` annotations emitted via `docvec!`
 
 ## Implementation
 
