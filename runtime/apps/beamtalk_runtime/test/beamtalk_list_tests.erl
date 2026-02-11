@@ -29,15 +29,15 @@ at_test() ->
     ?assertEqual(3, beamtalk_list_ops:at([1, 2, 3], 3)).
 
 at_out_of_bounds_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
         beamtalk_list_ops:at([1, 2, 3], 0)),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
         beamtalk_list_ops:at([1, 2, 3], 4)),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
         beamtalk_list_ops:at([1, 2, 3], -1)).
 
 at_invalid_type_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:at([1, 2, 3], foo)).
 
 %%% ============================================================================
@@ -49,7 +49,7 @@ detect_test() ->
         beamtalk_list_ops:detect([1, 2, 3], fun(X) -> X > 1 end)).
 
 detect_not_found_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List'}},
         beamtalk_list_ops:detect([1, 2, 3], fun(X) -> X > 10 end)).
 
 detect_if_none_test() ->
@@ -79,9 +79,9 @@ take_test() ->
     ?assertEqual([], beamtalk_list_ops:take([1, 2, 3], 0)).
 
 take_invalid_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:take([1, 2, 3], -1)),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:take([1, 2, 3], foo)).
 
 drop_test() ->
@@ -90,9 +90,9 @@ drop_test() ->
     ?assertEqual([1, 2, 3], beamtalk_list_ops:drop([1, 2, 3], 0)).
 
 drop_invalid_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:drop([1, 2, 3], -1)),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:drop([1, 2, 3], foo)).
 
 sort_with_test() ->
@@ -100,7 +100,7 @@ sort_with_test() ->
         beamtalk_list_ops:sort_with([1, 3, 2], fun(A, B) -> A >= B end)).
 
 sort_with_invalid_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'List'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'List'}},
         beamtalk_list_ops:sort_with([1, 2, 3], not_a_function)).
 
 %%% ============================================================================
@@ -147,7 +147,7 @@ dispatch_first_test() ->
     ?assertEqual(1, 'bt@stdlib@list':dispatch('first', [], [1, 2, 3])).
 
 dispatch_first_empty_test() ->
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'}},
         'bt@stdlib@list':dispatch('first', [], [])).
 
 dispatch_rest_test() ->

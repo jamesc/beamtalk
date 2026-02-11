@@ -22,9 +22,9 @@ _error kind
 _error message
 // => _
 
-// _error class should be Exception
+// _error class should reflect the error hierarchy (BT-452)
 _error class
-// => Exception
+// => RuntimeError
 
 // ===========================================================================
 // _error SELECTOR FIELD

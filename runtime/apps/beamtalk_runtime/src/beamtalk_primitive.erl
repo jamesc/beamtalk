@@ -176,9 +176,6 @@ print_string(#beamtalk_object{class = ClassName}) ->
     end;
 print_string(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'Exception' ->
-            %% BT-338: Format exceptions nicely
-            beamtalk_exception_handler:dispatch('printString', [], X);
         'Association' ->
             %% BT-335: Format associations as "key -> value"
             beamtalk_association:format_string(X);
@@ -187,9 +184,15 @@ print_string(X) when is_map(X) ->
             Elements = maps:get(elements, X, []),
             ElemStrs = [print_string(E) || E <- Elements],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
-        _ ->
-            ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
-            iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+        Class ->
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Format exception hierarchy objects
+                    beamtalk_exception_handler:dispatch('printString', [], X);
+                false ->
+                    ClassName = case Class of undefined -> 'Dictionary'; _ -> Class end,
+                    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+            end
     end;
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
@@ -247,9 +250,6 @@ send(X, Selector, Args) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
             'bt@stdlib@compiled_method':dispatch(Selector, Args, X);
-        'Exception' ->
-            %% BT-338: Exception value type - direct dispatch
-            beamtalk_exception_handler:dispatch(Selector, Args, X);
         'Association' ->
             %% BT-335: Association value type - direct dispatch (ADR 0016)
             'bt@stdlib@association':dispatch(Selector, Args, X);
@@ -260,8 +260,14 @@ send(X, Selector, Args) when is_map(X) ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
             'bt@stdlib@dictionary':dispatch(Selector, Args, X);
         Class ->
-            %% Value type instance - route to class module (BT-354)
-            value_type_send(X, Class, Selector, Args)
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Exception hierarchy - direct dispatch
+                    beamtalk_exception_handler:dispatch(Selector, Args, X);
+                false ->
+                    %% Value type instance - route to class module (BT-354)
+                    value_type_send(X, Class, Selector, Args)
+            end
     end;
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
@@ -323,9 +329,6 @@ responds_to(X, Selector) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
             'bt@stdlib@compiled_method':has_method(Selector);
-        'Exception' ->
-            %% BT-338: Exception value type
-            beamtalk_exception_handler:has_method(Selector);
         'Association' ->
             %% BT-335: Association value type (ADR 0016)
             'bt@stdlib@association':has_method(Selector);
@@ -335,8 +338,14 @@ responds_to(X, Selector) when is_map(X) ->
         undefined ->
             'bt@stdlib@dictionary':has_method(Selector);
         Class ->
-            %% Value type instance - check class module exports (BT-354)
-            value_type_responds_to(Class, Selector)
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Exception hierarchy
+                    beamtalk_exception_handler:has_method(Selector);
+                false ->
+                    %% Value type instance - check class module exports (BT-354)
+                    value_type_responds_to(Class, Selector)
+            end
     end;
 responds_to(X, Selector) when is_list(X) ->
     'bt@stdlib@list':has_method(Selector);

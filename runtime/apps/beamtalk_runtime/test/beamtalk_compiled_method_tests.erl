@@ -120,7 +120,7 @@ has_method_unknown_test() ->
 
 unknown_selector_raises_error_test() ->
     Method = test_method(),
-    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}},
                  beamtalk_compiled_method_ops:dispatch('nonexistent', [], Method)).
 
 unknown_selector_error_has_selector_test() ->
@@ -129,7 +129,7 @@ unknown_selector_error_has_selector_test() ->
         beamtalk_compiled_method_ops:dispatch('badMethod', [], Method),
         ?assert(false)
     catch
-        error:#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{selector = Sel, hint = Hint}} ->
+        error:#{'$beamtalk_class' := _, error := #beamtalk_error{selector = Sel, hint = Hint}} ->
             ?assertEqual('badMethod', Sel),
             ?assertNotEqual(undefined, Hint)
     end.
@@ -140,7 +140,7 @@ unknown_selector_error_has_hint_test() ->
         beamtalk_compiled_method_ops:dispatch('nope', [], Method),
         ?assert(false)
     catch
-        error:#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{hint = Hint}} ->
+        error:#{'$beamtalk_class' := _, error := #beamtalk_error{hint = Hint}} ->
             ?assert(is_binary(Hint)),
             %% Hint should mention available selectors
             ?assertNotEqual(nomatch, binary:match(Hint, <<"selector">>))

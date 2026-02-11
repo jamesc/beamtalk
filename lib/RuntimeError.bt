@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// RuntimeError - Errors for message dispatch and mutation failures
+//
+// Subclass of Error for runtime dispatch errors:
+// does_not_understand, arity_mismatch, immutable_value
+
+Error subclass: RuntimeError
+  describe => 'a RuntimeError'
