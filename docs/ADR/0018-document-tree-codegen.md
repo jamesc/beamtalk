@@ -1,7 +1,7 @@
 # ADR 0018: Document Tree Code Generation (Wadler-Lindig Pretty Printer)
 
 ## Status
-Proposed (2026-02-11)
+Accepted (2026-02-11)
 
 ## Context
 
@@ -32,9 +32,9 @@ self.indent -= 1;
 
 **1. Indentation is fragile.** The `self.indent` counter must be manually incremented/decremented in matched pairs. Forgetting a decrement or nesting incorrectly produces malformed Core Erlang that `erlc` rejects — but the Rust code compiles fine. This class of bug is invisible at compile time.
 
-**2. No composability.** Code fragments can't be built independently and combined. Every `write!` call mutates a shared `String` buffer, so you can't build a function body, inspect it, test it in isolation, or compose it with other fragments. Adding new codegen features requires understanding the mutation flow across multiple files.
+**2. No composability.** Code fragments can't be built independently and combined. Every `write!` call mutates a shared `String` buffer, so you can't build a function body, inspect it, test it in isolation, or compose it with other fragments. Adding new codegen features requires understanding the mutation flow across multiple files. In practice, AI agents working on codegen issues struggle with the dense `write!`/`writeln!` + manual indent patterns — the code is hard to read and reason through, increasing the risk of subtle indentation errors that compile as valid Rust but produce invalid Core Erlang.
 
-**3. Testing requires full string comparison.** The codegen subsystem has 196 snapshot tests and 170 unit tests, with 84 assertions that directly inspect `self.output` string content. There's no way to unit-test individual code generation fragments (e.g., "does this method table generate correctly?") without running the full pipeline.
+**3. Testing requires full string comparison.** The codegen subsystem has 196 snapshot tests and 170 unit tests. There's no way to unit-test individual code generation fragments (e.g., "does this method table generate correctly?") without running the full pipeline.
 
 **4. The codebase is large and growing.** 1,100+ `write!`/`writeln!` calls across 28 files, with the heaviest files being:
 
@@ -43,7 +43,7 @@ self.indent -= 1;
 | `primitive_implementations.rs` | 136 | Intrinsic method bodies |
 | `counted_loops.rs` | 126 | Loop codegen |
 | `gen_server/methods.rs` | 98 | Method dispatch |
-| `value_type_codegen.rs` | 87 | Value type modules |
+| `value_type_codegen.rs` | 204 | Value type modules |
 | `intrinsics.rs` | 80 | Intrinsic dispatch |
 
 As the language grows (pattern matching, exception handling, type annotations), this approach will become increasingly difficult to maintain.
@@ -121,9 +121,11 @@ fn generate_method_table(&self, methods: &[(String, usize)]) -> Document {
 - The result is composable — can be embedded in a larger document
 - Can be unit tested: `assert_eq!(generate_method_table(&methods).to_string(), "...")`
 
+**Note on mutable generator state:** `CoreErlangGenerator` holds mutable state beyond the output buffer — `var_context` (variable scoping/fresh names) and `state_threading` (field assignment state variables). Functions that use these will still require `&mut self` even after adopting `Document` return types. The migration decouples *output construction* from *state mutation* but does not eliminate all `&mut self` methods. The `write_document()` bridge (Phase 0) accommodates this: `Document`-returning functions can still take `&mut self` when they need to generate fresh variable names.
+
 ### Document Type
 
-A minimal `Document` enum for Core Erlang generation (based on Gleam's approach, ~200 lines):
+A `Document` enum for Core Erlang generation (based on Gleam's approach, ~250 lines):
 
 ```rust
 pub enum Document<'a> {
@@ -137,24 +139,28 @@ pub enum Document<'a> {
     Nest(isize, Box<Document<'a>>),
     /// A sequence of documents
     Vec(Vec<Document<'a>>),
+    /// A group that can be rendered flat or broken across lines
+    Group(Box<Document<'a>>),
+    /// A break point — rendered as a space when flat, newline when broken
+    Break(&'a str),
     /// Empty document
     Nil,
 }
 ```
 
-Core Erlang doesn't need Gleam's full pretty-printer (no `Group`, `Break`, `ForceBroken` — we don't need automatic line-wrapping decisions). A simplified subset suffices.
+While Core Erlang mostly has fixed formatting, `Group` and `Break` are included from the start because pattern matching compilation (planned soon) will generate deeply nested `case` expressions where readable line-breaking is needed. Including these variants now (~50 extra lines) avoids a disruptive retrofit later and follows Gleam's proven design.
 
 ### Approach: Roll Our Own vs. Use a Crate
 
-**Recommended: Roll a minimal implementation** (~200 lines), following Gleam's proven design.
+**Recommended: Roll a focused implementation** (~250 lines), following Gleam's proven design.
 
 | Option | Pros | Cons |
 |--------|------|------|
-| `pretty` crate | Full Wadler-Lindig, well-tested | Overkill — Core Erlang doesn't need line-wrapping heuristics; adds dependency |
-| Gleam-style minimal | Exactly what we need, no unused features, easy to understand | Must write ~200 lines |
+| `pretty` crate | Full Wadler-Lindig, well-tested | Adds dependency; includes features we don't need (`ForceBroken`, `FlexBreak`) |
+| Gleam-style focused | What we need including `Group`/`Break`, easy to understand | Must write ~250 lines |
 | Full Wadler-Lindig custom | Future-proof for formatting tools | Unnecessary complexity |
 
-Core Erlang has fixed formatting (no "fit on one line vs. break" decisions), so we only need: `Str`, `String`, `Line`, `Nest`, `Vec`, `Nil`, and a `docvec!` macro.
+We need: `Str`, `String`, `Line`, `Nest`, `Vec`, `Group`, `Break`, `Nil`, and a `docvec!` macro.
 
 ## Prior Art
 
@@ -203,12 +209,12 @@ This is a **purely internal refactoring** — it changes how the compiler genera
 
 ### The Strongest Argument Against This ADR
 
-**This is a pure refactoring of the largest subsystem in a ~15k-line compiler that has multiple active epics of unimplemented language features. The refactoring produces zero user-visible value. Every hour spent migrating `write!` calls is an hour not spent on pattern matching, type inference, or the features that will determine whether Beamtalk has users.**
+**This is a pure refactoring of the largest subsystem in a ~40k-line compiler that has multiple active epics of unimplemented language features. The refactoring produces zero user-visible value. Every hour spent migrating `write!` calls is an hour not spent on pattern matching, type inference, or the features that will determine whether Beamtalk has users.**
 
 This is a legitimate concern. The ADR proceeds despite it because:
 1. The migration is designed to be **organic, not dedicated** — new code uses `Document`, old code migrates opportunistically during feature work
 2. Codegen is the subsystem that *every* language feature touches — improving its architecture reduces the cost of all future features
-3. The `Document` type itself is ~200 lines of net-new code; the migration cost is spread across feature PRs, not front-loaded
+3. The `Document` type itself is ~250 lines of net-new code; the migration cost is spread across feature PRs, not front-loaded
 
 ### Option A: Document Tree (Recommended)
 
@@ -239,7 +245,7 @@ This is a legitimate concern. The ADR proceeds despite it because:
 - **Risk vs. maintainability**: The status quo has zero risk today but increasing maintenance cost as features grow. The document tree has one-time migration risk but reduces ongoing cost. Helper methods sit in the middle — low risk, moderate improvement.
 - **Familiarity**: `write!` is standard Rust; `docvec!` is a custom macro. But `docvec!` is learnable in minutes and the pattern is well-documented (Gleam, Wadler-Lindig papers).
 - **Timing**: Multiple active epics will change codegen substantially. Doing a dedicated migration now risks conflicting with feature PRs. Organic migration avoids this by folding migration into feature work.
-- **Opportunity cost**: Time spent on infrastructure vs. features. Mitigated by organic migration — the `Document` type itself is ~200 lines; no dedicated migration phases compete with feature work.
+- **Opportunity cost**: Time spent on infrastructure vs. features. Mitigated by organic migration — the `Document` type itself is ~250 lines; no dedicated migration phases compete with feature work.
 
 ## Alternatives Considered
 
@@ -311,19 +317,40 @@ A typed IR may become valuable later (for optimization passes, multiple backends
 
 Use the existing `pretty` crate from crates.io instead of rolling our own.
 
-**Rejected because:**
-- The `pretty` crate implements full Wadler-Lindig with line-wrapping heuristics (`Group`, `Break`, `ForceBroken`) — complexity we don't need today
-- Core Erlang currently has fixed formatting; we don't need "fit on one line or break" decisions
-- A minimal custom implementation (~200 lines) is simpler, has zero dependencies, and is tailored to our needs
+**Not adopted because:**
+- The `pretty` crate includes features beyond what we need (`ForceBroken`, `FlexBreak`, `Annotated` with generic metadata) — adding API surface and dependency weight we won't use
+- A focused custom implementation (~250 lines) with `Group`/`Break` is simpler, has zero dependencies, and is tailored to our needs
 - Gleam took the same approach (custom ~875 line implementation) for similar reasons
-
-**Future note:** If pattern matching compilation produces deeply nested `case` expressions where line-wrapping matters for debugging generated `.core` files, we may need `Group`/`Break` variants. The minimal `Document` type can be extended with these variants without adopting the full `pretty` crate — Gleam demonstrates this progression.
+- Owning the implementation lets us add Core Erlang-specific helpers (e.g., `core_atom()`, `core_binary()`) directly on the `Document` type
 
 ### 5. Incremental Adoption — `write!` + Document Hybrid
 
 Keep `write!` for existing code, use `Document` only for new code.
 
 **Partially adopted:** The migration strategy (see Implementation) is incremental. But the end goal is full migration — a permanent hybrid would be confusing for contributors who must learn both patterns.
+
+### 6. Builder Pattern
+
+Use a builder API that wraps `String` construction with composable methods:
+
+```rust
+CoreErlangBuilder::new()
+    .line("'method_table'/0 = fun () ->")
+    .indent(|b| {
+        b.text("~{")
+         .join(methods.iter(), ", ", |(name, arity)| format!("'{name}' => {arity}"))
+         .text("}~")
+    })
+    .build()  // → String
+```
+
+**Not adopted because:**
+- Still fundamentally imperative — closures execute in order, so fragment reuse requires `Clone` or re-execution
+- The `indent()` closure approach is essentially Alternative 1 (helper methods) with a wrapper type — it doesn't enable building fragments independently and composing them later
+- No standard rendering pipeline — each builder call immediately appends to the internal buffer, so you can't inspect or transform the structure before rendering
+- The `Document` algebraic type is the industry-standard approach (Gleam, rustc, prettyplease) and enables `Group`/`Break` line-wrapping decisions that a builder can't express declaratively
+
+**What it does better than `write!`:** Eliminates manual `indent += 1` / `indent -= 1` pairs, so it solves Problem #1 (fragile indentation). If composability and fragment testing are not priorities, a builder is a pragmatic middle ground.
 
 ## Consequences
 
@@ -341,7 +368,7 @@ Keep `write!` for existing code, use `Document` only for new code.
 - **Migration effort**: ~1,100 `write!` call sites across 28 files need conversion over time (mitigated: organic migration during feature work, not a dedicated project)
 - **New concept**: Contributors must learn the `Document` type and `docvec!` macro (mitigated: simple API, well-documented pattern)
 - **Regression risk**: Any large refactoring risks introducing bugs (mitigated: 196 snapshot tests catch output changes)
-- **Test migration**: 170 codegen unit tests with 84 assertions that directly inspect `self.output` content will need updating as each file migrates to return `Document` values
+- **Test migration**: 170 codegen unit tests will need updating as each file migrates to return `Document` values
 - **Hybrid-state confusion**: During the organic migration period, some functions return `Document` while others write to `self.output` — contributors must understand both patterns (mitigated: clear documentation of which pattern to use where; new code always uses `Document`)
 - **No user-visible benefit**: This is pure internal improvement — it competes with feature work for attention
 
@@ -359,8 +386,8 @@ Keep `write!` for existing code, use `Document` only for new code.
 Rather than a dedicated multi-phase migration project that competes with feature work, adopt the document tree **organically**:
 
 ### Phase 0: Foundation (~S — single PR)
-1. Add `Document` enum and `docvec!` macro in `crates/beamtalk-core/src/codegen/core_erlang/document.rs`
-2. Implement `to_string()` / `render()` for the document type
+1. Add `Document` enum (with `Group`/`Break` variants) and `docvec!` macro in `crates/beamtalk-core/src/codegen/core_erlang/document.rs`
+2. Implement `to_string()` / `render()` for the document type, including group/break rendering logic
 3. Add unit tests for the document primitives
 4. Add a `write_document()` bridge method to `CoreErlangGenerator` that renders a `Document` to `self.output` — enabling gradual per-function migration
 
@@ -393,6 +420,14 @@ Rather than a dedicated multi-phase migration project that competes with feature
 
 **Key advantage:** No dedicated migration phases compete with feature work. The document tree earns its keep by making each feature PR's codegen changes cleaner and more testable.
 
+### Migration Health Checks
+
+To prevent the organic migration from stalling indefinitely:
+
+- **Tracking:** After Phase 0, count remaining `write!`/`writeln!` calls with `grep -c 'write!\|writeln!' crates/beamtalk-core/src/codegen/core_erlang/**/*.rs`. Current baseline: ~1,200 calls.
+- **Checkpoint:** If after 6 months of feature work, fewer than 10% of call sites have migrated, revisit whether the organic strategy is working or a dedicated migration sprint is warranted.
+- **Phase 3 trigger:** When ≤50 `write!` calls remain (i.e., the long tail of rarely-touched files), schedule a dedicated cleanup PR to finish the migration and remove the `self.output` buffer.
+
 ## Migration Path
 
 Not applicable — this is an internal refactoring with no user-facing changes.
@@ -403,7 +438,7 @@ Not applicable — this is an internal refactoring with no user-facing changes.
 - Related ADR: [ADR 0007 — Compilable Standard Library with Primitive Injection](0007-compilable-stdlib-with-primitive-injection.md) (class kind routing maintained by document tree migration)
 - Related ADR: [ADR 0014 — Beamtalk Test Framework](0014-beamtalk-test-framework.md) (196 codegen snapshot tests serve as verification)
 - Gleam's Document implementation: [compiler-core/src/pretty.rs](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/pretty.rs) (~875 lines)
-- Gleam's Erlang codegen using documents: [compiler-core/src/erlang.rs](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs) (65 `docvec!` calls)
+- Gleam's Erlang codegen using documents: [compiler-core/src/erlang/](https://github.com/gleam-lang/gleam/tree/main/compiler-core/src/erlang) (uses `docvec!` throughout)
 - Wadler-Lindig paper: ["Strictly Pretty" (2000) by Christian Lindig](http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.34.2200)
 - `pretty` crate: [docs.rs/pretty](https://docs.rs/pretty/latest/pretty/)
 - `prettyplease` crate: [github.com/dtolnay/prettyplease](https://github.com/dtolnay/prettyplease)
