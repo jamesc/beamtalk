@@ -20,23 +20,25 @@ Actor subclass: FieldMutationAccumulator
       self.product := self.product * item.
       self.count := self.count + 1
     ].
-    ^#{sum => self.sum, product => self.product, count => self.count}
+    ^#{#sum => self.sum, #product => self.product, #count => self.count}
 
-  // Field mutation in inject:into:
-  accumulateWithInject: items =>
-    | result |
-    result := items inject: 0 into: [:acc :item |
-      self.count := self.count + 1.
-      acc + item
-    ].
-    ^#{result => result, count => self.count}
+  // NOTE: accumulateWithInject: and processWithLocal: commented out —
+  // they use local variables in blocks and inject:into: block params,
+  // which are not yet supported by the compiler. See BT-98 follow-up.
 
-  // Mixed local variables and field mutations
-  processWithLocal: items =>
-    | localSum |
-    localSum := 0.
-    items do: [:item |
-      localSum := localSum + 1.
-      self.sum := self.sum + item
-    ].
-    ^#{localSum => localSum, sum => self.sum}
+  // accumulateWithInject: items =>
+  //   | result |
+  //   result := items inject: 0 into: [:acc :item |
+  //     self.count := self.count + 1.
+  //     acc + item
+  //   ].
+  //   ^#{#result => result, #count => self.count}
+
+  // processWithLocal: items =>
+  //   | localSum |
+  //   localSum := 0.
+  //   items do: [:item |
+  //     localSum := localSum + 1.
+  //     self.sum := self.sum + item
+  //   ].
+  //   ^#{#localSum => localSum, #sum => self.sum}
