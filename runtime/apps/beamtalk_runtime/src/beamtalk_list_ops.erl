@@ -24,14 +24,14 @@ at(List, N) when is_list(List), not is_integer(N) ->
     Hint = iolist_to_binary(
         io_lib:format("Index must be a positive integer, got: ~p", [N])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 at(List, N) when is_list(List), is_integer(N), N =< 0 ->
     Error0 = beamtalk_error:new(does_not_understand, 'List'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     Hint = iolist_to_binary(
         io_lib:format("Index ~p is out of bounds (must be >= 1)", [N])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 at(List, N) when is_list(List), is_integer(N), N >= 1 ->
     try
         lists:nth(N, List)
@@ -42,14 +42,14 @@ at(List, N) when is_list(List), is_integer(N), N >= 1 ->
             Hint = iolist_to_binary(
                 io_lib:format("Index ~p is out of bounds", [N])),
             Error2 = beamtalk_error:with_hint(Error1, Hint),
-            error(Error2);
+            beamtalk_error:raise(Error2);
         error:function_clause ->
             Error0 = beamtalk_error:new(does_not_understand, 'List'),
             Error1 = beamtalk_error:with_selector(Error0, 'at:'),
             Hint = iolist_to_binary(
                 io_lib:format("Index ~p is out of bounds", [N])),
             Error2 = beamtalk_error:with_hint(Error1, Hint),
-            error(Error2)
+            beamtalk_error:raise(Error2)
     end.
 
 %% @doc Find first element matching block, error if not found.
@@ -61,7 +61,7 @@ detect(List, Block) when is_list(List), is_function(Block, 1) ->
             Error0 = beamtalk_error:new(does_not_understand, 'List'),
             Error1 = beamtalk_error:with_selector(Error0, 'detect:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"No element matched the block">>),
-            error(Error2)
+            beamtalk_error:raise(Error2)
     end;
 detect(List, Block) when is_list(List) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
@@ -69,7 +69,7 @@ detect(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Find first element matching block, return default if not found.
 -spec detect_if_none(list(), function(), term()) -> term().
@@ -85,7 +85,7 @@ detect_if_none(List, Block, _Default) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Iterate over elements with side effects.
 -spec do(list(), function()) -> nil.
@@ -98,7 +98,7 @@ do(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Filter out elements matching block.
 -spec reject(list(), function()) -> list().
@@ -110,7 +110,7 @@ reject(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("Block must be a unary function (arity 1), got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Take N elements with validation.
 -spec take(list(), term()) -> list().
@@ -120,7 +120,7 @@ take(List, N) when is_list(List), (not is_integer(N)) orelse N < 0 ->
     Hint = iolist_to_binary(
         io_lib:format("Argument must be a non-negative integer, got: ~p", [N])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 take(List, N) when is_list(List), is_integer(N), N >= 0 ->
     lists:sublist(List, N).
 
@@ -132,7 +132,7 @@ drop(List, N) when is_list(List), (not is_integer(N)) orelse N < 0 ->
     Hint = iolist_to_binary(
         io_lib:format("Argument must be a non-negative integer, got: ~p", [N])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 drop(List, N) when is_list(List), is_integer(N), N >= 0 ->
     safe_nthtail(N, List).
 
@@ -146,7 +146,7 @@ sort_with(_List, Block) ->
     Hint = iolist_to_binary(
         io_lib:format("sort: expects a 2-argument block, got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Zip two lists into a list of maps #{key => K, value => V}.
 -spec zip(list(), list()) -> list().
@@ -158,7 +158,7 @@ zip(List, Other) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("zip: expects a List as argument, got: ~p", [Other])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Group elements by block result into a map.
 -spec group_by(list(), function()) -> map().
@@ -175,7 +175,7 @@ group_by(_List, Block) ->
     Hint = iolist_to_binary(
         io_lib:format("groupBy: expects a 1-argument block, got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Partition list into matching and non-matching.
 -spec partition(list(), function()) -> map().
@@ -188,7 +188,7 @@ partition(_List, Block) ->
     Hint = iolist_to_binary(
         io_lib:format("partition: expects a 1-argument block, got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Intersperse separator between elements.
 -spec intersperse(list(), term()) -> list().
@@ -213,21 +213,21 @@ from_to(List, Start, _End) when is_list(List), not is_integer(Start) ->
     Hint = iolist_to_binary(
         io_lib:format("Start index must be a positive integer, got: ~p", [Start])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 from_to(List, _Start, End) when is_list(List), not is_integer(End) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
     Error1 = beamtalk_error:with_selector(Error0, 'from:to:'),
     Hint = iolist_to_binary(
         io_lib:format("End index must be a positive integer, got: ~p", [End])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 from_to(List, Start, _End) when is_list(List), is_integer(Start), Start < 1 ->
     Error0 = beamtalk_error:new(does_not_understand, 'List'),
     Error1 = beamtalk_error:with_selector(Error0, 'from:to:'),
     Hint = iolist_to_binary(
         io_lib:format("Start index ~p is out of bounds (must be >= 1)", [Start])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Find 1-based index of element, nil if not found.
 -spec index_of(list(), term()) -> integer() | nil.
@@ -245,7 +245,7 @@ each_with_index(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
         io_lib:format("Block must be a 2-argument function (element, index), got: ~p", [Block])),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% Internal helpers
 

@@ -18,7 +18,8 @@
     with_selector/2,
     with_hint/2,
     with_details/2,
-    format/1
+    format/1,
+    raise/1
 ]).
 
 %% Type definition for error record
@@ -111,6 +112,21 @@ format(#beamtalk_error{message = Message, hint = undefined}) ->
     Message;
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     [Message, <<"\nHint: ">>, Hint].
+
+%% @doc Wrap an error as an Exception object and raise it.
+%%
+%% This is the canonical way to signal errors in the Beamtalk runtime.
+%% It wraps the `#beamtalk_error{}` record as an Exception tagged map
+%% before throwing, ensuring all exceptions are Beamtalk objects at
+%% signal time (ADR 0015).
+%%
+%% Example:
+%%   Error = beamtalk_error:new(does_not_understand, 'Integer'),
+%%   beamtalk_error:raise(Error)
+-spec raise(#beamtalk_error{}) -> no_return().
+raise(#beamtalk_error{} = Error) ->
+    Wrapped = beamtalk_exception_handler:wrap(Error),
+    error(Wrapped).
 
 %% Internal helper to generate error messages
 -spec generate_message(atom(), atom(), atom() | undefined) -> binary().

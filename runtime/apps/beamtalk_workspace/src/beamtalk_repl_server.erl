@@ -824,6 +824,9 @@ format_rejection_reason(Reason) ->
 %% @private
 %% Format an error reason as a human-readable message.
 -spec format_error_message(term()) -> binary().
+format_error_message(#{'$beamtalk_class' := 'Exception', error := Error}) ->
+    %% ADR 0015: Format wrapped Exception objects
+    iolist_to_binary([<<"Exception: ">>, beamtalk_error:format(Error)]);
 format_error_message(#beamtalk_error{} = Error) ->
     %% Format structured beamtalk_error using the error helper
     iolist_to_binary(beamtalk_error:format(Error));
@@ -841,6 +844,9 @@ format_error_message({invalid_request, Reason}) ->
     iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]);
 format_error_message({parse_error, Details}) ->
     iolist_to_binary([<<"Parse error: ">>, format_name(Details)]);
+format_error_message({eval_error, _Class, #{'$beamtalk_class' := 'Exception', error := Error}}) ->
+    %% ADR 0015: Evaluation error with wrapped Exception
+    iolist_to_binary([<<"Exception: ">>, beamtalk_error:format(Error)]);
 format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)]);
 format_error_message({load_error, Reason}) ->

@@ -608,7 +608,7 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'first') in \
                    let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
-                   call 'erlang':'error'(Error2) \
+                   call 'beamtalk_error':'raise'(Error2) \
                  end"
             )
             .ok()?;
@@ -634,7 +634,7 @@ fn generate_list_bif(output: &mut String, selector: &str, params: &[String]) -> 
                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', 'List') in \
                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'last') in \
                    let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint}) in \
-                   call 'erlang':'error'(Error2) \
+                   call 'beamtalk_error':'raise'(Error2) \
                  <_> when 'true' -> \
                    call 'lists':'last'(Self) \
                  end"

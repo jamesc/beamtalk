@@ -607,7 +607,7 @@ impl CoreErlangGenerator {
             "let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in"
         )?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(IvaErr2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(IvaErr2)")?;
         self.indent -= 1;
 
         // instVarAt:put: — error: primitives are immutable
@@ -633,7 +633,7 @@ impl CoreErlangGenerator {
             "let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in"
         )?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(ImmErr2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(ImmErr2)")?;
         self.indent -= 1;
 
         // perform: — recursive dispatch
@@ -759,7 +759,7 @@ impl CoreErlangGenerator {
                 "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in"
             )?;
             self.write_indent()?;
-            writeln!(self.output, "call 'erlang':'error'(DnuErr2)")?;
+            writeln!(self.output, "call 'beamtalk_error':'raise'(DnuErr2)")?;
         }
 
         self.indent -= 1;

@@ -560,7 +560,7 @@ impl CoreErlangGenerator {
                             " in let {class_var} = call 'beamtalk_primitive':'class_of'({recv_var}) in \
                              let {err0} = call 'beamtalk_error':'new'('user_error', {class_var}) in \
                              let {err1} = call 'beamtalk_error':'with_message'({err0}, {msg_var}) in \
-                             call 'erlang':'error'({err1})"
+                             call 'beamtalk_error':'raise'({err1})"
                         )?;
                         Ok(Some(()))
                     }
@@ -763,7 +763,7 @@ impl CoreErlangGenerator {
                              let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
                              let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:') in \
                              let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                             call 'erlang':'error'({error_hint}) \
+                             call 'beamtalk_error':'raise'({error_hint}) \
                              end"
                         )?;
 
@@ -836,7 +836,7 @@ impl CoreErlangGenerator {
                              let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
                              let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:put:') in \
                              let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                             call 'erlang':'error'({error_hint}) \
+                             call 'beamtalk_error':'raise'({error_hint}) \
                              end"
                         )?;
 

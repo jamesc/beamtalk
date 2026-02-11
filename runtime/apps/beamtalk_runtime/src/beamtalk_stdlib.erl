@@ -258,7 +258,7 @@ dispatch(Selector, _Args, _Receiver) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Check if the Beamtalk class responds to the given selector.
 -spec has_method(atom()) -> boolean().

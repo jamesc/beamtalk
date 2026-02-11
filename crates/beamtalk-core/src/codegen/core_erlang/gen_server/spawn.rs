@@ -29,7 +29,9 @@ impl CoreErlangGenerator {
     ///         <{'ok', Pid}> when 'true' ->
     ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
-    ///             call 'erlang':'error'({'spawn_failed', Reason})
+    ///             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Counter') in
+    ///             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
+    ///             call 'beamtalk_error':'raise'(SpawnErr1)
     ///     end
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
@@ -75,8 +77,15 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "call 'erlang':'error'({{'spawn_failed', Reason}})"
+            "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(SpawnErr1)")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -132,7 +141,9 @@ impl CoreErlangGenerator {
     ///         <{'ok', Pid}> when 'true' ->
     ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
-    ///             call 'erlang':'error'({'spawn_failed', Reason})
+    ///             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Counter') in
+    ///             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
+    ///             call 'beamtalk_error':'raise'(SpawnErr1)
     ///     end
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
@@ -177,8 +188,15 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "call 'erlang':'error'({{'spawn_failed', Reason}})"
+            "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
         )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(SpawnErr1)")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -201,7 +219,7 @@ impl CoreErlangGenerator {
     ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
     ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
-    ///     call 'erlang':'error'(Error2)
+    ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &mut self,
@@ -226,7 +244,7 @@ impl CoreErlangGenerator {
         self.generate_binary_string("Use spawn instead")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(Error2)")?;
         self.indent -= 1;
 
         Ok(())
@@ -245,7 +263,7 @@ impl CoreErlangGenerator {
     ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
     ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
-    ///     call 'erlang':'error'(Error2)
+    ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &mut self,
@@ -270,7 +288,7 @@ impl CoreErlangGenerator {
         self.generate_binary_string("Use spawnWith: instead")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(Error2)")?;
         self.indent -= 1;
 
         Ok(())
@@ -305,7 +323,7 @@ impl CoreErlangGenerator {
         self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(Error2)")?;
         self.indent -= 1;
 
         Ok(())
@@ -336,7 +354,7 @@ impl CoreErlangGenerator {
         self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
         writeln!(self.output, ") in")?;
         self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(Error2)")?;
         self.indent -= 1;
 
         Ok(())
