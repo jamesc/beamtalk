@@ -429,6 +429,7 @@ impl CoreErlangGenerator {
     /// Helper to generate a binary string literal in Core Erlang format.
     ///
     /// Generates: #{#<char1>(...), #<char2>(...), ...}#
+    #[allow(dead_code)]
     pub(in crate::codegen::core_erlang) fn generate_binary_string(
         &mut self,
         s: &str,
