@@ -8,8 +8,10 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
+use crate::docvec;
 use std::fmt::Write;
 
 impl CoreErlangGenerator {
@@ -41,50 +43,56 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
 
         let selector_name = method.selector.name();
+
+        // BT-295: Collect parameter variable names (mutates scope via fresh_var)
+        let param_vars: Vec<String> = method
+            .parameters
+            .iter()
+            .map(|p| {
+                let var_name = self.fresh_var(&p.name);
+                self.current_method_params.push(var_name.clone());
+                var_name
+            })
+            .collect();
+
+        // Capture body output using truncate (error-safe: no buffer swap)
+        let start = self.output.len();
+        self.generate_method_definition_body_with_reply(method)?;
+        let body_str = self.output[start..].to_string();
+        self.output.truncate(start);
+
+        // Write selector header at current indent (write! positions cursor correctly)
         self.write_indent()?;
         write!(self.output, "<'{selector_name}'> when 'true' ->")?;
-        writeln!(self.output)?;
         self.indent += 1;
 
-        // Bind method parameters from Args list
-        if !method.parameters.is_empty() {
-            self.write_indent()?;
-            write!(self.output, "case Args of")?;
-            writeln!(self.output)?;
-            self.indent += 1;
+        // Build body as Document tree
+        let has_params = !param_vars.is_empty();
+        let body_doc: Document = if has_params {
+            let params_pattern = param_vars.join(", ");
+            docvec![
+                line(),
+                "case Args of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("<[{params_pattern}]> when 'true' ->"),
+                        nest(INDENT, docvec![line(), body_str,]),
+                        line(),
+                        "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
+                    ]
+                ),
+                line(),
+                "end",
+            ]
+        } else {
+            docvec![line(), body_str,]
+        };
 
-            self.write_indent()?;
-            write!(self.output, "<[")?;
-            // BT-295: Track method params for @primitive codegen
-            for (i, param) in method.parameters.iter().enumerate() {
-                if i > 0 {
-                    write!(self.output, ", ")?;
-                }
-                let var_name = self.fresh_var(&param.name);
-                write!(self.output, "{var_name}")?;
-                self.current_method_params.push(var_name);
-            }
-            write!(self.output, "]> when 'true' ->")?;
-            writeln!(self.output)?;
-            self.indent += 1;
-        }
-
-        // Generate the method body with state threading
-        self.write_indent()?;
-        self.generate_method_definition_body_with_reply(method)?;
-        writeln!(self.output)?;
-
-        if !method.parameters.is_empty() {
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-            )?;
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "end")?;
-        }
+        // Render body at current indent level
+        let indent_spaces = isize::try_from(self.indent).unwrap_or(0) * INDENT;
+        self.write_document(&nest(indent_spaces, docvec![body_doc, "\n"]));
 
         self.indent -= 1;
 
@@ -407,202 +415,182 @@ impl CoreErlangGenerator {
             return Ok(());
         }
 
-        writeln!(self.output, "'register_class'/0 = fun () ->")?;
-        self.indent += 1;
+        let mut class_docs = Vec::new();
 
-        // Wrap in try-catch for defensive loading
-        self.write_indent()?;
-        writeln!(self.output, "try")?;
-        self.indent += 1;
-
-        // Generate registration for each class in the module
         for (i, class) in module.classes.iter().enumerate() {
-            self.write_indent()?;
-            // Use case expressions for error handling
-            if i > 0 {
-                write!(self.output, "in ")?;
-            }
-            write!(
-                self.output,
-                "let _Reg{} = case call 'beamtalk_object_class':'start'('{}', ~{{",
-                i, class.name.name
-            )?;
-            writeln!(self.output)?;
-            self.indent += 1;
-
-            // Class name
-            self.write_indent()?;
-            writeln!(self.output, "'name' => '{}',", class.name.name)?;
-
-            // Module name
-            self.write_indent()?;
-            writeln!(self.output, "'module' => '{}',", self.module_name)?;
-
-            // Superclass
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'superclass' => '{}',",
-                class.superclass_name()
-            )?;
-
-            // BT-105: Sealing modifiers
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_sealed' => '{}',",
-                if class.is_sealed { "true" } else { "false" }
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_abstract' => '{}',",
-                if class.is_abstract { "true" } else { "false" }
-            )?;
-
             // Instance methods
-            self.write_indent()?;
-            write!(self.output, "'instance_methods' => ~{{")?;
             let instance_methods: Vec<_> = class
                 .methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            for (method_idx, method) in instance_methods.iter().enumerate() {
-                if method_idx > 0 {
-                    write!(self.output, ", ")?;
-                }
-                // BT-403: Include per-method is_sealed flag
-                let is_sealed = if method.is_sealed || class.is_sealed {
-                    "'true'"
-                } else {
-                    "'false'"
-                };
-                write!(
-                    self.output,
-                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
-                    method.selector.name(),
-                    method.selector.arity(),
-                    is_sealed
-                )?;
-            }
-            writeln!(self.output, "}}~,")?;
+            let methods_str: Vec<String> = instance_methods
+                .iter()
+                .map(|method| {
+                    let is_sealed = if method.is_sealed || class.is_sealed {
+                        "'true'"
+                    } else {
+                        "'false'"
+                    };
+                    format!(
+                        "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
+                        method.selector.name(),
+                        method.selector.arity(),
+                        is_sealed
+                    )
+                })
+                .collect();
+            let instance_methods_str = methods_str.join(", ");
 
             // Instance variables
-            self.write_indent()?;
-            write!(self.output, "'instance_variables' => [")?;
-            for (state_idx, state_decl) in class.state.iter().enumerate() {
-                if state_idx > 0 {
-                    write!(self.output, ", ")?;
-                }
-                write!(self.output, "'{}'", state_decl.name.name)?;
-            }
-            writeln!(self.output, "],")?;
+            let inst_vars_str: Vec<String> = class
+                .state
+                .iter()
+                .map(|s| format!("'{}'", s.name.name))
+                .collect();
+            let inst_vars = inst_vars_str.join(", ");
 
-            // Class methods — depends on whether this is an actor or value type
-            // BT-411: Include both built-in and user-defined class methods
-            self.write_indent()?;
-            writeln!(self.output, "'class_methods' => ~{{")?;
-            self.indent += 1;
+            // Class methods - depends on context
+            let mut class_method_entries = Vec::new();
             if self.context == CodeGenContext::Actor {
-                self.write_indent()?;
-                writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
-                self.write_indent()?;
-                writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~,")?;
+                class_method_entries.push("'spawn' => ~{'arity' => 0}~,".to_string());
+                class_method_entries.push("'spawnWith:' => ~{'arity' => 1}~,".to_string());
             } else {
-                self.write_indent()?;
-                writeln!(self.output, "'new' => ~{{'arity' => 0}}~,")?;
-                self.write_indent()?;
-                writeln!(self.output, "'new:' => ~{{'arity' => 1}}~,")?;
+                class_method_entries.push("'new' => ~{'arity' => 0}~,".to_string());
+                class_method_entries.push("'new:' => ~{'arity' => 1}~,".to_string());
             }
-            self.write_indent()?;
-            writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
+            class_method_entries.push("'superclass' => ~{'arity' => 0}~".to_string());
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
-                    self.write_indent()?;
-                    writeln!(
-                        self.output,
+                    class_method_entries.push(format!(
                         ", '{}' => ~{{'arity' => {}}}~",
                         method.selector.name(),
                         method.selector.arity()
-                    )?;
+                    ));
                 }
             }
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~,")?;
 
-            // BT-101: Method source for CompiledMethod introspection
-            self.write_indent()?;
-            write!(self.output, "'method_source' => ~{{")?;
+            let class_methods_lines: Vec<_> = class_method_entries
+                .into_iter()
+                .map(|entry| docvec![line(), entry])
+                .collect();
+            let class_methods_doc = docvec![
+                "'class_methods' => ~{",
+                nest(INDENT, Document::Vec(class_methods_lines)),
+                line(),
+                "}~,",
+            ];
+
+            // BT-101: Method source
+            let mut method_source_parts = Vec::new();
             for (method_idx, method) in instance_methods.iter().enumerate() {
                 if method_idx > 0 {
-                    write!(self.output, ", ")?;
+                    method_source_parts.push(", ".to_string());
                 }
                 let source_str = self.extract_method_source(method);
-                write!(self.output, "'{}' => ", method.selector.name())?;
-                self.generate_binary_string(&source_str)?;
+                let binary = Self::binary_string_literal(&source_str);
+                method_source_parts.push(format!("'{}' => {binary}", method.selector.name()));
             }
-            writeln!(self.output, "}}~,")?;
+            let method_source_str = method_source_parts.join("");
 
             // BT-412: Class variable initial values
-            self.write_indent()?;
-            write!(self.output, "'class_variables' => ~{{")?;
+            let mut class_var_parts = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
                 if cv_idx > 0 {
-                    write!(self.output, ", ")?;
+                    class_var_parts.push(", ".to_string());
                 }
-                write!(self.output, "'{}' => ", cv.name.name)?;
-                if let Some(ref default_value) = cv.default_value {
-                    self.generate_expression(default_value)?;
+                let val = if let Some(ref default_value) = cv.default_value {
+                    self.capture_expression(default_value)?
                 } else {
-                    write!(self.output, "'nil'")?;
-                }
+                    "'nil'".to_string()
+                };
+                class_var_parts.push(format!("'{}' => {val}", cv.name.name));
             }
-            writeln!(self.output, "}}~")?;
+            let class_vars_str = class_var_parts.join("");
 
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~) of")?;
+            let is_sealed = if class.is_sealed { "true" } else { "false" };
+            let is_abstract = if class.is_abstract { "true" } else { "false" };
+            let let_prefix = if i > 0 { "in " } else { "" };
 
-            // Handle success case
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "<{{'ok', _Pid{i}}}> when 'true' -> 'ok'")?;
-
-            // Handle error cases - allow module to load anyway
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
-            )?;
-
-            self.write_indent()?;
-            writeln!(self.output, "<{{'error', _Reason{i}}}> when 'true' -> 'ok'")?;
-            self.indent -= 1;
-
-            self.write_indent()?;
-            writeln!(self.output, "end")?;
+            let class_doc = docvec![
+                line(),
+                format!(
+                    "{let_prefix}let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ~{{",
+                    class.name.name
+                ),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("'name' => '{}',", class.name.name),
+                        line(),
+                        format!("'module' => '{}',", self.module_name),
+                        line(),
+                        format!("'superclass' => '{}',", class.superclass_name()),
+                        line(),
+                        format!("'is_sealed' => '{is_sealed}',"),
+                        line(),
+                        format!("'is_abstract' => '{is_abstract}',"),
+                        line(),
+                        format!("'instance_methods' => ~{{{instance_methods_str}}}~,"),
+                        line(),
+                        format!("'instance_variables' => [{inst_vars}],"),
+                        line(),
+                        class_methods_doc,
+                        line(),
+                        format!("'method_source' => ~{{{method_source_str}}}~,"),
+                        line(),
+                        format!("'class_variables' => ~{{{class_vars_str}}}~"),
+                    ]
+                ),
+                line(),
+                "}~) of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
+                        line(),
+                        format!(
+                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
+                        ),
+                        line(),
+                        format!("<{{'error', _Reason{i}}}> when 'true' -> 'ok'"),
+                    ]
+                ),
+                line(),
+                "end",
+            ];
+            class_docs.push(class_doc);
         }
 
-        writeln!(self.output)?;
-        self.write_indent()?;
-        writeln!(self.output, "in 'ok'")?;
-
-        // Catch any exceptions during registration
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "of RegResult -> RegResult")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "catch <CatchType, CatchError, CatchStack> -> 'ok'"
-        )?;
-
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let doc = docvec![
+            "'register_class'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "try",
+                    nest(
+                        INDENT,
+                        docvec![Document::Vec(class_docs), "\n", line(), "in 'ok'",]
+                    ),
+                ]
+            ),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "of RegResult -> RegResult",
+                    line(),
+                    "catch <CatchType, CatchError, CatchStack> -> 'ok'",
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -652,12 +640,6 @@ impl CoreErlangGenerator {
             // BT-412: +2 for ClassSelf and ClassVars parameters
             let arity = method.selector.arity() + 2;
 
-            writeln!(self.output)?;
-            write!(
-                self.output,
-                "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars"
-            )?;
-
             // Push scope for parameter bindings
             self.push_scope();
             self.current_method_params.clear();
@@ -669,25 +651,45 @@ impl CoreErlangGenerator {
             self.bind_var("self", "ClassSelf");
             self.in_class_method = true;
 
-            // Generate parameter names
-            for param in &method.parameters {
-                let var_name = self.fresh_var(&param.name);
-                write!(self.output, ", {var_name}")?;
-                self.current_method_params.push(var_name);
-            }
-            writeln!(self.output, ") ->")?;
-            self.indent += 1;
+            // Collect parameter names (mutates scope via fresh_var)
+            let param_vars: Vec<String> = method
+                .parameters
+                .iter()
+                .map(|p| {
+                    let var_name = self.fresh_var(&p.name);
+                    self.current_method_params.push(var_name.clone());
+                    var_name
+                })
+                .collect();
 
-            // Generate method body
-            self.write_indent()?;
-            if method.body.is_empty() {
-                write!(self.output, "'nil'")?;
+            // Capture body output using truncate (error-safe: no buffer swap)
+            let body_str = if method.body.is_empty() {
+                "'nil'".to_string()
             } else {
+                let start = self.output.len();
                 self.generate_class_method_body(method, &class.class_variables)?;
-            }
-            writeln!(self.output)?;
+                let captured = self.output[start..].to_string();
+                self.output.truncate(start);
+                captured
+            };
 
-            self.indent -= 1;
+            // Build function header with params
+            let params_suffix = if param_vars.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", param_vars.join(", "))
+            };
+
+            let doc = docvec![
+                "\n",
+                format!(
+                    "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars{params_suffix}) ->"
+                ),
+                nest(INDENT, docvec![line(), body_str,]),
+                "\n",
+            ];
+            self.write_document(&doc);
+
             self.pop_scope();
             self.in_class_method = false;
         }

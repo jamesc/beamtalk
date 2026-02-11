@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test class method codegen (class-side methods, class variables)
+
+Actor subclass: ClassVarCounter
+  classVar: instanceCount = 0
+  state: count = 0
+
+  class create =>
+    self.instanceCount := self.instanceCount + 1
+    self spawn
+
+  class getCount =>
+    self.instanceCount
+
+  increment =>
+    self.count := self.count + 1
+
+  getCount => self.count
