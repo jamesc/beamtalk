@@ -714,11 +714,26 @@ impl CoreErlangGenerator {
             }
             // If the chain terminated at a known value-type root (Object/ProtoObject),
             // this is definitely a value type.
-            let known_value_roots = ["Object", "ProtoObject"];
+            // BT-480: Include exception hierarchy classes — these inherit from Object
+            // (Exception → Object) and must compile as value types, not actors.
+            let known_value_roots = [
+                "Object",
+                "ProtoObject",
+                "Exception",
+                "Error",
+                "RuntimeError",
+                "TypeError",
+                "InstantiationError",
+            ];
             if let Some(last) = chain.last() {
                 if known_value_roots.contains(&last.as_str()) {
                     return false;
                 }
+            }
+            // Also check direct superclass against known value types for incomplete chains
+            // (e.g., `Error subclass: MyCustomError` compiled without Exception in hierarchy).
+            if known_value_roots.contains(&class.superclass_name()) {
+                return false;
             }
             // Chain is incomplete (superclass not in hierarchy) or empty with
             // non-Object superclass. Default to actor for backward compatibility
