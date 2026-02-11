@@ -37,14 +37,14 @@ at(_Tuple, Idx) when not is_integer(Idx) ->
     Error0 = beamtalk_error:new(type_error, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     Error = beamtalk_error:with_hint(Error1, <<"Index must be an integer">>),
-    error(Error);
+    beamtalk_error:raise(Error);
 at(Tuple, Idx) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(
         io_lib:format("Index ~p is out of bounds for tuple of size ~p (1-based indexing)",
                       [Idx, tuple_size(Tuple)]))),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Extract value from {ok, Value} or raise error from {error, Reason}.
 -spec unwrap(tuple()) -> term().
@@ -54,12 +54,12 @@ unwrap({error, Reason}) ->
     Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Called unwrap on an error tuple">>),
     Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
-    error(Error3);
+    beamtalk_error:raise(Error3);
 unwrap(_Tuple) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'unwrap'),
     Error = beamtalk_error:with_hint(Error1, <<"unwrap requires {ok, Value} or {error, Reason} tuple">>),
-    error(Error).
+    beamtalk_error:raise(Error).
 
 %% @doc Return Value from {ok, Value} or Default otherwise.
 -spec unwrap_or(tuple(), term()) -> term().
@@ -76,7 +76,7 @@ unwrap_or_else(_Tuple, _NotABlock) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'unwrapOrElse:'),
     Error = beamtalk_error:with_hint(Error1, <<"Argument must be a block (0-arity function)">>),
-    error(Error).
+    beamtalk_error:raise(Error).
 
 %% @doc Convert tuple to string representation.
 -spec as_string(tuple()) -> binary().

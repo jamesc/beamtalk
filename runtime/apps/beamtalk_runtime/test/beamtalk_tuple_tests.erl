@@ -22,19 +22,19 @@ at_valid_index_test() ->
     ?assertEqual(42, beamtalk_tuple_ops:at({ok, 42}, 2)).
 
 at_out_of_bounds_test() ->
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}},
                  beamtalk_tuple_ops:at({a, b}, 0)),
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}},
                  beamtalk_tuple_ops:at({a, b}, 3)),
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}},
                  beamtalk_tuple_ops:at({a, b}, -1)).
 
 at_empty_tuple_test() ->
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}},
                  beamtalk_tuple_ops:at({}, 1)).
 
 at_non_integer_index_test() ->
-    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'at:'}},
                  beamtalk_tuple_ops:at({a, b}, foo)).
 
 %%% ============================================================================
@@ -47,13 +47,13 @@ unwrap_ok_test() ->
     ?assertEqual({a, b}, beamtalk_tuple_ops:unwrap({ok, {a, b}})).
 
 unwrap_error_test() ->
-    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}},
                  beamtalk_tuple_ops:unwrap({error, not_found})),
-    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}},
                  beamtalk_tuple_ops:unwrap({error, reason})).
 
 unwrap_invalid_pattern_test() ->
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'}},
                  beamtalk_tuple_ops:unwrap({a, b})).
 
 %%% ============================================================================
@@ -94,7 +94,7 @@ unwrap_or_else_side_effects_test() ->
 
 unwrap_or_else_non_function_test() ->
     %% Non-function argument raises does_not_understand (not type_error)
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrapOrElse:'}},
                  beamtalk_tuple_ops:unwrap_or_else({error, reason}, 42)).
 
 %%% ============================================================================
@@ -122,7 +122,7 @@ dispatch_at_test() ->
     ?assertEqual(b, 'bt@stdlib@tuple':dispatch('at:', [2], {a, b, c})).
 
 dispatch_at_out_of_bounds_test() ->
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}},
                  'bt@stdlib@tuple':dispatch('at:', [0], {a, b})).
 
 dispatch_is_ok_test() ->
@@ -136,7 +136,7 @@ dispatch_is_error_test() ->
 
 dispatch_unwrap_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrap', [], {ok, 42})),
-    ?assertError(#beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'unwrap'}},
                  'bt@stdlib@tuple':dispatch('unwrap', [], {error, reason})).
 
 dispatch_unwrap_or_test() ->
@@ -151,7 +151,7 @@ dispatch_unwrap_or_else_test() ->
     ?assertEqual(default, 'bt@stdlib@tuple':dispatch('unwrapOrElse:', [fun() -> default end], {error, reason})).
 
 dispatch_unwrap_invalid_pattern_test() ->
-    ?assertError(#beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'},
+    ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'unwrap'}},
                  'bt@stdlib@tuple':dispatch('unwrap', [], {a, b})).
 
 %%% ============================================================================

@@ -237,7 +237,7 @@ class_send(ClassPid, Selector, Args) ->
             Error0 = beamtalk_error:new(does_not_understand, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
-            error(Error2);
+            beamtalk_error:raise(Error2);
         Other -> unwrap_class_call(Other)
     end.
 
@@ -263,7 +263,7 @@ method(ClassName, Selector) when is_atom(ClassName) ->
             Error0 = beamtalk_error:new(does_not_understand, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, '>>'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
-            error(Error2);
+            beamtalk_error:raise(Error2);
         Pid ->
             gen_server:call(Pid, {method, Selector})
     end.
@@ -828,11 +828,11 @@ code_change(OldVsn, State, Extra) ->
 %% @private
 %% @doc Unwrap a class gen_server call result for use in class_send.
 %%
-%% Translates {ok, Value} → Value, {error, Error} → error(Error).
+%% Translates {ok, Value} → Value, {error, Error} → raise(Error).
 %% This DRYs the repeated unwrap pattern in class_send/3 clauses.
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) -> Value;
-unwrap_class_call({error, Error}) -> error(Error).
+unwrap_class_call({error, Error}) -> beamtalk_error:raise(Error).
 
 %% @private
 %% @doc Build a structured instantiation_error for abstract classes.
@@ -938,7 +938,7 @@ convert_methods_to_info(Methods) ->
                 Error1 = beamtalk_error:with_selector(Error0, Selector),
                 Error2 = beamtalk_error:with_hint(Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>),
                 Error3 = beamtalk_error:with_details(Error2, #{actual_arity => Arity, expected_arity => 3}),
-                error(Error3)
+                beamtalk_error:raise(Error3)
         end,
         #{
             arity => Arity,

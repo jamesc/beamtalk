@@ -499,8 +499,8 @@ value_type_send_does_not_understand_test() ->
     Self = #{'$beamtalk_class' => 'MockVTErr'},
     create_mock_value_type_module('bt@mock_vterr', 'MockVTErr', []),
     try
-        ?assertError(#beamtalk_error{kind = does_not_understand, class = 'MockVTErr',
-                                      selector = 'nonexistent'},
+        ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = does_not_understand, class = 'MockVTErr',
+                                      selector = 'nonexistent'}},
                      beamtalk_primitive:send(Self, 'nonexistent', []))
     after
         code:purge('bt@mock_vterr'),
@@ -565,8 +565,8 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar', 'MockVtIvar', []),
     try
-        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar',
-                                       selector = 'instVarAt:put:'},
+        ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = immutable_value, class = 'MockVtIvar',
+                                       selector = 'instVarAt:put:'}},
                      beamtalk_primitive:send(Self, 'instVarAt:put:', [x, 99]))
     after
         code:purge('bt@mock_vt_ivar'),
@@ -578,8 +578,8 @@ value_type_inst_var_at_raises_immutable_value_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
     try
-        ?assertError(#beamtalk_error{kind = immutable_value, class = 'MockVtIvar2',
-                                       selector = 'instVarAt:'},
+        ?assertError(#{'$beamtalk_class' := 'Exception', error := #beamtalk_error{kind = immutable_value, class = 'MockVtIvar2',
+                                       selector = 'instVarAt:'}},
                      beamtalk_primitive:send(Self, 'instVarAt:', [x]))
     after
         code:purge('bt@mock_vt_ivar2'),

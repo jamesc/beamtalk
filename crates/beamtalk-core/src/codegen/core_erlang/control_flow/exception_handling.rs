@@ -23,7 +23,7 @@
 //! try apply _BlockFun ()
 //! of _Result -> _Result
 //! catch <_Type, _Error, _Stacktrace> ->
-//!     let _ExObj = call 'beamtalk_exception_handler':'wrap'(_Error) in
+//!     let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(_Error) in
 //!     case matches_class(ExClass, Error) of
 //!         true  -> apply _HandlerFun (_ExObj)
 //!         false -> primop 'raw_raise'(_Type, _Error, _Stacktrace)
@@ -95,7 +95,7 @@ impl CoreErlangGenerator {
         write!(self.output, "of {result_var} -> {result_var} ")?;
 
         // catch <Type, Error, Stack> ->
-        //   let _ExObj = call 'beamtalk_exception_handler':'wrap'(Error) in
+        //   let _ExObj = call 'beamtalk_exception_handler':'ensure_wrapped'(Error) in
         //   let _Match = call 'beamtalk_exception_handler':'matches_class'(ExClass, Error) in
         //   case _Match of
         //     <'true'> -> apply _HandlerFun (_ExObj)
@@ -104,7 +104,7 @@ impl CoreErlangGenerator {
         write!(
             self.output,
             "catch <{type_var}, {error_var}, {stack_var}> -> \
-             let {ex_obj_var} = call 'beamtalk_exception_handler':'wrap'({error_var}) in \
+             let {ex_obj_var} = call 'beamtalk_exception_handler':'ensure_wrapped'({error_var}) in \
              let {match_var} = call 'beamtalk_exception_handler':'matches_class'({ex_class_var}, {error_var}) in \
              case {match_var} of \
              <'true'> when 'true' -> apply {handler_var} ({ex_obj_var}) \

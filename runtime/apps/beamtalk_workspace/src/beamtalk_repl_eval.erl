@@ -78,10 +78,11 @@ do_eval(Expression, State) ->
                         %% Check if result is a rejected future - treat as error
                         case Result of
                             {future_rejected, ErrorReason} ->
-                                %% Rejected future should be an error, not a result
-                                %% Still update bindings from any mutations before the error
-                                FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                                {error, ErrorReason, FinalState};
+                                %% ADR 0015: Wrap rejected future error and bind to _error
+                                FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
+                                FutBindings = maps:put('_error', FutExObj, CleanBindings),
+                                FinalState = beamtalk_repl_state:set_bindings(FutBindings, NewState),
+                                {error, FutExObj, FinalState};
                             _ ->
                                 %% Normal result - check if this was an assignment
                                 case extract_assignment(Expression) of
@@ -98,7 +99,11 @@ do_eval(Expression, State) ->
                         end
                     catch
                         Class:Reason:_Stacktrace ->
-                            {error, {eval_error, Class, Reason}, NewState}
+                            %% ADR 0015: Wrap error as Exception and bind to _error
+                            CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+                            CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                            CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, NewState),
+                            {error, {eval_error, Class, CaughtExObj}, CaughtState}
                     after
                         %% Only purge module if it has no living actors
                         case should_purge_module(ModuleName, RegistryPid) of

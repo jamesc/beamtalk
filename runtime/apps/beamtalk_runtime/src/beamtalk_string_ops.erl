@@ -42,13 +42,13 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
             Error0 = beamtalk_error:new(index_out_of_bounds, 'String'),
             Error1 = beamtalk_error:with_selector(Error0, 'at:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Index is beyond string length">>),
-            error(Error2)
+            beamtalk_error:raise(Error2)
     end;
 at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
     Error0 = beamtalk_error:new(index_out_of_bounds, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Index must be >= 1 (1-based indexing)">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Capitalize the first grapheme, keep rest unchanged.
 -spec capitalize(binary()) -> binary().

@@ -56,3 +56,15 @@ c getValue await
 // Verify increment worked via getValue
 c getValue await
 // => 43
+
+// BT-359: instVarAt:put: on value types raises immutable_value error
+42 instVarAt: #x put: 99
+// => ERROR: immutable_value
+
+// BT-359: instVarAt: on value types raises immutable_value error
+42 instVarAt: #x
+// => ERROR: immutable_value
+
+// BT-359: instVarAt:put: on string also errors
+'hello' instVarAt: #x put: 'world'
+// => ERROR: immutable_value

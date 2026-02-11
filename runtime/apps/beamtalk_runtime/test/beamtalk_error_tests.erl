@@ -182,3 +182,28 @@ callback_failed_message_test() ->
     ?assertEqual(<<"Callback failed for Actor">>, Error#beamtalk_error.message),
     ErrorWithSel = beamtalk_error:with_selector(Error, 'on_actor_spawned'),
     ?assertEqual(<<"Callback 'on_actor_spawned' failed for Actor">>, ErrorWithSel#beamtalk_error.message).
+
+%%% Test: raise/1 wraps and throws as Exception tagged map (ADR 0015)
+raise_wraps_and_throws_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Integer'),
+    Error1 = beamtalk_error:with_selector(Error, 'foo'),
+    try
+        beamtalk_error:raise(Error1)
+    catch
+        error:Caught ->
+            ?assertMatch(#{'$beamtalk_class' := 'Exception', error := _}, Caught),
+            #{'$beamtalk_class' := 'Exception', error := Inner} = Caught,
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual('Integer', Inner#beamtalk_error.class),
+            ?assertEqual('foo', Inner#beamtalk_error.selector)
+    end.
+
+%%% Test: raise/1 always produces Exception tagged map
+raise_produces_exception_class_test() ->
+    Error = beamtalk_error:new(type_error, 'String'),
+    try
+        beamtalk_error:raise(Error)
+    catch
+        error:#{'$beamtalk_class' := Class} ->
+            ?assertEqual('Exception', Class)
+    end.
