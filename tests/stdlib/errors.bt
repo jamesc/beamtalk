@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for error handling
+// Tests that runtime errors produce correct error kinds
+// Validates BT-458: ERROR: assertion support in stdlib test framework
+
+// Division by zero (Erlang badarith)
+1 / 0
+// => ERROR: badarith
+
+// Calling non-existent method on integer (does_not_understand)
+42 nonExistentMethod
+// => ERROR: does_not_understand
+
+// Arithmetic type error (string is not a number)
+"hello" + 42
+// => ERROR: badarith
+
+// Calling non-existent method on string
+"hello" nonExistentMethod
+// => ERROR: does_not_understand
