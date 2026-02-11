@@ -85,10 +85,7 @@ impl CoreErlangGenerator {
             "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in"
         )?;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'beamtalk_error':'raise'(SpawnErr1)"
-        )?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(SpawnErr1)")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -199,10 +196,7 @@ impl CoreErlangGenerator {
             "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in"
         )?;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'beamtalk_error':'raise'(SpawnErr1)"
-        )?;
+        writeln!(self.output, "call 'beamtalk_error':'raise'(SpawnErr1)")?;
         self.indent -= 2;
         self.write_indent()?;
         writeln!(self.output, "end")?;
