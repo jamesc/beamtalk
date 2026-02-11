@@ -40,6 +40,11 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Generate: let List = <receiver> in let Body = <body> in
         //           let State1 = lists:foldl(
         //               fun (Item, StateAcc) -> <body with state threading> end,
@@ -116,6 +121,13 @@ impl CoreErlangGenerator {
                 }
                 // Otherwise, the trailing " in " from generate_field_assignment_open
                 // allows the next expression to become the body
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
+
+                if is_last {
+                    write!(self.output, "{}", self.current_state_var())?;
+                }
             } else {
                 // Non-assignment expression
                 if i > 0 {
@@ -287,6 +299,11 @@ impl CoreErlangGenerator {
         initial: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Generate: let List = <receiver> in let Init = <initial> in
         //           let State1 = lists:foldl(
         //               fun (Item, Accumulator, StateAcc) ->
@@ -392,6 +409,15 @@ impl CoreErlangGenerator {
                     write!(self.output, "{{_Val, {final_state}}}")?;
                 } else {
                     // Not the last expression - the trailing " in " allows the next expression
+                }
+            } else if self.is_actor_self_send(expr) {
+                has_mutations = true;
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
+
+                if is_last {
+                    let final_state = self.current_state_var();
+                    write!(self.output, "{{'nil', {final_state}}}")?;
                 }
             } else {
                 // Non-assignment expression

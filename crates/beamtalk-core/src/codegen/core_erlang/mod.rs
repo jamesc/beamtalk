@@ -512,6 +512,10 @@ pub(super) struct CoreErlangGenerator {
     /// (class var assignment or class method self-send). Used by the class method
     /// body generator to reference the result when closing open scopes.
     last_open_scope_result: Option<String>,
+    /// BT-245: Whether a state-threading loop mutated REPL bindings.
+    /// Set by `_with_mutations` loop codegen when `is_repl_mode` is true.
+    /// Checked by `generate_eval_module_body` to return `{'nil', Result}`.
+    repl_loop_mutated: bool,
 }
 
 impl CoreErlangGenerator {
@@ -538,6 +542,7 @@ impl CoreErlangGenerator {
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
+            repl_loop_mutated: false,
         }
     }
 
@@ -564,6 +569,7 @@ impl CoreErlangGenerator {
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
+            repl_loop_mutated: false,
         }
     }
 
@@ -657,9 +663,9 @@ impl CoreErlangGenerator {
         format!("ClassVars{}", self.class_var_version)
     }
 
-    /// BT-153: Check if mutation threading should be used for a block.
+    /// BT-153/BT-245: Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
-    /// In module mode, only field writes trigger threading.
+    /// In module mode, field writes OR self-sends trigger threading.
     pub(super) fn needs_mutation_threading(
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
@@ -668,8 +674,8 @@ impl CoreErlangGenerator {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
         } else {
-            // Module: only field writes need threading
-            !analysis.field_writes.is_empty()
+            // Module: field writes or self-sends (which may mutate state) need threading
+            analysis.has_state_effects()
         }
     }
 
@@ -1854,7 +1860,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_times_repeat_mutation() {
         // BT-153: REPL with mutation should return updated state
         // Expression: 5 timesRepeat: [count := count + 1]
@@ -1916,7 +1921,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_to_do_mutation() {
         use crate::ast::BlockParameter;
 

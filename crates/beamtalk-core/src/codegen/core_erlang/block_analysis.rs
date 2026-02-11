@@ -20,6 +20,8 @@ pub struct BlockMutationAnalysis {
     pub field_reads: HashSet<String>,
     /// Fields (self.field) that are written to in the block.
     pub field_writes: HashSet<String>,
+    /// BT-245: Whether the block contains self-sends (which may mutate actor state).
+    pub has_self_sends: bool,
 }
 
 impl BlockMutationAnalysis {
@@ -32,6 +34,12 @@ impl BlockMutationAnalysis {
     #[allow(dead_code)] // Used in tests and will be used for error detection
     pub fn has_mutations(&self) -> bool {
         !self.local_writes.is_empty() || !self.field_writes.is_empty()
+    }
+
+    /// BT-245: Returns true if the block has any state-affecting operations.
+    /// This includes field writes AND self-sends (which may mutate actor state).
+    pub fn has_state_effects(&self) -> bool {
+        !self.field_writes.is_empty() || self.has_self_sends
     }
 
     /// Returns all variables that need threading (read AND written).
@@ -153,6 +161,10 @@ fn analyze_expression(
             arguments,
             ..
         } => {
+            // BT-245: Detect self-sends (may mutate actor state)
+            if is_self_reference(receiver) {
+                analysis.has_self_sends = true;
+            }
             analyze_expression(receiver, analysis, ctx);
             for arg in arguments {
                 analyze_expression(arg, analysis, ctx);

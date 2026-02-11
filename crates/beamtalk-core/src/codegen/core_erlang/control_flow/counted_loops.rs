@@ -97,6 +97,11 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Analyze which variables are mutated
         // BT-153: Only include field_writes for loop parameters (actor state),
         // local_writes are handled by updating StateAcc in the body via maps:put
@@ -187,6 +192,9 @@ impl CoreErlangGenerator {
                 // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
                 // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
@@ -275,6 +283,11 @@ impl CoreErlangGenerator {
         limit: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Analyze which variables are mutated
         // BT-153: Mutated variables are derived from field_writes for REPL context
         let analysis = block_analysis::analyze_block(body);
@@ -573,6 +586,11 @@ impl CoreErlangGenerator {
         step: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Analyze which variables are mutated
         let analysis = block_analysis::analyze_block(body);
         let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
