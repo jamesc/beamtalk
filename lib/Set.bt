@@ -38,5 +38,8 @@ sealed Object subclass: Set
   // Iteration
   do: block => @primitive 'do:'
 
+  // Display
+  printString => @primitive 'printString'
+
   // Reflection
   describe => 'a Set'

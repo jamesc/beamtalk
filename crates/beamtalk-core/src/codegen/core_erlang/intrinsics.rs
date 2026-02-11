@@ -14,7 +14,7 @@
 //! - **Object protocol** (split into domain-aligned groups):
 //!   - **Nil protocol**: `isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:` → Nil-testing boolean protocol
 //!   - **Error signaling**: `error:` → Error construction and signaling
-//!   - **Object identity**: `yourself`, `hash`, `printString` → Identity and representation
+//!   - **Object identity**: `yourself`, `hash` → Identity and representation
 //!   - **Object reflection**: `respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:` → Runtime introspection
 //! - **Dynamic dispatch**: `perform:`, `perform:withArguments:` → Runtime type-based dispatch (actors → async/Future, primitives → sync/value)
 //!
@@ -385,7 +385,7 @@ impl CoreErlangGenerator {
     /// Delegates to domain-aligned intrinsic groups:
     /// - Nil protocol (`isNil`, `notNil`, `ifNil:`, `ifNotNil:`, `ifNil:ifNotNil:`, `ifNotNil:ifNil:`)
     /// - Error signaling (`error:`)
-    /// - Object identity (`yourself`, `hash`, `printString`)
+    /// - Object identity (`yourself`, `hash`)
     /// - Object reflection (`respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`)
     ///
     /// - Returns `Ok(Some(()))` if the message was an Object method and code was generated
@@ -577,7 +577,6 @@ impl CoreErlangGenerator {
     ///
     /// - `yourself` — Identity: returns the receiver unchanged
     /// - `hash` — Hash using `erlang:phash2/1`
-    /// - `printString` — String representation via `beamtalk_primitive:print_string/1`
     fn try_generate_object_identity(
         &mut self,
         receiver: &Expression,
@@ -599,20 +598,8 @@ impl CoreErlangGenerator {
                     write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
                     Ok(Some(()))
                 }
-                "printString" if arguments.is_empty() => {
-                    // BT-457: Delegate to beamtalk_primitive:print_string/1 which
-                    // handles all types including those without printString dispatch
-                    // (class objects, futures, PIDs). See follow-up issue for removing
-                    // this intrinsic in favor of full polymorphic dispatch.
-                    let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in call 'beamtalk_primitive':'print_string'({recv_var})"
-                    )?;
-                    Ok(Some(()))
-                }
+                // BT-477: printString removed as intrinsic — now uses polymorphic
+                // dispatch via Object >> printString and per-class overrides.
                 _ => Ok(None),
             },
             _ => Ok(None),

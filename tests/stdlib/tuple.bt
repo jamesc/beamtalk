@@ -40,3 +40,11 @@ Tuple new
 // Tuple new: is not supported (no meaningful init-from-map)
 Tuple new: #{#a => 1}
 // => ERROR: instantiation_error
+
+// ===========================================================================
+// DISPLAY (BT-477)
+// ===========================================================================
+
+// Tuple printString uses Object default
+(Tuple new) printString
+// => a Tuple
