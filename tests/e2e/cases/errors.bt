@@ -1,13 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for error handling
-// Each expression tests that specific errors are caught correctly
-
-// Division by zero
-// Note: Erlang returns 'badarith' for division by zero
-1 / 0
-// => ERROR: badarith
+// E2E tests for error handling (REPL-specific)
+// Pure runtime errors (badarith, does_not_understand, immutable_value,
+// instantiation_error, etc.) are tested in tests/stdlib/errors.bt.
+// This file tests errors that require REPL features:
+// - Undefined variables (REPL workspace binding resolution)
+// - Syntax errors (REPL incremental parsing)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -45,12 +44,8 @@ undefinedVar + 5
 // => ERROR: expected expression, found +
 
 // ===========================================================================
-// RUNTIME ERRORS
+// RUNTIME ERRORS (need REPL substring matching for non-beamtalk errors)
 // ===========================================================================
-
-// Calling non-existent method on integer
-42 nonExistentMethod
-// => ERROR: does not understand
 
 // Wrong number of block arguments (too few)
 [:x :y | x + y] value: 5
@@ -59,45 +54,3 @@ undefinedVar + 5
 // Wrong number of block arguments (too many)
 [:x | x + 1] value: 5 value: 10
 // => ERROR: badarity
-
-// ===========================================================================
-// PRIMITIVE TYPE INSTANTIATION ERRORS (BT-422)
-// ===========================================================================
-// Primitive types are backed by native BEAM values, not maps.
-// Calling `new` on them should raise an instantiation_error.
-
-Integer new
-// => ERROR: instantiation_error
-
-String new
-// => ERROR: instantiation_error
-
-CompiledMethod new
-// => ERROR: instantiation_error
-
-Float new
-// => ERROR: instantiation_error
-
-Symbol new
-// => ERROR: instantiation_error
-
-True new
-// => ERROR: instantiation_error
-
-False new
-// => ERROR: instantiation_error
-
-UndefinedObject new
-// => ERROR: instantiation_error
-
-Block new
-// => ERROR: instantiation_error
-
-// Note: `new:` (keyword message with args) also raises instantiation_error.
-// BT-422: gen_server crash fix ensures class process survives the error.
-
-Integer new: 42
-// => ERROR: instantiation_error
-
-String new: "hello"
-// => ERROR: instantiation_error

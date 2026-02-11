@@ -59,12 +59,12 @@ c getValue await
 
 // BT-359: instVarAt:put: on value types raises immutable_value error
 42 instVarAt: #x put: 99
-// => ERROR: immutable value
+// => ERROR: immutable_value
 
 // BT-359: instVarAt: on value types raises immutable_value error
 42 instVarAt: #x
-// => ERROR: immutable value
+// => ERROR: immutable_value
 
 // BT-359: instVarAt:put: on string also errors
 'hello' instVarAt: #x put: 'world'
-// => ERROR: immutable value
+// => ERROR: immutable_value
