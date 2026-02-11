@@ -350,6 +350,7 @@ Keep `write!` for existing code, use `Document` only for new code.
 - **Generated output unchanged**: Byte-for-byte identical Core Erlang output (verified by snapshot tests)
 - **Performance**: Document tree adds one allocation + render pass. Negligible compared to `erlc` compilation time
 - **Future backends**: If Beamtalk ever adds an Erlang source backend (ADR 0003 leaves this open), the `Document` type would be reusable
+- **Source maps**: If source-level debugging is added later, the document tree enables it more naturally than `write!` — an `Annotated(Span, Box<Document>)` variant can carry source positions through construction, and the renderer emits Core Erlang line annotations centrally. The current `write!` approach would require manually inserting line annotations across 22 files. Gleam demonstrates this pattern with `-file()` annotations emitted via `docvec!`
 
 ## Implementation
 
