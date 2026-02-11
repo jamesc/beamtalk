@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Tuple class compilation as a value type (not gen_server).
+// Tuple is a sealed Object subclass backed by Erlang tuples.
+// new/0 should return {} (empty tuple).
+
+sealed Object subclass: Tuple
+
+  // Size and access
+  size => @primitive 'size'
+  at: index => @primitive 'at:'
+
+  // Pattern matching for Erlang result types
+  isOk => @primitive 'isOk'
+  isError => @primitive 'isError'
+
+  // Unwrapping
+  unwrap => @primitive 'unwrap'
+  unwrapOr: default => @primitive 'unwrapOr:'
+  unwrapOrElse: block => @primitive 'unwrapOrElse:'
+
+  // Conversion
+  asString => @primitive 'asString'

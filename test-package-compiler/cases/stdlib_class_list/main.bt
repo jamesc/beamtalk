@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test List class compilation as a value type (not gen_server).
+// List is a sealed Object subclass backed by Erlang linked lists.
+// new/0 should return [] (empty list).
+
+sealed Object subclass: List
+
+  // Access
+  size => @primitive 'size'
+  isEmpty => @primitive 'isEmpty'
+  first => @primitive 'first'
+  rest => @primitive 'rest'
+  last => @primitive 'last'
+  at: index => @primitive 'at:'
+  includes: item => @primitive 'includes:'
+
+  // Ordering
+  sort => @primitive 'sort'
+  reversed => @primitive 'reversed'
+  unique => @primitive 'unique'
+
+  // Iteration
+  do: block => @primitive 'do:'
+  collect: block => @primitive 'collect:'
+  select: block => @primitive 'select:'
+  reject: block => @primitive 'reject:'
+  inject: initial into: block => @primitive 'inject:into:'
+
+  // Concatenation
+  ++ other => @primitive '++'
+
+  // Reflection
+  describe => 'a List'

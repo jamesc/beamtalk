@@ -1,0 +1,610 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "List",
+                span: Span {
+                    start: 267,
+                    end: 271,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 250,
+                        end: 256,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: true,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "size",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "size",
+                            is_quoted: true,
+                            span: Span {
+                                start: 295,
+                                end: 312,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 287,
+                        end: 312,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "isEmpty",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "isEmpty",
+                            is_quoted: true,
+                            span: Span {
+                                start: 326,
+                                end: 346,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 315,
+                        end: 346,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "first",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "first",
+                            is_quoted: true,
+                            span: Span {
+                                start: 358,
+                                end: 376,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 349,
+                        end: 376,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "rest",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "rest",
+                            is_quoted: true,
+                            span: Span {
+                                start: 387,
+                                end: 404,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 379,
+                        end: 404,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "last",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "last",
+                            is_quoted: true,
+                            span: Span {
+                                start: 415,
+                                end: 432,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 407,
+                        end: 432,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 435,
+                                    end: 438,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "index",
+                            span: Span {
+                                start: 439,
+                                end: 444,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "at:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 448,
+                                end: 464,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 435,
+                        end: 464,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "includes:",
+                                span: Span {
+                                    start: 467,
+                                    end: 476,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "item",
+                            span: Span {
+                                start: 477,
+                                end: 481,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "includes:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 485,
+                                end: 507,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 467,
+                        end: 507,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "sort",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "sort",
+                            is_quoted: true,
+                            span: Span {
+                                start: 533,
+                                end: 550,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 525,
+                        end: 550,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "reversed",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "reversed",
+                            is_quoted: true,
+                            span: Span {
+                                start: 565,
+                                end: 586,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 553,
+                        end: 586,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "unique",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "unique",
+                            is_quoted: true,
+                            span: Span {
+                                start: 599,
+                                end: 618,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 589,
+                        end: 618,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "do:",
+                                span: Span {
+                                    start: 637,
+                                    end: 640,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 641,
+                                end: 646,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "do:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 650,
+                                end: 666,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 637,
+                        end: 666,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "collect:",
+                                span: Span {
+                                    start: 669,
+                                    end: 677,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 678,
+                                end: 683,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "collect:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 687,
+                                end: 708,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 669,
+                        end: 708,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "select:",
+                                span: Span {
+                                    start: 711,
+                                    end: 718,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 719,
+                                end: 724,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "select:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 728,
+                                end: 748,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 711,
+                        end: 748,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "reject:",
+                                span: Span {
+                                    start: 751,
+                                    end: 758,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 759,
+                                end: 764,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "reject:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 768,
+                                end: 788,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 751,
+                        end: 788,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "inject:",
+                                span: Span {
+                                    start: 791,
+                                    end: 798,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "into:",
+                                span: Span {
+                                    start: 807,
+                                    end: 812,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "initial",
+                            span: Span {
+                                start: 799,
+                                end: 806,
+                            },
+                        },
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 813,
+                                end: 818,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "inject:into:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 822,
+                                end: 847,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 791,
+                        end: 847,
+                    },
+                },
+                MethodDefinition {
+                    selector: Binary(
+                        "++",
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "other",
+                            span: Span {
+                                start: 873,
+                                end: 878,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "++",
+                            is_quoted: true,
+                            span: Span {
+                                start: 882,
+                                end: 897,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 870,
+                        end: 897,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "describe",
+                    ),
+                    parameters: [],
+                    body: [
+                        Literal(
+                            String(
+                                "a List",
+                            ),
+                            Span {
+                                start: 929,
+                                end: 937,
+                            },
+                        ),
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 917,
+                        end: 937,
+                    },
+                },
+            ],
+            class_methods: [],
+            span: Span {
+                start: 243,
+                end: 937,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 243,
+        end: 937,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 243,
+                end: 249,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 243,
+                end: 249,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test List class compilation as a value type (not gen_server).",
+            span: Span {
+                start: 243,
+                end: 249,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// List is a sealed Object subclass backed by Erlang linked lists.",
+            span: Span {
+                start: 243,
+                end: 249,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// new/0 should return [] (empty list).",
+            span: Span {
+                start: 243,
+                end: 249,
+            },
+            kind: Line,
+        },
+    ],
+}

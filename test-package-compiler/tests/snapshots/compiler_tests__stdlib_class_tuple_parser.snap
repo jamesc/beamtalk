@@ -1,0 +1,316 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Tuple",
+                span: Span {
+                    start: 264,
+                    end: 269,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 247,
+                        end: 253,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: true,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "size",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "size",
+                            is_quoted: true,
+                            span: Span {
+                                start: 302,
+                                end: 319,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 294,
+                        end: 319,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 322,
+                                    end: 325,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "index",
+                            span: Span {
+                                start: 326,
+                                end: 331,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "at:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 335,
+                                end: 351,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 322,
+                        end: 351,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "isOk",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "isOk",
+                            is_quoted: true,
+                            span: Span {
+                                start: 409,
+                                end: 426,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 401,
+                        end: 426,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "isError",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "isError",
+                            is_quoted: true,
+                            span: Span {
+                                start: 440,
+                                end: 460,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 429,
+                        end: 460,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "unwrap",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "unwrap",
+                            is_quoted: true,
+                            span: Span {
+                                start: 490,
+                                end: 509,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 480,
+                        end: 509,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "unwrapOr:",
+                                span: Span {
+                                    start: 512,
+                                    end: 521,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "default",
+                            span: Span {
+                                start: 522,
+                                end: 529,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "unwrapOr:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 533,
+                                end: 555,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 512,
+                        end: 555,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "unwrapOrElse:",
+                                span: Span {
+                                    start: 558,
+                                    end: 571,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "block",
+                            span: Span {
+                                start: 572,
+                                end: 577,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "unwrapOrElse:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 581,
+                                end: 607,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 558,
+                        end: 607,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "asString",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "asString",
+                            is_quoted: true,
+                            span: Span {
+                                start: 639,
+                                end: 660,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 627,
+                        end: 660,
+                    },
+                },
+            ],
+            class_methods: [],
+            span: Span {
+                start: 240,
+                end: 660,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 240,
+        end: 660,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 240,
+                end: 246,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 240,
+                end: 246,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test Tuple class compilation as a value type (not gen_server).",
+            span: Span {
+                start: 240,
+                end: 246,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Tuple is a sealed Object subclass backed by Erlang tuples.",
+            span: Span {
+                start: 240,
+                end: 246,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// new/0 should return {} (empty tuple).",
+            span: Span {
+                start: 240,
+                end: 246,
+            },
+            kind: Line,
+        },
+    ],
+}

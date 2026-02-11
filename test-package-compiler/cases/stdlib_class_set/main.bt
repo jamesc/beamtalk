@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test Set class compilation as a value type (not gen_server).
+// Set is a sealed Object subclass with state (elements), backed by tagged maps.
+// new/0 should return a tagged map with empty elements.
+
+sealed Object subclass: Set
+  state: elements = #()
+
+  // Size
+  size => @primitive 'size'
+  isEmpty => @primitive 'isEmpty'
+
+  // Membership
+  includes: element => @primitive 'includes:'
+
+  // Modification (returns new Set)
+  add: element => @primitive 'add:'
+  remove: element => @primitive 'remove:'
+
+  // Set operations
+  union: other => @primitive 'union:'
+  intersection: other => @primitive 'intersection:'
+  difference: other => @primitive 'difference:'
+
+  // Predicates
+  isSubsetOf: other => @primitive 'isSubsetOf:'
+
+  // Conversion
+  asList => @primitive 'asList'
+
+  // Iteration
+  do: block => @primitive 'do:'
+
+  // Reflection
+  describe => 'a Set'
