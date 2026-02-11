@@ -35,7 +35,7 @@ scopeTestVar
 
 // --- Closure variable capture ---
 
-// Closures capture outer variables by value
+// Closures capture outer variables
 outerVal := 10
 // => 10
 adder := [:x | x + outerVal]

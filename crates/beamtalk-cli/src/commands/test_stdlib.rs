@@ -1082,6 +1082,8 @@ mod tests {
         assert!(wrapper.contains("case TryResult0 of"));
         assert!(wrapper.contains("{ok, _}"));
         assert!(wrapper.contains("CaughtKind0"));
+        // Error wrapper catches future_rejected throws (actor errors via await)
+        assert!(wrapper.contains("throw:{future_rejected, {beamtalk_error,"));
     }
 
     #[test]
