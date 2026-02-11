@@ -414,7 +414,7 @@
 | `printString` | ✅ | `beamtalk_primitive:print_string/1` | `Set>>printString` (BT-477) |
 | `describe` | ✅ | Returns `'a Set'` | `Set>>printString` |
 
-**E2E coverage:** 14 of 15 methods tested in `tests/e2e/cases/set.bt` (47 assertions). Only `describe` lacks E2E coverage.
+**Test coverage:** 14 of 15 methods tested in `tests/stdlib/set.bt` (47 assertions). Only `describe` lacks test coverage.
 
 ### Tuple (`lib/Tuple.bt`)
 
