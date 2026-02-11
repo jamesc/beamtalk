@@ -354,7 +354,9 @@ super_dispatch(State, Selector, Args) ->
         undefined ->
             Error0 = beamtalk_error:new(internal_error, unknown),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error = beamtalk_error:with_hint(Error1, <<"State map missing '__class__' field">>),
+            ClassKey = beamtalk_tagged_map:class_key(),
+            Hint = iolist_to_binary(io_lib:format("State map missing '~p' field", [ClassKey])),
+            Error = beamtalk_error:with_hint(Error1, Hint),
             {error, Error};
         CurrentClass ->
             %% Look up the current class process
