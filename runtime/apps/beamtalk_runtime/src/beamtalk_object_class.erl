@@ -82,6 +82,8 @@
     module_name/1,
     create_subclass/3,
     is_class_object/1,
+    is_class_name/1,
+    class_display_name/1,
     class_send/3,
     class_object_tag/1
 ]).
@@ -197,11 +199,31 @@ module_name(ClassPid) ->
 %% This distinguishes class objects from actor instances at runtime.
 -spec is_class_object(term()) -> boolean().
 is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
-    ClassBin = atom_to_binary(Class, utf8),
-    Size = byte_size(ClassBin) - 6,
-    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
+    is_class_name(Class);
 is_class_object(_) ->
     false.
+
+%% @doc Check if an atom class name represents a class object (ends with " class").
+-spec is_class_name(atom()) -> boolean().
+is_class_name(ClassName) when is_atom(ClassName) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    Size = byte_size(ClassBin) - 6,
+    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
+is_class_name(_) ->
+    false.
+
+%% @doc Strip " class" suffix from a class object name to get the display name.
+%%
+%% Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
+%% Returns the full name as binary if not a class name.
+-spec class_display_name(atom()) -> binary().
+class_display_name(ClassName) when is_atom(ClassName) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    Size = byte_size(ClassBin) - 6,
+    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
+        true -> binary:part(ClassBin, 0, Size);
+        false -> ClassBin
+    end.
 
 %% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 %%

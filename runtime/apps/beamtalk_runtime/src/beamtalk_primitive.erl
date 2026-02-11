@@ -111,9 +111,7 @@ class_of_object('Metaclass') ->
     'Metaclass';
 class_of_object(#beamtalk_object{class = ClassName}) ->
     %% BT-412: class of a class object → 'Metaclass' sentinel (terminal)
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
+    case beamtalk_object_class:is_class_name(ClassName) of
         true -> 'Metaclass';
         false -> class_of_object_inner(ClassName)
     end;
@@ -170,14 +168,11 @@ print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
     %% BT-412: Class objects display as their class name (e.g., "Integer")
-    ClassBin = atom_to_binary(ClassName, utf8),
-    Size = byte_size(ClassBin) - 6,
-    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
+    case beamtalk_object_class:is_class_name(ClassName) of
         true ->
-            %% Strip " class" suffix to get the display name
-            binary:part(ClassBin, 0, Size);
+            beamtalk_object_class:class_display_name(ClassName);
         false ->
-            iolist_to_binary([<<"a ">>, ClassBin])
+            iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
     end;
 print_string(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of

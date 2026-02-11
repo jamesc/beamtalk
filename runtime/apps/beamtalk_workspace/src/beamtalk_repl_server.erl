@@ -783,14 +783,13 @@ term_to_json(Value) when is_tuple(Value) ->
     case Value of
         {beamtalk_object, Class, _Module, Pid} ->
             %% BT-412: Check if this is a class object vs actor instance
-            ClassBin = atom_to_binary(Class, utf8),
-            SuffixSize = byte_size(ClassBin) - 6,
-            case SuffixSize >= 0 andalso binary:part(ClassBin, SuffixSize, 6) =:= <<" class">> of
+            case beamtalk_object_class:is_class_name(Class) of
                 true ->
                     %% Class object: display as class name (e.g., "Integer")
-                    binary:part(ClassBin, 0, SuffixSize);
+                    beamtalk_object_class:class_display_name(Class);
                 false ->
                     %% Actor instance: format as #Actor<Class, Pid>
+                    ClassBin = atom_to_binary(Class, utf8),
                     PidStr = pid_to_list(Pid),
                     Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
                     iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])

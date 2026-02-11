@@ -316,8 +316,17 @@ fn generate_eunit_wrapper(
          \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
          \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
          format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
-         \x20   %% BT-412: Class objects display as their class name\n\
-         \x20   beamtalk_primitive:print_string(V);\n\
+         \x20   %% BT-412: Match REPL formatting for class objects vs actor instances\n\
+         \x20   Class = element(2, V),\n\
+         \x20   case beamtalk_object_class:is_class_name(Class) of\n\
+         \x20       true -> beamtalk_object_class:class_display_name(Class);\n\
+         \x20       false ->\n\
+         \x20           Pid = element(4, V),\n\
+         \x20           ClassBin = atom_to_binary(Class, utf8),\n\
+         \x20           PidStr = pid_to_list(Pid),\n\
+         \x20           Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),\n\
+         \x20           iolist_to_binary([<<\"#Actor<\">>, ClassBin, <<\",\">>, Inner, <<\">\">>])\n\
+         \x20   end;\n\
          format_result(V) when is_map(V) ->\n\
          \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
          \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
