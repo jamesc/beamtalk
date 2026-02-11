@@ -29,7 +29,7 @@ mod while_loops;
 
 use super::{CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generate a local variable assignment inside a loop body with state threading (BT-153).
@@ -51,9 +51,8 @@ impl CoreErlangGenerator {
                     format!("StateAcc{}", self.state_version())
                 };
 
-                // let _Val = <value> in
-                write!(self.output, "let {val_var} = ")?;
-                self.generate_expression(value)?;
+                // Capture value expression (ADR 0018 bridge pattern)
+                let value_code = self.capture_expression(value)?;
 
                 // Increment state version for the new state
                 let _ = self.next_state_var();
@@ -63,12 +62,16 @@ impl CoreErlangGenerator {
                     format!("State{}", self.state_version())
                 };
 
-                // let StateAccN = call 'maps':'put'('varname', _Val, StateAcc{N-1}) in
-                write!(
-                    self.output,
-                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in",
-                    id.name
-                )?;
+                let doc = docvec![
+                    format!("let {val_var} = "),
+                    value_code,
+                    format!(
+                        " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in",
+                        id.name
+                    ),
+                ];
+
+                self.write_document(&doc);
             }
         }
         Ok(())

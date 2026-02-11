@@ -11,6 +11,7 @@
 //! - Class identity (DDD Value Object bundling module + class names)
 
 use super::{CoreErlangGenerator, Result};
+use crate::ast::Expression;
 use std::fmt::Write;
 
 /// Value Object: A class's compile-time identity.
@@ -70,6 +71,32 @@ impl CoreErlangGenerator {
             write!(self.output, "    ")?;
         }
         Ok(())
+    }
+
+    /// Bridge: renders a `Document` tree and appends it to `self.output`.
+    ///
+    /// This enables incremental migration — functions that return `Document`
+    /// can coexist with functions that write directly to `self.output`.
+    /// The document is rendered at the current indentation level.
+    pub(super) fn write_document(&mut self, doc: &super::document::Document<'_>) {
+        let rendered = doc.to_pretty_string();
+        self.output.push_str(&rendered);
+    }
+
+    /// Captures the output of `generate_expression` as a `String` without
+    /// modifying the output buffer.
+    ///
+    /// This is the bridge mechanism for Phase 0 migration (ADR 0018): functions
+    /// that are being migrated to return `Document` can capture expression output
+    /// as owned strings and embed them in document trees.
+    ///
+    /// All side effects on `var_context` and `state_threading` are preserved.
+    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
+        let start = self.output.len();
+        self.generate_expression(expr)?;
+        let captured = self.output[start..].to_string();
+        self.output.truncate(start);
+        Ok(captured)
     }
 
     /// Generates a fresh variable name and binds it in the current scope.
