@@ -73,18 +73,18 @@
                     Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
                     Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
-                    error(Error3);
+                    beamtalk_error:raise(Error3);
                 {error, eacces} ->
                     Error0 = beamtalk_error:new(permission_denied, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
                     Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                    error(Error3);
+                    beamtalk_error:raise(Error3);
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(io_error, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    error(Error2)
+                    beamtalk_error:raise(Error2)
             end;
         {error, Reason} ->
             Error0 = beamtalk_error:new(invalid_path, 'File'),
@@ -95,13 +95,13 @@
                 directory_traversal -> <<"Use relative paths within the project">>
             end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
-            error(Error3)
+            beamtalk_error:raise(Error3)
     end;
 'readAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Write string contents to a file.
 %%
@@ -123,19 +123,19 @@
                             Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
                             Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
                             Error3 = beamtalk_error:with_hint(Error2, <<"Check file permissions">>),
-                            error(Error3);
+                            beamtalk_error:raise(Error3);
                         {error, Reason} ->
                             Error0 = beamtalk_error:new(io_error, 'File'),
                             Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
                             Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                            error(Error2)
+                            beamtalk_error:raise(Error2)
                     end;
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(io_error, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
                     Error3 = beamtalk_error:with_hint(Error2, <<"Could not create directory">>),
-                    error(Error3)
+                    beamtalk_error:raise(Error3)
             end;
         {error, Reason} ->
             Error0 = beamtalk_error:new(invalid_path, 'File'),
@@ -146,18 +146,18 @@
                 directory_traversal -> <<"Use relative paths within the project">>
             end,
             Error3 = beamtalk_error:with_hint(Error2, Hint),
-            error(Error3)
+            beamtalk_error:raise(Error3)
     end;
 'writeAll:contents:'(Path, _) when is_binary(Path) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a String">>),
-    error(Error2);
+    beamtalk_error:raise(Error2);
 'writeAll:contents:'(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Check if File responds to the given selector.
 -spec has_method(atom()) -> boolean().

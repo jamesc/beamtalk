@@ -104,4 +104,4 @@ does_not_understand(Selector, _Args, _Value) ->
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1,
         <<"CompiledMethod supports: selector, source, argumentCount, class, printString, asString, respondsTo:">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).

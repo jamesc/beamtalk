@@ -214,7 +214,7 @@ send(X, Selector, _Args) ->
     Error0 = beamtalk_error:new(does_not_understand, Class),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Primitive type does not support this message">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Check if a value responds to a given selector.
 %%
@@ -302,7 +302,7 @@ value_type_send(Self, Class, Selector, Args) ->
             IvarErr0 = beamtalk_error:new(immutable_value, Class),
             IvarErr1 = beamtalk_error:with_selector(IvarErr0, Selector),
             IvarErr2 = beamtalk_error:with_hint(IvarErr1, Hint),
-            error(IvarErr2);
+            beamtalk_error:raise(IvarErr2);
         false ->
             ok
     end,
@@ -318,12 +318,12 @@ value_type_send(Self, Class, Selector, Args) ->
                 true ->
                     case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
                         {reply, Result, _State} -> Result;
-                        {error, Error, _State} -> error(Error)
+                        {error, Error, _State} -> beamtalk_error:raise(Error)
                     end;
                 false ->
                     Error0 = beamtalk_error:new(does_not_understand, Class),
                     Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    error(Error1)
+                    beamtalk_error:raise(Error1)
             end
     end.
 

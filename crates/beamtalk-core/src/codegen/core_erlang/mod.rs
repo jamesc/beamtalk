@@ -1698,7 +1698,7 @@ end
 
         // Check that it handles errors
         assert!(code.contains("<{'error', Reason}> when 'true' ->"));
-        assert!(code.contains("call 'erlang':'error'({'spawn_failed', Reason})"));
+        assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr1)"));
 
         // Check that init/1 creates the default state with fields and merges with InitArgs
         assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
@@ -1729,7 +1729,7 @@ end
         assert!(code.contains("call 'beamtalk_error':'new'('instantiation_error', 'Actor')"));
         assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new')"));
         assert!(code.contains("call 'beamtalk_error':'with_hint'(Error1,"));
-        assert!(code.contains("call 'erlang':'error'(Error2)"));
+        assert!(code.contains("call 'beamtalk_error':'raise'(Error2)"));
 
         // Check that new/1 function exists and uses beamtalk_error
         assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));

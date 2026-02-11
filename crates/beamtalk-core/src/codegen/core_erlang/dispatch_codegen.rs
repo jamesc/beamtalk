@@ -314,7 +314,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'module':'safe_dispatch'('selector', [Args], State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
-    ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
     ///
@@ -324,7 +324,7 @@ impl CoreErlangGenerator {
     /// let Self = call 'beamtalk_actor':'make_self'(State) in
     /// case call 'module':'dispatch'('selector', [Args], Self, State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
-    ///   <{'error', Error, _}> when 'true' -> call 'erlang':'error'(Error)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
     fn generate_self_dispatch(
@@ -363,7 +363,7 @@ impl CoreErlangGenerator {
         // Error: re-raise for proper error propagation
         write!(
             self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
         )?;
 
         write!(self.output, "end")?;
@@ -423,7 +423,7 @@ impl CoreErlangGenerator {
         // Error: re-raise for proper error propagation
         write!(
             self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
         )?;
 
         write!(self.output, "end")?;
@@ -475,7 +475,7 @@ impl CoreErlangGenerator {
         // Error: re-raise
         write!(
             self.output,
-            "<{{'error', {error_var}, _}}> when 'true' -> call 'erlang':'error'({error_var}) "
+            "<{{'error', {error_var}, _}}> when 'true' -> call 'beamtalk_error':'raise'({error_var}) "
         )?;
 
         write!(self.output, "end")?;
