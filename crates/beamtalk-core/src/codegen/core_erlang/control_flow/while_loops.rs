@@ -152,10 +152,15 @@ impl CoreErlangGenerator {
         let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
+        // BT-478: Check if body has direct field assignments. If not, mutations
+        // come from nested constructs and the last expression's result must be bound.
+        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
                 write!(self.output, " ")?;
             }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
@@ -166,6 +171,16 @@ impl CoreErlangGenerator {
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
+            } else if is_last && !has_direct_field_assignments {
+                // BT-478: Last expression with no direct field assignments in body.
+                // Mutations come from nested constructs (e.g., inner to:do:).
+                // Bind the nested construct's returned state to the next StateAcc.
+                let next_version = self.state_version() + 1;
+                let next_var = format!("StateAcc{next_version}");
+                write!(self.output, "let {next_var} = ")?;
+                self.generate_expression(expr)?;
+                self.set_state_version(next_version);
+                write!(self.output, " in")?;
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
