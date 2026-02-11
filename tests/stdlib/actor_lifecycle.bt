@@ -44,3 +44,18 @@ counter isAlive await
 // Sending a message to a stopped actor returns actor_dead error
 counter increment await
 // => ERROR: actor_dead
+
+// ===========================================================================
+// NON-MAP ARGUMENT TO spawnWith: (BT-473)
+// ===========================================================================
+// Passing a non-Dictionary argument to spawnWith: should raise type_error,
+// not silently fall back to spawn/0.
+
+Counter spawnWith: 42
+// => ERROR: type_error
+
+Counter spawnWith: "hello"
+// => ERROR: type_error
+
+Counter spawnWith: true
+// => ERROR: type_error

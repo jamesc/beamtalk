@@ -539,26 +539,36 @@ handle_call({spawn, Args}, _From, #class_state{
     name = ClassName,
     module = Module
 } = State) ->
-    SpawnResult = case Args of
-        [] ->
-            erlang:apply(Module, spawn, []);
-        [InitMap] when is_map(InitMap) ->
-            erlang:apply(Module, spawn, [InitMap]);
-        _ ->
-            erlang:apply(Module, spawn, [])
-    end,
-    case SpawnResult of
-        {beamtalk_object, _, _, _} = Obj ->
-            {reply, {ok, Obj}, State};
-        {ok, Pid} ->
-            Obj = #beamtalk_object{
-                class = ClassName,
-                class_mod = Module,
-                pid = Pid
-            },
-            {reply, {ok, Obj}, State};
-        Error ->
-            {reply, Error, State}
+    try
+        SpawnResult = case Args of
+            [] ->
+                erlang:apply(Module, spawn, []);
+            [InitMap] when is_map(InitMap) ->
+                erlang:apply(Module, spawn, [InitMap]);
+            _ ->
+                %% BT-473: Reject non-map arguments with type_error.
+                %% Actors are always spawnable, so wrong arg type is the issue.
+                Error0 = beamtalk_error:new(type_error, ClassName),
+                Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
+                Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
+                error(Error2)
+        end,
+        case SpawnResult of
+            {beamtalk_object, _, _, _} = Obj ->
+                {reply, {ok, Obj}, State};
+            {ok, Pid} ->
+                Obj = #beamtalk_object{
+                    class = ClassName,
+                    class_mod = Module,
+                    pid = Pid
+                },
+                {reply, {ok, Obj}, State};
+            SpawnError ->
+                {reply, SpawnError, State}
+        end
+    catch
+        error:CaughtError ->
+            {reply, {error, CaughtError}, State}
     end;
 
 handle_call({new, Args}, _From, #class_state{
@@ -583,35 +593,45 @@ handle_call({new, Args}, _From, #class_state{
         beamtalk_dynamic_object ->
             %% Dynamic class - spawn beamtalk_dynamic_object instance
             %% Build initial state with methods and fields
-            InitState = #{
-                '$beamtalk_class' => ClassName,
-                '__class_pid__' => self(),
-                '__methods__' => DynamicMethods
-            },
-            %% Initialize instance variables from Args (expected to be a map or proplist)
-            InitStateWithFields = case Args of
-                [FieldMap] when is_map(FieldMap) ->
-                    maps:merge(InitState, FieldMap);
-                _ ->
-                    %% Initialize all instance variables to nil
-                    InitFields = lists:foldl(fun(Var, Acc) ->
-                        maps:put(Var, nil, Acc)
-                    end, InitState, InstanceVars),
-                    InitFields
-            end,
-            
-            %% Spawn the dynamic object
-            case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
-                {ok, Pid} ->
-                    %% Wrap in beamtalk_object record
-                    Obj = #beamtalk_object{
-                        class = ClassName,
-                        class_mod = beamtalk_dynamic_object,
-                        pid = Pid
-                    },
-                    {reply, {ok, Obj}, State};
-                Error ->
-                    {reply, Error, State}
+            try
+                InitState = #{
+                    '$beamtalk_class' => ClassName,
+                    '__class_pid__' => self(),
+                    '__methods__' => DynamicMethods
+                },
+                %% Initialize instance variables from Args (expected to be a map or proplist)
+                InitStateWithFields = case Args of
+                    [FieldMap] when is_map(FieldMap) ->
+                        maps:merge(InitState, FieldMap);
+                    [] ->
+                        %% new with no args: initialize all instance variables to nil
+                        lists:foldl(fun(Var, Acc) ->
+                            maps:put(Var, nil, Acc)
+                        end, InitState, InstanceVars);
+                    _ ->
+                        %% BT-473: Reject non-map arguments with type_error
+                        DynErr0 = beamtalk_error:new(type_error, ClassName),
+                        DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),
+                        DynErr2 = beamtalk_error:with_hint(DynErr1, <<"new: expects a Dictionary argument">>),
+                        error(DynErr2)
+                end,
+                
+                %% Spawn the dynamic object
+                case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
+                    {ok, Pid} ->
+                        %% Wrap in beamtalk_object record
+                        Obj = #beamtalk_object{
+                            class = ClassName,
+                            class_mod = beamtalk_dynamic_object,
+                            pid = Pid
+                        },
+                        {reply, {ok, Obj}, State};
+                    DynError ->
+                        {reply, DynError, State}
+                end
+            catch
+                error:DynCaughtError ->
+                    {reply, {error, DynCaughtError}, State}
             end;
         _ ->
             %% Compiled class — value type instantiation via new (BT-246 / ADR 0013)
@@ -632,7 +652,21 @@ handle_call({new, Args}, _From, #class_state{
                                 erlang:apply(Module, new, [])
                         end;
                     _ ->
-                        erlang:apply(Module, new, [])
+                        %% BT-473: Reject non-map arguments to new:
+                        %% Priority: instantiation_error (can't construct) before
+                        %% type_error (wrong argument type).
+                        %% Try new/0 first — if it raises instantiation_error,
+                        %% that's the real problem. If it succeeds, the class
+                        %% IS constructible but got wrong arg type → type_error.
+                        try erlang:apply(Module, new, []) of
+                            _ ->
+                                Error0 = beamtalk_error:new(type_error, ClassName),
+                                Error1 = beamtalk_error:with_selector(Error0, 'new:'),
+                                Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
+                                error(Error2)
+                        catch
+                            error:NewError -> error(NewError)
+                        end
                 end,
                 {reply, {ok, Result}, State}
             catch
