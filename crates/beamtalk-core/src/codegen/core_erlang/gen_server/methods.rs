@@ -176,6 +176,12 @@ impl CoreErlangGenerator {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
                     self.generate_expression(expr)?;
+                } else if self.control_flow_has_mutations(expr) {
+                    // BT-410: Last expression is control flow with field mutations.
+                    // The mutation variant returns the new state, not a result value.
+                    write!(self.output, "let _NewState = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {{'reply', 'nil', _NewState}}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -284,6 +290,12 @@ impl CoreErlangGenerator {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
                     self.generate_expression(expr)?;
+                } else if self.control_flow_has_mutations(expr) {
+                    // BT-410: Last expression is control flow with field mutations.
+                    // The mutation variant returns the new state, not a result value.
+                    write!(self.output, "let _NewState = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in {{'reply', 'nil', _NewState}}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -369,6 +381,19 @@ impl CoreErlangGenerator {
                     self.output,
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
                 )?;
+            } else if self.control_flow_has_mutations(expr) {
+                // BT-410: Control flow with field mutations (on:do:, ensure:, etc.)
+                // Bind the returned state to the next state variable.
+                let next_version = self.state_version() + 1;
+                let new_state = if next_version == 1 {
+                    "State1".to_string()
+                } else {
+                    format!("State{next_version}")
+                };
+                write!(self.output, "let {new_state} = ")?;
+                self.generate_expression(expr)?;
+                let _ = self.next_state_var();
+                write!(self.output, " in ")?;
             } else {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -812,9 +837,26 @@ impl CoreErlangGenerator {
             return false;
         }
 
-        // Extract the block argument and analyze for mutations
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // The block is typically the last argument for these control flow constructs
+        if let Expression::MessageSend {
+            receiver,
+            arguments,
+            selector: crate::ast::MessageSelector::Keyword(parts),
+            ..
+        } = expr
+        {
+            // BT-410: For on:do: and ensure:, the receiver (try body) is also
+            // a block that may contain field mutations
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if matches!(sel.as_str(), "on:do:" | "ensure:") {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    let analysis = block_analysis::analyze_block(block);
+                    if self.needs_mutation_threading(&analysis) {
+                        return true;
+                    }
+                }
+            }
+
+            // Standard check: analyze the last argument block
             if let Some(Expression::Block(block)) = arguments.last() {
                 let analysis = block_analysis::analyze_block(block);
                 return self.needs_mutation_threading(&analysis);
