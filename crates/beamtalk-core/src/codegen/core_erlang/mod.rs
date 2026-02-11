@@ -90,6 +90,7 @@ mod actor_codegen;
 mod block_analysis;
 mod control_flow;
 mod dispatch_codegen;
+pub mod document;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;

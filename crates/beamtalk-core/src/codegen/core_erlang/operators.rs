@@ -7,7 +7,7 @@
 
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
@@ -64,12 +64,18 @@ impl CoreErlangGenerator {
             }
         };
 
-        write!(self.output, "call 'erlang':'{erlang_op}'(")?;
-        self.generate_expression(left)?;
-        write!(self.output, ", ")?;
-        self.generate_expression(&arguments[0])?;
-        write!(self.output, ")")?;
+        let left_code = self.capture_expression(left)?;
+        let right_code = self.capture_expression(&arguments[0])?;
 
+        let doc = docvec![
+            format!("call 'erlang':'{erlang_op}'("),
+            left_code,
+            ", ",
+            right_code,
+            ")",
+        ];
+
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -90,39 +96,44 @@ impl CoreErlangGenerator {
 
         if is_list {
             // List concatenation: erlang:'++'
-            write!(self.output, "call 'erlang':'++'(")?;
-            self.generate_expression(left)?;
-            write!(self.output, ", ")?;
-            self.generate_expression(right)?;
-            write!(self.output, ")")?;
+            let left_code = self.capture_expression(left)?;
+            let right_code = self.capture_expression(right)?;
+            let doc = docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",];
+            self.write_document(&doc);
         } else if is_string {
             // String concatenation: iolist_to_binary
-            write!(
-                self.output,
-                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'("
-            )?;
-            self.generate_expression(left)?;
-            write!(self.output, "), call 'erlang':'binary_to_list'(")?;
-            self.generate_expression(right)?;
-            write!(self.output, ")])")?;
+            let left_code = self.capture_expression(left)?;
+            let right_code = self.capture_expression(right)?;
+            let doc = docvec![
+                "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
+                left_code,
+                "), call 'erlang':'binary_to_list'(",
+                right_code,
+                ")])",
+            ];
+            self.write_document(&doc);
         } else {
             // Runtime dispatch: check is_list at runtime
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            write!(self.output, "let {left_var} = ")?;
-            self.generate_expression(left)?;
-            write!(self.output, " in let {right_var} = ")?;
-            self.generate_expression(right)?;
-            write!(
-                self.output,
-                " in case call 'erlang':'is_list'({left_var}) of \
-                 <'true'> when 'true' -> call 'erlang':'++'({left_var}, {right_var}) \
-                 <'false'> when 'true' -> \
-                   call 'erlang':'iolist_to_binary'(\
-                     [call 'erlang':'binary_to_list'({left_var}), \
-                      call 'erlang':'binary_to_list'({right_var})]) \
-                 end"
-            )?;
+            let left_code = self.capture_expression(left)?;
+            let right_code = self.capture_expression(right)?;
+            let doc = docvec![
+                format!("let {left_var} = "),
+                left_code,
+                format!(" in let {right_var} = "),
+                right_code,
+                format!(
+                    " in case call 'erlang':'is_list'({left_var}) of \
+                     <'true'> when 'true' -> call 'erlang':'++'({left_var}, {right_var}) \
+                     <'false'> when 'true' -> \
+                       call 'erlang':'iolist_to_binary'(\
+                         [call 'erlang':'binary_to_list'({left_var}), \
+                          call 'erlang':'binary_to_list'({right_var})]) \
+                     end"
+                ),
+            ];
+            self.write_document(&doc);
         }
 
         Ok(())
