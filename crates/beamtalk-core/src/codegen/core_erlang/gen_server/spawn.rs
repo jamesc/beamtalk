@@ -372,18 +372,18 @@ impl CoreErlangGenerator {
 
     /// Returns a Core Erlang binary string literal for the given string.
     ///
-    /// Produces: `#{#<char1>(8,1,'integer',['unsigned'|['big']]), ...}#`
+    /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
     pub(in crate::codegen::core_erlang) fn binary_string_literal(s: &str) -> String {
         use std::fmt::Write;
         let mut result = String::from("#{");
-        for (i, ch) in s.chars().enumerate() {
+        for (i, byte) in s.bytes().enumerate() {
             if i > 0 {
                 result.push(',');
             }
             write!(
                 result,
                 "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                ch as u32
+                byte
             )
             .unwrap();
         }
