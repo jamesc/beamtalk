@@ -55,6 +55,10 @@ b value
 ('count' -> 5) asString
 // => count -> 5
 
+// printString delegates to asString (Association.bt)
+(#name -> 'James') printString
+// => #name -> James
+
 // ===========================================================================
 // REFLECTION
 // ===========================================================================

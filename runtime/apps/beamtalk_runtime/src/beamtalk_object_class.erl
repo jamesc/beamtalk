@@ -85,7 +85,8 @@
     is_class_name/1,
     class_display_name/1,
     class_send/3,
-    class_object_tag/1
+    class_object_tag/1,
+    inherits_from/2
 ]).
 
 %% gen_server callbacks
@@ -250,6 +251,12 @@ class_send(ClassPid, class_name, []) ->
     gen_server:call(ClassPid, class_name);
 class_send(ClassPid, module_name, []) ->
     gen_server:call(ClassPid, module_name);
+class_send(ClassPid, 'printString', []) ->
+    %% BT-477: Class objects return their display name as a string.
+    %% e.g., Integer printString → <<"Integer">>, Counter printString → <<"Counter">>
+    %% Enables Object >> printString => 'a ' ++ self class printString
+    ClassName = gen_server:call(ClassPid, class_name),
+    atom_to_binary(ClassName, utf8);
 class_send(_ClassPid, class, []) ->
     %% BT-412: Metaclass terminal — returns 'Metaclass' sentinel atom.
     %% The metaclass tower terminates here (no infinite regression).
@@ -985,8 +992,11 @@ invalidate_subclass_flattened_tables(ChangedClass) ->
     end, AllClasses),
     ok.
 
-%% @private
 %% @doc Check if a class inherits from a given ancestor (walks superclass chain).
+%%
+%% Returns true if ClassName is equal to or a subclass of Ancestor.
+%% Returns false if the class is not registered (safe during bootstrap).
+%% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
 inherits_from(none, _Ancestor) ->
     false;

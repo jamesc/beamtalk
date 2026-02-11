@@ -99,6 +99,11 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
 
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Generate: let N = <receiver> in
         //           letrec 'repeat'/2 = fun (I, StateAcc) ->
         //               case I =< N of
@@ -169,6 +174,9 @@ impl CoreErlangGenerator {
                 // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
                 // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
@@ -270,6 +278,11 @@ impl CoreErlangGenerator {
         // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
         // Field values are read from StateAcc when needed. This correctly handles nested
         // control flow constructs that modify state and return the updated StateAcc.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
 
         // Generate: let Start = <receiver> in let End = <limit> in
         //           letrec 'loop'/2 = fun (I, StateAcc) ->
@@ -513,6 +526,11 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
 
         // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
         //           letrec 'loop'/2 = fun (I, StateAcc) ->

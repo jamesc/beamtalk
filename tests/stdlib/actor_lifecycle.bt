@@ -59,3 +59,18 @@ Counter spawnWith: "hello"
 
 Counter spawnWith: true
 // => ERROR: type_error
+
+// ===========================================================================
+// printString — actor instance and class object (BT-477)
+// ===========================================================================
+
+// Actor instance printString returns "a ClassName"
+c2 := Counter spawn
+// => _
+
+c2 printString await
+// => a Counter
+
+// Class object printString returns class name
+Counter printString
+// => Counter

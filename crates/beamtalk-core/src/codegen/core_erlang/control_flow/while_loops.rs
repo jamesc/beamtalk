@@ -82,6 +82,11 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // BT-478: Simplified loop signature — only (StateAcc), no separate field params.
 
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Generate: letrec 'while'/1 = fun (StateAcc) ->
         //     let _CondFun = <condition> in
         //     case apply _CondFun (StateAcc) of
@@ -168,6 +173,9 @@ impl CoreErlangGenerator {
                 // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
                 // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
@@ -254,6 +262,13 @@ impl CoreErlangGenerator {
         body: &Block,
     ) -> Result<()> {
         // BT-478: Simplified loop signature — only (StateAcc), no separate field params.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
+        // Same as while_true but with false/true swapped in the case
 
         write!(self.output, "letrec 'while'/1 = fun (StateAcc) -> ")?;
 
