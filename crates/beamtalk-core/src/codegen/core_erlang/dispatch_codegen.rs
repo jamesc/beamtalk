@@ -772,6 +772,8 @@ impl CoreErlangGenerator {
                         | "select:"
                         | "reject:"
                         | "inject:into:"
+                        | "on:do:"
+                        | "ensure:"
                 )
             }
             Expression::MessageSend {
