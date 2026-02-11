@@ -38,6 +38,41 @@ false printString
 nil printString
 // => nil
 
+// --- Floats ---
+3.14 printString
+// => 3.14
+
+-2.5 printString
+// => -2.5
+
+// --- Lists ---
+#(1, 2, 3) printString
+// => #(1, 2, 3)
+
+#() printString
+// => #()
+
+// --- Blocks ---
+[42] printString
+// => a Block
+
+// --- Dictionaries ---
+#{} printString
+// => a Dictionary
+
+// --- Class objects (BT-477: class_send printString) ---
+42 class printString
+// => Integer
+
+'hello' class printString
+// => String
+
+true class printString
+// => True
+
+nil class printString
+// => UndefinedObject
+
 // ===========================================================================
 // yourself — identity method (returns receiver)
 // ===========================================================================
