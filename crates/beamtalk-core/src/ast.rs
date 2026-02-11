@@ -198,6 +198,8 @@ pub struct ClassDefinition {
     pub methods: Vec<MethodDefinition>,
     /// Class-side method definitions (defined with `class` prefix).
     pub class_methods: Vec<MethodDefinition>,
+    /// Class variable declarations (defined with `classVar:`).
+    pub class_variables: Vec<StateDeclaration>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -220,6 +222,7 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
+            class_variables: Vec::new(),
             span,
         }
     }
@@ -243,6 +246,7 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
+            class_variables: Vec::new(),
             span,
         }
     }

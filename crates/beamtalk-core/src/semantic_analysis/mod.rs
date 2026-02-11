@@ -1901,6 +1901,7 @@ mod tests {
             state: vec![state_decl],
             methods: vec![get_value_method],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
 
@@ -2269,6 +2270,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
 
@@ -2302,6 +2304,7 @@ mod tests {
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
 
@@ -2583,6 +2586,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
 

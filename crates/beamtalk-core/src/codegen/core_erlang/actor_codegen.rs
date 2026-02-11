@@ -232,8 +232,8 @@ impl CoreErlangGenerator {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
                 .map(|m| {
-                    // Class method takes ClassSelf + user params
-                    format!("'class_{}'/{}", m.selector.name(), m.selector.arity() + 1)
+                    // BT-412: Class method takes ClassSelf + ClassVars + user params
+                    format!("'class_{}'/{}", m.selector.name(), m.selector.arity() + 2)
                 })
                 .collect();
             if class_method_exports.is_empty() {

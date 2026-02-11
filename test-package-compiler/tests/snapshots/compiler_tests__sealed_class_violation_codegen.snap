@@ -91,7 +91,8 @@ call 'erlang':'*'(Self, 2)
                 'new:' => ~{'arity' => 1}~,
                 'superclass' => ~{'arity' => 0}~
             }~,
-            'method_source' => ~{'doubled' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#}~
+            'method_source' => ~{'doubled' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'class_variables' => ~{}~
         }~) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'

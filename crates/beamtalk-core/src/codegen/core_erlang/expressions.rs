@@ -214,8 +214,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<()> {
-        // BT-426: Class methods cannot access instance fields
+        // BT-412: Class methods access class variables directly from ClassVars map
         if self.in_class_method {
+            if let Expression::Identifier(recv_id) = receiver {
+                if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
+                    let cv = self.current_class_var();
+                    write!(self.output, "call 'maps':'get'('{}', {cv})", field.name)?;
+                    return Ok(());
+                }
+            }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
                     "cannot access instance field '{}' in a class method",
@@ -269,8 +276,24 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<()> {
-        // BT-426: Reject field assignments in class method context
+        // BT-412: Class methods assign to class variables via ClassVars map threading.
+        // The generated code leaves `let ClassVarsN = ...` open — the caller (sequential
+        // expression handler) must provide the continuation.
         if self.in_class_method {
+            if self.class_var_names.contains(field_name) {
+                let val_var = self.fresh_temp_var("Val");
+                let current_cv = self.current_class_var();
+                write!(self.output, "let {val_var} = ")?;
+                self.generate_expression(value)?;
+                let new_cv = self.next_class_var();
+                write!(
+                    self.output,
+                    " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
+                )?;
+                // Store result var name for callers that need to reference it
+                self.last_open_scope_result = Some(val_var);
+                return Ok(());
+            }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
                     "cannot assign to instance field '{field_name}' in a class method"

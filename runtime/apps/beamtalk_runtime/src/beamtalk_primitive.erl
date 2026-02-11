@@ -42,7 +42,7 @@
 %%% See: docs/internal/design-self-as-object.md Section 3.3
 
 -module(beamtalk_primitive).
--export([class_of/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
+-export([class_of/1, class_of_object/1, class_of_object_by_name/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
 
 -include("beamtalk.hrl").
 
@@ -94,6 +94,56 @@ class_of(X) when is_port(X) -> 'Port';
 class_of(X) when is_reference(X) -> 'Reference';
 class_of(_) -> 'Object'.
 
+%% @doc Return the class of any value as a first-class class object (BT-412).
+%%
+%% Unlike class_of/1 which returns an atom, this returns a #beamtalk_object{}
+%% tuple representing the class as a first-class object that can receive messages.
+%% Uses whereis_class to look up the class process pid.
+%%
+%% Examples:
+%% ```
+%% class_of_object(42)           % => {beamtalk_object, 'Integer class', ..., Pid}
+%% class_of_object(<<"hello">>)  % => {beamtalk_object, 'String class', ..., Pid}
+%% ```
+-spec class_of_object(term()) -> tuple() | atom().
+class_of_object('Metaclass') ->
+    %% BT-412: Metaclass tower is terminal
+    'Metaclass';
+class_of_object(#beamtalk_object{class = ClassName}) ->
+    %% BT-412: class of a class object → 'Metaclass' sentinel (terminal)
+    case beamtalk_object_class:is_class_name(ClassName) of
+        true -> 'Metaclass';
+        false -> class_of_object_inner(ClassName)
+    end;
+class_of_object(X) ->
+    ClassName = class_of(X),
+    class_of_object_inner(ClassName).
+
+%% @private Helper to construct class object from class name.
+class_of_object_inner(ClassName) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined ->
+            %% Fallback for classes without a registered process
+            ClassName;
+        Pid when is_pid(Pid) ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
+    end.
+
+%% @doc Return a class object given a class name atom (BT-412).
+%%
+%% Used by dispatch when the class name is already known (e.g., from state tag).
+-spec class_of_object_by_name(atom()) -> tuple() | atom().
+class_of_object_by_name(ClassName) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined -> ClassName;
+        Pid when is_pid(Pid) ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
+    end.
+
 %% @doc Return the printString representation of any value.
 %%
 %% Handles all BEAM types uniformly — used by the printString intrinsic.
@@ -110,12 +160,20 @@ print_string(false) ->
     <<"false">>;
 print_string(nil) ->
     <<"nil">>;
+print_string('Metaclass') ->
+    <<"Metaclass">>;
 print_string(X) when is_atom(X) ->
     iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
-    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
+    %% BT-412: Class objects display as their class name (e.g., "Integer")
+    case beamtalk_object_class:is_class_name(ClassName) of
+        true ->
+            beamtalk_object_class:class_display_name(ClassName);
+        false ->
+            iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
+    end;
 print_string(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'Exception' ->

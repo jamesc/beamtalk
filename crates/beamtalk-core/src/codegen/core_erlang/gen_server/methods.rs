@@ -545,6 +545,22 @@ impl CoreErlangGenerator {
                 write!(self.output, "'{}' => ", method.selector.name())?;
                 self.generate_binary_string(&source_str)?;
             }
+            writeln!(self.output, "}}~,")?;
+
+            // BT-412: Class variable initial values
+            self.write_indent()?;
+            write!(self.output, "'class_variables' => ~{{")?;
+            for (cv_idx, cv) in class.class_variables.iter().enumerate() {
+                if cv_idx > 0 {
+                    write!(self.output, ", ")?;
+                }
+                write!(self.output, "'{}' => ", cv.name.name)?;
+                if let Some(ref default_value) = cv.default_value {
+                    self.generate_expression(default_value)?;
+                } else {
+                    write!(self.output, "'nil'")?;
+                }
+            }
             writeln!(self.output, "}}~")?;
 
             self.indent -= 1;
@@ -612,24 +628,42 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<()> {
+        // BT-412: Populate class variable names for field access validation
+        self.class_var_names = class
+            .class_variables
+            .iter()
+            .map(|cv| cv.name.name.to_string())
+            .collect();
+
+        // BT-412: Populate class method selectors for self-send routing
+        self.class_method_selectors = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(|m| m.selector.to_erlang_atom())
+            .collect();
+
         for method in &class.class_methods {
             if method.kind != MethodKind::Primary {
                 continue;
             }
 
             let selector_name = method.selector.name();
-            let arity = method.selector.arity() + 1; // +1 for ClassSelf
+            // BT-412: +2 for ClassSelf and ClassVars parameters
+            let arity = method.selector.arity() + 2;
 
             writeln!(self.output)?;
             write!(
                 self.output,
-                "'class_{selector_name}'/{arity} = fun (ClassSelf"
+                "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars"
             )?;
 
             // Push scope for parameter bindings
             self.push_scope();
             self.current_method_params.clear();
             self.reset_state_version();
+            self.class_var_version = 0;
+            self.class_var_mutated = false;
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
@@ -649,7 +683,7 @@ impl CoreErlangGenerator {
             if method.body.is_empty() {
                 write!(self.output, "'nil'")?;
             } else {
-                self.generate_class_method_body(method)?;
+                self.generate_class_method_body(method, &class.class_variables)?;
             }
             writeln!(self.output)?;
 
@@ -657,6 +691,8 @@ impl CoreErlangGenerator {
             self.pop_scope();
             self.in_class_method = false;
         }
+        self.class_var_names.clear();
+        self.class_method_selectors.clear();
         Ok(())
     }
 
@@ -664,16 +700,76 @@ impl CoreErlangGenerator {
     ///
     /// Unlike instance methods, class methods have no state threading.
     /// They simply evaluate expressions and return the last value.
-    fn generate_class_method_body(&mut self, method: &MethodDefinition) -> Result<()> {
+    /// BT-412: If class variables were mutated, wraps the final result
+    /// in `{class_var_result, Result, ClassVarsN}`.
+    fn generate_class_method_body(
+        &mut self,
+        method: &MethodDefinition,
+        class_vars: &[crate::ast::StateDeclaration],
+    ) -> Result<()> {
+        let has_class_vars = !class_vars.is_empty();
+
         for (i, expr) in method.body.iter().enumerate() {
             let is_last = i == method.body.len() - 1;
 
             if let Expression::Return { value, .. } = expr {
-                self.generate_expression(value)?;
+                if has_class_vars {
+                    let result_var = self.fresh_temp_var("Ret");
+                    write!(self.output, "let {result_var} = ")?;
+                    self.generate_expression(value)?;
+                    if self.class_var_mutated {
+                        let final_cv = self.current_class_var();
+                        write!(
+                            self.output,
+                            " in {{'class_var_result', {result_var}, {final_cv}}}"
+                        )?;
+                    } else {
+                        write!(self.output, " in {result_var}")?;
+                    }
+                } else {
+                    self.generate_expression(value)?;
+                }
                 return Ok(());
             }
 
             if is_last {
+                if has_class_vars {
+                    if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+                        // Open-scope expression: generate it and close with class_var_result.
+                        // The result var is stored in last_open_scope_result.
+                        self.last_open_scope_result = None;
+                        self.generate_expression(expr)?;
+                        let final_cv = self.current_class_var();
+                        if let Some(result_var) = &self.last_open_scope_result.clone() {
+                            write!(
+                                self.output,
+                                "{{'class_var_result', {result_var}, {final_cv}}}"
+                            )?;
+                        } else {
+                            // Fallback: shouldn't happen
+                            write!(self.output, "{{'class_var_result', 'nil', {final_cv}}}")?;
+                        }
+                    } else {
+                        let result_var = self.fresh_temp_var("Ret");
+                        write!(self.output, "let {result_var} = ")?;
+                        self.generate_expression(expr)?;
+                        if self.class_var_mutated {
+                            let final_cv = self.current_class_var();
+                            write!(
+                                self.output,
+                                " in {{'class_var_result', {result_var}, {final_cv}}}"
+                            )?;
+                        } else {
+                            write!(self.output, " in {result_var}")?;
+                        }
+                    }
+                } else {
+                    self.generate_expression(expr)?;
+                }
+            } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+                // Class var assignment or class method self-send: the generated code
+                // ends with `in ` (open scope) so ClassVarsN stays visible for the
+                // remaining body expressions.
                 self.generate_expression(expr)?;
             } else {
                 let tmp_var = self.fresh_temp_var("seq");

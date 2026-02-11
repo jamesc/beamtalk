@@ -68,7 +68,10 @@
 %% --- Reflection methods ---
 
 dispatch(class, [], _Self, State) ->
-    {reply, beamtalk_tagged_map:class_of(State), State};
+    %% BT-412: Return class as first-class object (not just an atom)
+    ClassName = beamtalk_tagged_map:class_of(State),
+    ClassObj = beamtalk_primitive:class_of_object_by_name(ClassName),
+    {reply, ClassObj, State};
 
 dispatch('respondsTo:', [Selector], _Self, State) when is_atom(Selector) ->
     ClassName = beamtalk_tagged_map:class_of(State),

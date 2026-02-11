@@ -167,7 +167,8 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
                 'spawnWith:' => ~{'arity' => 1}~,
                 'superclass' => ~{'arity' => 0}~
             }~,
-            'method_source' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~
+            'method_source' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'class_variables' => ~{}~
         }~) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'

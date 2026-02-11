@@ -497,6 +497,20 @@ pub(super) struct CoreErlangGenerator {
     /// BT-426: Whether we're currently generating a class-side method body.
     /// When true, field access/assignment should produce a compile error.
     in_class_method: bool,
+    /// BT-412: Names of class variables in the current class.
+    /// Used to distinguish class variable access from instance field access in class methods.
+    class_var_names: std::collections::HashSet<String>,
+    /// BT-412: Selector names of class methods in the current class.
+    /// Used to route self-sends to class method functions vs module exports.
+    class_method_selectors: std::collections::HashSet<String>,
+    /// BT-412: State version counter for class variable threading.
+    class_var_version: usize,
+    /// BT-412: Whether class variables were mutated in the current method.
+    class_var_mutated: bool,
+    /// BT-412: Name of the result variable from the last open-scope expression
+    /// (class var assignment or class method self-send). Used by the class method
+    /// body generator to reference the result when closing open scopes.
+    last_open_scope_result: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -518,6 +532,11 @@ impl CoreErlangGenerator {
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
             in_class_method: false,
+            class_var_names: std::collections::HashSet::new(),
+            class_method_selectors: std::collections::HashSet::new(),
+            class_var_version: 0,
+            class_var_mutated: false,
+            last_open_scope_result: None,
         }
     }
 
@@ -539,6 +558,11 @@ impl CoreErlangGenerator {
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
             in_class_method: false,
+            class_var_names: std::collections::HashSet::new(),
+            class_method_selectors: std::collections::HashSet::new(),
+            class_var_version: 0,
+            class_var_mutated: false,
+            last_open_scope_result: None,
         }
     }
 
@@ -614,6 +638,22 @@ impl CoreErlangGenerator {
     /// Sets the state version.
     pub(super) fn set_state_version(&mut self, version: usize) {
         self.state_threading.set_version(version);
+    }
+
+    /// BT-412: Returns the current class variable state variable name.
+    fn current_class_var(&self) -> String {
+        if self.class_var_version == 0 {
+            "ClassVars".to_string()
+        } else {
+            format!("ClassVars{}", self.class_var_version)
+        }
+    }
+
+    /// BT-412: Increments class var version and returns the new variable name.
+    fn next_class_var(&mut self) -> String {
+        self.class_var_version += 1;
+        self.class_var_mutated = true;
+        format!("ClassVars{}", self.class_var_version)
     }
 
     /// BT-153: Check if mutation threading should be used for a block.
@@ -3163,6 +3203,7 @@ end
                 },
             ],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 50),
         };
 
@@ -3309,6 +3350,7 @@ end
             }],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 20),
         };
 
@@ -3325,6 +3367,7 @@ end
             }],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 30),
         };
 
@@ -3621,6 +3664,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3643,6 +3687,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3667,6 +3712,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let logging_counter = ClassDefinition {
@@ -3677,6 +3723,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         // Module with both classes; first class is LoggingCounter
@@ -3718,6 +3765,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3741,6 +3789,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3768,6 +3817,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3794,6 +3844,7 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
             span: Span::new(0, 0),
         };
         let module = Module {

@@ -116,7 +116,7 @@ impl CoreErlangGenerator {
         // BT-411: Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
-                let arity = method.parameters.len() + 1; // +1 for ClassSelf
+                let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
                 exports.push(format!("'class_{}'/{arity}", method.selector.name()));
             }
         }

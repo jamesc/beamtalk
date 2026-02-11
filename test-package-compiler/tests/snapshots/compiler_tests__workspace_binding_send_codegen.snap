@@ -167,7 +167,8 @@ module 'workspace_binding_send' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'han
                 'spawnWith:' => ~{'arity' => 1}~,
                 'superclass' => ~{'arity' => 0}~
             }~,
-            'method_source' => ~{'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~
+            'method_source' => ~{'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'class_variables' => ~{}~
         }~) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
             <{'error', {'already_started', _Existing0}}> when 'true' -> 'ok'

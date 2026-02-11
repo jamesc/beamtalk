@@ -21,7 +21,7 @@ false class
 // => False
 
 nil class
-// => Nil
+// => UndefinedObject
 
 // ===========================================================================
 // IDENTITY COMPARISON (==, ~=)
