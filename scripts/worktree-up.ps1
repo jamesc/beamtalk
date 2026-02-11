@@ -500,7 +500,7 @@ Write-Host "`n✨ Container ready!" -ForegroundColor Green
 
 # Set up Copilot CLI config
 Write-Host "🤖 Setting up Copilot CLI config..." -ForegroundColor Cyan
-devcontainer exec --workspace-folder $worktreePath bash -c "mkdir -p ~/.copilot && cp .devcontainer/mcp-config.json ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json" 2>$null
+devcontainer exec --workspace-folder $worktreePath bash -c "mkdir -p ~/.copilot && envsubst < .devcontainer/mcp-config.json > ~/.copilot/mcp-config.json && envsubst < .devcontainer/copilot-config.json > ~/.copilot/config.json" 2>$null
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✅ Copilot CLI configured" -ForegroundColor Green
 }
