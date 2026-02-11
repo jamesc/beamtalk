@@ -25,6 +25,7 @@ impl CoreErlangGenerator {
     /// 'method_table'/0 = fun () ->
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_method_table(
         &mut self,
         module: &Module,
@@ -94,6 +95,7 @@ impl CoreErlangGenerator {
     /// 'has_method'/1 = fun (Selector) ->
     ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_has_method(
         &mut self,
         module: &Module,
@@ -174,6 +176,7 @@ impl CoreErlangGenerator {
     ///     catch <Type, Error, _Stacktrace> ->
     ///         {'error', {Type, Error}, State}
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<()> {
         let module_name = &self.module_name.clone();
 
@@ -187,9 +190,7 @@ impl CoreErlangGenerator {
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
-                    format!(
-                        "try call '{module_name}':'dispatch'(Selector, Args, Self, State)"
-                    ),
+                    format!("try call '{module_name}':'dispatch'(Selector, Args, Self, State)"),
                     line(),
                     "of Result -> Result",
                     line(),
@@ -313,7 +314,9 @@ impl CoreErlangGenerator {
             line(),
             "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
             line(),
-            format!("let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"),
+            format!(
+                "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
+            ),
             nest(
                 INDENT,
                 docvec![
@@ -405,7 +408,9 @@ impl CoreErlangGenerator {
                                                             line(),
                                                             "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
                                                             line(),
-                                                            format!("let HintMsg = {hint_binary} in"),
+                                                            format!(
+                                                                "let HintMsg = {hint_binary} in"
+                                                            ),
                                                             line(),
                                                             "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
                                                             line(),
@@ -430,7 +435,7 @@ impl CoreErlangGenerator {
             "end",
         ];
         // Render at current indent level
-        let indent_spaces = self.indent as isize * INDENT;
+        let indent_spaces = isize::try_from(self.indent).unwrap_or(0) * INDENT;
         self.write_document(&nest(indent_spaces, docvec![default_body, "\n"]));
 
         self.indent -= 2;
