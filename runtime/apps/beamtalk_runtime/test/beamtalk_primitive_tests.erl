@@ -300,14 +300,14 @@ reflection_responds_to_integer_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases - methods that exist
-         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['+'], 42)),
-         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['class'], 42)),
-         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['abs'], 42)),
-         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo', ['respondsTo'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo:', ['+'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo:', ['class'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo:', ['abs'], 42)),
+         ?assertEqual(true, beamtalk_integer:dispatch('respondsTo:', ['respondsTo:'], 42)),
          
          %% False cases - methods that don't exist
-         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo', ['unknownMethod'], 42)),
-         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo', ['fooBar'], 42))
+         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo:', ['unknownMethod'], 42)),
+         ?assertEqual(false, beamtalk_integer:dispatch('respondsTo:', ['fooBar'], 42))
      end}.
 
 reflection_responds_to_string_test_() ->
@@ -316,14 +316,14 @@ reflection_responds_to_string_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['++'], <<"hi">>)),
-         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['class'], <<"hi">>)),
-         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['size'], <<"hi">>)),
-         ?assertEqual(true, beamtalk_string:dispatch('respondsTo', ['respondsTo'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo:', ['++'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo:', ['class'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo:', ['size'], <<"hi">>)),
+         ?assertEqual(true, beamtalk_string:dispatch('respondsTo:', ['respondsTo:'], <<"hi">>)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_string:dispatch('respondsTo', ['unknownMethod'], <<"hi">>)),
-         ?assertEqual(false, beamtalk_string:dispatch('respondsTo', ['+'], <<"hi">>))
+         ?assertEqual(false, beamtalk_string:dispatch('respondsTo:', ['unknownMethod'], <<"hi">>)),
+         ?assertEqual(false, beamtalk_string:dispatch('respondsTo:', ['+'], <<"hi">>))
      end}.
 
 reflection_responds_to_boolean_test_() ->
@@ -332,14 +332,14 @@ reflection_responds_to_boolean_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['not'], true)),
-         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['class'], true)),
-         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['ifTrue:'], true)),
-         ?assertEqual(true, beamtalk_true:dispatch('respondsTo', ['respondsTo'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo:', ['not'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo:', ['class'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo:', ['ifTrue:'], true)),
+         ?assertEqual(true, beamtalk_true:dispatch('respondsTo:', ['respondsTo:'], true)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_true:dispatch('respondsTo', ['unknownMethod'], true)),
-         ?assertEqual(false, beamtalk_true:dispatch('respondsTo', ['+'], true))
+         ?assertEqual(false, beamtalk_true:dispatch('respondsTo:', ['unknownMethod'], true)),
+         ?assertEqual(false, beamtalk_true:dispatch('respondsTo:', ['+'], true))
      end}.
 
 reflection_responds_to_nil_test_() ->
@@ -348,14 +348,14 @@ reflection_responds_to_nil_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['isNil'], nil)),
-         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['class'], nil)),
-         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['ifNil:'], nil)),
-         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo', ['respondsTo'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo:', ['isNil'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo:', ['class'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo:', ['ifNil:'], nil)),
+         ?assertEqual(true, beamtalk_undefined_object:dispatch('respondsTo:', ['respondsTo:'], nil)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo', ['unknownMethod'], nil)),
-         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo', ['+'], nil))
+         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo:', ['unknownMethod'], nil)),
+         ?assertEqual(false, beamtalk_undefined_object:dispatch('respondsTo:', ['+'], nil))
      end}.
 
 reflection_responds_to_block_test_() ->
@@ -365,14 +365,14 @@ reflection_responds_to_block_test_() ->
      fun() ->
          Block = fun() -> ok end,
          %% True cases
-         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['value'], Block)),
-         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['class'], Block)),
-         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['arity'], Block)),
-         ?assertEqual(true, beamtalk_block:dispatch('respondsTo', ['respondsTo'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo:', ['value'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo:', ['class'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo:', ['arity'], Block)),
+         ?assertEqual(true, beamtalk_block:dispatch('respondsTo:', ['respondsTo:'], Block)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_block:dispatch('respondsTo', ['unknownMethod'], Block)),
-         ?assertEqual(false, beamtalk_block:dispatch('respondsTo', ['+'], Block))
+         ?assertEqual(false, beamtalk_block:dispatch('respondsTo:', ['unknownMethod'], Block)),
+         ?assertEqual(false, beamtalk_block:dispatch('respondsTo:', ['+'], Block))
      end}.
 
 reflection_responds_to_tuple_test_() ->
@@ -382,14 +382,14 @@ reflection_responds_to_tuple_test_() ->
      fun() ->
          Tuple = {a, b, c},
          %% True cases
-         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['size'], Tuple)),
-         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['class'], Tuple)),
-         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['at:'], Tuple)),
-         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo', ['respondsTo'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo:', ['size'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo:', ['class'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo:', ['at:'], Tuple)),
+         ?assertEqual(true, beamtalk_tuple:dispatch('respondsTo:', ['respondsTo:'], Tuple)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['unknownMethod'], Tuple)),
-         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo', ['+'], Tuple))
+         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo:', ['unknownMethod'], Tuple)),
+         ?assertEqual(false, beamtalk_tuple:dispatch('respondsTo:', ['+'], Tuple))
      end}.
 
 reflection_responds_to_float_test_() ->
@@ -398,14 +398,14 @@ reflection_responds_to_float_test_() ->
      fun(_) -> ok end,
      fun() ->
          %% True cases
-         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['+'], 3.14)),
-         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['class'], 3.14)),
-         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['abs'], 3.14)),
-         ?assertEqual(true, beamtalk_float:dispatch('respondsTo', ['respondsTo'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo:', ['+'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo:', ['class'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo:', ['abs'], 3.14)),
+         ?assertEqual(true, beamtalk_float:dispatch('respondsTo:', ['respondsTo:'], 3.14)),
          
          %% False cases
-         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['unknownMethod'], 3.14)),
-         ?assertEqual(false, beamtalk_float:dispatch('respondsTo', ['fooBar'], 3.14))
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo:', ['unknownMethod'], 3.14)),
+         ?assertEqual(false, beamtalk_float:dispatch('respondsTo:', ['fooBar'], 3.14))
      end}.
 
 %%% ============================================================================
@@ -435,7 +435,7 @@ perform_on_boolean_test() ->
 perform_with_unary_message_on_integer_test() ->
     %% Test perform: with unary message (no args)
     %% -5 perform: #abs  => 5
-    Result = beamtalk_integer:dispatch('perform', ['abs'], -5),
+    Result = beamtalk_integer:dispatch('perform:', ['abs'], -5),
     ?assertEqual(5, Result).
 
 perform_withArgs_invalid_args_type_on_primitive_test() ->
