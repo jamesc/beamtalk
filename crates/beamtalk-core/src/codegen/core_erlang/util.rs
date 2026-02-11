@@ -19,7 +19,7 @@ use std::fmt::Write;
 ///
 /// Holds the user-facing class name (from the AST class definition).
 /// This decouples class identity from the Erlang module name, which may
-/// differ for stdlib classes (e.g., module `bt_stdlib_string` → class `String`).
+/// differ for stdlib classes (e.g., module `bt@stdlib@string` → class `String`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClassIdentity {
     class_name: String,
@@ -108,7 +108,7 @@ impl CoreErlangGenerator {
     /// # Examples
     ///
     /// - Module `"counter"` (no class identity) → `"Counter"`
-    /// - Module `"bt_stdlib_string"` with class identity `"String"` → `"String"`
+    /// - Module `"bt@stdlib@string"` with class identity `"String"` → `"String"`
     pub(super) fn class_name(&self) -> String {
         if let Some(ref identity) = self.class_identity {
             return identity.class_name().to_string();
@@ -162,4 +162,15 @@ pub fn to_module_name(class_name: &str) -> String {
     }
 
     result
+}
+
+/// Returns true if `module_name` corresponds to the compiled form of `class_name`.
+///
+/// ADR 0016: Module names may be prefixed with `bt@` (user code) or
+/// `bt@stdlib@` (stdlib), or unprefixed (legacy/tests).
+pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
+    let snake = to_module_name(class_name);
+    module_name == snake
+        || module_name == format!("bt@{snake}")
+        || module_name == format!("bt@stdlib@{snake}")
 }

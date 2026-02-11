@@ -4,7 +4,7 @@
 %%% @doc EUnit tests for beamtalk_message_dispatch module (BT-430).
 %%%
 %%% Tests unified dispatch routing for actors, class objects, and primitives.
-%%% Note: Compiled stdlib modules (beamtalk_integer etc.) require `just build-stdlib`.
+%%% Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdlib`.
 %%% These tests focus on routing logic that works without compiled stdlib.
 -module(beamtalk_message_dispatch_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -21,6 +21,8 @@ actor_setup() ->
     end,
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
+    %% BT-446: Bootstrap only starts pg. Classes registered by compiled stdlib.
+    beamtalk_stdlib:init(),
     ok.
 
 actor_teardown(_) ->

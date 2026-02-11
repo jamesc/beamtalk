@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for CompiledMethod introspection (BT-101, BT-454)
+//
+// Tests the >> operator and CompiledMethod protocol:
+// selector, source, argumentCount, class
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// METHOD LOOKUP
+// ===========================================================================
+
+Counter >> #getValue
+// => _
+
+Counter >> #nonExistent
+// => nil
+
+// ===========================================================================
+// CLASS
+// ===========================================================================
+
+(Counter >> #getValue) class
+// => CompiledMethod
+
+// ===========================================================================
+// SELECTOR
+// ===========================================================================
+
+(Counter >> #getValue) selector
+// => getValue
+
+(Counter >> #increment) selector
+// => increment
+
+// ===========================================================================
+// ARGUMENT COUNT
+// ===========================================================================
+
+(Counter >> #getValue) argumentCount
+// => 0
+
+(Counter >> #increment) argumentCount
+// => 0
+
+// ===========================================================================
+// SOURCE
+// ===========================================================================
+
+(Counter >> #getValue) source
+// => getValue => ^self.value
+
+// ===========================================================================
+// PRINT STRING — blocked on printString dispatch bug (follow-up issue)
+// ===========================================================================
+
+// (Counter >> #getValue) printString
+// // => a CompiledMethod(getValue)

@@ -6,7 +6,7 @@
 %% Tests the beamtalk_list_ops module which provides complex List methods
 %% that can't be expressed as simple BIF calls.
 %%
-%% BT-419: Updated from beamtalk_list dispatch tests to beamtalk_list_ops tests.
+%% BT-419: Updated from bt@stdlib@list dispatch tests to beamtalk_list_ops tests.
 -module(beamtalk_list_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -131,62 +131,62 @@ intersperse_test() ->
 
 %%% ============================================================================
 %%% Compiled dispatch integration tests
-%%% Tests via beamtalk_list:dispatch/3 (compiled from lib/List.bt)
+%%% Tests via 'bt@stdlib@list':dispatch/3 (compiled from lib/List.bt)
 %%% to verify BIF mappings are wired correctly end-to-end.
 %%% ============================================================================
 
 dispatch_size_test() ->
-    ?assertEqual(3, beamtalk_list:dispatch('size', [], [1, 2, 3])),
-    ?assertEqual(0, beamtalk_list:dispatch('size', [], [])).
+    ?assertEqual(3, 'bt@stdlib@list':dispatch('size', [], [1, 2, 3])),
+    ?assertEqual(0, 'bt@stdlib@list':dispatch('size', [], [])).
 
 dispatch_is_empty_test() ->
-    ?assertEqual(true, beamtalk_list:dispatch('isEmpty', [], [])),
-    ?assertEqual(false, beamtalk_list:dispatch('isEmpty', [], [1])).
+    ?assertEqual(true, 'bt@stdlib@list':dispatch('isEmpty', [], [])),
+    ?assertEqual(false, 'bt@stdlib@list':dispatch('isEmpty', [], [1])).
 
 dispatch_first_test() ->
-    ?assertEqual(1, beamtalk_list:dispatch('first', [], [1, 2, 3])).
+    ?assertEqual(1, 'bt@stdlib@list':dispatch('first', [], [1, 2, 3])).
 
 dispatch_first_empty_test() ->
     ?assertError(#beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'},
-        beamtalk_list:dispatch('first', [], [])).
+        'bt@stdlib@list':dispatch('first', [], [])).
 
 dispatch_rest_test() ->
-    ?assertEqual([2, 3], beamtalk_list:dispatch('rest', [], [1, 2, 3])),
-    ?assertEqual([], beamtalk_list:dispatch('rest', [], [])).
+    ?assertEqual([2, 3], 'bt@stdlib@list':dispatch('rest', [], [1, 2, 3])),
+    ?assertEqual([], 'bt@stdlib@list':dispatch('rest', [], [])).
 
 dispatch_last_test() ->
-    ?assertEqual(3, beamtalk_list:dispatch('last', [], [1, 2, 3])).
+    ?assertEqual(3, 'bt@stdlib@list':dispatch('last', [], [1, 2, 3])).
 
 dispatch_at_test() ->
-    ?assertEqual(2, beamtalk_list:dispatch('at:', [2], [1, 2, 3])).
+    ?assertEqual(2, 'bt@stdlib@list':dispatch('at:', [2], [1, 2, 3])).
 
 dispatch_includes_test() ->
-    ?assertEqual(true, beamtalk_list:dispatch('includes:', [2], [1, 2, 3])),
-    ?assertEqual(false, beamtalk_list:dispatch('includes:', [4], [1, 2, 3])).
+    ?assertEqual(true, 'bt@stdlib@list':dispatch('includes:', [2], [1, 2, 3])),
+    ?assertEqual(false, 'bt@stdlib@list':dispatch('includes:', [4], [1, 2, 3])).
 
 dispatch_sort_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('sort', [], [3, 1, 2])).
+    ?assertEqual([1, 2, 3], 'bt@stdlib@list':dispatch('sort', [], [3, 1, 2])).
 
 dispatch_reversed_test() ->
-    ?assertEqual([3, 2, 1], beamtalk_list:dispatch('reversed', [], [1, 2, 3])).
+    ?assertEqual([3, 2, 1], 'bt@stdlib@list':dispatch('reversed', [], [1, 2, 3])).
 
 dispatch_collect_test() ->
     ?assertEqual([2, 4, 6],
-        beamtalk_list:dispatch('collect:', [fun(X) -> X * 2 end], [1, 2, 3])).
+        'bt@stdlib@list':dispatch('collect:', [fun(X) -> X * 2 end], [1, 2, 3])).
 
 dispatch_select_test() ->
     ?assertEqual([2, 4],
-        beamtalk_list:dispatch('select:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
+        'bt@stdlib@list':dispatch('select:', [fun(X) -> X rem 2 =:= 0 end], [1, 2, 3, 4])).
 
 dispatch_inject_into_test() ->
     ?assertEqual(6,
-        beamtalk_list:dispatch('inject:into:', [0, fun(Acc, X) -> Acc + X end], [1, 2, 3])).
+        'bt@stdlib@list':dispatch('inject:into:', [0, fun(Acc, X) -> Acc + X end], [1, 2, 3])).
 
 dispatch_add_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list:dispatch('add:', [3], [1, 2])).
+    ?assertEqual([1, 2, 3], 'bt@stdlib@list':dispatch('add:', [3], [1, 2])).
 
 dispatch_flatten_test() ->
-    ?assertEqual([1, 2, 3, 4], beamtalk_list:dispatch('flatten', [], [[1, 2], [3, 4]])).
+    ?assertEqual([1, 2, 3, 4], 'bt@stdlib@list':dispatch('flatten', [], [[1, 2], [3, 4]])).
 
 %%% ============================================================================
 %%% beamtalk_primitive:send integration tests

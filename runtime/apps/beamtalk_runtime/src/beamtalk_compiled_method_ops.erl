@@ -27,7 +27,7 @@
 %%% | `respondsTo:`    | [S]  | Check if responds to selector S    |
 %%%
 %%% **DDD Context:** Runtime Context
--module(beamtalk_compiled_method).
+-module(beamtalk_compiled_method_ops).
 -export([dispatch/3, has_method/1]).
 
 -include("beamtalk.hrl").
@@ -81,7 +81,7 @@ builtin_dispatch('class', [], _Value) ->
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
-    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~p)", [Sel]))};
+    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
 
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->

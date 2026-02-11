@@ -40,7 +40,7 @@
 %%% ## Integration
 %%%
 %%% This module is invoked by `beamtalk_dispatch` when walking the hierarchy.
-%%% The dispatch service calls `beamtalk_object:dispatch(Selector, Args, Self, State)`
+%%% The dispatch service calls `beamtalk_object_ops:dispatch(Selector, Args, Self, State)`
 %%% where State is the actor's actual state map (containing `$beamtalk_class`, fields, etc.).
 %%%
 %%% ## References
@@ -48,7 +48,7 @@
 %%% - ADR 0006: Unified Method Dispatch with Hierarchy Walking
 %%% - BT-275: printString/yourself/hash protocol
 %%% - BT-282: Bootstrap Object with shared reflection methods
--module(beamtalk_object).
+-module(beamtalk_object_ops).
 
 -export([dispatch/4, has_method/1]).
 

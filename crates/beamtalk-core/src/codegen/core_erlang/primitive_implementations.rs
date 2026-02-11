@@ -49,6 +49,7 @@ pub fn generate_primitive_bif(
         "Object" => generate_object_bif(output, selector, params),
         "Association" => generate_association_bif(output, selector, params),
         "Set" => generate_set_bif(output, selector, params),
+        "CompiledMethod" => generate_compiled_method_bif(output, selector, params),
         _ => None,
     }
 }
@@ -1040,6 +1041,42 @@ fn write_power_bif(output: &mut String, params: &[String]) -> Option<()> {
          call 'erlang':'float'(Self), call 'erlang':'float'({p0})))"
     )
     .ok()?;
+    Some(())
+}
+
+/// `CompiledMethod` primitive implementations.
+///
+/// All selectors delegate to `beamtalk_compiled_method_ops:dispatch/3`
+/// (the hand-written Erlang runtime helper) to avoid recursion through
+/// the compiled stdlib module's own dispatch/3.
+fn generate_compiled_method_bif(
+    output: &mut String,
+    selector: &str,
+    params: &[String],
+) -> Option<()> {
+    match selector {
+        "selector" | "source" | "argumentCount" | "printString" | "asString" => {
+            write_ops_dispatch(output, "beamtalk_compiled_method_ops", selector, params)
+        }
+        _ => None,
+    }
+}
+
+/// Generate a call to a `_ops` Erlang module's dispatch/3 function.
+fn write_ops_dispatch(
+    output: &mut String,
+    module: &str,
+    selector: &str,
+    params: &[String],
+) -> Option<()> {
+    write!(output, "call '{module}':'dispatch'('{selector}', [").ok()?;
+    for (i, param) in params.iter().enumerate() {
+        if i > 0 {
+            write!(output, ", ").ok()?;
+        }
+        write!(output, "{param}").ok()?;
+    }
+    write!(output, "], Self)").ok()?;
     Some(())
 }
 

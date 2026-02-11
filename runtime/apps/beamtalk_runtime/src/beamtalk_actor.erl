@@ -491,8 +491,8 @@ dispatch(Selector, Args, Self, State) ->
                                  true -> true;
                                  false ->
                                      %% Class may not be registered — check Object directly
-                                     beamtalk_object:has_method(CheckSelector)
-                             catch _:_ -> beamtalk_object:has_method(CheckSelector)
+                                     beamtalk_object_ops:has_method(CheckSelector)
+                             catch _:_ -> beamtalk_object_ops:has_method(CheckSelector)
                              end,
                     {reply, Result, State}
             end;
@@ -660,7 +660,7 @@ make_dnu_error(Selector, ClassName, State) ->
 -spec object_fallback(atom(), list(), #beamtalk_object{}, map(), atom()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 object_fallback(Selector, Args, Self, State, ClassName) ->
-    case beamtalk_object:dispatch(Selector, Args, Self, State) of
+    case beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
         {error, _, _} ->
             make_dnu_error(Selector, ClassName, State);
         Result ->

@@ -19,8 +19,9 @@ stdlib_setup() ->
     end,
     %% Initialize extensions ETS table
     beamtalk_extensions:init(),
-    %% Start bootstrap (creates ProtoObject, Object, Actor)
+    %% Start bootstrap (starts pg) then load stdlib classes
     {ok, _} = beamtalk_bootstrap:start_link(),
+    beamtalk_stdlib:init(),
     ok.
 
 stdlib_teardown(_) ->

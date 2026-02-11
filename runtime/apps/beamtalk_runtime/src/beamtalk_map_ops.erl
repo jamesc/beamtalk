@@ -5,7 +5,7 @@
 %%
 %% BT-418: Complex Dictionary operations that cannot be inlined as
 %% direct BIF calls in generated Core Erlang. Called from compiled
-%% stdlib module beamtalk_dictionary.
+%% stdlib module bt@stdlib@dictionary.
 %%
 %% Replaces the former beamtalk_map.erl hand-written dispatch module.
 -module(beamtalk_map_ops).

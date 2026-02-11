@@ -1,7 +1,7 @@
 # ADR 0016: Universal Module Naming with @ Separator
 
 ## Status
-Accepted (2026-02-10)
+Accepted (2026-02-10), Implemented (BT-454)
 
 **Amendment 2026-02-10:** Changed from underscore-based naming (`bt_stdlib_*`) to at-sign separator (`bt@stdlib@*`) for clearer namespacing and following proven BEAM patterns (Gleam). Extends scope from stdlib-only to all compiled Beamtalk modules.
 

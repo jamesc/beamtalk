@@ -67,3 +67,11 @@ incMethod class
 
 Counter >> #nonExistent
 // => nil
+
+// ---------------------------------------------------------------------------
+// CompiledMethod is not instantiable via new (BT-422)
+// NOTE: Uncomment when BT-422 is implemented
+// ---------------------------------------------------------------------------
+
+// CompiledMethod new
+// // => ERROR: instantiation_error
