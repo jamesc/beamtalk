@@ -300,6 +300,21 @@ hierarchy_test_() ->
        end}
      ]}.
 
+%% BT-480: signal_from_class/1 unit test
+signal_from_class_test_() ->
+    {"signal_from_class preserves class and uses class name as message",
+     fun() ->
+         try
+             beamtalk_exception_handler:signal_from_class('MyCustomError'),
+             ?assert(false)  % Should never reach here — signal_from_class is no_return
+         catch
+             error:#{error := Inner} ->
+                 ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
+                 ?assertEqual(signal, Inner#beamtalk_error.kind),
+                 ?assertEqual(<<"MyCustomError">>, Inner#beamtalk_error.message)
+         end
+     end}.
+
 %% @private Setup class system for hierarchy tests
 setup_class_system() ->
     case whereis(pg) of

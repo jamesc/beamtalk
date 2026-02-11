@@ -19,6 +19,10 @@
 [MyCustomError new signal] on: Exception do: [:e | e class]
 // => MyCustomError
 
+// signal (no args) message is the class name
+[MyCustomError new signal] on: Exception do: [:e | e message]
+// => MyCustomError
+
 // signal: preserves the message
 [MyCustomError new signal: 'custom message'] on: Exception do: [:e | e message]
 // => custom message

@@ -44,6 +44,7 @@
     signal/1,
     signal_message/1,
     signal_message/2,
+    signal_from_class/1,
     kind_to_class/1,
     is_exception_class/1
 ]).
@@ -289,7 +290,7 @@ signal_from_class(ClassName) ->
         kind = signal,
         class = ClassName,
         selector = undefined,
-        message = iolist_to_binary(io_lib:format("~s", [ClassName])),
+        message = atom_to_binary(ClassName, utf8),
         hint = undefined,
         details = #{}
     },
