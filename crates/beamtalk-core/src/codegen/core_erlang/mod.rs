@@ -87,7 +87,6 @@
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
 mod actor_codegen;
-mod beamtalk_module;
 mod block_analysis;
 mod control_flow;
 mod dispatch_codegen;
@@ -220,7 +219,7 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// # Ok::<(), beamtalk_core::codegen::core_erlang::CodeGenError>(())
 /// ```
 pub fn generate(module: &Module) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new("beamtalk_module");
+    let mut generator = CoreErlangGenerator::new("bt_module");
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -1150,7 +1149,7 @@ mod tests {
         let result = generate(&module);
         assert!(result.is_ok());
         let code = result.unwrap();
-        assert!(code.contains("module 'beamtalk_module'"));
+        assert!(code.contains("module 'bt_module'"));
         assert!(code.contains("attributes ['behaviour' = ['gen_server']]"));
     }
 
@@ -3386,91 +3385,6 @@ end
         assert!(
             code.contains("in 'ok'"),
             "Should return ok after all registrations. Got:\n{code}"
-        );
-    }
-
-    #[test]
-    fn test_beamtalk_module_generation() {
-        // BT-220: Test that Beamtalk class generates special module with class methods
-        use crate::ast::{ClassDefinition, Identifier};
-        use crate::source_analysis::Span;
-
-        let class = ClassDefinition {
-            name: Identifier::new("Beamtalk", Span::new(0, 8)),
-            superclass: Some(Identifier::new("Object", Span::new(0, 6))),
-            is_abstract: false,
-            is_sealed: false,
-            state: vec![],
-            methods: vec![],
-            class_methods: vec![],
-            span: Span::new(0, 50),
-        };
-
-        let module = Module {
-            expressions: vec![],
-            classes: vec![class],
-            span: Span::new(0, 50),
-            leading_comments: vec![],
-        };
-
-        let code = generate_with_name(&module, "Beamtalk").expect("codegen should succeed");
-
-        // Should export class methods
-        assert!(
-            code.contains("'allClasses'/0"),
-            "Should export allClasses. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'classNamed:'/1"),
-            "Should export classNamed:. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'globals'/0"),
-            "Should export globals. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'register_class'/0"),
-            "Should export register_class. Got:\n{code}"
-        );
-
-        // Should have on_load attribute
-        assert!(
-            code.contains("'on_load' = [{'register_class', 0}]"),
-            "Should have on_load attribute. Got:\n{code}"
-        );
-
-        // Should register with class_methods map
-        assert!(
-            code.contains("'class_methods' => ~{"),
-            "Should include class_methods map. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'allClasses' => ~{'arity' => 0}"),
-            "Should include allClasses in class_methods. Got:\n{code}"
-        );
-
-        // Should implement allClasses to call beamtalk_class:all_classes
-        assert!(
-            code.contains("call 'beamtalk_object_class':'all_classes'()"),
-            "Should call beamtalk_class:all_classes. Got:\n{code}"
-        );
-
-        // Should wrap results in #beamtalk_object{} records with class_object_tag
-        assert!(
-            code.contains("{'beamtalk_object', ClassTag, ClassModName, Pid}"),
-            "Should wrap in beamtalk_object records with ClassTag. Got:\n{code}"
-        );
-
-        // Should implement classNamed: to call whereis_class
-        assert!(
-            code.contains("call 'beamtalk_object_class':'whereis_class'(ClassName)"),
-            "Should call whereis_class. Got:\n{code}"
-        );
-
-        // Should return nil for undefined classes
-        assert!(
-            code.contains("'undefined'> when 'true' ->\n            'nil'"),
-            "Should return nil for undefined classes. Got:\n{code}"
         );
     }
 

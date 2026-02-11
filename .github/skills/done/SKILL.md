@@ -12,7 +12,8 @@ When activated, execute this workflow to complete work and push:
 1. **Determine Issue ID**: Use the same resolution logic as `pick-issue` step 1:
    - Extract from branch name (e.g., `BT-10` from `BT-10-implement-erlang-codegen`)
    - Fall back to worktree name (e.g., `/workspaces/BT-34` → `BT-34`)
-   - If neither works, ask the user
+   - If branch name starts with `chore/`, `docs/`, or `refactor/` and has no `BT-` prefix, treat as a standalone chore — no issue ID needed. Skip steps 10 and 11 (Linear updates), and omit `BT-{number}` from commit message and PR title.
+   - If neither works and not a chore branch, ask the user
 
 2. **Check branch**: Verify we're NOT on `main` branch. If on main, stop and tell the user to create a feature branch first.
 

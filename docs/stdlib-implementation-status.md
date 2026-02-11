@@ -357,9 +357,9 @@
 | `readAll:` | @primitive selector | ✅ | 🧪 | `FileReference>>contents` |
 | `writeAll:contents:` | @primitive selector | ✅ | 🧪 | `FileReference>>writeStream` |
 
-### Beamtalk / SystemDictionary (`lib/Beamtalk.bt`)
+### Beamtalk / SystemDictionary (`lib/SystemDictionary.bt`)
 
-**Class:** `Beamtalk` — superclass: `Actor`
+**Class:** `SystemDictionary` — superclass: `Actor`
 **Methods:** 4/4 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
