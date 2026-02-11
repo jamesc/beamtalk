@@ -82,7 +82,7 @@ counter getValue await
 
 // Actors inherit Object base methods via the class hierarchy walk.
 
-// isNil and notNil — nil-testing protocol from Object
+// isNil and notNil — nil-testing protocol from Object (intrinsic, no await)
 counter isNil
 // => false
 
