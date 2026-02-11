@@ -184,13 +184,16 @@ print_string(X) when is_map(X) ->
             Elements = maps:get(elements, X, []),
             ElemStrs = [print_string(E) || E <- Elements],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
+        'CompiledMethod' ->
+            %% BT-457: Delegate to ops module for "a CompiledMethod(selector)" format
+            beamtalk_compiled_method_ops:dispatch('printString', [], X);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
                     %% BT-338/BT-452: Format exception hierarchy objects
                     beamtalk_exception_handler:dispatch('printString', [], X);
                 false ->
-                    ClassName = case Class of undefined -> 'Dictionary'; _ -> Class end,
+                    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
                     iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
             end
     end;

@@ -600,7 +600,10 @@ impl CoreErlangGenerator {
                     Ok(Some(()))
                 }
                 "printString" if arguments.is_empty() => {
-                    // Delegate to beamtalk_primitive:print_string/1 which handles all types
+                    // BT-457: Delegate to beamtalk_primitive:print_string/1 which
+                    // handles all types including those without printString dispatch
+                    // (class objects, futures, PIDs). See follow-up issue for removing
+                    // this intrinsic in favor of full polymorphic dispatch.
                     let recv_var = self.fresh_temp_var("Obj");
                     write!(self.output, "let {recv_var} = ")?;
                     self.generate_expression(receiver)?;
