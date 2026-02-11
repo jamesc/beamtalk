@@ -432,7 +432,7 @@ impl CoreErlangGenerator {
 
         // respondsTo: — validate Args is a non-empty list
         self.write_indent()?;
-        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
+        writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "case Args of")?;
@@ -481,12 +481,30 @@ impl CoreErlangGenerator {
         writeln!(self.output, "[]")?;
         self.indent -= 1;
 
-        // instVarAt: — always returns nil for primitives
+        // instVarAt: — error: primitives are immutable
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "'nil'")?;
+        writeln!(
+            self.output,
+            "let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in"
+        )?;
+        self.write_indent()?;
+        let iva_hint = Self::core_erlang_binary(&format!(
+            "{class_name}s are immutable and have no instance variables."
+        ));
+        writeln!(
+            self.output,
+            "let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "call 'erlang':'error'(IvaErr2)")?;
         self.indent -= 1;
 
         // instVarAt:put: — error: primitives are immutable
@@ -496,7 +514,7 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(
             self.output,
-            "let <ImmErr0> = call 'beamtalk_error':'new'('immutable_primitive', '{class_name}') in"
+            "let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in"
         )?;
         self.write_indent()?;
         writeln!(
@@ -517,7 +535,7 @@ impl CoreErlangGenerator {
 
         // perform: — recursive dispatch
         self.write_indent()?;
-        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        writeln!(self.output, "<'perform:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
         writeln!(self.output, "let <PerfSel> = call 'erlang':'hd'(Args) in")?;
@@ -673,7 +691,10 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
 
-        writeln!(self.output, "'dispatch'/4 = fun (Selector, Args, Self, State) ->")?;
+        writeln!(
+            self.output,
+            "'dispatch'/4 = fun (Selector, Args, Self, State) ->"
+        )?;
         self.indent += 1;
 
         if class_name == "Object" {
@@ -694,6 +715,7 @@ impl CoreErlangGenerator {
     /// Actor instances inherit Object methods via the hierarchy walk. These
     /// methods need access to the actor's State map for proper reflection
     /// (field access, class name, etc.).
+    #[allow(clippy::too_many_lines)]
     fn generate_object_dispatch_4(&mut self, mod_name: &str) -> Result<()> {
         self.write_indent()?;
         writeln!(self.output, "case Selector of")?;
@@ -712,13 +734,10 @@ impl CoreErlangGenerator {
 
         // --- respondsTo: check against actual class ---
         self.write_indent()?;
-        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
+        writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <RtSel4> = call 'erlang':'hd'(Args) in"
-        )?;
+        writeln!(self.output, "let <RtSel4> = call 'erlang':'hd'(Args) in")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -744,13 +763,10 @@ impl CoreErlangGenerator {
 
         // --- instVarAt: read field value from State ---
         self.write_indent()?;
-        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
+        writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <IvaName4> = call 'erlang':'hd'(Args) in"
-        )?;
+        writeln!(self.output, "let <IvaName4> = call 'erlang':'hd'(Args) in")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -763,10 +779,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <IvapName4> = call 'erlang':'hd'(Args) in"
-        )?;
+        writeln!(self.output, "let <IvapName4> = call 'erlang':'hd'(Args) in")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -788,10 +801,7 @@ impl CoreErlangGenerator {
             "let <IvapNewState4> = call 'erlang':'element'(2, IvapTuple4) in"
         )?;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "{{'reply', IvapResult4, IvapNewState4}}"
-        )?;
+        writeln!(self.output, "{{'reply', IvapResult4, IvapNewState4}}")?;
         self.indent -= 1;
 
         // --- printString: use class name from State ---
@@ -826,13 +836,10 @@ impl CoreErlangGenerator {
 
         // --- perform: dynamic dispatch with State ---
         self.write_indent()?;
-        writeln!(self.output, "<'perform'> when 'true' ->")?;
+        writeln!(self.output, "<'perform:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <PerfSel4> = call 'erlang':'hd'(Args) in"
-        )?;
+        writeln!(self.output, "let <PerfSel4> = call 'erlang':'hd'(Args) in")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -845,13 +852,13 @@ impl CoreErlangGenerator {
         )?;
         self.write_indent()?;
         // Normalize {error, Error} to {error, Error, State}
-        writeln!(
-            self.output,
-            "case PerfResult4 of"
-        )?;
+        writeln!(self.output, "case PerfResult4 of")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "<{{'error', PerfErr4}}> when 'true' -> {{'error', PerfErr4, State}}")?;
+        writeln!(
+            self.output,
+            "<{{'error', PerfErr4}}> when 'true' -> {{'error', PerfErr4, State}}"
+        )?;
         self.write_indent()?;
         writeln!(self.output, "<PerfOther4> when 'true' -> PerfOther4")?;
         self.indent -= 1;
@@ -864,10 +871,7 @@ impl CoreErlangGenerator {
         writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <PwaSel4> = call 'erlang':'hd'(Args) in"
-        )?;
+        writeln!(self.output, "let <PwaSel4> = call 'erlang':'hd'(Args) in")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -884,13 +888,13 @@ impl CoreErlangGenerator {
             "let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in"
         )?;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "case PwaResult4 of"
-        )?;
+        writeln!(self.output, "case PwaResult4 of")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "<{{'error', PwaErr4}}> when 'true' -> {{'error', PwaErr4, State}}")?;
+        writeln!(
+            self.output,
+            "<{{'error', PwaErr4}}> when 'true' -> {{'error', PwaErr4, State}}"
+        )?;
         self.write_indent()?;
         writeln!(self.output, "<PwaOther4> when 'true' -> PwaOther4")?;
         self.indent -= 1;
@@ -914,8 +918,8 @@ impl CoreErlangGenerator {
 
     /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
     ///
-    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., does_not_understand
-    /// calling erlang:error) into {error, Error, State} tuples expected by the
+    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., `does_not_understand`
+    /// calling `erlang:error`) into `{error, Error, State}` tuples expected by the
     /// dispatch service.
     fn generate_dispatch_4_wrapper(&mut self, mod_name: &str) -> Result<()> {
         self.write_indent()?;
@@ -924,10 +928,7 @@ impl CoreErlangGenerator {
             "try call '{mod_name}':'dispatch'(Selector, Args, Self)"
         )?;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "of <D4Result> -> {{'reply', D4Result, State}}"
-        )?;
+        writeln!(self.output, "of <D4Result> -> {{'reply', D4Result, State}}")?;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -953,11 +954,11 @@ impl CoreErlangGenerator {
         let mut selectors: Vec<String> = vec![
             // Reflection methods
             "'class'".to_string(),
-            "'respondsTo'".to_string(),
+            "'respondsTo:'".to_string(),
             "'instVarNames'".to_string(),
-            "'instVarAt'".to_string(),
+            "'instVarAt:'".to_string(),
             "'instVarAt:put:'".to_string(),
-            "'perform'".to_string(),
+            "'perform:'".to_string(),
             "'perform:withArguments:'".to_string(),
         ];
 

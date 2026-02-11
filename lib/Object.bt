@@ -7,6 +7,10 @@
 // all objects need: instantiation, reflection, nil testing, and debugging.
 
 ProtoObject subclass: Object
+  // Type introspection — override ProtoObject's class to ensure actor hierarchy
+  // walk invokes Object's state-aware dispatch/4 (BT-446)
+  class => @primitive 'class'
+
   // Instantiation — structural intrinsics
   new => @primitive basicNew
   new: initArgs => @primitive basicNewWith
