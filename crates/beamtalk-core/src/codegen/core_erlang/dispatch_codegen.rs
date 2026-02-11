@@ -363,11 +363,10 @@ impl CoreErlangGenerator {
                     self.last_open_scope_result = Some(result);
                 } else {
                     // Built-in export (spawn, new, superclass, etc.)
-                    write!(
-                        self.output,
-                        "call '{}':'{selector_atom}'(",
-                        self.module_name
-                    )?;
+                    // BT-413: Strip keyword colons for function name — module-level
+                    // functions use arity (new/0, new/1), not colon naming (new:).
+                    let fun_name = selector_atom.replace(':', "");
+                    write!(self.output, "call '{}':'{fun_name}'(", self.module_name)?;
                     for (i, arg) in arguments.iter().enumerate() {
                         if i > 0 {
                             write!(self.output, ", ")?;
