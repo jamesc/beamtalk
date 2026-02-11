@@ -29,7 +29,7 @@ clean-all: clean clean-erlang
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Build all targets (Rust + Erlang + stdlib)
-build: build-rust build-erlang build-stdlib
+build: build-stdlib
 
 # Build Rust workspace
 build-rust:
@@ -110,7 +110,7 @@ test-e2e: build-stdlib _clean-daemon-state
 test-all: test-rust test-stdlib test-e2e test-runtime
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
-test-stdlib: build-rust build-erlang build-stdlib
+test-stdlib: build-stdlib
     @echo "🧪 Running stdlib tests..."
     @cargo run --bin beamtalk --quiet -- test-stdlib
     @echo "✅ Stdlib tests complete"
@@ -121,38 +121,18 @@ _clean-daemon-state:
 
 # Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
-#
-# Known failures: 6 tests for super dispatch (tracked in BT-235).
-# We allow these specific failures to avoid blocking development while the fix is in progress.
-# If more tests fail, it indicates a regression and the build will fail.
+# Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately.
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
     echo "🧪 Running Erlang runtime unit tests..."
-    # Only run beamtalk_runtime and beamtalk_workspace tests (stdlib has no test modules)
-    # Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
-        # Check if tests actually failed (as opposed to being cancelled)
-        if echo "$OUTPUT" | grep -qE "[1-9][0-9]* failures"; then
-            # Show full output only on real failures
-            echo "$OUTPUT"
-            echo "❌ Runtime tests failed"
-            exit 1
-        fi
-        # Allow "cancelled" status for tests that can't run (need daemon, etc.)
-        if echo "$OUTPUT" | grep -q "cancelled"; then
-            # Extract summary line only (concise)
-            echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ Tests passed with some skipped"
-        else
-            # Unexpected error - show full output
-            echo "$OUTPUT"
-            echo "❌ rebar3 failed unexpectedly"
-            exit 1
-        fi
-    else
-        # Success - show only summary
+    if OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
         echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || echo "✓ All tests passed"
+    else
+        echo "$OUTPUT"
+        echo "❌ Runtime tests failed"
+        exit 1
     fi
 
 # Run Erlang runtime integration tests (requires daemon)
@@ -192,27 +172,17 @@ coverage-rust:
 
 # Generate Erlang runtime coverage
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
-#
-# Known failures: 6 tests for super dispatch (tracked in BT-235).
-# Coverage is still generated despite these failures since they're expected.
 coverage-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    # Run both runtime and workspace tests (stdlib has no test modules)
     if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover 2>&1); then
         echo "$OUTPUT"
-        # Allow known failures (BT-235 super dispatch tests)
-        FAILURE_COUNT=$(echo "$OUTPUT" | grep -oE '[0-9]+ failures' | grep -oE '[0-9]+' || echo "0")
-        if [ "$FAILURE_COUNT" -gt 30 ]; then
-            echo "❌ $FAILURE_COUNT test failures detected! Check for regressions."
-            exit 1
-        fi
-        # Tests ran (with known failures), continue to coverage
-    else
-        echo "$OUTPUT"
+        echo "❌ Runtime tests failed"
+        exit 1
     fi
+    echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
     rebar3 cover --verbose
     rebar3 covertool generate
     # Clean up covertool XML: remove empty phantom packages, shorten path-based names
@@ -221,7 +191,7 @@ coverage-runtime:
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
 
 # Collect E2E test coverage (runs E2E tests with Erlang cover instrumentation)
-coverage-e2e: _clean-daemon-state
+coverage-e2e: build-stdlib _clean-daemon-state
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📊 Running E2E tests with Erlang cover instrumentation..."
@@ -237,7 +207,7 @@ coverage-e2e: _clean-daemon-state
     fi
 
 # Collect stdlib test coverage (runs stdlib tests with Erlang cover instrumentation)
-coverage-stdlib: build-rust build-erlang build-stdlib
+coverage-stdlib: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📊 Running stdlib tests with Erlang cover instrumentation..."
