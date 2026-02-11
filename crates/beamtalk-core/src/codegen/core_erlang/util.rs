@@ -77,7 +77,9 @@ impl CoreErlangGenerator {
     ///
     /// This enables incremental migration — functions that return `Document`
     /// can coexist with functions that write directly to `self.output`.
-    /// The document is rendered at the current indentation level.
+    /// The document is rendered starting at indent level 0; callers are
+    /// responsible for embedding indentation in the document tree itself
+    /// (e.g., via `nest()` or literal spaces).
     pub(super) fn write_document(&mut self, doc: &super::document::Document<'_>) {
         let rendered = doc.to_pretty_string();
         self.output.push_str(&rendered);
@@ -93,10 +95,18 @@ impl CoreErlangGenerator {
     /// All side effects on `var_context` and `state_threading` are preserved.
     pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
         let start = self.output.len();
-        self.generate_expression(expr)?;
-        let captured = self.output[start..].to_string();
-        self.output.truncate(start);
-        Ok(captured)
+        match self.generate_expression(expr) {
+            Ok(()) => {
+                let captured = self.output[start..].to_string();
+                self.output.truncate(start);
+                Ok(captured)
+            }
+            Err(err) => {
+                // Roll back any partial output written by generate_expression.
+                self.output.truncate(start);
+                Err(err)
+            }
+        }
     }
 
     /// Generates a fresh variable name and binds it in the current scope.

@@ -159,7 +159,8 @@ pub fn group(doc: Document<'_>) -> Document<'_> {
     Document::Group(Box::new(doc))
 }
 
-/// Creates a `Break` document — renders as `unbroken` in flat mode, newline when broken.
+/// Creates a `Break` document — renders `broken` string followed by a newline
+/// when in break mode, or `unbroken` string when in flat mode.
 #[must_use]
 pub fn break_<'a>(broken: &'a str, unbroken: &'a str) -> Document<'a> {
     Document::Break { broken, unbroken }
