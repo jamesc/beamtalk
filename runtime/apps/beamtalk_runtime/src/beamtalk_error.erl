@@ -162,6 +162,30 @@ generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
     iolist_to_binary(io_lib:format("~p", [Selector]));
+generate_message(class_not_found, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Class '~s' not found", [Class]));
+generate_message(class_not_found, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Class '~s' not found (while resolving '~s')", [Class, Selector]));
+generate_message(no_superclass, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s has no superclass", [Class]));
+generate_message(no_superclass, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s has no superclass (cannot resolve '~s' via super)", [Class, Selector]));
+generate_message(class_already_exists, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Class '~s' already exists", [Class]));
+generate_message(class_already_exists, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Class '~s' already exists (via '~s')", [Class, Selector]));
+generate_message(internal_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Internal error in ~s", [Class]));
+generate_message(internal_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Internal error in '~s' on ~s", [Selector, Class]));
+generate_message(dispatch_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Dispatch error for ~s", [Class]));
+generate_message(dispatch_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Dispatch error for '~s' on ~s", [Selector, Class]));
+generate_message(callback_failed, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Callback failed for ~s", [Class]));
+generate_message(callback_failed, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Callback '~s' failed for ~s", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->

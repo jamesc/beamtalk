@@ -468,7 +468,20 @@ try_flattened_lookup(ClassPid, Selector) ->
     try
         gen_server:call(ClassPid, {lookup_flattened, Selector}, 5000)
     catch
-        _:_ ->
-            %% gen_server call failed (timeout, noproc, etc.)
+        exit:{noproc, _} ->
+            %% Class process not running
+            not_found;
+        exit:{normal, _} ->
+            %% Class process terminated normally
+            not_found;
+        exit:{timeout, _} ->
+            %% Class process lookup timed out — log for visibility
+            logger:warning("Flattened lookup timed out", #{
+                class_pid => ClassPid,
+                selector => Selector
+            }),
+            not_found;
+        exit:{_Reason, _} ->
+            %% Other exit reasons (shutdown, killed, etc.)
             not_found
     end.

@@ -221,7 +221,7 @@ superclass_not_found_test() ->
         instance_methods => #{}
     }),
     
-    ?assertMatch({error, {superclass_not_found, 'NonExistentClass'}}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NonExistentClass'}}, Result).
 
 %% Test creating class with no instance variables
 no_instance_variables_test() ->

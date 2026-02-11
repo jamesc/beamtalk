@@ -352,17 +352,26 @@ super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state
     case beamtalk_tagged_map:class_of(State) of
         undefined ->
-            {error, missing_class_field_in_state};
+            Error0 = beamtalk_error:new(internal_error, unknown),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            ClassKey = beamtalk_tagged_map:class_key(),
+            Hint = iolist_to_binary(io_lib:format("State map missing '~p' field", [ClassKey])),
+            Error = beamtalk_error:with_hint(Error1, Hint),
+            {error, Error};
         CurrentClass ->
             %% Look up the current class process
             case whereis_class(CurrentClass) of
                 undefined ->
-                    {error, {class_not_found, CurrentClass}};
+                    Error0 = beamtalk_error:new(class_not_found, CurrentClass),
+                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error};
                 ClassPid ->
                     %% Get the superclass
                     case superclass(ClassPid) of
                         none ->
-                            {error, {no_superclass, CurrentClass, Selector}};
+                            Error0 = beamtalk_error:new(no_superclass, CurrentClass),
+                            Error = beamtalk_error:with_selector(Error0, Selector),
+                            {error, Error};
                         Superclass ->
                             %% Find and invoke in superclass chain
                             find_and_invoke_super_method(Superclass, Selector, Args, State)
@@ -402,7 +411,9 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
     %% Verify superclass exists
     case whereis_class(SuperclassName) of
         undefined ->
-            {error, {superclass_not_found, SuperclassName}};
+            Error0 = beamtalk_error:new(class_not_found, SuperclassName),
+            Error = beamtalk_error:with_hint(Error0, <<"Superclass must be registered before creating subclass">>),
+            {error, Error};
         _SuperclassPid ->
             %% Extract fields from ClassSpec
             InstanceVars = maps:get(instance_variables, ClassSpec, []),
@@ -429,7 +440,8 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                             {ok, ClassPid};
                         {error, {already_started, _Pid}} ->
                             %% Class already exists - return error for consistency
-                            {error, {class_already_exists, ClassName}};
+                            Error0 = beamtalk_error:new(class_already_exists, ClassName),
+                            {error, Error0};
                         Error ->
                             Error
                     end
@@ -936,7 +948,9 @@ convert_methods_to_info(Methods) ->
 find_and_invoke_super_method(ClassName, Selector, Args, State) ->
     case whereis_class(ClassName) of
         undefined ->
-            {error, {class_not_found, ClassName}};
+            Error0 = beamtalk_error:new(class_not_found, ClassName),
+            Error = beamtalk_error:with_selector(Error0, Selector),
+            {error, Error};
         ClassPid ->
             %% Get class info via API calls
             case get_class_method_info(ClassPid, Selector) of
@@ -948,7 +962,10 @@ find_and_invoke_super_method(ClassName, Selector, Args, State) ->
                     case superclass(ClassPid) of
                         none ->
                             %% Reached root, method not found
-                            {error, {method_not_found_in_superclass, Selector}};
+                            StateClassName = beamtalk_tagged_map:class_of(State, ClassName),
+                            Error0 = beamtalk_error:new(does_not_understand, StateClassName),
+                            Error = beamtalk_error:with_selector(Error0, Selector),
+                            {error, Error};
                         Superclass ->
                             %% Recursively search in superclass
                             find_and_invoke_super_method(Superclass, Selector, Args, State)

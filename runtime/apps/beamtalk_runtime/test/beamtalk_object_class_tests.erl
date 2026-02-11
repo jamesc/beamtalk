@@ -475,7 +475,7 @@ super_dispatch_missing_class_field_test_() ->
               %% State without $beamtalk_class field
               State = #{value => 0},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, missing_class_field_in_state}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = internal_error}}, Result)
           end)]
      end}.
 
@@ -488,7 +488,7 @@ super_dispatch_class_not_found_test_() ->
               %% State with class that doesn't exist
               State = #{'$beamtalk_class' => 'NonexistentClass999'},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, {class_not_found, 'NonexistentClass999'}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NonexistentClass999'}}, Result)
           end)]
      end}.
 
@@ -507,7 +507,7 @@ super_dispatch_no_superclass_test_() ->
               {ok, _Pid} = beamtalk_object_class:start_link('RootTestClass', ClassInfo),
               State = #{'$beamtalk_class' => 'RootTestClass'},
               Result = beamtalk_object_class:super_dispatch(State, someMethod, []),
-              ?assertMatch({error, {no_superclass, 'RootTestClass', someMethod}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = no_superclass, class = 'RootTestClass', selector = someMethod}}, Result)
           end)]
      end}.
 
@@ -523,7 +523,7 @@ create_subclass_nonexistent_superclass_test_() ->
          [?_test(begin
               Result = beamtalk_object_class:create_subclass(
                   'NoSuchSuperclass', 'TestChild', #{instance_variables => []}),
-              ?assertMatch({error, {superclass_not_found, 'NoSuchSuperclass'}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NoSuchSuperclass'}}, Result)
           end)]
      end}.
 

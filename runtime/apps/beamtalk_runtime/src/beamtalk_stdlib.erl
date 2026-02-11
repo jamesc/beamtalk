@@ -142,9 +142,29 @@ ensure_class_registered(Mod, ClassName) ->
             %% Class process doesn't exist — re-register
             try Mod:register_class() of
                 ok -> ok;
-                _ -> ok
+                Other ->
+                    logger:warning("Unexpected return from register_class", #{
+                        module => Mod,
+                        class => ClassName,
+                        result => Other
+                    }),
+                    ok
             catch
-                _:_ -> ok
+                error:undef ->
+                    %% Module doesn't export register_class/0
+                    logger:warning("Module missing register_class/0", #{
+                        module => Mod,
+                        class => ClassName
+                    }),
+                    ok;
+                Class:Reason ->
+                    logger:error("Failed to register class", #{
+                        module => Mod,
+                        class => ClassName,
+                        error_class => Class,
+                        reason => Reason
+                    }),
+                    ok
             end;
         _Pid ->
             ok
