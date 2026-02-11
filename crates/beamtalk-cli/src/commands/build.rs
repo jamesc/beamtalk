@@ -59,8 +59,11 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
             );
         }
 
-        // ADR 0016: User code modules use bt@ prefix
-        let module_name = format!("bt@{stem}");
+        // ADR 0016: User code modules use bt@ prefix with snake_case normalization
+        let module_name = format!(
+            "bt@{}",
+            beamtalk_core::codegen::core_erlang::to_module_name(stem)
+        );
         let core_file = build_dir.join(format!("{module_name}.core"));
 
         compile_file(file, &module_name, &core_file, options)?;

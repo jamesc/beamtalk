@@ -354,8 +354,11 @@ value_type_responds_to(Class, Selector) ->
 %% ADR 0016: User-defined value types use bt@ prefix.
 %% Matches the Rust codegen convention in build.rs.
 %%
-%% Uses list_to_existing_atom/1 to avoid atom table exhaustion from untrusted
-%% class names — the module atom must already exist if the module is loaded.
+%% Uses list_to_existing_atom/1 first to avoid atom table exhaustion.
+%% Falls back to list_to_atom/1 because Class is already a known atom
+%% (from class registration) — the new atom merely adds the bt@ prefix.
+%% Callers (value_type_send/responds_to) check function_exported which
+%% returns false for non-existent modules, triggering does_not_understand.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
     SnakeCase = camel_to_snake(atom_to_list(Class)),
@@ -363,10 +366,9 @@ class_name_to_module(Class) when is_atom(Class) ->
     ModName = "bt@" ++ SnakeCase,
     try list_to_existing_atom(ModName)
     catch error:badarg ->
-        %% Module atom doesn't exist — cannot be a loaded module.
-        %% Return a non-existent atom safely; callers use code:ensure_loaded
-        %% and function_exported which will return false, triggering proper
-        %% does_not_understand error handling.
+        %% Module atom doesn't exist yet. Since Class is already a known
+        %% atom, creating bt@{snake} is bounded by the number of registered
+        %% classes, not by arbitrary user input.
         list_to_atom(ModName)
     end.
 
