@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for _error binding (ADR 0015)
+//
+// After any error in the REPL, the wrapped Exception object is bound to
+// `_error`. This binding persists until the next error occurs.
+
+// ===========================================================================
+// BASIC _error BINDING
+// ===========================================================================
+
+// Trigger an error (undefined method on integer)
+42 nonExistentMethod
+// => ERROR: does_not_understand
+
+// _error should be bound to the Exception object
+_error kind
+// => does_not_understand
+
+// _error message contains the error description
+_error message
+// => _
+
+// _error class should be Exception
+_error class
+// => Exception
+
+// ===========================================================================
+// _error SELECTOR FIELD
+// ===========================================================================
+
+// Trigger an error with a known selector
+42 badMethod
+// => ERROR: does_not_understand
+
+// _error selector should be the failed method name
+_error selector
+// => badMethod
+
+// ===========================================================================
+// _error PERSISTS UNTIL NEXT ERROR
+// ===========================================================================
+
+// After a successful expression, _error should still be the previous error
+3 + 4
+// => 7
+
+// _error still holds the last error
+_error kind
+// => does_not_understand
+
+// Trigger a new error to replace _error
+'hello' / 2
+// => ERROR: does_not_understand
+
+// _error now holds the new error
+_error kind
+// => does_not_understand
