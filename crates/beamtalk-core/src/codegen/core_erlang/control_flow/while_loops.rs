@@ -213,6 +213,8 @@ impl CoreErlangGenerator {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
                 self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
+                // BT-153: Handle local variable assignments for REPL context
+                self.generate_local_var_assignment_in_loop(expr)?;
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;

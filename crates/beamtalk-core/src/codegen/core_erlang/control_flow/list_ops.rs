@@ -416,8 +416,19 @@ impl CoreErlangGenerator {
                 self.generate_self_dispatch_open(expr)?;
 
                 if is_last {
+                    // For inject:into:, the self-send result becomes the new accumulator.
+                    // generate_self_dispatch_open saves the dispatch tuple var in last_dispatch_var.
+                    // Extract element 1 (the result) for the accumulator.
                     let final_state = self.current_state_var();
-                    write!(self.output, "{{'nil', {final_state}}}")?;
+                    if let Some(dv) = self.last_dispatch_var.clone() {
+                        let acc_result = self.fresh_temp_var("AccResult");
+                        write!(
+                            self.output,
+                            "let {acc_result} = call 'erlang':'element'(1, {dv}) in {{{acc_result}, {final_state}}}"
+                        )?;
+                    } else {
+                        write!(self.output, "{{'nil', {final_state}}}")?;
+                    }
                 }
             } else {
                 // Non-assignment expression

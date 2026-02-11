@@ -516,6 +516,9 @@ pub(super) struct CoreErlangGenerator {
     /// Set by `_with_mutations` loop codegen when `is_repl_mode` is true.
     /// Checked by `generate_eval_module_body` to return `{'nil', Result}`.
     repl_loop_mutated: bool,
+    /// BT-245: Name of the dispatch tuple variable from the last `generate_self_dispatch_open`.
+    /// Contains `{Result, State}` — callers can extract element 1 for the result value.
+    last_dispatch_var: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -543,6 +546,7 @@ impl CoreErlangGenerator {
             class_var_mutated: false,
             last_open_scope_result: None,
             repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 
@@ -570,6 +574,7 @@ impl CoreErlangGenerator {
             class_var_mutated: false,
             last_open_scope_result: None,
             repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 

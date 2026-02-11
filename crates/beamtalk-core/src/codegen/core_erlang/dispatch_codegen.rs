@@ -553,6 +553,7 @@ impl CoreErlangGenerator {
             ];
 
             self.write_document(&doc);
+            self.last_dispatch_var = Some(dispatch_var);
             return Ok(());
         }
         // Fallback
