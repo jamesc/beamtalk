@@ -178,7 +178,7 @@ impl CoreErlangGenerator {
     /// ```
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<()> {
-        let module_name = &self.module_name.clone();
+        let module_name = &self.module_name;
 
         let doc = docvec![
             "'safe_dispatch'/3 = fun (Selector, Args, State) ->",
