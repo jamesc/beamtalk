@@ -15,13 +15,13 @@ Transcript show: 'Hello'   // codegen → call 'transcript':'show:'(<<"Hello">>)
 Transcript cr               // codegen → call 'transcript':'cr'()
 ```
 
-**Beamtalk** is defined in `lib/Beamtalk.bt` and backed by `beamtalk_stdlib.erl`:
+**Beamtalk** is a global workspace binding backed by `SystemDictionary` (defined in `lib/SystemDictionary.bt`) and implemented by `beamtalk_system_dictionary.erl`:
 ```beamtalk
-Beamtalk allClasses         // codegen → call 'beamtalk':'allClasses'()
+Beamtalk allClasses         // dispatched via workspace binding → beamtalk_system_dictionary
 Beamtalk classNamed: #Counter
 ```
 
-Both are registered as classes in `beamtalk_stdlib.erl` with class methods but no instance methods.
+Both are singleton actors registered as workspace bindings via `persistent_term`.
 
 ### Problems
 
@@ -317,7 +317,7 @@ Actor subclass: TranscriptStream
   recent => @primitive 'recent'
   clear => @primitive 'clear'
 
-// lib/SystemDictionary.bt (future — renamed from lib/Beamtalk.bt)
+// lib/SystemDictionary.bt (renamed from lib/Beamtalk.bt)
 Actor subclass: SystemDictionary
   allClasses => @primitive 'allClasses'
   classNamed: className => @primitive 'classNamed:'
@@ -502,8 +502,8 @@ Transcript = #{'__class__' => 'TranscriptStream'}
 - Newcomer confusion — `Transcript show:` returns `nil` in REPL, output goes to separate channel
 
 ### Neutral
-- `lib/Beamtalk.bt` renamed to `lib/SystemDictionary.bt`
-- Transcript module renamed from `transcript.erl` to `beamtalk_transcript_stream.erl`
+- `lib/Beamtalk.bt` renamed to `lib/SystemDictionary.bt` (completed)
+- Transcript module renamed from `transcript.erl` to `beamtalk_transcript_stream.erl` (completed)
 - Workspace bindings use `persistent_term` internally — implementation detail, not public API
 
 ## Implementation
@@ -566,11 +566,11 @@ Restarted processes update their own `persistent_term` binding in `init/1` — n
 - If not bound → direct module function call (existing class method codegen path)
 - Class method calls (`Counter spawn`, `Point new`) are completely unchanged
 
-### Phase 4: Migration
-- Rename `lib/Beamtalk.bt` → `lib/SystemDictionary.bt`
-- Rename `transcript.erl` → `beamtalk_transcript_stream.erl`
-- Update E2E tests and examples
-- Deprecate old module names
+### Phase 4: Migration (Completed)
+- Renamed `lib/Beamtalk.bt` → `lib/SystemDictionary.bt`
+- Renamed `transcript.erl` → `beamtalk_transcript_stream.erl`
+- Updated E2E tests and examples
+- Old `beamtalk_module.rs` codegen removed (legacy dead code)
 
 ### Affected Components
 - **Codegen:** `dispatch_codegen.rs` — `ClassReference` checks workspace bindings first
