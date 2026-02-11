@@ -108,3 +108,4 @@ _rel/
 /lib/build/
 *.backup
 *.crashdump
+_bt_stdlib_*.txt

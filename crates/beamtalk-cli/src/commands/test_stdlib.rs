@@ -22,13 +22,22 @@ use tracing::{debug, info, instrument};
 // Test file parsing (lifted from e2e.rs)
 // ──────────────────────────────────────────────────────────────────────────
 
+/// What a test assertion expects: a value or an error.
+#[derive(Debug, Clone, PartialEq)]
+enum Expected {
+    /// Match formatted result string (`_` for wildcard).
+    Value(String),
+    /// Match `#beamtalk_error{kind = Kind}` on error.
+    Error { kind: String },
+}
+
 /// A single test assertion: expression + expected result.
 #[derive(Debug)]
 struct TestCase {
     /// The Beamtalk expression to evaluate.
     expression: String,
-    /// Expected result string (`_` for wildcard).
-    expected: String,
+    /// Expected outcome (value or error).
+    expected: Expected,
     /// Line number in the source file (1-based).
     line: usize,
 }
@@ -88,9 +97,27 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
         if i < lines.len() {
             let next_line = lines[i].trim();
             if let Some(expected) = next_line.strip_prefix("// =>") {
+                let expected = expected.trim();
+                let expected = if let Some(kind) = expected.strip_prefix("ERROR:") {
+                    let kind = kind.trim();
+                    if kind.is_empty() {
+                        warnings.push(format!(
+                            "Line {expr_line}: Expression will not be executed \
+                             (invalid // => ERROR: assertion with missing error kind): \
+                             {expression}"
+                        ));
+                        i += 1;
+                        continue;
+                    }
+                    Expected::Error {
+                        kind: kind.to_string(),
+                    }
+                } else {
+                    Expected::Value(expected.to_string())
+                };
                 cases.push(TestCase {
                     expression,
-                    expected: expected.trim().to_string(),
+                    expected,
                     line: expr_line,
                 });
                 i += 1;
@@ -203,6 +230,54 @@ fn extract_assignment_var(expression: &str) -> Option<String> {
 ///
 /// Results are formatted to strings before comparison (matching E2E
 /// semantics where the REPL returns string representations).
+/// Generate the `EUnit` try/catch block for an ERROR: assertion.
+fn write_error_assertion(
+    erl: &mut String,
+    i: usize,
+    eval_mod: &str,
+    kind: &str,
+    bindings_in: &str,
+    bindings_out: &str,
+) {
+    // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
+    // Also handles plain atom errors (e.g., badarith, badarity)
+    // Variables are suffixed with index to avoid Erlang scoping conflicts.
+    // Assertions are outside the try/catch to avoid the catch clause
+    // swallowing EUnit assertion exceptions.
+    // The case uses CaughtKind/CaughtReason (fresh variables) since
+    // Erlang considers variables bound in catch as unsafe outside try.
+    let _ = writeln!(
+        erl,
+        "    {bindings_out} =\n\
+         \x20   begin\n\
+         \x20       TryResult{i} = try '{eval_mod}':eval({bindings_in}) of\n\
+         \x20           {{_V{i}, B{i}}} ->\n\
+         \x20               {{ok, B{i}}}\n\
+         \x20       catch\n\
+         \x20           error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           error:'{kind}' ->\n\
+         \x20               atom_error;\n\
+         \x20           error:Reason{i} ->\n\
+         \x20               {{other_error, Reason{i}}}\n\
+         \x20       end,\n\
+         \x20       case TryResult{i} of\n\
+         \x20           {{ok, _}} ->\n\
+         \x20               ?assert(false, <<\"Expected error '{kind}' but expression succeeded\">>),\n\
+         \x20               {bindings_in};\n\
+         \x20           {{beamtalk_error, CaughtKind{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtKind{i}),\n\
+         \x20               {bindings_in};\n\
+         \x20           atom_error ->\n\
+         \x20               {bindings_in};\n\
+         \x20           {{other_error, CaughtReason{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtReason{i}),\n\
+         \x20               {bindings_in}\n\
+         \x20       end\n\
+         \x20   end,"
+    );
+}
+
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -260,35 +335,40 @@ fn generate_eunit_wrapper(
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         let bindings_in = format!("Bindings{i}");
-        let result_var = format!("Result{i}");
-
-        // Call the eval module — returns {Result, RawBindings}
-        let raw_bindings = format!("RawBindings{}", i + 1);
-        let _ = writeln!(
-            erl,
-            "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
-        );
-
-        // If this expression is a variable assignment (x := expr), persist
-        // the binding in the bindings map for subsequent expressions.
-        // This mirrors the REPL's extract_assignment + maps:put logic.
         let bindings_out = format!("Bindings{}", i + 1);
-        if let Some(var_name) = extract_assignment_var(&case.expression) {
-            let _ = writeln!(
-                erl,
-                "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
-            );
-        } else {
-            let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
-        }
 
-        // Add assertion (unless wildcard)
-        if case.expected != "_" {
-            let expected_bin = expected_to_binary_literal(&case.expected);
-            let _ = writeln!(
-                erl,
-                "    ?assertEqual({expected_bin}, format_result({result_var})),"
-            );
+        match &case.expected {
+            Expected::Error { kind } => {
+                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
+            }
+            Expected::Value(v) => {
+                // Normal eval: call the module and extract result + bindings
+                let result_var = format!("Result{i}");
+                let raw_bindings = format!("RawBindings{}", i + 1);
+                let _ = writeln!(
+                    erl,
+                    "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
+                );
+
+                // Persist assignment bindings
+                if let Some(var_name) = extract_assignment_var(&case.expression) {
+                    let _ = writeln!(
+                        erl,
+                        "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
+                    );
+                } else {
+                    let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
+                }
+
+                // Add value assertion (unless wildcard)
+                if v != "_" {
+                    let expected_bin = expected_to_binary_literal(v);
+                    let _ = writeln!(
+                        erl,
+                        "    ?assertEqual({expected_bin}, format_result({result_var})),"
+                    );
+                }
+            }
         }
     }
 
@@ -623,7 +703,8 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        miette::bail!("erlc batch compilation failed:\n{}", stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!("erlc batch compilation failed:\n{}{}", stdout, stderr);
     }
 
     Ok(())
@@ -829,7 +910,7 @@ mod tests {
         let parsed = parse_test_file(content);
         assert_eq!(parsed.cases.len(), 1);
         assert_eq!(parsed.cases[0].expression, "1 + 2");
-        assert_eq!(parsed.cases[0].expected, "3");
+        assert_eq!(parsed.cases[0].expected, Expected::Value("3".to_string()));
         assert_eq!(parsed.cases[0].line, 1);
     }
 
@@ -838,7 +919,7 @@ mod tests {
         let content = "Counter spawn\n// => _\n";
         let parsed = parse_test_file(content);
         assert_eq!(parsed.cases.len(), 1);
-        assert_eq!(parsed.cases[0].expected, "_");
+        assert_eq!(parsed.cases[0].expected, Expected::Value("_".to_string()));
     }
 
     #[test]
@@ -899,7 +980,7 @@ mod tests {
     fn test_generate_eunit_wrapper_simple() {
         let cases = vec![TestCase {
             expression: "1 + 2".to_string(),
-            expected: "3".to_string(),
+            expected: Expected::Value("3".to_string()),
             line: 1,
         }];
         let eval_modules = vec!["test_arith_0".to_string()];
@@ -913,7 +994,7 @@ mod tests {
     fn test_generate_eunit_wrapper_wildcard() {
         let cases = vec![TestCase {
             expression: "Counter spawn".to_string(),
-            expected: "_".to_string(),
+            expected: Expected::Value("_".to_string()),
             line: 1,
         }];
         let eval_modules = vec!["test_spawn_0".to_string()];
@@ -935,5 +1016,111 @@ mod tests {
     fn test_compile_expression_to_core_invalid() {
         let result = compile_expression_to_core("", "test_invalid_0");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_error_assertion() {
+        let content = "42 foo\n// => ERROR: does_not_understand\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "42 foo");
+        assert_eq!(
+            parsed.cases[0].expected,
+            Expected::Error {
+                kind: "does_not_understand".to_string()
+            }
+        );
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_assertion_type_error() {
+        let content = "\"hello\" + 42\n// => ERROR: type_error\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(
+            parsed.cases[0].expected,
+            Expected::Error {
+                kind: "type_error".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_value_and_error_assertions() {
+        let content = "1 + 2\n// => 3\n42 foo\n// => ERROR: does_not_understand\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 2);
+        assert_eq!(parsed.cases[0].expected, Expected::Value("3".to_string()));
+        assert_eq!(
+            parsed.cases[1].expected,
+            Expected::Error {
+                kind: "does_not_understand".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_error() {
+        let cases = vec![TestCase {
+            expression: "42 foo".to_string(),
+            expected: Expected::Error {
+                kind: "does_not_understand".to_string(),
+            },
+            line: 1,
+        }];
+        let eval_modules = vec!["test_err_0".to_string()];
+        let wrapper = generate_eunit_wrapper("err_tests", "test/err.bt", &cases, &eval_modules);
+        assert!(wrapper.contains("try 'test_err_0':eval("));
+        assert!(wrapper.contains("beamtalk_error"));
+        assert!(wrapper.contains("does_not_understand"));
+        // Error assertions should not call format_result in the assertion
+        assert!(!wrapper.contains("format_result(Result"));
+        // Assertions must be outside try/catch (not caught by own catch clause)
+        assert!(wrapper.contains("case TryResult0 of"));
+        assert!(wrapper.contains("{ok, _}"));
+        assert!(wrapper.contains("CaughtKind0"));
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_mixed() {
+        let cases = vec![
+            TestCase {
+                expression: "1 + 2".to_string(),
+                expected: Expected::Value("3".to_string()),
+                line: 1,
+            },
+            TestCase {
+                expression: "42 foo".to_string(),
+                expected: Expected::Error {
+                    kind: "does_not_understand".to_string(),
+                },
+                line: 3,
+            },
+        ];
+        let eval_modules = vec!["test_mix_0".to_string(), "test_mix_1".to_string()];
+        let wrapper = generate_eunit_wrapper("mix_tests", "test/mix.bt", &cases, &eval_modules);
+        // First case: normal value assertion
+        assert!(wrapper.contains("format_result(Result0)"));
+        // Second case: error try/catch
+        assert!(wrapper.contains("try 'test_mix_1':eval("));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_empty_kind() {
+        let content = "42 foo\n// => ERROR:\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_whitespace_only_kind() {
+        let content = "42 foo\n// => ERROR:   \n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
     }
 }

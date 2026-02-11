@@ -1,108 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for ProtoObject - the root of the class hierarchy
+// E2E tests for ProtoObject - REPL-specific tests
 //
-// ProtoObject provides the minimal interface that all objects must understand:
-// - class (reflection)
-// - doesNotUnderstand:args: (fallback for unknown messages)
-// - == (identity comparison)
-// - ~= (not equal)
+// Pure value tests (class, ==, ~=, perform:) are in tests/stdlib/:
+//   - protoobject_manual_test.bt (class, ==, ~=, perform:)
+//   - equality.bt (comprehensive equality tests)
 //
-// ===========================================================================
-// CLASS METHOD TESTS
-// ===========================================================================
-//
-// All objects respond to `class`, which returns their class name
-
-// Integer responds to class
-42 class
-// => Integer
-
-// String responds to class
-'hello' class
-// => String
-
-// Boolean responds to class
-true class
-// => True
-
-false class
-// => False
-
-// Nil responds to class
-nil class
-// => Nil
-
-// ===========================================================================
-// IDENTITY COMPARISON (==)
-// ===========================================================================
-//
-// `==` tests object identity (reference equality)
-// For primitives, this is value equality since they're immutable
-
-// Integer identity
-42 == 42
-// => true
-
-42 == 43
-// => false
-
-// String identity
-'hello' == 'hello'
-// => true
-
-'hello' == 'world'
-// => false
-
-// Boolean identity
-true == true
-// => true
-
-true == false
-// => false
-
-// Nil identity
-nil == nil
-// => true
-
-nil == false
-// => false
-
-// ===========================================================================
-// INEQUALITY COMPARISON (~=)
-// ===========================================================================
-//
-// `~=` tests object inequality (not identical)
-// Delegates to `==` and negates the result
-
-// Integer inequality
-42 ~= 43
-// => true
-
-42 ~= 42
-// => false
-
-// String inequality
-'hello' ~= 'world'
-// => true
-
-'hello' ~= 'hello'
-// => false
-
-// Boolean inequality
-true ~= false
-// => true
-
-true ~= true
-// => false
-
-// Nil inequality
-nil ~= false
-// => true
-
-nil ~= nil
-// => false
+// This file tests features that need REPL: actor identity, inheritance.
 
 // ===========================================================================
 // ACTOR IDENTITY TESTS
@@ -134,40 +39,6 @@ a ~= c
 // => true
 
 // ===========================================================================
-// DOESNOTUNDERSTAND TESTS
-// ===========================================================================
-//
-// When an object receives a message it doesn't understand, the runtime
-// calls `doesNotUnderstand:args:` which raises a does_not_understand error.
-// (See also errors.bt for additional doesNotUnderstand coverage)
-
-// Send unknown message to integer
-42 nonExistentMethod
-// => ERROR: does_not_understand
-
-// Send unknown message to string
-'hello' nonExistentMethod
-// => ERROR: does_not_understand
-
-// ===========================================================================
-// PERFORM:WITHARGUMENTS: TESTS
-// ===========================================================================
-//
-// Dynamic dispatch - send a message to an object at runtime
-
-// Primitive: perform binary operation dynamically
-42 perform: #+ withArguments: #(3)
-// => 45
-
-// Primitive: perform unary dynamically
-42 perform: #asString withArguments: #()
-// => 42
-
-// String: perform binary operation dynamically
-'hello' perform: #++ withArguments: #(' world')
-// => hello world
-
-// ===========================================================================
 // INHERITANCE TESTS
 // ===========================================================================
 //
@@ -183,16 +54,3 @@ Counter superclass
 // Root class has no superclass
 ProtoObject superclass
 // => nil
-
-// ===========================================================================
-// IMPLEMENTATION STATUS
-// ===========================================================================
-//
-// ✅ ProtoObject.bt defined in lib/
-// ✅ Compiler support for `class` message
-// ✅ Compiler support for `==` and `~=` operators
-// ✅ Compiler support for `doesNotUnderstand:args:`
-// ✅ Compiler support for `perform:withArguments:`
-// ✅ Runtime dispatch for ProtoObject methods
-// ✅ Actor identity (== / ~=) tests
-// ✅ Inheritance chain (superclass) tests
