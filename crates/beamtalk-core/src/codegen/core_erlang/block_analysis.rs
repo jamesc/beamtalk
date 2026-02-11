@@ -173,7 +173,6 @@ fn analyze_expression(
 
         Expression::Block(block) => {
             // Nested block - analyze it separately
-            // Note: mutations in nested blocks don't escape unless the block is evaluated
             let nested_analysis = analyze_block(block);
             // Merge reads (nested block reads outer vars)
             analysis
@@ -182,7 +181,12 @@ fn analyze_expression(
             analysis
                 .field_reads
                 .extend(nested_analysis.field_reads.iter().cloned());
-            // Don't merge writes - nested block mutations are isolated
+            // Don't merge local_writes - nested block local mutations are isolated
+            // DO merge field_writes - field mutations (self.x := ...) modify shared
+            // actor state and must be visible to outer loops for state threading (BT-478)
+            analysis
+                .field_writes
+                .extend(nested_analysis.field_writes.iter().cloned());
         }
 
         Expression::Return { value, .. } => {
@@ -407,6 +411,55 @@ mod tests {
         let analysis = analyze_block(&block);
         assert!(analysis.field_writes.contains("value"));
         assert!(!analysis.field_reads.contains("value"));
+    }
+
+    #[test]
+    fn test_nested_block_propagates_field_writes() {
+        // BT-478: [:i | [:j | self.value := self.value + 1]]
+        // Field writes in nested blocks must propagate to outer analysis
+        let inner_block = Expression::Block(Block::new(
+            vec![BlockParameter::new("j", Span::new(1, 2))],
+            vec![Expression::Assignment {
+                target: Box::new(Expression::FieldAccess {
+                    receiver: Box::new(make_expr_id("self")),
+                    field: make_id("value"),
+                    span: Span::new(0, 10),
+                }),
+                value: Box::new(Expression::MessageSend {
+                    receiver: Box::new(Expression::FieldAccess {
+                        receiver: Box::new(make_expr_id("self")),
+                        field: make_id("value"),
+                        span: Span::new(0, 10),
+                    }),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![Expression::Literal(
+                        crate::ast::Literal::Integer(1),
+                        Span::new(20, 21),
+                    )],
+                    span: Span::new(0, 21),
+                }),
+                span: Span::new(0, 21),
+            }],
+            Span::new(0, 25),
+        ));
+
+        let outer_block = Block::new(
+            vec![BlockParameter::new("i", Span::new(1, 2))],
+            vec![inner_block],
+            Span::new(0, 30),
+        );
+
+        let analysis = analyze_block(&outer_block);
+        // Field writes from nested blocks MUST propagate (BT-478)
+        assert!(
+            analysis.field_writes.contains("value"),
+            "field_writes should propagate from nested blocks"
+        );
+        // Local writes should NOT propagate
+        assert!(
+            analysis.local_writes.is_empty(),
+            "local_writes should not propagate from nested blocks"
+        );
     }
 
     #[test]
