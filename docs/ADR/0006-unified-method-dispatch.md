@@ -1,7 +1,7 @@
 # ADR 0006: Unified Method Dispatch with Hierarchy Walking
 
 ## Status
-Accepted
+Implemented (2026-02-08) — Epic BT-278
 
 ## Context
 
