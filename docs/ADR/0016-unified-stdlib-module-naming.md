@@ -5,6 +5,8 @@ Accepted (2026-02-10)
 
 **Amendment 2026-02-10:** Changed from underscore-based naming (`bt_stdlib_*`) to at-sign separator (`bt@stdlib@*`) for clearer namespacing and following proven BEAM patterns (Gleam). Extends scope from stdlib-only to all compiled Beamtalk modules.
 
+> **Filename note:** This ADR was originally drafted for "unified stdlib module naming" and later expanded to universal module naming for all compiled Beamtalk modules. The file name `0016-unified-stdlib-module-naming.md` is retained for historical continuity and to avoid breaking existing links.
+
 ## Context
 
 ### The Problem
@@ -267,7 +269,7 @@ Gleam compiles modules to Erlang using the package name as `@` separator prefix:
 - The `@` character is legal in Erlang atoms but unlikely to appear in user-chosen identifiers
 - Package names already use it in Gleam's source syntax (`import gleam/list`)
 - Avoids collision with Erlang's `:` module separator (used in `module:function` calls)
-- No quoting needed in most contexts (though still required in Erlang source)
+- Atoms/modules containing `@` must be quoted in Erlang text (source and shell), e.g. `'gleam@list'`, but the underlying atom/module identity is unaffected by quoting
 
 **Gleam's experience:** Successfully used in production since 2019. No reported issues with tooling (rebar3, dialyzer, observer). The community has accepted the convention and it appears throughout the ecosystem (gleam-lang/stdlib, gleam-lang/httpc, etc.).
 
@@ -419,7 +421,7 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 
 | Component | File(s) | Change |
 |-----------|---------|--------|
-| **Build stdlib** | `build_stdlib.rs` | Simplify `module_name_from_path()` — always `bt@stdlib@`. Delete `is_primitive_type()`. Emit quoted atoms. |
+| **Build stdlib** | `build_stdlib.rs` | Simplify `module_name_from_path()` — always `bt@stdlib@`. Delete `is_primitive_type()`. Emit atom module names as plain strings (e.g., `bt@stdlib@list`); quoting is applied later in Erlang/Core Erlang source. |
 | **User code compiler** | `main.rs` / `compile.rs` | Update module name generation to `bt@{snake_case}` for user `.bt` files |
 | **Codegen** | `value_type_codegen.rs`, `module_codegen.rs` | Merge `is_primitive_type()` + `is_stdlib_nonprimitive_type()` → `is_known_stdlib_type()`. Update `superclass_module_name()` to emit `bt@stdlib@` and `bt@` prefixes. Emit quoted atoms in Core Erlang. |
 | **Runtime dispatch** | `beamtalk_primitive.erl` | Update ~24 module atoms in `send/3` and `has_method/1` to quoted atoms with `@` |
@@ -495,10 +497,10 @@ Use `bt@stdlib@*` for stdlib but keep user code as plain `counter`, `point`, etc
 ## Future Considerations
 
 ### Hot Code Reload
-Erlang's hot code reload mechanism uses module names as identity for code replacement. Quoted atoms behave identically to unquoted atoms for this purpose (both are stored in the global atom table with the same internal representation). The BEAM VM's `code_server` treats `'bt@stdlib@integer'` and `bt_stdlib_integer` equivalently—no issues expected.
+Erlang's hot code reload mechanism uses the *module atom* as the identity for code replacement. Quoting does not change which atom you get: `'bt_stdlib_integer'` and `bt_stdlib_integer` refer to the same atom, but `'bt@stdlib@integer'` is a different atom from `'bt_stdlib_integer'`. Because this ADR deliberately changes the module atom from `bt_stdlib_integer` to `'bt@stdlib@integer'`, the VM treats them as two distinct modules; hot reload will not transparently map old modules to the new naming scheme, and code must be recompiled and loaded under the new name.
 
 ### Class-Side Methods (ADR 0013)
-When class-side methods are implemented, they will use the same module names as instance methods. Class-side dispatch will route through the same `bt@stdlib@integer` module, using different function names or metadata to distinguish class-side from instance-side methods. No module naming conflicts expected.
+When class-side methods are implemented, they will use the same module names as instance methods. Class-side dispatch will route through the same `'bt@stdlib@integer'` module, using different function names or metadata to distinguish class-side from instance-side methods. No module naming conflicts expected.
 
 ### Namespace Versioning
 If breaking stdlib changes require multiple versions to coexist (e.g., for gradual migration), we could use:

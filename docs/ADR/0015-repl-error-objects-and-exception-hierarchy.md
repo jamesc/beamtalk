@@ -469,14 +469,17 @@ But general `resume:` that continues from arbitrary error points is fundamentall
 
 **Proposed Beamtalk patterns** (needs separate ADR + implementation):
 
-```beamtalk
+```
+// NOTE: This is pseudocode/future syntax. List literals (#(...)), tuple
+// literals, and supervision DSL are not yet implemented in Beamtalk.
+
 // 1. Supervisor as a class (declarative)
 Supervisor subclass: WebApp
-  children: [
-    {DatabasePool spawn, restartStrategy: #permanent},
-    {HTTPRouter spawn, restartStrategy: #transient},
-    {MetricsCollector spawn, restartStrategy: #temporary}
-  ]
+  children: #(
+    #{#class => DatabasePool, #restartStrategy => #permanent},
+    #{#class => HTTPRouter, #restartStrategy => #transient},
+    #{#class => MetricsCollector, #restartStrategy => #temporary}
+  )
   strategy: #oneForOne
   maxRestarts: 5
   restartWindow: 60
@@ -484,9 +487,9 @@ Supervisor subclass: WebApp
 // 2. Actor-level supervision spec (metadata)
 Actor subclass: Worker
   supervisionPolicy: #{
-    restart: #transient,
-    maxRestarts: 5,
-    restartWindow: 60
+    #restart       => #transient,
+    #maxRestarts   => 5,
+    #restartWindow => 60
   }
 
 // 3. Retry patterns (syntactic sugar)
@@ -502,7 +505,7 @@ data := [API fetchUser: id]
 
 // 5. Supervision from REPL (inspection)
 supervisor := WebApp supervise.
-supervisor children.           // => [DatabasePool, HTTPRouter, MetricsCollector]
+supervisor children.           // => #(DatabasePool, HTTPRouter, MetricsCollector)
 supervisor restartCount: 'DatabasePool'.  // => 3
 supervisor strategyFor: 'HTTPRouter'.     // => #transient
 ```
