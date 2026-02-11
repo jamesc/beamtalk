@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "github:obra/streamlinear"],
       "env": {
-        "LINEAR_API_TOKEN": "${env:LINEAR_API_KEY}"
+        "LINEAR_API_TOKEN": "${env:LINEAR_API_TOKEN}"
       }
     }
   }

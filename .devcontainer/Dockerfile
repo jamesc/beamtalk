@@ -5,6 +5,7 @@
 # - Erlang/OTP and rebar3 for BEAM bytecode
 # - Node.js for build tooling
 # - GitHub CLI (gh)
+# - streamlinear CLI for Linear issue management
 # - Debugging and networking utilities
 #
 # GitHub Copilot CLI and workspace setup are handled by devcontainer.json features.
@@ -44,9 +45,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
     && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov just
 
+# Install streamlinear CLI for Linear issue management (used by Copilot skill)
+RUN npm install -g streamlinear@github:obra/streamlinear --ignore-scripts
+
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
-    && node --version && npm --version && gh --version
+    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true)
 
 # Set up Erlang paths
 ENV PATH="/usr/lib/erlang/bin:${PATH}"

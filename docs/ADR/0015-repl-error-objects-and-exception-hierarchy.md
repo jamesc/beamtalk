@@ -1,7 +1,7 @@
 # ADR 0015: Signal-Time Exception Objects and Error Class Hierarchy
 
 ## Status
-Proposed (2026-02-10)
+Accepted (2026-02-10)
 
 ## Context
 
@@ -354,9 +354,9 @@ end
 - `doesNotUnderstand:` creates a `MessageNotUnderstood` and calls `signal` on it
 - The debugger receives the same object the handler would — no wrapping step
 - **Exception class hierarchy** enables granular matching: `on: ZeroDivide do:` vs `on: Error do:`
-- **Resumption protocol**: `resume:`, `retry`, `pass` — handlers can resume execution
+- **Resumption protocol**: `resume:`, `retry`, `pass` — handlers can resume execution from the point of error
 - **Adopted:** Signal-time creation, class hierarchy, `on:do:` matching
-- **Deferred:** Resumption protocol (requires VM-level support Beamtalk can't easily provide on BEAM)
+- **Deferred:** Resumption protocol (see "Why Not Resumption?" below)
 
 ### Elixir
 - Exceptions are **structs** (`%RuntimeError{message: "..."}`) — always objects
@@ -396,6 +396,134 @@ end
 | Class-based matching | ✅ on:do: | ✅ rescue | ✅ rescue | ❌ pattern match | ❌ pattern match | **✅ on:do: + hierarchy** |
 | REPL inspection | ✅ debugger | ❌ manual | ✅ Pry _ex_ | ❌ N/A | ❌ none | **✅ _error binding** |
 | Resumption | ✅ resume: | ❌ no | ❌ no | ❌ no | ❌ no | **❌ deferred** |
+
+### Why Not Resumption? (And Why Supervision Is Better)
+
+**Smalltalk's resumption protocol** (`resume:`, `retry`, `pass`) allows exception handlers to:
+- `resume:` — Continue execution from the point of error with a replacement value
+- `retry` — Re-execute the protected code that failed
+- `pass` — Propagate the exception to the next handler
+
+Example in Pharo:
+```smalltalk
+result := [1 / 0] on: ZeroDivide do: [:ex | ex resume: Float infinity].
+"Returns infinity, continues execution"
+```
+
+**Why this is hard on BEAM:**
+
+1. **No first-class continuations** — Smalltalk VMs have built-in continuation support. BEAM does not. Resuming from an arbitrary point requires capturing and restoring the call stack as data.
+
+2. **Exception mechanism is built-in** — Erlang's `error/1` immediately unwinds the stack. There's no hook to intercept and redirect control flow before unwinding happens.
+
+3. **Would require custom handler stack** — Smalltalk maintains an explicit handler stack in the VM. On BEAM, we'd need to:
+   - Store handlers in process dictionary or state
+   - Replace all `error/1` calls with custom signaling
+   - Manually walk the stack, check handlers, resume or propagate
+   - This is 1000+ lines of runtime complexity
+
+4. **Conflicts with BEAM's design philosophy** — Erlang's entire error model is "let it crash, restart clean." Resumption fights this by trying to patch up corrupted state and continue.
+
+**Why supervision + restart is the right model for BEAM:**
+
+Erlang's "let it crash" philosophy is **fundamentally different** from resumption but **equally powerful**:
+
+```beamtalk
+// Smalltalk approach: catch and resume
+connection := [Database connect: config]
+  on: ConnectionTimeout do: [:ex | ex resume: cachedConnection].
+
+// BEAM approach: supervisor restarts failed process
+// If Database actor crashes (timeout, connection refused, etc.),
+// the supervisor automatically restarts it with clean state.
+// The client just waits or retries — no manual error patching.
+```
+
+**Benefits of the BEAM model:**
+- **Clean slate** — Restart gives you fresh state, not corrupted state patched over
+- **Isolation** — Errors in one actor don't require defensive handling in another
+- **Proven at scale** — WhatsApp, Discord, RabbitMQ all use supervision, not resumption
+- **Composable** — Supervision trees organize restart strategies declaratively
+
+**What we DO adopt from Smalltalk:**
+- ✅ Signal-time creation (errors are objects from birth)
+- ✅ Class hierarchy (`on: TypeError do:` matches specific errors)
+- ✅ `on:do:` syntax (familiar to Smalltalk developers)
+- ✅ Object protocol (errors respond to messages like `message`, `hint`, `kind`)
+
+**What we adapt to BEAM:**
+- ❌ Resumption → ✅ Supervision + restart (BEAM-native error recovery)
+- ❌ Custom handler stack → ✅ Erlang's built-in try/catch (simpler, faster)
+
+**When resumption might return (future ADR):**
+If there's strong demand, we could explore **limited resumption** for specific cases:
+- Retry loops (`retryTimes:onError:`) — syntactic sugar over `on:do:` + recursion
+- Fallback values (`[expr] valueOrDefault: fallback`) — pure data flow, no stack magic
+- Actor-level retry policies (supervisor strategies exposed to Beamtalk)
+
+But general `resume:` that continues from arbitrary error points is fundamentally incompatible with BEAM's execution model.
+
+### Making Supervision Intuitive (Future Work)
+
+**The gap:** Smalltalk developers think "catch and fix." BEAM developers think "let it crash and restart clean." We need Smalltalk-friendly syntax for supervision trees.
+
+**Proposed Beamtalk patterns** (needs separate ADR + implementation):
+
+```
+// NOTE: This is pseudocode/future syntax. List literals (#(...)), tuple
+// literals, and supervision DSL are not yet implemented in Beamtalk.
+
+// 1. Supervisor as a class (declarative)
+Supervisor subclass: WebApp
+  children: #(
+    #{#class => DatabasePool, #restartStrategy => #permanent},
+    #{#class => HTTPRouter, #restartStrategy => #transient},
+    #{#class => MetricsCollector, #restartStrategy => #temporary}
+  )
+  strategy: #oneForOne
+  maxRestarts: 5
+  restartWindow: 60
+
+// 2. Actor-level supervision spec (metadata)
+Actor subclass: Worker
+  supervisionPolicy: #{
+    #restart       => #transient,
+    #maxRestarts   => 5,
+    #restartWindow => 60
+  }
+
+// 3. Retry patterns (syntactic sugar)
+result := [Database query: sql]
+  retryTimes: 3
+  onError: [:e | e isA: ConnectionTimeout]
+  backoff: [:attempt | attempt * 1000]  // exponential backoff
+
+// 4. Fallback chains (error -> default)
+data := [API fetchUser: id]
+  valueOrDefault: cachedUser
+  onError: [:e | Telemetry record: e]
+
+// 5. Supervision from REPL (inspection)
+supervisor := WebApp supervise.
+supervisor children.           // => #(DatabasePool, HTTPRouter, MetricsCollector)
+supervisor restartCount: 'DatabasePool'.  // => 3
+supervisor strategyFor: 'HTTPRouter'.     // => #transient
+```
+
+**Why this bridges the gap:**
+- **Familiar class syntax** — `Supervisor subclass:` looks like normal Beamtalk code
+- **Declarative children** — No manual OTP supervision spec construction
+- **Retry syntax** — Looks like `on:do:` but with automatic retry logic
+- **ValueOrDefault** — Simple pattern for "try this, or use default" without full try/catch
+- **REPL inspection** — Smalltalk developers expect to inspect live objects
+
+**Implementation needs:**
+- New `Supervisor` class in stdlib (wraps OTP supervisor behavior)
+- Codegen for `retryTimes:onError:` (desugars to recursive `on:do:`)
+- Runtime support for supervision specs (read metadata, register with supervisor)
+- REPL integration for supervision tree inspection
+
+**See:** Future ADR for supervision syntax and semantics. This ADR focuses on exception objects; supervision is orthogonal.
 
 ## User Impact
 
@@ -591,6 +719,17 @@ catch error:#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}} -> 
 - `tests/e2e/cases/errors.bt` — `ERROR:` assertion format may need updating for wrapped objects
 - `tests/stdlib/error_method.bt` — Method-level error behavior; should continue to pass
 - Runtime tests that catch `#beamtalk_error{}` directly — Update to match wrapped objects
+
+## Implementation Tracking
+
+**Epic:** [BT-450](https://linear.app/beamtalk/issue/BT-450) — Signal-Time Exception Objects (ADR 0015)
+
+| Issue | Title | Size | Status |
+|-------|-------|------|--------|
+| [BT-451](https://linear.app/beamtalk/issue/BT-451) | Signal-time wrapping: raise/1, runtime + codegen migration, REPL _error binding | L | Planned |
+| [BT-452](https://linear.app/beamtalk/issue/BT-452) | Error class hierarchy: RuntimeError, TypeError, InstantiationError + kind_to_class mapping | M | Planned (blocked by BT-451) |
+
+**Supersedes:** BT-30 (Prototype object-wrapped exceptions), BT-237 (REPL error formatting)
 
 ## References
 - Related ADRs: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md) (object model), [ADR 0006](0006-unified-method-dispatch.md) (dispatch), [ADR 0007](0007-compilable-stdlib-with-primitive-injection.md) (stdlib)
