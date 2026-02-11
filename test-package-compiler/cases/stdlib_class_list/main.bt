@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test List class compilation as a value type (not gen_server).
-// List is a sealed Object subclass backed by Erlang linked lists.
-// new/0 should return [] (empty list).
+// Mirrors lib/List.bt exactly — new/0 should return [] (empty list).
 
 sealed Object subclass: List
-
   // Access
   size => @primitive 'size'
   isEmpty => @primitive 'isEmpty'
@@ -18,18 +16,48 @@ sealed Object subclass: List
 
   // Ordering
   sort => @primitive 'sort'
+  sort: comparator => @primitive 'sort:'
   reversed => @primitive 'reversed'
   unique => @primitive 'unique'
 
-  // Iteration
+  // Search
+  detect: block => @primitive 'detect:'
+  detect: block ifNone: default => @primitive 'detect:ifNone:'
+
+  // Iteration — selector-based runtime dispatch
   do: block => @primitive 'do:'
   collect: block => @primitive 'collect:'
   select: block => @primitive 'select:'
   reject: block => @primitive 'reject:'
   inject: initial into: block => @primitive 'inject:into:'
 
+  // Functional
+  take: n => @primitive 'take:'
+  drop: n => @primitive 'drop:'
+  flatten => @primitive 'flatten'
+  flatMap: block => @primitive 'flatMap:'
+  count: block => @primitive 'count:'
+  anySatisfy: block => @primitive 'anySatisfy:'
+  allSatisfy: block => @primitive 'allSatisfy:'
+
   // Concatenation
   ++ other => @primitive '++'
+
+  // Subsequence / Search
+  from: start to: end => @primitive 'from:to:'
+  indexOf: item => @primitive 'indexOf:'
+
+  // Iteration with index
+  eachWithIndex: block => @primitive 'eachWithIndex:'
+
+  // Advanced
+  zip: other => @primitive 'zip:'
+  groupBy: block => @primitive 'groupBy:'
+  partition: block => @primitive 'partition:'
+  takeWhile: block => @primitive 'takeWhile:'
+  dropWhile: block => @primitive 'dropWhile:'
+  intersperse: separator => @primitive 'intersperse:'
+  add: item => @primitive 'add:'
 
   // Reflection
   describe => 'a List'

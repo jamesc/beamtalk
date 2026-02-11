@@ -14,7 +14,7 @@ module 'ws_stdlib_string' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
         <{'ok', Pid}> when 'true' ->
             {'beamtalk_object', 'WsStdlibString', 'ws_stdlib_string', Pid}
         <{'error', Reason}> when 'true' ->
-            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'StdlibString') in
+            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'WsStdlibString') in
             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
             call 'beamtalk_error':'raise'(SpawnErr1)
     end
@@ -25,7 +25,7 @@ module 'ws_stdlib_string' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_ca
         <{'ok', Pid}> when 'true' ->
             {'beamtalk_object', 'WsStdlibString', 'ws_stdlib_string', Pid}
         <{'error', Reason}> when 'true' ->
-            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'StdlibString') in
+            let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'WsStdlibString') in
             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in
             call 'beamtalk_error':'raise'(SpawnErr1)
     end

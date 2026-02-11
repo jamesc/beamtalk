@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Test Set class compilation as a value type (not gen_server).
-// Set is a sealed Object subclass with state (elements), backed by tagged maps.
-// new/0 should return a tagged map with empty elements.
+// Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.
 
 sealed Object subclass: Set
   state: elements = #()
@@ -19,7 +18,7 @@ sealed Object subclass: Set
   add: element => @primitive 'add:'
   remove: element => @primitive 'remove:'
 
-  // Set operations
+  // Set operations (returns new Set)
   union: other => @primitive 'union:'
   intersection: other => @primitive 'intersection:'
   difference: other => @primitive 'difference:'
@@ -29,6 +28,7 @@ sealed Object subclass: Set
 
   // Conversion
   asList => @primitive 'asList'
+  fromList: list => @primitive 'fromList:'
 
   // Iteration
   do: block => @primitive 'do:'

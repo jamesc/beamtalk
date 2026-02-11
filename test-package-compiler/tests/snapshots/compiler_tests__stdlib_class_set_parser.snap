@@ -9,16 +9,16 @@ Module {
             name: Identifier {
                 name: "Set",
                 span: Span {
-                    start: 297,
-                    end: 300,
+                    start: 245,
+                    end: 248,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Object",
                     span: Span {
-                        start: 280,
-                        end: 286,
+                        start: 228,
+                        end: 234,
                     },
                 },
             ),
@@ -29,8 +29,8 @@ Module {
                     name: Identifier {
                         name: "elements",
                         span: Span {
-                            start: 310,
-                            end: 318,
+                            start: 258,
+                            end: 266,
                         },
                     },
                     type_annotation: None,
@@ -39,14 +39,14 @@ Module {
                             elements: [],
                             tail: None,
                             span: Span {
-                                start: 321,
-                                end: 324,
+                                start: 269,
+                                end: 272,
                             },
                         },
                     ),
                     span: Span {
-                        start: 303,
-                        end: 324,
+                        start: 251,
+                        end: 272,
                     },
                 },
             ],
@@ -61,8 +61,8 @@ Module {
                             name: "size",
                             is_quoted: true,
                             span: Span {
-                                start: 346,
-                                end: 363,
+                                start: 294,
+                                end: 311,
                             },
                         },
                     ],
@@ -70,8 +70,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 338,
-                        end: 363,
+                        start: 286,
+                        end: 311,
                     },
                 },
                 MethodDefinition {
@@ -84,8 +84,8 @@ Module {
                             name: "isEmpty",
                             is_quoted: true,
                             span: Span {
-                                start: 377,
-                                end: 397,
+                                start: 325,
+                                end: 345,
                             },
                         },
                     ],
@@ -93,8 +93,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 366,
-                        end: 397,
+                        start: 314,
+                        end: 345,
                     },
                 },
                 MethodDefinition {
@@ -103,8 +103,8 @@ Module {
                             KeywordPart {
                                 keyword: "includes:",
                                 span: Span {
-                                    start: 417,
-                                    end: 426,
+                                    start: 365,
+                                    end: 374,
                                 },
                             },
                         ],
@@ -113,8 +113,8 @@ Module {
                         Identifier {
                             name: "element",
                             span: Span {
-                                start: 427,
-                                end: 434,
+                                start: 375,
+                                end: 382,
                             },
                         },
                     ],
@@ -123,8 +123,8 @@ Module {
                             name: "includes:",
                             is_quoted: true,
                             span: Span {
-                                start: 438,
-                                end: 460,
+                                start: 386,
+                                end: 408,
                             },
                         },
                     ],
@@ -132,8 +132,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 417,
-                        end: 460,
+                        start: 365,
+                        end: 408,
                     },
                 },
                 MethodDefinition {
@@ -142,8 +142,8 @@ Module {
                             KeywordPart {
                                 keyword: "add:",
                                 span: Span {
-                                    start: 500,
-                                    end: 504,
+                                    start: 448,
+                                    end: 452,
                                 },
                             },
                         ],
@@ -152,8 +152,8 @@ Module {
                         Identifier {
                             name: "element",
                             span: Span {
-                                start: 505,
-                                end: 512,
+                                start: 453,
+                                end: 460,
                             },
                         },
                     ],
@@ -162,8 +162,8 @@ Module {
                             name: "add:",
                             is_quoted: true,
                             span: Span {
-                                start: 516,
-                                end: 533,
+                                start: 464,
+                                end: 481,
                             },
                         },
                     ],
@@ -171,8 +171,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 500,
-                        end: 533,
+                        start: 448,
+                        end: 481,
                     },
                 },
                 MethodDefinition {
@@ -181,8 +181,8 @@ Module {
                             KeywordPart {
                                 keyword: "remove:",
                                 span: Span {
-                                    start: 536,
-                                    end: 543,
+                                    start: 484,
+                                    end: 491,
                                 },
                             },
                         ],
@@ -191,8 +191,8 @@ Module {
                         Identifier {
                             name: "element",
                             span: Span {
-                                start: 544,
-                                end: 551,
+                                start: 492,
+                                end: 499,
                             },
                         },
                     ],
@@ -201,8 +201,8 @@ Module {
                             name: "remove:",
                             is_quoted: true,
                             span: Span {
-                                start: 555,
-                                end: 575,
+                                start: 503,
+                                end: 523,
                             },
                         },
                     ],
@@ -210,8 +210,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 536,
-                        end: 575,
+                        start: 484,
+                        end: 523,
                     },
                 },
                 MethodDefinition {
@@ -220,8 +220,8 @@ Module {
                             KeywordPart {
                                 keyword: "union:",
                                 span: Span {
-                                    start: 599,
-                                    end: 605,
+                                    start: 565,
+                                    end: 571,
                                 },
                             },
                         ],
@@ -230,8 +230,8 @@ Module {
                         Identifier {
                             name: "other",
                             span: Span {
-                                start: 606,
-                                end: 611,
+                                start: 572,
+                                end: 577,
                             },
                         },
                     ],
@@ -240,8 +240,8 @@ Module {
                             name: "union:",
                             is_quoted: true,
                             span: Span {
-                                start: 615,
-                                end: 634,
+                                start: 581,
+                                end: 600,
                             },
                         },
                     ],
@@ -249,8 +249,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 599,
-                        end: 634,
+                        start: 565,
+                        end: 600,
                     },
                 },
                 MethodDefinition {
@@ -259,8 +259,8 @@ Module {
                             KeywordPart {
                                 keyword: "intersection:",
                                 span: Span {
-                                    start: 637,
-                                    end: 650,
+                                    start: 603,
+                                    end: 616,
                                 },
                             },
                         ],
@@ -269,8 +269,8 @@ Module {
                         Identifier {
                             name: "other",
                             span: Span {
-                                start: 651,
-                                end: 656,
+                                start: 617,
+                                end: 622,
                             },
                         },
                     ],
@@ -279,8 +279,8 @@ Module {
                             name: "intersection:",
                             is_quoted: true,
                             span: Span {
-                                start: 660,
-                                end: 686,
+                                start: 626,
+                                end: 652,
                             },
                         },
                     ],
@@ -288,8 +288,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 637,
-                        end: 686,
+                        start: 603,
+                        end: 652,
                     },
                 },
                 MethodDefinition {
@@ -298,8 +298,8 @@ Module {
                             KeywordPart {
                                 keyword: "difference:",
                                 span: Span {
-                                    start: 689,
-                                    end: 700,
+                                    start: 655,
+                                    end: 666,
                                 },
                             },
                         ],
@@ -308,8 +308,8 @@ Module {
                         Identifier {
                             name: "other",
                             span: Span {
-                                start: 701,
-                                end: 706,
+                                start: 667,
+                                end: 672,
                             },
                         },
                     ],
@@ -318,8 +318,8 @@ Module {
                             name: "difference:",
                             is_quoted: true,
                             span: Span {
-                                start: 710,
-                                end: 734,
+                                start: 676,
+                                end: 700,
                             },
                         },
                     ],
@@ -327,8 +327,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 689,
-                        end: 734,
+                        start: 655,
+                        end: 700,
                     },
                 },
                 MethodDefinition {
@@ -337,8 +337,8 @@ Module {
                             KeywordPart {
                                 keyword: "isSubsetOf:",
                                 span: Span {
-                                    start: 754,
-                                    end: 765,
+                                    start: 720,
+                                    end: 731,
                                 },
                             },
                         ],
@@ -347,8 +347,8 @@ Module {
                         Identifier {
                             name: "other",
                             span: Span {
-                                start: 766,
-                                end: 771,
+                                start: 732,
+                                end: 737,
                             },
                         },
                     ],
@@ -357,8 +357,8 @@ Module {
                             name: "isSubsetOf:",
                             is_quoted: true,
                             span: Span {
-                                start: 775,
-                                end: 799,
+                                start: 741,
+                                end: 765,
                             },
                         },
                     ],
@@ -366,8 +366,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 754,
-                        end: 799,
+                        start: 720,
+                        end: 765,
                     },
                 },
                 MethodDefinition {
@@ -380,8 +380,8 @@ Module {
                             name: "asList",
                             is_quoted: true,
                             span: Span {
-                                start: 829,
-                                end: 848,
+                                start: 795,
+                                end: 814,
                             },
                         },
                     ],
@@ -389,8 +389,47 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 819,
-                        end: 848,
+                        start: 785,
+                        end: 814,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "fromList:",
+                                span: Span {
+                                    start: 817,
+                                    end: 826,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "list",
+                            span: Span {
+                                start: 827,
+                                end: 831,
+                            },
+                        },
+                    ],
+                    body: [
+                        Primitive {
+                            name: "fromList:",
+                            is_quoted: true,
+                            span: Span {
+                                start: 835,
+                                end: 857,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 817,
+                        end: 857,
                     },
                 },
                 MethodDefinition {
@@ -399,8 +438,8 @@ Module {
                             KeywordPart {
                                 keyword: "do:",
                                 span: Span {
-                                    start: 867,
-                                    end: 870,
+                                    start: 876,
+                                    end: 879,
                                 },
                             },
                         ],
@@ -409,8 +448,8 @@ Module {
                         Identifier {
                             name: "block",
                             span: Span {
-                                start: 871,
-                                end: 876,
+                                start: 880,
+                                end: 885,
                             },
                         },
                     ],
@@ -419,8 +458,8 @@ Module {
                             name: "do:",
                             is_quoted: true,
                             span: Span {
-                                start: 880,
-                                end: 896,
+                                start: 889,
+                                end: 905,
                             },
                         },
                     ],
@@ -428,8 +467,8 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 867,
-                        end: 896,
+                        start: 876,
+                        end: 905,
                     },
                 },
                 MethodDefinition {
@@ -443,8 +482,8 @@ Module {
                                 "a Set",
                             ),
                             Span {
-                                start: 928,
-                                end: 935,
+                                start: 937,
+                                end: 944,
                             },
                         ),
                     ],
@@ -452,61 +491,54 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     span: Span {
-                        start: 916,
-                        end: 935,
+                        start: 925,
+                        end: 944,
                     },
                 },
             ],
             class_methods: [],
+            class_variables: [],
             span: Span {
-                start: 273,
-                end: 935,
+                start: 221,
+                end: 944,
             },
         },
     ],
     expressions: [],
     span: Span {
-        start: 273,
-        end: 935,
+        start: 221,
+        end: 944,
     },
     leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {
-                start: 273,
-                end: 279,
+                start: 221,
+                end: 227,
             },
             kind: Line,
         },
         Comment {
             content: "// SPDX-License-Identifier: Apache-2.0",
             span: Span {
-                start: 273,
-                end: 279,
+                start: 221,
+                end: 227,
             },
             kind: Line,
         },
         Comment {
             content: "// Test Set class compilation as a value type (not gen_server).",
             span: Span {
-                start: 273,
-                end: 279,
+                start: 221,
+                end: 227,
             },
             kind: Line,
         },
         Comment {
-            content: "// Set is a sealed Object subclass with state (elements), backed by tagged maps.",
+            content: "// Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.",
             span: Span {
-                start: 273,
-                end: 279,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// new/0 should return a tagged map with empty elements.",
-            span: Span {
-                start: 273,
-                end: 279,
+                start: 221,
+                end: 227,
             },
             kind: Line,
         },
