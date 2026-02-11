@@ -602,6 +602,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         }
     }
@@ -735,6 +736,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         }
     }
@@ -943,6 +945,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
         let derived = ClassDefinition {
@@ -961,6 +964,7 @@ mod tests {
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
             span: test_span(),
         };
 

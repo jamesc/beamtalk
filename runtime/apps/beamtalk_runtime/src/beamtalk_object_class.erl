@@ -228,6 +228,10 @@ class_send(ClassPid, class_name, []) ->
     gen_server:call(ClassPid, class_name);
 class_send(ClassPid, module_name, []) ->
     gen_server:call(ClassPid, module_name);
+class_send(_ClassPid, class, []) ->
+    %% BT-412: Metaclass terminal — returns 'Metaclass' sentinel atom.
+    %% The metaclass tower terminates here (no infinite regression).
+    'Metaclass';
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}) of
@@ -706,10 +710,12 @@ handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods 
     {reply, Result, State};
 
 %% BT-411: User-defined class method dispatch.
+%% BT-412: Passes class variables to method and handles updates.
 %% Looks up selector in flattened_class_methods and calls the module function.
 handle_call({class_method_call, Selector, Args}, _From,
             #class_state{flattened_class_methods = FlatClassMethods,
-                         name = ClassName, module = Module} = State) ->
+                         name = ClassName, module = Module,
+                         class_variables = ClassVars} = State) ->
     case maps:find(Selector, FlatClassMethods) of
         {ok, {DefiningClass, _MethodInfo}} ->
             %% Resolve the module for the defining class (may differ for inherited methods)
@@ -725,8 +731,13 @@ handle_call({class_method_call, Selector, Args}, _From,
             ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
             %% Class method function name: class_<selector>
             FunName = class_method_fun_name(Selector),
-            try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
-                Result -> {reply, {ok, Result}, State}
+            %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
+            try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+                {class_var_result, Result, NewClassVars} ->
+                    NewState = State#class_state{class_variables = NewClassVars},
+                    {reply, {ok, Result}, NewState};
+                Result ->
+                    {reply, {ok, Result}, State}
             catch
                 Class:Error ->
                     logger:error("Class method ~p:~p failed: ~p:~p",
@@ -751,7 +762,20 @@ handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_met
 
 %% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
-    {reply, Module, State}.
+    {reply, Module, State};
+
+%% BT-412: Get a class variable value
+handle_call({get_class_var, Name}, _From,
+            #class_state{class_variables = ClassVars} = State) ->
+    Value = maps:get(Name, ClassVars, nil),
+    {reply, Value, State};
+
+%% BT-412: Set a class variable value
+handle_call({set_class_var, Name, Value}, _From,
+            #class_state{class_variables = ClassVars} = State) ->
+    NewClassVars = maps:put(Name, Value, ClassVars),
+    NewState = State#class_state{class_variables = NewClassVars},
+    {reply, Value, NewState}.
 
 handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
     %% Handle async message dispatch (Future protocol)

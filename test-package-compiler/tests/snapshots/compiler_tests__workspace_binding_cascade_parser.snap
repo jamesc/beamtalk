@@ -130,6 +130,7 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
             span: Span {
                 start: 130,
                 end: 205,

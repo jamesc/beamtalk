@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-412: Test fixture for class variables
+Actor subclass: ClassVarCounter
+  classVar: instanceCount = 0
+  state: count = 0
+
+  class create =>
+    self.instanceCount := self.instanceCount + 1
+    self spawn
+
+  class getCount =>
+    self.instanceCount
+
+  class createAndReport =>
+    self create
+    self getCount
+
+  increment =>
+    self.count := self.count + 1
+
+  getCount => self.count

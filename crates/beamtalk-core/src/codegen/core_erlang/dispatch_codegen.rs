@@ -165,6 +165,13 @@ impl CoreErlangGenerator {
             return Ok(result);
         }
 
+        // BT-412: Self-sends in class methods route through class_send
+        if let Some(result) =
+            self.try_handle_class_method_self_send(receiver, selector, arguments)?
+        {
+            return Ok(result);
+        }
+
         // BT-330: Self-sends in actor methods use direct synchronous dispatch
         if let Some(result) = self.try_handle_self_dispatch(receiver, selector, arguments)? {
             return Ok(result);
@@ -291,6 +298,85 @@ impl CoreErlangGenerator {
                     self.generate_self_dispatch(selector, arguments)?;
                     return Ok(Some(()));
                 }
+            }
+        }
+        Ok(None)
+    }
+
+    /// BT-412: Handles self-sends in class method context.
+    ///
+    /// When a class method sends a message to `self` (the class object),
+    /// we call the module function directly (not through `gen_server`) to avoid
+    /// deadlock since class methods execute inside a `gen_server:call` handler.
+    ///
+    /// For user-defined class methods, generates `class_<selector>(ClassSelf, ClassVars, ...)`.
+    /// For built-in exports (spawn, new, etc.), generates `module:selector(...)`.
+    fn try_handle_class_method_self_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<()>> {
+        if !self.in_class_method {
+            return Ok(None);
+        }
+        if let Expression::Identifier(id) = receiver {
+            if id.name == "self" {
+                let selector_atom = selector.to_erlang_atom();
+
+                // Check if this is a call to another class method
+                if self.class_method_selectors.contains(&selector_atom) {
+                    // Route to class_<selector>(ClassSelf, ClassVars, ...)
+                    // Extract ClassVarsN and result, leaving scope open for continuation.
+                    let call_result = self.fresh_temp_var("CMR");
+                    let cv = self.current_class_var();
+                    write!(
+                        self.output,
+                        "let {call_result} = call '{}':'class_{selector_atom}'(ClassSelf, {cv}",
+                        self.module_name
+                    )?;
+                    for arg in arguments {
+                        write!(self.output, ", ")?;
+                        self.generate_expression(arg)?;
+                    }
+                    let new_cv = self.next_class_var();
+                    let inner_cv = self.fresh_temp_var("CV");
+                    let inner_res = self.fresh_temp_var("MR");
+                    let plain_cv = self.fresh_temp_var("PCV");
+                    let result = self.fresh_temp_var("Unwrapped");
+                    let wrapped_res = self.fresh_temp_var("WR");
+                    let plain_res = self.fresh_temp_var("PR");
+                    // Bind new ClassVars and unwrapped result, leave scope open
+                    write!(
+                        self.output,
+                        ") in \
+                         let {new_cv} = case {call_result} of \
+                         <{{'class_var_result', {inner_res}, {inner_cv}}}> when 'true' -> {inner_cv} \
+                         <{plain_cv}> when 'true' -> {cv} \
+                         end in \
+                         let {result} = case {call_result} of \
+                         <{{'class_var_result', {wrapped_res}, _}}> when 'true' -> {wrapped_res} \
+                         <{plain_res}> when 'true' -> {plain_res} \
+                         end in "
+                    )?;
+                    // NOTE: scope is OPEN — caller provides continuation
+                    self.last_open_scope_result = Some(result);
+                } else {
+                    // Built-in export (spawn, new, superclass, etc.)
+                    write!(
+                        self.output,
+                        "call '{}':'{selector_atom}'(",
+                        self.module_name
+                    )?;
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if i > 0 {
+                            write!(self.output, ", ")?;
+                        }
+                        self.generate_expression(arg)?;
+                    }
+                    write!(self.output, ")")?;
+                }
+                return Ok(Some(()));
             }
         }
         Ok(None)
@@ -490,6 +576,46 @@ impl CoreErlangGenerator {
             if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     return recv_id.name == "self";
+                }
+            }
+        }
+        false
+    }
+
+    /// Checks if an expression is a class variable assignment (`self.classVar := value`).
+    pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
+        if !self.in_class_method {
+            return false;
+        }
+        if let Expression::Assignment { target, .. } = expr {
+            if let Expression::FieldAccess {
+                receiver, field, ..
+            } = target.as_ref()
+            {
+                if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                    return recv_id.name == "self"
+                        && self.class_var_names.contains(field.name.as_str());
+                }
+            }
+        }
+        false
+    }
+
+    /// Checks if an expression is a self-send to a class method (BT-412).
+    /// These need special scoping in class method bodies because they may
+    /// update `ClassVars` via `let ClassVarsN = ... in` which must not be wrapped.
+    pub(super) fn is_class_method_self_send(&self, expr: &Expression) -> bool {
+        if !self.in_class_method || self.class_method_selectors.is_empty() {
+            return false;
+        }
+        if let Expression::MessageSend {
+            receiver, selector, ..
+        } = expr
+        {
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                if id.name == "self" {
+                    let sel_atom = selector.to_erlang_atom();
+                    return self.class_method_selectors.contains(&sel_atom);
                 }
             }
         }

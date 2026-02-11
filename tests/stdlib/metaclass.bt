@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-412: Virtual metaclass tests
+// Tests that `class` returns first-class class objects
+
+// Primitive class returns class object that displays as class name
+42 class
+// => Integer
+
+3.14 class
+// => Float
+
+'hello' class
+// => String
+
+true class
+// => True
+
+false class
+// => False
+
+nil class
+// => UndefinedObject
+
+#symbol class
+// => Symbol
+
+// Metaclass terminal: class of a class returns 'Metaclass' sentinel
+42 class class
+// => Metaclass
+
+'hello' class class
+// => Metaclass
+
+true class class
+// => Metaclass
+
+// Metaclass tower terminates
+42 class class class
+// => Metaclass

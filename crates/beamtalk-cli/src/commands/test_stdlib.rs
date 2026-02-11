@@ -315,6 +315,9 @@ fn generate_eunit_wrapper(
          \x20   S = pid_to_list(V),\n\
          \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
          \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
+         format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
+         \x20   %% BT-412: Class objects display as their class name\n\
+         \x20   beamtalk_primitive:print_string(V);\n\
          format_result(V) when is_map(V) ->\n\
          \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
          \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\

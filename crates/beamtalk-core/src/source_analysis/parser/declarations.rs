@@ -79,10 +79,10 @@ impl Parser {
         // Parse class name
         let name = self.parse_identifier("Expected class name");
 
-        // Parse class body (state declarations, instance methods, and class methods)
-        let (state, methods, class_methods) = self.parse_class_body();
+        // Parse class body (state declarations, instance methods, class methods, class variables)
+        let (state, methods, class_methods, class_variables) = self.parse_class_body();
 
-        // Determine end span: max of last instance method, class method, state, or name
+        // Determine end span: max of last instance method, class method, state, class var, or name
         let mut end = name.span;
         if let Some(s) = state.last() {
             end = end.merge(s.span);
@@ -92,6 +92,9 @@ impl Parser {
         }
         if let Some(cm) = class_methods.last() {
             end = end.merge(cm.span);
+        }
+        if let Some(cv) = class_variables.last() {
+            end = end.merge(cv.span);
         }
         let span = start.merge(end);
 
@@ -105,6 +108,7 @@ impl Parser {
             span,
         );
         class_def.class_methods = class_methods;
+        class_def.class_variables = class_variables;
         class_def
     }
 
@@ -132,10 +136,12 @@ impl Parser {
         Vec<StateDeclaration>,
         Vec<MethodDefinition>,
         Vec<MethodDefinition>,
+        Vec<StateDeclaration>,
     ) {
         let mut state = Vec::new();
         let mut methods = Vec::new();
         let mut class_methods = Vec::new();
+        let mut class_variables = Vec::new();
 
         // Skip any periods/statement terminators
         while self.match_token(&TokenKind::Period) {}
@@ -145,6 +151,12 @@ impl Parser {
             if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
                 if let Some(state_decl) = self.parse_state_declaration() {
                     state.push(state_decl);
+                }
+            }
+            // Check for class variable declaration: `classVar: varName ...`
+            else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classVar:") {
+                if let Some(classvar_decl) = self.parse_classvar_declaration() {
+                    class_variables.push(classvar_decl);
                 }
             }
             // Check for method definition (with optional modifiers including `class`)
@@ -191,7 +203,7 @@ impl Parser {
             while self.match_token(&TokenKind::Period) {}
         }
 
-        (state, methods, class_methods)
+        (state, methods, class_methods, class_variables)
     }
 
     /// Checks if the current position is at the start of a method definition.
@@ -324,6 +336,70 @@ impl Parser {
         let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
         {
             self.advance(); // consume `=`
+            Some(self.parse_expression())
+        } else {
+            None
+        };
+
+        let end = default_value
+            .as_ref()
+            .map(Expression::span)
+            .or(type_annotation.as_ref().map(TypeAnnotation::span))
+            .unwrap_or(name.span);
+        let span = start.merge(end);
+
+        Some(StateDeclaration {
+            name,
+            type_annotation,
+            default_value,
+            span,
+        })
+    }
+
+    /// Parses a class variable declaration (BT-412).
+    ///
+    /// Syntax is identical to state declarations but uses `classVar:` keyword:
+    /// - `classVar: varName`
+    /// - `classVar: varName = defaultValue`
+    /// - `classVar: varName: TypeName`
+    /// - `classVar: varName: TypeName = defaultValue`
+    fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
+        let start = self.current_token().span();
+
+        // Consume `classVar:`
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classVar:") {
+            return None;
+        }
+        self.advance();
+
+        let (name, type_annotation) = match self.current_kind() {
+            TokenKind::Keyword(keyword) => {
+                let field_name = keyword.trim_end_matches(':');
+                let span = self.current_token().span();
+                let name_ident = Identifier::new(field_name, span);
+                self.advance();
+                let type_ann = self.parse_type_annotation();
+                (name_ident, Some(type_ann))
+            }
+            TokenKind::Identifier(_) => {
+                let name_ident = self.parse_identifier("Expected variable name after 'classVar:'");
+                let type_ann = if self.match_token(&TokenKind::Colon) {
+                    Some(self.parse_type_annotation())
+                } else {
+                    None
+                };
+                (name_ident, type_ann)
+            }
+            _ => {
+                self.error("Expected variable name after 'classVar:'");
+                let span = self.current_token().span();
+                (Identifier::new("Error", span), None)
+            }
+        };
+
+        let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
+        {
+            self.advance();
             Some(self.parse_expression())
         } else {
             None

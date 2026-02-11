@@ -72,6 +72,7 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
             span: Span {
                 start: 179,
                 end: 224,
