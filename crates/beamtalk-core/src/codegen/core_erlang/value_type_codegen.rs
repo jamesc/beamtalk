@@ -741,12 +741,19 @@ impl CoreErlangGenerator {
         )?;
         self.indent -= 1;
 
-        // --- respondsTo: check against actual class ---
+        // --- respondsTo: validate [Selector] arg, check against actual class ---
         self.write_indent()?;
         writeln!(self.output, "<'respondsTo:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let <RtSel4> = call 'erlang':'hd'(Args) in")?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<[RtSel4|_]> when call 'erlang':'is_atom'(RtSel4) ->"
+        )?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -757,6 +764,15 @@ impl CoreErlangGenerator {
             self.output,
             "{{'reply', call 'beamtalk_dispatch':'responds_to'(RtSel4, RtClass4), State}}"
         )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<_RtBadArgs> when 'true' -> {{'reply', 'false', State}}"
+        )?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
         self.indent -= 1;
 
         // --- instVarNames: return actual field names from State ---
@@ -770,30 +786,49 @@ impl CoreErlangGenerator {
         )?;
         self.indent -= 1;
 
-        // --- instVarAt: read field value from State ---
+        // --- instVarAt: validate [Name] arg, read field value from State ---
         self.write_indent()?;
         writeln!(self.output, "<'instVarAt:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let <IvaName4> = call 'erlang':'hd'(Args) in")?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[IvaName4|_]> when 'true' ->")?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
             "{{'reply', call 'beamtalk_reflection':'read_field'(IvaName4, State), State}}"
         )?;
         self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_IvaBadArgs> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_arity_error("'instVarAt:'", 1)?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
 
-        // --- instVarAt:put: write field value, return new State ---
+        // --- instVarAt:put: validate [Name, Value] args, write field value ---
         self.write_indent()?;
         writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let <IvapName4> = call 'erlang':'hd'(Args) in")?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
         self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <IvapVal4> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
-        )?;
+        writeln!(self.output, "<[IvapName4|IvapRest4]> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case IvapRest4 of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "<[IvapVal4|_]> when 'true' ->")?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -811,6 +846,26 @@ impl CoreErlangGenerator {
         )?;
         self.write_indent()?;
         writeln!(self.output, "{{'reply', IvapResult4, IvapNewState4}}")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_IvapBad2> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_arity_error("'instVarAt:put:'", 2)?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_IvapBad1> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_arity_error("'instVarAt:put:'", 2)?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
         self.indent -= 1;
 
         // --- printString: use class name from State ---
@@ -843,12 +898,19 @@ impl CoreErlangGenerator {
         )?;
         self.indent -= 1;
 
-        // --- perform: dynamic dispatch with State ---
+        // --- perform: validate [Selector] arg with is_atom guard ---
         self.write_indent()?;
         writeln!(self.output, "<'perform:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let <PerfSel4> = call 'erlang':'hd'(Args) in")?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<[PerfSel4|_]> when call 'erlang':'is_atom'(PerfSel4) ->"
+        )?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -874,18 +936,39 @@ impl CoreErlangGenerator {
         self.write_indent()?;
         writeln!(self.output, "end")?;
         self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_PerfBadArgs> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_type_error("'perform:'", "selector must be an atom")?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
 
-        // --- perform:withArguments: dynamic dispatch with State ---
+        // --- perform:withArguments: validate [Selector, ArgList] with type guards ---
         self.write_indent()?;
         writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
         self.indent += 1;
         self.write_indent()?;
-        writeln!(self.output, "let <PwaSel4> = call 'erlang':'hd'(Args) in")?;
+        writeln!(self.output, "case Args of")?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
-            "let <PwaArgs4> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
+            "<[PwaSel4|PwaRest4]> when call 'erlang':'is_atom'(PwaSel4) ->"
         )?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(self.output, "case PwaRest4 of")?;
+        self.indent += 1;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "<[PwaArgs4|_]> when call 'erlang':'is_list'(PwaArgs4) ->"
+        )?;
+        self.indent += 1;
         self.write_indent()?;
         writeln!(
             self.output,
@@ -906,6 +989,26 @@ impl CoreErlangGenerator {
         )?;
         self.write_indent()?;
         writeln!(self.output, "<PwaOther4> when 'true' -> PwaOther4")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_PwaBadArgList> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_type_error("'perform:withArguments:'", "arguments must be a list")?;
+        self.indent -= 1;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "end")?;
+        self.indent -= 1;
+        self.write_indent()?;
+        writeln!(self.output, "<_PwaBadSel> when 'true' ->")?;
+        self.indent += 1;
+        self.write_indent()?;
+        self.generate_type_error("'perform:withArguments:'", "selector must be an atom")?;
+        self.indent -= 1;
         self.indent -= 1;
         self.write_indent()?;
         writeln!(self.output, "end")?;
@@ -944,6 +1047,54 @@ impl CoreErlangGenerator {
             "catch <_D4Type, D4Error, _D4Stack> -> {{'error', D4Error, State}}"
         )?;
 
+        Ok(())
+    }
+
+    /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
+    fn generate_arity_error(&mut self, selector: &str, expected_arity: u32) -> Result<()> {
+        let hint = Self::core_erlang_binary(&format!(
+            "Expected {expected_arity} argument(s) for {selector}"
+        ));
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'error', ArErr2, State}}")?;
+        Ok(())
+    }
+
+    /// Generates a structured `type_error` for dispatch/4 argument validation.
+    fn generate_type_error(&mut self, selector: &str, hint_msg: &str) -> Result<()> {
+        let hint = Self::core_erlang_binary(hint_msg);
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(
+            self.output,
+            "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in"
+        )?;
+        self.write_indent()?;
+        writeln!(self.output, "{{'error', TyErr2, State}}")?;
         Ok(())
     }
 

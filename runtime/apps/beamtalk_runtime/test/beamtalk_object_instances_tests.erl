@@ -23,7 +23,10 @@ setup() ->
 
 cleanup(_Pid) ->
     %% Don't stop the server — it may be supervised by the application.
-    %% Tests are responsible for cleaning up their own registrations.
+    %% Clear all registrations to prevent leaking between tests.
+    try ets:delete_all_objects(beamtalk_instance_registry)
+    catch _:_ -> ok
+    end,
     ok.
 
 %%====================================================================

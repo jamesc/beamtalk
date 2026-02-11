@@ -76,7 +76,7 @@ bootstrap_starts_pg_test_() ->
 %% Stdlib Class Registration Tests (BT-446)
 %%
 %% These tests verify that compiled stdlib modules correctly register
-%% the three foundational classes. They call beamtalk_stdlib:do_init/0
+%% the three foundational classes. They call beamtalk_stdlib:init/0
 %% after bootstrap to simulate the full startup sequence.
 %%====================================================================
 
