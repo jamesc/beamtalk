@@ -342,10 +342,16 @@ fn handle_compile(
         // the source of truth). :load is for loading class definitions; fall
         // back to file stem only for legacy non-class files.
         let classes = extract_class_names(&module);
-        let module_name = if let Some(first_class) = module.classes.first() {
+        // ADR 0016: Apply bt@stdlib@ or bt@ prefix to module names
+        let base_name = if let Some(first_class) = module.classes.first() {
             beamtalk_core::erlang::to_module_name(&first_class.name.name)
         } else {
             file_path.file_stem().unwrap_or("module").to_string()
+        };
+        let module_name = if params.stdlib_mode {
+            format!("bt@stdlib@{base_name}")
+        } else {
+            format!("bt@{base_name}")
         };
 
         // BT-374 / ADR 0010: :load compiles modules for workspace context,
@@ -1014,7 +1020,7 @@ mod tests {
         assert!(response.error.is_none());
         let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert!(result.success);
-        assert_eq!(result.module_name, Some("counter".to_string()));
+        assert_eq!(result.module_name, Some("bt@counter".to_string()));
     }
 
     #[test]
@@ -1030,7 +1036,7 @@ mod tests {
         assert!(response.error.is_none());
         let result: CompileResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert!(result.success);
-        assert_eq!(result.module_name, Some("test".to_string()));
+        assert_eq!(result.module_name, Some("bt@test".to_string()));
     }
 
     #[test]

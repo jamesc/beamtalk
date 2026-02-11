@@ -318,15 +318,13 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Returns true if the class is a primitive type (native Erlang value).
+    /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
-    /// Primitive types need `dispatch/3` and `has_method/1` for runtime
-    /// dispatch via `beamtalk_primitive:send/3`.
-    ///
-    /// NOTE: Must stay in sync with `build_stdlib::is_primitive_type()`.
-    fn is_primitive_type(class_name: &str) -> bool {
+    /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
+    fn is_known_stdlib_type(class_name: &str) -> bool {
         matches!(
             class_name,
+            // Primitive types (native Erlang values)
             "Integer"
                 | "Float"
                 | "String"
@@ -339,17 +337,9 @@ impl CoreErlangGenerator {
                 | "List"
                 | "Dictionary"
                 | "Set"
-        )
-    }
-
-    /// Returns `true` for known non-primitive stdlib classes that compile to
-    /// `bt_stdlib_{snake}` modules.
-    ///
-    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
-    fn is_stdlib_nonprimitive_type(class_name: &str) -> bool {
-        matches!(
-            class_name,
-            "Object"
+                // Non-primitive stdlib types
+                | "ProtoObject"
+                | "Object"
                 | "Number"
                 | "Actor"
                 | "File"
@@ -361,31 +351,31 @@ impl CoreErlangGenerator {
         )
     }
 
+    /// Computes the compiled module name for a class (ADR 0016).
+    ///
+    /// - Stdlib classes → `bt@stdlib@{snake_case}`
+    /// - User-defined classes → `bt@{snake_case}`
+    pub fn compiled_module_name(class_name: &str) -> String {
+        let snake = super::util::to_module_name(class_name);
+        if Self::is_known_stdlib_type(class_name) {
+            format!("bt@stdlib@{snake}")
+        } else {
+            format!("bt@{snake}")
+        }
+    }
+
     /// Computes the module name for a superclass in the dispatch chain.
     ///
     /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For stdlib classes, applies the naming convention from
-    /// `build_stdlib::module_name_from_path`:
-    /// - Primitive types → `beamtalk_{snake_case}`
-    /// - Non-primitive stdlib types → `bt_stdlib_{snake_case}`
+    /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
+    /// all stdlib types → `bt@stdlib@{snake_case}`.
     ///
-    /// For user-defined classes, falls back to `to_module_name(superclass)`
-    /// so that dispatch delegates to the actual compiled module.
-    ///
-    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
+    /// For user-defined classes, uses `bt@{snake_case}` prefix.
     fn superclass_module_name(superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
         }
-        let snake = super::util::to_module_name(superclass);
-        if Self::is_primitive_type(superclass) {
-            Some(format!("beamtalk_{snake}"))
-        } else if Self::is_stdlib_nonprimitive_type(superclass) {
-            Some(format!("bt_stdlib_{snake}"))
-        } else {
-            // User-defined superclass: use plain module name without prefix
-            Some(snake)
-        }
+        Some(Self::compiled_module_name(superclass))
     }
 
     /// Encode a string as a Core Erlang binary literal.

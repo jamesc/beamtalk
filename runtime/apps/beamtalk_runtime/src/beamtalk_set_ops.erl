@@ -5,7 +5,7 @@
 %%
 %% BT-73: Complex Set operations that cannot be inlined as direct BIF
 %% calls in generated Core Erlang. Called from compiled stdlib module
-%% beamtalk_set.
+%% bt@stdlib@set.
 %%
 %% Sets are represented as tagged maps:
 %%   #{'$beamtalk_class' => 'Set', elements => OrdsetData}

@@ -17,24 +17,25 @@ cd "$REPO_ROOT"
 cargo build --bin beamtalk --quiet 2>/dev/null || cargo build --bin beamtalk --quiet
 
 # Clean old artifacts to ensure fresh compilation
-rm -f tests/e2e/fixtures/build/counter.beam tests/e2e/fixtures/build/counter.core
-rm -f "$FIXTURES_DIR/build/logging_counter.beam" "$FIXTURES_DIR/build/logging_counter.core"
+rm -f tests/e2e/fixtures/build/bt@counter.beam tests/e2e/fixtures/build/bt@counter.core
+rm -f "$FIXTURES_DIR/build/bt@logging_counter.beam" "$FIXTURES_DIR/build/bt@logging_counter.core"
 
 # Build counter fixture (using E2E fixture - BT-239)
+# ADR 0016: User code modules use bt@ prefix
 if ! ./target/debug/beamtalk build tests/e2e/fixtures/counter.bt >/dev/null; then
     echo "✗ Failed to compile counter.bt"
     exit 1
 fi
 
 # Verify build succeeded
-if [ ! -f tests/e2e/fixtures/build/counter.beam ]; then
+if [ ! -f tests/e2e/fixtures/build/bt@counter.beam ]; then
     echo "✗ Failed to compile counter.bt (no .beam output)"
     exit 1
 fi
 
 # Copy to rebar3 build directories (for test execution)
 for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-    [ -d "$build_dir" ] && cp tests/e2e/fixtures/build/counter.beam "$build_dir/"
+    [ -d "$build_dir" ] && cp tests/e2e/fixtures/build/bt@counter.beam "$build_dir/"
 done
 
 # Build logging_counter fixture (BT-108 - super keyword tests)
@@ -44,12 +45,12 @@ if ! ./target/debug/beamtalk build "$FIXTURES_DIR/logging_counter.bt" >/dev/null
 fi
 
 # Verify build succeeded
-if [ ! -f "$FIXTURES_DIR/build/logging_counter.beam" ]; then
+if [ ! -f "$FIXTURES_DIR/build/bt@logging_counter.beam" ]; then
     echo "✗ Failed to compile logging_counter.bt (no .beam output)"
     exit 1
 fi
 
 # Copy to rebar3 build directories
 for build_dir in runtime/_build/*/lib/beamtalk_runtime/test; do
-    [ -d "$build_dir" ] && cp "$FIXTURES_DIR/build/logging_counter.beam" "$build_dir/"
+    [ -d "$build_dir" ] && cp "$FIXTURES_DIR/build/bt@logging_counter.beam" "$build_dir/"
 done

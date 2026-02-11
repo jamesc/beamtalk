@@ -159,15 +159,12 @@ impl PrimitiveBindingTable {
 
     /// Returns the runtime module name for a class's selector-based primitives.
     ///
-    /// Convention: class name → `snake_case` with `beamtalk_` prefix.
+    /// ADR 0016: All stdlib classes use `bt@stdlib@{snake_case}` prefix.
     /// Uses `to_module_name()` for proper `CamelCase` → `snake_case` conversion,
-    /// which handles multi-word names like `TranscriptStream` → `beamtalk_transcript_stream`.
-    ///
-    /// BT-340: True/False now have their own compiled modules (`beamtalk_true`,
-    /// `beamtalk_false`) instead of sharing `beamtalk_boolean`.
+    /// which handles multi-word names like `TranscriptStream` → `bt@stdlib@transcript_stream`.
     #[must_use]
     pub fn runtime_module_for_class(class_name: &str) -> String {
-        format!("beamtalk_{}", super::to_module_name(class_name))
+        format!("bt@stdlib@{}", super::to_module_name(class_name))
     }
 }
 
@@ -426,40 +423,40 @@ mod tests {
 
     #[test]
     fn test_runtime_module_for_class() {
+        // ADR 0016: All stdlib classes use bt@stdlib@ prefix
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("Integer"),
-            "beamtalk_integer"
+            "bt@stdlib@integer"
         );
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("String"),
-            "beamtalk_string"
+            "bt@stdlib@string"
         );
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("Block"),
-            "beamtalk_block"
+            "bt@stdlib@block"
         );
-        // True/False now have separate modules (BT-340)
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("True"),
-            "beamtalk_true"
+            "bt@stdlib@true"
         );
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("False"),
-            "beamtalk_false"
+            "bt@stdlib@false"
         );
         // Multi-word class names use snake_case
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("SequenceableCollection"),
-            "beamtalk_sequenceable_collection"
+            "bt@stdlib@sequenceable_collection"
         );
         // BT-375: Actor-based singletons
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("TranscriptStream"),
-            "beamtalk_transcript_stream"
+            "bt@stdlib@transcript_stream"
         );
         assert_eq!(
             PrimitiveBindingTable::runtime_module_for_class("SystemDictionary"),
-            "beamtalk_system_dictionary"
+            "bt@stdlib@system_dictionary"
         );
     }
 

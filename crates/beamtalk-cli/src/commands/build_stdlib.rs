@@ -163,12 +163,9 @@ fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
 /// Extract the module name from a `.bt` file path.
 ///
-/// For **primitive types** (Integer, Float, String, True, False, `UndefinedObject`, Block),
-/// uses `beamtalk_*` prefix to replace hand-written Erlang dispatch modules
-/// with the compiled stdlib (BT-340).
-///
-/// For other types, uses `bt_stdlib_*` prefix to avoid shadowing Erlang
-/// built-in modules on case-insensitive filesystems (BT-333).
+/// ADR 0016: All stdlib classes use `bt@stdlib@{snake_case}` prefix.
+/// The `@` separator is legal in unquoted Erlang atoms and follows
+/// the Gleam convention (`gleam@list`, `gleam@string`).
 fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     let stem = path
         .file_stem()
@@ -184,37 +181,8 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
 
     let snake = beamtalk_core::codegen::core_erlang::to_module_name(stem);
 
-    // BT-340: Primitive types use beamtalk_* prefix so the compiled stdlib
-    // module directly replaces the hand-written Erlang dispatch module.
-    if is_primitive_type(stem) {
-        Ok(format!("beamtalk_{snake}"))
-    } else {
-        Ok(format!("bt_stdlib_{snake}"))
-    }
-}
-
-/// Returns true if the class name identifies a primitive type.
-///
-/// Primitive types are backed by native Erlang values and need `dispatch/3`
-/// for runtime dispatch via `beamtalk_primitive:send/3`.
-///
-/// NOTE: Must stay in sync with `value_type_codegen::is_primitive_type()`.
-fn is_primitive_type(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "Integer"
-            | "Float"
-            | "String"
-            | "True"
-            | "False"
-            | "UndefinedObject"
-            | "Block"
-            | "Symbol"
-            | "Tuple"
-            | "List"
-            | "Dictionary"
-            | "Set"
-    )
+    // ADR 0016: All stdlib modules use bt@stdlib@ prefix
+    Ok(format!("bt@stdlib@{snake}"))
 }
 
 /// Compile a single stdlib `.bt` file to Core Erlang.
@@ -402,8 +370,9 @@ mod tests {
 
     #[test]
     fn test_module_name_from_path() {
+        // ADR 0016: All stdlib modules use bt@stdlib@ prefix
         let path = Utf8PathBuf::from("lib/Integer.bt");
-        assert_eq!(module_name_from_path(&path).unwrap(), "beamtalk_integer");
+        assert_eq!(module_name_from_path(&path).unwrap(), "bt@stdlib@integer");
     }
 
     #[test]
@@ -411,7 +380,7 @@ mod tests {
         let path = Utf8PathBuf::from("lib/SystemDictionary.bt");
         assert_eq!(
             module_name_from_path(&path).unwrap(),
-            "bt_stdlib_system_dictionary"
+            "bt@stdlib@system_dictionary"
         );
     }
 
@@ -420,7 +389,7 @@ mod tests {
         let path = Utf8PathBuf::from("lib/ProtoObject.bt");
         assert_eq!(
             module_name_from_path(&path).unwrap(),
-            "bt_stdlib_proto_object"
+            "bt@stdlib@proto_object"
         );
     }
 
@@ -463,8 +432,9 @@ mod tests {
 
         let content = fs::read_to_string(app_file).unwrap();
         assert!(content.contains("beamtalk_stdlib"));
-        assert!(content.contains("'beamtalk_integer'"));
-        assert!(content.contains("'beamtalk_string'"));
+        // ADR 0016: Module names use bt@stdlib@ prefix
+        assert!(content.contains("'bt@stdlib@integer'"));
+        assert!(content.contains("'bt@stdlib@string'"));
     }
 
     #[test]

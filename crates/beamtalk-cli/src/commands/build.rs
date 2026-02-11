@@ -47,24 +47,23 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions) -> Result<()>
     // Compile each file to Core Erlang
     let mut core_files = Vec::new();
     for file in &source_files {
-        let module_name = file
+        let stem = file
             .file_stem()
             .ok_or_else(|| miette::miette!("File '{}' has no name", file))?;
 
         // Validate module name contains only safe characters
-        if !module_name
-            .chars()
-            .all(|c| c == '_' || c.is_ascii_alphanumeric())
-        {
+        if !stem.chars().all(|c| c == '_' || c.is_ascii_alphanumeric()) {
             miette::bail!(
                 "Invalid module name '{}': must contain only alphanumeric characters and underscores",
-                module_name
+                stem
             );
         }
 
+        // ADR 0016: User code modules use bt@ prefix
+        let module_name = format!("bt@{stem}");
         let core_file = build_dir.join(format!("{module_name}.core"));
 
-        compile_file(file, module_name, &core_file, options)?;
+        compile_file(file, &module_name, &core_file, options)?;
         core_files.push(core_file);
     }
 

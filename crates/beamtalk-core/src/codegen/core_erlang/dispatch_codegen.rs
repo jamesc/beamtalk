@@ -34,7 +34,7 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, util::to_module_name};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
 use std::fmt::Write;
 
@@ -695,7 +695,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         init_args: Option<&Expression>,
     ) -> Result<()> {
-        let module_name = to_module_name(class_name);
+        let module_name = Self::compiled_module_name(class_name);
 
         // Check if we're in REPL context by looking for __bindings__ in scope
         let in_repl_context = self.lookup_var("__bindings__").is_some();
