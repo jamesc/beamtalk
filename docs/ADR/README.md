@@ -43,6 +43,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Accepted | 2026-02-09 |
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Proposed | 2026-02-10 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Proposed | 2026-02-10 |
+| [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Proposed | 2026-02-11 |
 
 ## Creating New ADRs
 
