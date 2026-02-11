@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TypeError - Errors for type mismatches
+//
+// Subclass of Error for type-related errors:
+// type_error (wrong argument type)
+
+Error subclass: TypeError
+  describe => 'a TypeError'

@@ -4,15 +4,16 @@
 %%% @doc Exception handling runtime support for Beamtalk.
 %%%
 %%% Provides exception wrapping, class matching, and Exception object field
-%%% access. Wraps `#beamtalk_error{}' records as Exception value type objects
-%%% (tagged maps). Called by compiler-generated try/catch code.
+%%% access. Wraps `#beamtalk_error{}' records as exception hierarchy value
+%%% type objects (tagged maps). Called by compiler-generated try/catch code.
 %%%
 %%% **DDD Context:** Runtime — Error Handling
 %%%
-%%% Exception objects are value types (tagged maps), not actors:
+%%% Exception objects are value types (tagged maps), not actors.
+%%% The `$beamtalk_class' is set based on error kind (BT-452):
 %%% ```
 %%% #{
-%%%   '$beamtalk_class' => 'Exception',
+%%%   '$beamtalk_class' => 'RuntimeError',  %% or TypeError, InstantiationError, Error
 %%%   error => #beamtalk_error{kind, class, selector, message, hint, details}
 %%% }
 %%% ```
@@ -31,8 +32,50 @@
     dispatch/3,
     has_method/1,
     signal/1,
-    signal_message/1
+    signal_message/1,
+    kind_to_class/1,
+    is_exception_class/1
 ]).
+
+%% @doc Map an error kind atom to the appropriate exception class name.
+%%
+%% Used by wrap/1 to set `$beamtalk_class` based on the error's kind field.
+%% Falls back to 'Error' for unknown kinds (safe bootstrap default).
+%%
+%% NOTE: When adding new error subclasses (e.g., IOError), update BOTH
+%% this function AND is_exception_class/1 below.
+-spec kind_to_class(atom()) -> atom().
+kind_to_class(does_not_understand) -> 'RuntimeError';
+kind_to_class(arity_mismatch) -> 'RuntimeError';
+kind_to_class(immutable_value) -> 'RuntimeError';
+kind_to_class(runtime_error) -> 'RuntimeError';
+kind_to_class(index_out_of_bounds) -> 'RuntimeError';
+kind_to_class(class_not_found) -> 'RuntimeError';
+kind_to_class(no_superclass) -> 'RuntimeError';
+kind_to_class(class_already_exists) -> 'RuntimeError';
+kind_to_class(dispatch_error) -> 'RuntimeError';
+kind_to_class(callback_failed) -> 'RuntimeError';
+kind_to_class(actor_dead) -> 'RuntimeError';
+kind_to_class(future_not_awaited) -> 'RuntimeError';
+kind_to_class(internal_error) -> 'RuntimeError';
+kind_to_class(type_error) -> 'TypeError';
+kind_to_class(instantiation_error) -> 'InstantiationError';
+%% signal (from signal_message/1) stays Error — user decides semantics.
+%% file_*/io_error/invalid_path/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
+kind_to_class(signal) -> 'Error';
+kind_to_class(_) -> 'Error'.
+
+%% @doc Check if a class name belongs to the exception hierarchy.
+%%
+%% Used by dispatch routing to identify exception objects regardless of
+%% their specific subclass (RuntimeError, TypeError, etc.).
+-spec is_exception_class(atom()) -> boolean().
+is_exception_class('Exception') -> true;
+is_exception_class('Error') -> true;
+is_exception_class('RuntimeError') -> true;
+is_exception_class('TypeError') -> true;
+is_exception_class('InstantiationError') -> true;
+is_exception_class(_) -> false.
 
 %% @doc Check if an error matches the requested exception class.
 %%
@@ -48,7 +91,7 @@
 -spec matches_class(term(), term()) -> boolean().
 matches_class(nil, _Error) ->
     true;
-matches_class(Filter, #{'$beamtalk_class' := 'Exception', error := Error}) ->
+matches_class(Filter, #{'$beamtalk_class' := _, error := Error}) ->
     matches_class(Filter, Error);
 matches_class({beamtalk_object, ClassName, _, _}, Error) ->
     matches_class_name(ClassName, Error);
@@ -58,22 +101,46 @@ matches_class(_Other, _Error) ->
     %% Unknown filter type — catch all for safety
     true.
 
-%% @private Match by class name atom.
+%% @private Match by class name atom with hierarchy-aware matching (BT-452).
+%%
+%% Exception hierarchy:
+%%   Exception (catches all)
+%%   └── Error (catches all Error subclasses)
+%%       ├── RuntimeError (e.g. does_not_understand, arity_mismatch, immutable_value, ...)
+%%       ├── TypeError (type_error)
+%%       └── InstantiationError (instantiation_error)
 -spec matches_class_name(atom(), #beamtalk_error{}) -> boolean().
 matches_class_name('Exception class', _Error) -> true;
 matches_class_name('Exception', _Error) -> true;
 matches_class_name('Error class', _Error) -> true;
 matches_class_name('Error', _Error) -> true;
+matches_class_name('RuntimeError class', Error) ->
+    matches_class_name('RuntimeError', Error);
+matches_class_name('RuntimeError', #beamtalk_error{kind = Kind}) ->
+    kind_to_class(Kind) =:= 'RuntimeError';
+matches_class_name('TypeError class', Error) ->
+    matches_class_name('TypeError', Error);
+matches_class_name('TypeError', #beamtalk_error{kind = Kind}) ->
+    kind_to_class(Kind) =:= 'TypeError';
+matches_class_name('InstantiationError class', Error) ->
+    matches_class_name('InstantiationError', Error);
+matches_class_name('InstantiationError', #beamtalk_error{kind = Kind}) ->
+    kind_to_class(Kind) =:= 'InstantiationError';
 matches_class_name(ClassName, #beamtalk_error{kind = Kind}) ->
+    %% Fall back to direct kind match for backward compatibility
     Kind =:= ClassName;
 matches_class_name(_ClassName, _RawError) ->
-    %% Raw Erlang errors don't have a kind field — can't match custom classes
+    %% Unknown class name — doesn't match
     false.
 
 %% @doc Wrap a `#beamtalk_error{}` record as an Exception tagged map.
+%%
+%% Sets `$beamtalk_class` based on the error kind (BT-452):
+%% does_not_understand → RuntimeError, type_error → TypeError, etc.
 -spec wrap(#beamtalk_error{} | term()) -> map().
-wrap(#beamtalk_error{} = Error) ->
-    #{'$beamtalk_class' => 'Exception', error => Error};
+wrap(#beamtalk_error{kind = Kind} = Error) ->
+    Class = kind_to_class(Kind),
+    #{'$beamtalk_class' => Class, error => Error};
 wrap(Other) ->
     GenError = #beamtalk_error{
         kind = runtime_error,
@@ -83,7 +150,7 @@ wrap(Other) ->
         hint = undefined,
         details = #{reason => Other}
     },
-    #{'$beamtalk_class' => 'Exception', error => GenError}.
+    #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError}.
 
 %% @doc Idempotent exception wrapper (ADR 0015).
 %%
@@ -99,35 +166,36 @@ ensure_wrapped(Other) ->
 %% @doc Dispatch a message to an Exception object.
 %%
 %% Exception objects expose the underlying `#beamtalk_error{}` fields.
+%% Matches any exception hierarchy class (Exception, Error, RuntimeError, etc.).
 -spec dispatch(atom(), list(), map()) -> term().
-dispatch('message', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('message', [], #{error := Error}) ->
     Error#beamtalk_error.message;
-dispatch('hint', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('hint', [], #{error := Error}) ->
     case Error#beamtalk_error.hint of
         undefined -> nil;
         Hint -> Hint
     end;
-dispatch('kind', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('kind', [], #{error := Error}) ->
     Error#beamtalk_error.kind;
-dispatch('selector', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('selector', [], #{error := Error}) ->
     case Error#beamtalk_error.selector of
         undefined -> nil;
         Selector -> Selector
     end;
-dispatch('errorClass', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('errorClass', [], #{error := Error}) ->
     Error#beamtalk_error.class;
-dispatch('printString', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('printString', [], #{error := Error}) ->
     beamtalk_error:format(Error);
 dispatch('describe', [], Self) ->
     dispatch('printString', [], Self);
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
-dispatch('signal', [], #{'$beamtalk_class' := 'Exception', error := Error}) ->
+dispatch('signal', [], #{error := Error}) ->
     beamtalk_error:raise(Error);
 dispatch('signal:', [Message], _Self) ->
     signal_message(Message);
-dispatch(Selector, _Args, _Self) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Exception'),
+dispatch(Selector, _Args, #{'$beamtalk_class' := Class}) ->
+    Error0 = beamtalk_error:new(does_not_understand, Class),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     beamtalk_error:raise(Error1).
 
