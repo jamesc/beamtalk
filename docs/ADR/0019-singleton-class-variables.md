@@ -372,7 +372,7 @@ SystemDictionary current allClasses
 | `Beamtalk classNamed: #Counter` | `SystemDictionary current classNamed: #Counter` |
 | `Beamtalk version` | `SystemDictionary current version` |
 | `Workspace actors` | `Workspace current actors` |
-| `Workspace actorsOf: Counter` | `Workspace current actorsOf: #Counter` |
+| `Workspace actorsOf: #Counter` | `Workspace current actorsOf: #Counter` |
 
 ### Diagnostic
 
