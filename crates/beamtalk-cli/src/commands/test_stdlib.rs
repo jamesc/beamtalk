@@ -282,6 +282,25 @@ fn write_error_assertion(
     );
 }
 
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. This preserves literal underscores in identifiers like
+/// `does_not_understand` or `beamtalk_class`.
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "EUnit wrapper includes format_result + matches_pattern helpers"
@@ -407,7 +426,7 @@ fn generate_eunit_wrapper(
                 // Add value assertion (unless bare wildcard)
                 if v == "_" {
                     // Bare wildcard: run but don't check result
-                } else if v.contains('_') {
+                } else if has_wildcard_underscore(v) {
                     // Pattern with wildcards: use glob-style matching (BT-502)
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(

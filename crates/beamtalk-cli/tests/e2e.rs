@@ -777,16 +777,20 @@ impl ReplClient {
 /// - `#Actor<Counter,_>` matches `#Actor<Counter,0.173.0>`
 /// - `{\: Set, elements: _}` matches the full Set output
 /// - `Alice` still exact-matches `Alice`
+///
+/// A `_` is only treated as a wildcard if it is NOT flanked on both sides by
+/// alphanumeric characters. This preserves literal underscores in identifiers
+/// like `does_not_understand` or `beamtalk_class`.
 fn matches_pattern(pattern: &str, actual: &str) -> bool {
     if pattern == "_" {
         return true;
     }
-    if !pattern.contains('_') {
+    if !has_wildcard_underscore(pattern) {
         return actual == pattern;
     }
 
-    // Split pattern on `_` to get literal segments that must appear in order
-    let segments: Vec<&str> = pattern.split('_').collect();
+    // Split pattern on wildcard `_` characters only
+    let segments = split_on_wildcard_underscores(pattern);
     let mut pos = 0;
 
     for (i, segment) in segments.iter().enumerate() {
@@ -813,6 +817,48 @@ fn matches_pattern(pattern: &str, actual: &str) -> bool {
     }
 
     true
+}
+
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. Examples:
+/// - `Counter,_>` → wildcard (`,` before, `>` after)
+/// - `does_not` → literal (`s` before, `n` after)
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Split a pattern on wildcard `_` characters only, preserving literal
+/// underscores in identifiers.
+fn split_on_wildcard_underscores(pattern: &str) -> Vec<&str> {
+    let bytes = pattern.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0;
+
+    for i in 0..bytes.len() {
+        if bytes[i] == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                segments.push(&pattern[start..i]);
+                start = i + 1;
+            }
+        }
+    }
+
+    segments.push(&pattern[start..]);
+    segments
 }
 
 /// Run a single test file.
@@ -936,7 +982,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_error, e
                         ));
                     }
-                } else if case.expected == "_" || case.expected.contains('_') {
+                } else if case.expected == "_" || has_wildcard_underscore(&case.expected) {
                     // Wildcard/pattern means "run but don't check result" - errors are still failures
                     // because we want to know if spawn or other side-effect operations fail
                     failures.push(format!(
@@ -1268,6 +1314,27 @@ Counter spawn
         assert!(!matches_pattern("Alice", "Bob"));
         assert!(matches_pattern("42", "42"));
         assert!(!matches_pattern("42", "43"));
+    }
+
+    #[test]
+    fn test_matches_pattern_literal_underscores() {
+        // Underscores between alphanumeric chars are literal, not wildcards
+        assert!(matches_pattern(
+            "does_not_understand",
+            "does_not_understand"
+        ));
+        assert!(!matches_pattern(
+            "does_not_understand",
+            "does_XXX_understand"
+        ));
+        assert!(matches_pattern("runtime_error", "runtime_error"));
+        assert!(!matches_pattern("runtime_error", "runtimeXerror"));
+        assert!(matches_pattern("a-b_c", "a-b_c"));
+        // $beamtalk_class has literal underscore (both sides alphanumeric)
+        assert!(matches_pattern(
+            r#"{"$beamtalk_class":"Point"}"#,
+            r#"{"$beamtalk_class":"Point"}"#
+        ));
     }
 
     #[test]

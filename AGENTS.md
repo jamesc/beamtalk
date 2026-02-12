@@ -176,6 +176,7 @@ Test assertions support **glob-style pattern matching** where `_` acts as a wild
 **Rules:**
 - **Bare `_`** → full wildcard (backward compatible, matches anything)
 - **`_` within a pattern** → matches any substring at that position
+- **`_` between alphanumeric chars** → literal (e.g., `does_not_understand` is exact match)
 - Non-`_` literal segments must appear **in order** in the actual result
 - First segment must match at the start, last segment must match at the end
 
