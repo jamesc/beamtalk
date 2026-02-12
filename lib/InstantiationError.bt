@@ -10,7 +10,6 @@
 /// ```beamtalk
 /// [Counter new] on: InstantiationError do: [:e | e message]
 /// ```
-
 Error subclass: InstantiationError
   /// Human-readable description of the receiver.
   ///

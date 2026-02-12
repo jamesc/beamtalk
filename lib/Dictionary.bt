@@ -15,7 +15,6 @@
 /// #{#name => 'Alice'} at: #name               // => 'Alice'
 /// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
 /// ```
-
 sealed Object subclass: Dictionary
 
   /// Number of key-value pairs.

@@ -781,6 +781,61 @@ impl ReplClient {
             _ => Err(format!("Unexpected load response: {response_line}")),
         }
     }
+
+    /// Get documentation for a class or method via the docs op.
+    fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<String, String> {
+        let mut request = serde_json::json!({
+            "op": "docs",
+            "id": "e2e-docs",
+            "class": class
+        });
+        if let Some(sel) = selector {
+            request["selector"] = serde_json::Value::String(sel.to_string());
+        }
+
+        writeln!(self.stream, "{request}")
+            .map_err(|e| format!("Failed to send docs request: {e}"))?;
+
+        self.stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Failed to read docs response: {e}"))?;
+
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| format!("Failed to parse docs response: {e}"))?;
+
+        // Check for errors (new protocol)
+        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
+            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
+            if is_error {
+                let message = response
+                    .get("error")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(message.to_string());
+            }
+        }
+
+        // Check for errors (legacy protocol)
+        if response.get("type").and_then(|t| t.as_str()) == Some("error") {
+            let message = response
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            return Err(message.to_string());
+        }
+
+        // Extract docs text
+        response
+            .get("docs")
+            .and_then(|d| d.as_str())
+            .map(String::from)
+            .ok_or_else(|| format!("No docs field in response: {response_line}"))
+    }
 }
 
 /// Pattern matcher for test assertions (BT-502).
@@ -958,7 +1013,23 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     }
 
     for case in &test_file.cases {
-        match client.eval(&case.expression) {
+        // Route :help commands through the docs op instead of eval
+        let eval_result =
+            if case.expression.starts_with(":help ") || case.expression.starts_with(":h ") {
+                let args = if case.expression.starts_with(":help ") {
+                    case.expression.strip_prefix(":help ").unwrap().trim()
+                } else {
+                    case.expression.strip_prefix(":h ").unwrap().trim()
+                };
+                let (class_name, selector) = match args.split_once(' ') {
+                    Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                    None => (args, None),
+                };
+                client.get_docs(class_name, selector)
+            } else {
+                client.eval(&case.expression)
+            };
+        match eval_result {
             Ok(result) => {
                 // Check if this is a WARNING assertion (BT-407)
                 if case.expected.starts_with("WARNING:") {

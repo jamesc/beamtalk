@@ -37,7 +37,7 @@ Calculator add: 3 to: 7
 // @load lib/SystemDictionary.bt
 
 cls := (Beamtalk classNamed: #Calculator) await
-// => _
+// => Calculator
 
 cls defaultValue
 // => 42

@@ -12,7 +12,6 @@
 /// instantiation, nil testing, and display protocols.
 ///
 /// All methods are compiler intrinsics dispatched at the call site.
-
 abstract nil subclass: ProtoObject
   /// Test value equality (Erlang `==`).
   ///

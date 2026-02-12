@@ -13,7 +13,6 @@
 /// nil notNil            // => false
 /// 42 class              // => Integer
 /// ```
-
 ProtoObject subclass: Object
   /// Return the class of the receiver.
   ///

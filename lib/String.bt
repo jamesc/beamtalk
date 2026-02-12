@@ -15,7 +15,6 @@
 /// 'hello' length        // => 5
 /// 'hello' ++ ' world'   // => 'hello world'
 /// ```
-
 sealed Object subclass: String
   /// Test equality with another string.
   ///

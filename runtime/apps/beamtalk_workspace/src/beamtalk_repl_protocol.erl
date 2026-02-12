@@ -24,6 +24,7 @@
          encode_status/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/3,
+         encode_docs/2,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1]).
 
 %% Protocol request record
@@ -259,6 +260,17 @@ encode_inspect(ActorState, Msg, TermToJson) ->
         false ->
             Base = base_response(Msg),
             jsx:encode(Base#{<<"state">> => JsonState, <<"status">> => [<<"done">>]})
+    end.
+
+%% @doc Encode a documentation response.
+-spec encode_docs(binary(), protocol_msg()) -> binary().
+encode_docs(DocText, Msg) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText});
+        false ->
+            Base = base_response(Msg),
+            jsx:encode(Base#{<<"docs">> => DocText, <<"status">> => [<<"done">>]})
     end.
 
 %%% Internal functions

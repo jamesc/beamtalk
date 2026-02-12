@@ -12,7 +12,6 @@
 /// 5 isPositive      // => true
 /// -3 isNegative     // => true
 /// ```
-
 abstract Object subclass: Number
   /// Test if the receiver is zero.
   ///

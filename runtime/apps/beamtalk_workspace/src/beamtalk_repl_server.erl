@@ -13,8 +13,8 @@
 
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
-         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,
-         term_to_json/1, format_error_message/1]).
+         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1, format_docs/1,
+         term_to_json/1, format_error_message/1, safe_to_existing_atom/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -494,6 +494,37 @@ handle_op(<<"info">>, Params, Msg, _SessionPid) ->
             jsx:encode(Base#{<<"info">> => Info, <<"status">> => [<<"done">>]})
     end;
 
+handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    case safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                {class_not_found, ClassBin}, Msg, fun format_error_message/1);
+        {ok, ClassName} ->
+            Selector = maps:get(<<"selector">>, Params, undefined),
+            case Selector of
+                undefined ->
+                    case beamtalk_repl_docs:format_class_docs(ClassName) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1)
+                    end;
+                SelectorBin ->
+                    case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1);
+                        {error, {method_not_found, _, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {method_not_found, ClassName, SelectorBin}, Msg, fun format_error_message/1)
+                    end
+            end
+    end;
+
 handle_op(Op, _Params, Msg, _SessionPid) ->
     beamtalk_repl_protocol:encode_error(
         {unknown_op, Op}, Msg, fun format_error_message/1).
@@ -512,6 +543,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     {kill_actor, string()} |
     {list_modules} |
     {unload_module, string()} |
+    {get_docs, binary(), binary() | undefined} |
     {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
@@ -558,7 +590,8 @@ parse_request(Data) when is_binary(Data) ->
 -spec op_to_request(binary(), map()) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
     {load_file, string()} | {list_actors} | {list_modules} |
-    {kill_actor, string()} | {unload_module, string()} | {error, term()}.
+    {kill_actor, string()} | {unload_module, string()} |
+    {get_docs, binary(), binary() | undefined} | {error, term()}.
 op_to_request(<<"eval">>, Map) ->
     Code = maps:get(<<"code">>, Map, <<>>),
     {eval, binary_to_list(Code)};
@@ -579,6 +612,10 @@ op_to_request(<<"unload">>, Map) ->
 op_to_request(<<"kill">>, Map) ->
     Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
     {kill_actor, binary_to_list(Pid)};
+op_to_request(<<"docs">>, Map) ->
+    ClassName = maps:get(<<"class">>, Map, <<>>),
+    Selector = maps:get(<<"selector">>, Map, undefined),
+    {get_docs, ClassName, Selector};
 op_to_request(Op, _Map) ->
     {error, {unknown_op, Op}}.
 
@@ -677,6 +714,11 @@ format_bindings(Bindings) ->
     ),
     jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
 
+%% @doc Format a documentation response as JSON.
+-spec format_docs(binary()) -> binary().
+format_docs(DocText) ->
+    jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText}).
+
 %% @doc Format a loaded file response as JSON.
 %% Classes is a list of #{name => string(), superclass => string()} maps.
 -spec format_loaded([map()]) -> binary().
@@ -750,7 +792,7 @@ term_to_json(Value) when is_integer(Value); is_float(Value); is_boolean(Value) -
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
-    Value;
+    beamtalk_transcript_stream:ensure_utf8(Value);
 term_to_json(Value) when is_list(Value) ->
     %% Empty list should serialize as empty array, not empty string
     case Value of
@@ -758,7 +800,11 @@ term_to_json(Value) when is_list(Value) ->
         _ ->
             case io_lib:printable_list(Value) of
                 true ->
-                    list_to_binary(Value);
+                    case unicode:characters_to_binary(Value) of
+                        Bin when is_binary(Bin) -> Bin;
+                        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
+                        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
+                    end;
                 false ->
                     [term_to_json(E) || E <- Value]
             end
@@ -805,10 +851,15 @@ term_to_json(Value) when is_map(Value) ->
         fun(K, V, Acc) ->
             KeyBin = if
                 is_atom(K) -> atom_to_binary(K, utf8);
-                is_binary(K) -> K;
+                is_binary(K) -> beamtalk_transcript_stream:ensure_utf8(K);
                 is_list(K) ->
                     case io_lib:printable_list(K) of
-                        true -> list_to_binary(K);
+                        true ->
+                            case unicode:characters_to_binary(K) of
+                                Bin when is_binary(Bin) -> Bin;
+                                {error, _, _} -> list_to_binary(io_lib:format("~p", [K]));
+                                {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [K]))
+                            end;
                         false -> list_to_binary(io_lib:format("~p", [K]))
                     end;
                 true -> list_to_binary(io_lib:format("~p", [K]))
@@ -851,7 +902,7 @@ term_to_json(Value) when is_tuple(Value) ->
     end;
 term_to_json(Value) ->
     %% Fallback: format using io_lib
-    iolist_to_binary(io_lib:format("~p", [Value])).
+    beamtalk_transcript_stream:ensure_utf8(iolist_to_binary(io_lib:format("~p", [Value]))).
 
 %% @private
 %% Format a rejection reason for display in #Future<rejected: ...>
@@ -913,6 +964,15 @@ format_error_message({actors_exist, ModuleName, Count}) ->
         <<"Cannot unload ">>, atom_to_binary(ModuleName, utf8), 
         <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
     ]);
+format_error_message({class_not_found, ClassName}) ->
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([<<"Unknown class: ">>, NameBin,
+                      <<". Use :modules to see loaded classes.">>]);
+format_error_message({method_not_found, ClassName, Selector}) ->
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([NameBin, <<" does not understand ">>,
+                      Selector, <<". Use :help ">>, NameBin,
+                      <<" to see available methods.">>]);
 format_error_message({unknown_op, Op}) ->
     iolist_to_binary([<<"Unknown operation: ">>, Op]);
 format_error_message({inspect_failed, PidStr}) ->
@@ -1049,3 +1109,19 @@ format_name(Name) when is_list(Name) ->
     list_to_binary(Name);
 format_name(Name) ->
     iolist_to_binary(io_lib:format("~p", [Name])).
+
+%% @private Convert atom or binary to binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
+to_binary(V) when is_binary(V) -> V.
+
+%% @private Safe atom conversion — returns error instead of creating new atoms.
+-spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
+safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(Bin) when is_binary(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> {error, badarg}
+    end;
+safe_to_existing_atom(_) -> {error, badarg}.
