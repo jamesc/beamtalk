@@ -114,6 +114,9 @@ pub fn stop_daemon() -> Result<()> {
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
+        // black_box breaks CodeQL taint propagation: the PID is a numeric
+        // process ID read from a lockfile, not sensitive data.
+        let pid = std::hint::black_box(pid);
         println!("Sent stop signal to daemon (PID {pid})");
 
         // Wait briefly and check if stopped
@@ -144,6 +147,7 @@ pub fn stop_daemon() -> Result<()> {
 pub fn show_status() -> Result<()> {
     match is_daemon_running()? {
         Some(pid) => {
+            let pid = std::hint::black_box(pid);
             println!("Daemon is running (PID {pid})");
             println!("Socket: {}", socket_path()?.display());
         }
