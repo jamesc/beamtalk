@@ -129,11 +129,8 @@ impl CoreErlangGenerator {
         ]);
 
         // True case: execute body and recurse
-        let body_start = self.output.len();
-        let final_state_version = self.generate_while_body_with_threading(body, &[])?;
-        let body_output = self.output[body_start..].to_string();
-        self.output.truncate(body_start);
-        docs.push(Document::String(body_output));
+        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
@@ -159,7 +156,7 @@ impl CoreErlangGenerator {
         &mut self,
         body: &Block,
         _mutated_vars: &[String],
-    ) -> Result<usize> {
+    ) -> Result<(Document<'static>, usize)> {
         // Generate the body with state threading
         let saved_state_version = self.state_version();
         self.set_state_version(0);
@@ -173,24 +170,26 @@ impl CoreErlangGenerator {
         // come from nested constructs and the last expression's result must be bound.
         let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
 
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                self.write_document(&docvec![" "]);
+                docs.push(docvec![" "]);
             }
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 let doc = self.generate_field_assignment_open(expr)?;
-                self.write_document(&doc);
+                docs.push(doc);
             } else if self.is_actor_self_send(expr) {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
                 let doc = self.generate_self_dispatch_open(expr)?;
-                self.write_document(&doc);
+                docs.push(doc);
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
-                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                self.write_document(&_assign_doc);
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
@@ -198,16 +197,16 @@ impl CoreErlangGenerator {
                 let next_version = self.state_version() + 1;
                 let next_var = format!("StateAcc{next_version}");
                 let tuple_var = format!("_NestTuple{next_version}");
-                let expr_code = self.capture_expression(expr)?;
+                let expr_code = self.expression_doc(expr)?;
                 self.set_state_version(next_version);
-                self.write_document(&docvec![
+                docs.push(docvec![
                     format!("let {tuple_var} = "),
                     expr_code,
                     format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
                 ]);
             } else {
-                let expr_code = self.capture_expression(expr)?;
-                self.write_document(&docvec!["let _ = ", expr_code, " in"]);
+                let expr_code = self.expression_doc(expr)?;
+                docs.push(docvec!["let _ = ", expr_code, " in"]);
             }
         }
 
@@ -217,7 +216,7 @@ impl CoreErlangGenerator {
         // Restore state
         self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
-        Ok(final_state_version)
+        Ok((Document::Vec(docs), final_state_version))
     }
 
     pub(in crate::codegen::core_erlang) fn generate_while_false(
@@ -317,11 +316,8 @@ impl CoreErlangGenerator {
         ]);
 
         // FALSE case: execute body and recurse
-        let body_start = self.output.len();
-        let final_state_version = self.generate_while_body_with_threading(body, &[])?;
-        let body_output = self.output[body_start..].to_string();
-        self.output.truncate(body_start);
-        docs.push(Document::String(body_output));
+        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {

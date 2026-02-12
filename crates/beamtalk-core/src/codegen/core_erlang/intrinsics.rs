@@ -117,11 +117,8 @@ impl CoreErlangGenerator {
 
             // `repeat` - infinite loop
             MessageSelector::Unary(name) if name == "repeat" => {
-                let start = self.output.len();
-                self.generate_repeat(receiver)?;
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                Ok(Some(Document::String(result)))
+                let doc = self.generate_repeat(receiver)?;
+                Ok(Some(doc))
             }
 
             // Keyword messages for block evaluation
@@ -149,52 +146,39 @@ impl CoreErlangGenerator {
 
                     // `timesRepeat:` - repeat body N times
                     "timesRepeat:" => {
-                        let start = self.output.len();
-                        self.generate_times_repeat(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_times_repeat(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // `to:do:` - range iteration (structural intrinsic from Integer)
                     "to:do:" if arguments.len() == 2 => {
-                        let start = self.output.len();
-                        self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc =
+                            self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
 
                     // `to:by:do:` - range iteration with step (structural intrinsic from Integer)
                     "to:by:do:" if arguments.len() == 3 => {
-                        let start = self.output.len();
-                        self.generate_to_by_do(
+                        let doc = self.generate_to_by_do(
                             receiver,
                             &arguments[0],
                             &arguments[1],
                             &arguments[2],
                         )?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        Ok(Some(doc))
                     }
 
                     // `on:do:` - exception handling (try/catch with class matching)
                     "on:do:" if arguments.len() == 2 => {
-                        let start = self.output.len();
-                        self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc =
+                            self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
 
                     // `ensure:` - cleanup (try/after via try/catch + re-raise)
                     "ensure:" => {
-                        let start = self.output.len();
-                        self.generate_ensure(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_ensure(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // Not a block evaluation message
@@ -245,39 +229,25 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "do:" if arguments.len() == 1 => {
-                        let start = self.output.len();
-                        self.generate_list_do(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_list_do(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "collect:" if arguments.len() == 1 => {
-                        let start = self.output.len();
-                        self.generate_list_collect(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_list_collect(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "select:" if arguments.len() == 1 => {
-                        let start = self.output.len();
-                        self.generate_list_select(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_list_select(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "reject:" if arguments.len() == 1 => {
-                        let start = self.output.len();
-                        self.generate_list_reject(receiver, &arguments[0])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc = self.generate_list_reject(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "inject:into:" if arguments.len() == 2 => {
-                        let start = self.output.len();
-                        self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
-                        let result = self.output[start..].to_string();
-                        self.output.truncate(start);
-                        Ok(Some(Document::String(result)))
+                        let doc =
+                            self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }

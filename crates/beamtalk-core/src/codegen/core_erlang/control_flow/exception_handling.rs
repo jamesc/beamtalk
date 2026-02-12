@@ -3,7 +3,7 @@
 
 //! Exception handling code generation (Block `on:do:` and `ensure:`).
 //!
-//! **DDD Context:** Compilation — Code Generation
+//! **DDD Compilation Context:** Code Generation 
 //!
 //! Generates Core Erlang `try/catch` for `on:do:` and `try/after` for `ensure:`.
 //! These are structural intrinsics because they must wrap the block execution
@@ -47,6 +47,7 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
+use super::super::document::Document;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -62,7 +63,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         ex_class: &Expression,
         handler: &Expression,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
@@ -95,11 +96,11 @@ impl CoreErlangGenerator {
         let match_var = self.fresh_temp_var("Match");
 
         // Capture expression outputs (ADR 0018 bridge pattern)
-        let receiver_code = self.capture_expression(receiver)?;
-        let ex_class_code = self.capture_expression(ex_class)?;
-        let handler_code = self.capture_expression(handler)?;
+        let receiver_code = self.expression_doc(receiver)?;
+        let ex_class_code = self.expression_doc(ex_class)?;
+        let handler_code = self.expression_doc(handler)?;
 
-        let doc = docvec![
+        Ok(docvec![
             format!("let {block_var} = "),
             receiver_code,
             format!(" in let {ex_class_var} = "),
@@ -116,10 +117,7 @@ impl CoreErlangGenerator {
                  <'true'> when 'true' -> apply {handler_var} ({ex_obj_var}) \
                  <'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) end"
             ),
-        ];
-
-        self.write_document(&doc);
-        Ok(())
+        ])
     }
 
     /// BT-410: Generates `on:do:` with state mutation threading.
@@ -148,7 +146,7 @@ impl CoreErlangGenerator {
         receiver_block: &Block,
         ex_class: &Expression,
         handler_block: &Block,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         if self.is_repl_mode {
             self.repl_loop_mutated = true;
         }
@@ -162,22 +160,22 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
 
         // Bind exception class
-        let ex_class_code = self.capture_expression(ex_class)?;
+        let ex_class_code = self.expression_doc(ex_class)?;
 
         // Rename current state to StateAcc for uniform threading
         let current_state = self.current_state_var();
 
-        let doc = docvec![
+        let mut docs: Vec<Document<'static>> = vec![docvec![
             format!("let {ex_class_var} = "),
             ex_class_code,
             format!(" in let StateAcc = {current_state} in try "),
-        ];
-        self.write_document(&doc);
+        ]];
 
         // Generate try body (receiver block) with state threading
-        // BT-483: Now returns (result_var, state_version)
-        let (try_result_var, try_final) =
+        // BT-483: Now returns (doc, result_var, state_version)
+        let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
+        docs.push(try_body_doc);
         let try_final_var = if try_final == 0 {
             "StateAcc".to_string()
         } else {
@@ -185,7 +183,7 @@ impl CoreErlangGenerator {
         };
         // BT-483: Return {Result, State} from try body
         // Success: pass {Result, State} through + catch clause header
-        let doc = docvec![
+        docs.push(docvec![
             format!(" {{{try_result_var}, {try_final_var}}} "),
             format!("of {state_after_try} -> {state_after_try} "),
             format!("catch <{type_var}, {error_var}, {stack_var}> -> "),
@@ -197,43 +195,41 @@ impl CoreErlangGenerator {
             ),
             format!("case {match_var} of "),
             "<'true'> when 'true' -> ",
-        ];
-        self.write_document(&doc);
+        ]);
 
         // Bind handler parameter (e.g., [:e | ...] binds e to exception object)
         self.push_scope();
         if let Some(param) = handler_block.parameters.first() {
             let param_var = Self::to_core_erlang_var(&param.name);
             self.bind_var(&param.name, &param_var);
-            let doc = docvec![format!("let {param_var} = {ex_obj_var} in ")];
-            self.write_document(&doc);
+            docs.push(docvec![format!("let {param_var} = {ex_obj_var} in ")]);
         }
 
         // Generate handler body with state threading (from original StateAcc)
-        // BT-483: Now returns (result_var, state_version)
-        let (handler_result_var, handler_final) =
+        // BT-483: Now returns (doc, result_var, state_version)
+        let (handler_body_doc, handler_result_var, handler_final) =
             self.generate_exception_body_with_threading(handler_block)?;
+        docs.push(handler_body_doc);
         let handler_final_var = if handler_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{handler_final}")
         };
         // BT-483: Return {Result, State} from handler
-        let handler_result_doc =
-            docvec![format!(" {{{handler_result_var}, {handler_final_var}}} ")];
-        self.write_document(&handler_result_doc);
+        docs.push(docvec![format!(
+            " {{{handler_result_var}, {handler_final_var}}} "
+        )]);
         self.pop_scope();
 
         // Re-raise non-matching exceptions
-        let doc = docvec![
+        docs.push(docvec![
             format!(
                 "<'false'> when 'true' -> primop 'raw_raise'({type_var}, {error_var}, {stack_var}) "
             ),
             "end",
-        ];
-        self.write_document(&doc);
+        ]);
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 
     /// Generates `ensure:` — wraps block in try, always runs cleanup block.
@@ -244,7 +240,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         cleanup: &Expression,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-410: Check both blocks for field/state mutations
         let receiver_needs = if let Expression::Block(b) = receiver {
             self.needs_mutation_threading(&block_analysis::analyze_block(b))
@@ -275,10 +271,10 @@ impl CoreErlangGenerator {
         let stack_var = self.fresh_temp_var("Stack");
 
         // Capture expression outputs (ADR 0018 bridge pattern)
-        let receiver_code = self.capture_expression(receiver)?;
-        let cleanup_code = self.capture_expression(cleanup)?;
+        let receiver_code = self.expression_doc(receiver)?;
+        let cleanup_code = self.expression_doc(cleanup)?;
 
-        let doc = docvec![
+        Ok(docvec![
             format!("let {block_var} = "),
             receiver_code,
             format!(" in let {cleanup_var} = "),
@@ -290,10 +286,7 @@ impl CoreErlangGenerator {
                  do apply {cleanup_var} () \
                  primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
             ),
-        ];
-
-        self.write_document(&doc);
-        Ok(())
+        ])
     }
 
     /// BT-410: Generates `ensure:` with state mutation threading.
@@ -320,7 +313,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver_block: &Block,
         cleanup_block: &Block,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         if self.is_repl_mode {
             self.repl_loop_mutated = true;
         }
@@ -332,56 +325,61 @@ impl CoreErlangGenerator {
 
         // Rename current state to StateAcc
         let current_state = self.current_state_var();
-        let doc = docvec![format!("let StateAcc = {current_state} in try ")];
-        self.write_document(&doc);
+        let mut docs: Vec<Document<'static>> =
+            vec![docvec![format!("let StateAcc = {current_state} in try ")]];
 
         // Generate try body with state threading
-        // BT-483: Now returns (result_var, state_version)
-        let (try_result_var, try_final) =
+        // BT-483: Now returns (doc, result_var, state_version)
+        let (try_body_doc, try_result_var, try_final) =
             self.generate_exception_body_with_threading(receiver_block)?;
+        docs.push(try_body_doc);
         let try_final_var = if try_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{try_final}")
         };
         // BT-483: Return {Result, State} from try body
-        let doc = docvec![format!(" {{{try_result_var}, {try_final_var}}} ")];
-        self.write_document(&doc);
+        docs.push(docvec![format!(
+            " {{{try_result_var}, {try_final_var}}} "
+        )]);
 
         // Success: run cleanup starting from try body's state
         // BT-483: Extract Result and State from {Result, State} tuple using element/N
         let result_from_try = self.fresh_temp_var("TryResult");
-        let doc = docvec![format!(
+        docs.push(docvec![format!(
             "of {state_after_try} -> \
              let {result_from_try} = call 'erlang':'element'(1, {state_after_try}) in \
              let StateAcc = call 'erlang':'element'(2, {state_after_try}) in "
-        )];
-        self.write_document(&doc);
+        )]);
 
-        let (_, cleanup_success_final) =
+        let (cleanup_success_doc, _, cleanup_success_final) =
             self.generate_exception_body_with_threading(cleanup_block)?;
+        docs.push(cleanup_success_doc);
         let cleanup_success_var = if cleanup_success_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{cleanup_success_final}")
         };
         // BT-483: Return try body result with cleanup's final state
-        let doc = docvec![format!(" {{{result_from_try}, {cleanup_success_var}}} ")];
-        self.write_document(&doc);
+        docs.push(docvec![format!(
+            " {{{result_from_try}, {cleanup_success_var}}} "
+        )]);
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
-        let doc = docvec![format!("catch <{type_var}, {error_var}, {stack_var}> -> ")];
-        self.write_document(&doc);
+        docs.push(docvec![format!(
+            "catch <{type_var}, {error_var}, {stack_var}> -> "
+        )]);
 
         // Cleanup body generates state mutations that are discarded (re-raise follows)
-        let _ = self.generate_exception_body_with_threading(cleanup_block)?;
+        let (cleanup_error_doc, _, _) =
+            self.generate_exception_body_with_threading(cleanup_block)?;
+        docs.push(cleanup_error_doc);
 
-        let doc = docvec![format!(
+        docs.push(docvec![format!(
             " primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
-        )];
-        self.write_document(&doc);
+        )]);
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 
     /// BT-410/BT-483: Generates block body expressions with state mutation threading.
@@ -390,12 +388,16 @@ impl CoreErlangGenerator {
     /// - Sets `in_loop_body = true` so field reads/writes use `StateAcc`
     /// - Resets `state_version` to 0 (`StateAcc` is version 0)
     /// - Threads field assignments, self-sends, and local var assignments
-    /// - Returns `(result_var, final_state_version)` — the variable holding
-    ///   the last expression's result and the final state version number
+    /// - Returns `(doc, result_var, final_state_version)` — the Document holding
+    ///   the generated code, the variable holding the last expression's result,
+    ///   and the final state version number
     ///
     /// The caller must have already bound `StateAcc` to the current state
     /// before calling this function.
-    fn generate_exception_body_with_threading(&mut self, body: &Block) -> Result<(String, usize)> {
+    fn generate_exception_body_with_threading(
+        &mut self,
+        body: &Block,
+    ) -> Result<(Document<'static>, String, usize)> {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
@@ -405,16 +407,17 @@ impl CoreErlangGenerator {
         let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
 
         let mut result_var = "'nil'".to_string();
+        let mut docs: Vec<Document<'static>> = Vec::new();
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                self.output.push(' ');
+                docs.push(Document::String(" ".to_string()));
             }
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 let doc = self.generate_field_assignment_open(expr)?;
-                self.write_document(&doc);
+                docs.push(doc);
                 if is_last {
                     // BT-483: Field assignment returns the assigned value
                     // The val was already bound by generate_field_assignment_open
@@ -426,27 +429,26 @@ impl CoreErlangGenerator {
                 }
             } else if self.is_actor_self_send(expr) {
                 let doc = self.generate_self_dispatch_open(expr)?;
-                self.write_document(&doc);
+                docs.push(doc);
                 if is_last {
                     // BT-483: Self-dispatch result is in last_dispatch_var
                     if let Some(dv) = self.last_dispatch_var.clone() {
                         let rv = self.fresh_temp_var("ExResult");
-                        let doc =
-                            docvec![format!("let {rv} = call 'erlang':'element'(1, {dv}) in ")];
-                        self.write_document(&doc);
+                        docs.push(docvec![format!(
+                            "let {rv} = call 'erlang':'element'(1, {dv}) in "
+                        )]);
                         result_var = rv;
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                self.write_document(&_assign_doc);
+                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(assign_doc);
             } else if is_last {
                 if has_direct_field_assignments {
                     // Has direct field assignments — last non-assignment expr result is captured
                     let rv = self.fresh_temp_var("ExResult");
-                    let expr_str = self.capture_expression(expr)?;
-                    let doc = docvec![format!("let {rv} = "), expr_str, " in"];
-                    self.write_document(&doc);
+                    let expr_doc = self.expression_doc(expr)?;
+                    docs.push(docvec![format!("let {rv} = "), expr_doc, " in"]);
                     result_var = rv;
                 } else {
                     // BT-483: Last expression with no direct field assignments.
@@ -458,35 +460,36 @@ impl CoreErlangGenerator {
                         let rv = self.fresh_temp_var("ExResult");
                         let next_version = self.state_version() + 1;
                         let next_var = format!("StateAcc{next_version}");
-                        let expr_str = self.capture_expression(expr)?;
-                        let doc = docvec![
+                        let expr_doc = self.expression_doc(expr)?;
+                        docs.push(docvec![
                             format!("let {tuple_var} = "),
-                            expr_str,
-                            format!(" in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "),
-                            format!("let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
-                        ];
-                        self.write_document(&doc);
+                            expr_doc,
+                            format!(
+                                " in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "
+                            ),
+                            format!(
+                                "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
+                            ),
+                        ]);
                         self.set_state_version(next_version);
                         result_var = rv;
                     } else {
                         // Regular expression — capture result, state unchanged
                         let rv = self.fresh_temp_var("ExResult");
-                        let expr_str = self.capture_expression(expr)?;
-                        let doc = docvec![format!("let {rv} = "), expr_str, " in"];
-                        self.write_document(&doc);
+                        let expr_doc = self.expression_doc(expr)?;
+                        docs.push(docvec![format!("let {rv} = "), expr_doc, " in"]);
                         result_var = rv;
                     }
                 }
             } else {
-                let expr_str = self.capture_expression(expr)?;
-                let doc = docvec!["let _ = ", expr_str, " in",];
-                self.write_document(&doc);
+                let expr_doc = self.expression_doc(expr)?;
+                docs.push(docvec!["let _ = ", expr_doc, " in",]);
             }
         }
 
         let final_state_version = self.state_version();
         self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
-        Ok((result_var, final_state_version))
+        Ok((Document::Vec(docs), result_var, final_state_version))
     }
 }
