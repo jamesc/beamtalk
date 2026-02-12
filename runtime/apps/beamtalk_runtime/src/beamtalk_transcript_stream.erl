@@ -35,6 +35,7 @@
 %% API
 -export([start_link/0, start_link/1, start_link_singleton/1, spawn/0, spawn/1]).
 -export([has_method/1, class_info/0]).
+-export([ensure_utf8/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -286,7 +287,7 @@ remove_subscriber(Pid, #state{subscribers = Subs} = State) ->
 %% @doc Convert a value to its string representation for display.
 -spec to_string(term()) -> binary().
 to_string(Value) when is_binary(Value) ->
-    Value;
+    ensure_utf8(Value);
 to_string(Value) when is_integer(Value) ->
     integer_to_binary(Value);
 to_string(Value) when is_float(Value) ->
@@ -294,8 +295,10 @@ to_string(Value) when is_float(Value) ->
 to_string(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 to_string(Value) when is_list(Value) ->
-    try
-        unicode:characters_to_binary(Value)
+    try unicode:characters_to_binary(Value) of
+        Bin when is_binary(Bin) -> Bin;
+        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
+        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
     catch
         _:_ -> list_to_binary(io_lib:format("~p", [Value]))
     end;
@@ -305,3 +308,13 @@ to_string(Value) when is_map(Value) ->
     beamtalk_tagged_map:format_for_display(Value);
 to_string(Value) ->
     list_to_binary(io_lib:format("~p", [Value])).
+
+%% @doc Ensure a binary is valid UTF-8. Returns the binary unchanged if valid,
+%% or a safely escaped representation if it contains invalid bytes.
+-spec ensure_utf8(binary()) -> binary().
+ensure_utf8(Bin) ->
+    case unicode:characters_to_binary(Bin) of
+        Utf8 when is_binary(Utf8) -> Utf8;
+        {error, _, _} -> list_to_binary(io_lib:format("~p", [Bin]));
+        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Bin]))
+    end.
