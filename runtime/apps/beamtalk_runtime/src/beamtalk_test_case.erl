@@ -19,7 +19,10 @@
     assert_equals/2,
     deny/1,
     should_raise/2,
-    fail/1
+    fail/1,
+    run_all/1,
+    run_single/2,
+    execute_tests/5
 ]).
 
 %% @doc Assert that a condition is true.
@@ -159,6 +162,73 @@ fail(Message) ->
     MessageBin = iolist_to_binary(io_lib:format("~p", [Message])),
     fail(MessageBin).
 
+%% @doc Execute tests from class-side dispatch (BT-440).
+%%
+%% Called from beamtalk_object_class handle_call via spawned process.
+%% Receives Selector (runAll | 'run:'), Args, ClassName, Module, and
+%% FlatMethods directly from gen_server state — no gen_server calls needed.
+-spec execute_tests(atom(), list(), atom(), atom(), map()) -> binary().
+execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
+    TestMethods = discover_test_methods(FlatMethods),
+    case TestMethods of
+        [] ->
+            iolist_to_binary(io_lib:format(
+                "No test methods found in ~s", [ClassName]));
+        _ ->
+            StartTime = erlang:monotonic_time(millisecond),
+            Results = lists:map(fun(Method) ->
+                run_test_method(ClassName, Module, Method, FlatMethods)
+            end, TestMethods),
+            EndTime = erlang:monotonic_time(millisecond),
+            Duration = (EndTime - StartTime) / 1000.0,
+            format_results(Results, Duration)
+    end;
+execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
+    case maps:is_key(TestMethodName, FlatMethods) of
+        false ->
+            iolist_to_binary(io_lib:format(
+                "Method '~s' not found in ~s", [TestMethodName, ClassName]));
+        true ->
+            StartTime = erlang:monotonic_time(millisecond),
+            Result = run_test_method(ClassName, Module, TestMethodName, FlatMethods),
+            EndTime = erlang:monotonic_time(millisecond),
+            Duration = (EndTime - StartTime) / 1000.0,
+            format_results([Result], Duration)
+    end.
+
+%% @doc Run all test methods (BT-440 — BIF fallback path).
+%% WARNING: May deadlock if called from within a class gen_server handle_call.
+%% Prefer execute_tests/5 which receives gen_server state directly and avoids
+%% any gen_server:call back to the class process.
+-spec run_all(atom()) -> binary().
+run_all(ClassName) ->
+    Module = resolve_module(ClassName),
+    TestMethods = discover_test_methods_from_module(Module),
+    case TestMethods of
+        [] ->
+            iolist_to_binary(io_lib:format(
+                "No test methods found in ~s", [ClassName]));
+        _ ->
+            StartTime = erlang:monotonic_time(millisecond),
+            Results = lists:map(fun(Method) ->
+                run_test_method(ClassName, Module, Method, none)
+            end, TestMethods),
+            EndTime = erlang:monotonic_time(millisecond),
+            Duration = (EndTime - StartTime) / 1000.0,
+            format_results(Results, Duration)
+    end.
+
+%% @doc Run a single test method (BT-440 — BIF fallback path).
+%% WARNING: May deadlock if called from within a class gen_server handle_call.
+-spec run_single(atom(), atom()) -> binary().
+run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
+    Module = resolve_module(ClassName),
+    StartTime = erlang:monotonic_time(millisecond),
+    Result = run_test_method(ClassName, Module, TestMethodName, none),
+    EndTime = erlang:monotonic_time(millisecond),
+    Duration = (EndTime - StartTime) / 1000.0,
+    format_results([Result], Duration).
+
 %%% Internal helpers
 
 %% @doc Format a comparison error message.
@@ -208,3 +278,149 @@ extract_error_kind(Kind) when is_atom(Kind) ->
 extract_error_kind(_) ->
     % Unknown error format - return generic 'error' kind
     error.
+
+%% @doc Discover test methods from flattened methods map (no gen_server call).
+%% FlatMethods is #{Selector => {DefiningClass, MethodInfo}}.
+-spec discover_test_methods(map()) -> [atom()].
+discover_test_methods(FlatMethods) ->
+    TestMethods = maps:fold(fun(Selector, _Info, Acc) ->
+        case atom_to_list(Selector) of
+            "test" ++ _ -> [Selector | Acc];
+            _ -> Acc
+        end
+    end, [], FlatMethods),
+    lists:sort(TestMethods).
+
+%% Discover test methods from module exports (BIF fallback path).
+-spec discover_test_methods_from_module(atom()) -> [atom()].
+discover_test_methods_from_module(Module) ->
+    Exports = Module:module_info(exports),
+    TestMethods = lists:filtermap(fun({FunName, _Arity}) ->
+        case atom_to_list(FunName) of
+            "test" ++ _ -> {true, FunName};
+            _ -> false
+        end
+    end, Exports),
+    lists:sort(TestMethods).
+
+%% @doc Resolve the BEAM module atom for a class name (no gen_server call).
+%% Uses the beamtalk compiler naming convention: bt@snake_case_name.
+%% Falls back to bt@stdlib@snake_case_name for stdlib classes.
+-spec resolve_module(atom()) -> atom().
+resolve_module(ClassName) ->
+    SnakeName = class_name_to_snake(atom_to_list(ClassName)),
+    UserModule = list_to_atom("bt@" ++ SnakeName),
+    case code:is_loaded(UserModule) of
+        {file, _} -> UserModule;
+        false ->
+            StdlibModule = list_to_atom("bt@stdlib@" ++ SnakeName),
+            case code:is_loaded(StdlibModule) of
+                {file, _} -> StdlibModule;
+                false ->
+                    %% Try loading (module may be on code path but not yet loaded)
+                    case code:ensure_loaded(UserModule) of
+                        {module, _} -> UserModule;
+                        _ ->
+                            case code:ensure_loaded(StdlibModule) of
+                                {module, _} -> StdlibModule;
+                                _ -> UserModule  % fall back, will error at call site
+                            end
+                    end
+            end
+    end.
+
+%% Convert CamelCase class name to snake_case module name component.
+%% Matches the Rust to_module_name() convention.
+-spec class_name_to_snake(string()) -> string().
+class_name_to_snake(Name) ->
+    class_name_to_snake(Name, false, []).
+
+class_name_to_snake([], _PrevLower, Acc) ->
+    lists:reverse(Acc);
+class_name_to_snake([H | T], PrevLower, Acc) when H >= $A, H =< $Z ->
+    Lower = H + 32,  % ASCII uppercase to lowercase
+    case PrevLower of
+        true -> class_name_to_snake(T, false, [Lower, $_ | Acc]);
+        false -> class_name_to_snake(T, false, [Lower | Acc])
+    end;
+class_name_to_snake([H | T], _PrevLower, Acc) ->
+    class_name_to_snake(T, H >= $a andalso H =< $z, [H | Acc]).
+
+%% @doc Run a single test method with setUp/tearDown lifecycle (BT-440).
+%%
+%% FlatMethods is either a map (from gen_server state) or 'none' (BIF fallback).
+%% When 'none', uses module_info(exports) to check for setUp/tearDown.
+%% Creates fresh instance, runs lifecycle, returns pass/fail.
+%% tearDown always runs, even if the test fails.
+-spec run_test_method(atom(), atom(), atom(), map() | none) ->
+    {pass, atom()} | {fail, atom(), binary()}.
+run_test_method(ClassName, Module, MethodName, FlatMethods) ->
+    try
+        Instance = Module:new(),
+        {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
+        case HasSetUp of
+            true -> Module:dispatch(setUp, [], Instance);
+            false -> ok
+        end,
+        TestResult = try
+            Module:dispatch(MethodName, [], Instance),
+            {pass, MethodName}
+        catch
+            error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
+                {fail, MethodName, AssertMsg};
+            error:#beamtalk_error{message = ErrMsg} ->
+                {fail, MethodName, ErrMsg};
+            error:TestReason ->
+                FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
+                {fail, MethodName, FailMsg};
+            TestClass:TestReason:TestST ->
+                FailMsg = iolist_to_binary(
+                    io_lib:format("~p:~p", [TestClass, TestReason])),
+                logger:debug("Test ~s:~s failed with stacktrace: ~p",
+                             [ClassName, MethodName, TestST]),
+                {fail, MethodName, FailMsg}
+        after
+            case HasTearDown of
+                true ->
+                    try Module:dispatch(tearDown, [], Instance)
+                    catch _:_ -> ok  % Don't mask the original test failure
+                    end;
+                false -> ok
+            end
+        end,
+        TestResult
+    catch
+        %% setUp or new() itself failed
+        SetupClass:SetupReason ->
+            SetupMsg = iolist_to_binary(
+                io_lib:format("setUp failed: ~p:~p", [SetupClass, SetupReason])),
+            {fail, MethodName, SetupMsg}
+    end.
+
+%% Check for setUp/tearDown methods, using FlatMethods map or module exports.
+-spec check_lifecycle_methods(atom(), map() | none) -> {boolean(), boolean()}.
+check_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
+    {maps:is_key(setUp, FlatMethods), maps:is_key(tearDown, FlatMethods)};
+check_lifecycle_methods(Module, none) ->
+    Exports = Module:module_info(exports),
+    {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
+
+%% @doc Format test results for REPL display.
+-spec format_results([{pass, atom()} | {fail, atom(), binary()}], float()) -> binary().
+format_results(Results, Duration) ->
+    Total = length(Results),
+    Passed = length([ok || {pass, _} <- Results]),
+    Failed = Total - Passed,
+    IoList = case Failed of
+        0 ->
+            io_lib:format(
+                "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]);
+        _ ->
+            Summary = io_lib:format(
+                "~p tests, ~p passed, ~p failed (~.1fs)",
+                [Total, Passed, Failed, Duration]),
+            Failures = [io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
+                        || {fail, M, Msg} <- Results],
+            [Summary, "\n\n" | Failures]
+    end,
+    unicode:characters_to_binary(IoList).

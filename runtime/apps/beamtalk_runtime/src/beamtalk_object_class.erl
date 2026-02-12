@@ -265,7 +265,12 @@ class_send(_ClassPid, class, []) ->
     'Metaclass';
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
-    case gen_server:call(ClassPid, {class_method_call, Selector, Args}) of
+    %% BT-440: Test execution may take a long time; use longer timeout.
+    Timeout = case is_test_execution_selector(Selector) of
+        true -> 300000;  % 5 minutes for test suites
+        false -> 5000    % default gen_server timeout
+    end,
+    case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
         {ok, Result} -> Result;
         {error, not_found} ->
             ClassName = gen_server:call(ClassPid, class_name),
@@ -798,8 +803,13 @@ handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods 
 %% BT-411: User-defined class method dispatch.
 %% BT-412: Passes class variables to method and handles updates.
 %% Looks up selector in flattened_class_methods and calls the module function.
-handle_call({class_method_call, Selector, Args}, _From,
+%%
+%% BT-440: For runAll and run: (test execution), we spawn test execution in
+%% a separate process using {noreply, State} to avoid gen_server deadlock,
+%% since test execution needs to call back into the class system.
+handle_call({class_method_call, Selector, Args}, From,
             #class_state{flattened_class_methods = FlatClassMethods,
+                         flattened_methods = FlatMethods,
                          name = ClassName, module = Module,
                          class_variables = ClassVars} = State) ->
     case maps:find(Selector, FlatClassMethods) of
@@ -813,22 +823,43 @@ handle_call({class_method_call, Selector, Args}, _From,
                         DefPid -> gen_server:call(DefPid, get_module, 5000)
                     end
             end,
-            %% Build class self object for `self` reference in class methods
-            ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
-            %% Class method function name: class_<selector>
-            FunName = class_method_fun_name(Selector),
-            %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
-            try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
-                {class_var_result, Result, NewClassVars} ->
-                    NewState = State#class_state{class_variables = NewClassVars},
-                    {reply, {ok, Result}, NewState};
-                Result ->
-                    {reply, {ok, Result}, State}
-            catch
-                Class:Error ->
-                    logger:error("Class method ~p:~p failed: ~p:~p",
-                                 [ClassName, Selector, Class, Error]),
-                    {reply, {error, Error}, State}
+            %% BT-440: For test execution (runAll, run:) inherited from TestCase,
+            %% spawn in separate process to avoid gen_server deadlock when
+            %% test execution calls class_send.
+            case is_test_execution_selector(Selector) andalso
+                 DefiningClass =:= 'TestCase' of
+                true ->
+                    spawn(fun() ->
+                        Result = try
+                            beamtalk_test_case:execute_tests(
+                                Selector, Args, ClassName, Module, FlatMethods)
+                        catch
+                            C:E ->
+                                logger:error("Test execution ~p:~p failed: ~p:~p",
+                                             [ClassName, Selector, C, E]),
+                                {error, E}
+                        end,
+                        gen_server:reply(From, {ok, Result})
+                    end),
+                    {noreply, State};
+                false ->
+                    %% Build class self object for `self` reference in class methods
+                    ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
+                    %% Class method function name: class_<selector>
+                    FunName = class_method_fun_name(Selector),
+                    %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
+                    try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+                        {class_var_result, Result, NewClassVars} ->
+                            NewState = State#class_state{class_variables = NewClassVars},
+                            {reply, {ok, Result}, NewState};
+                        Result ->
+                            {reply, {ok, Result}, State}
+                    catch
+                        Class:Error ->
+                            logger:error("Class method ~p:~p failed: ~p:~p",
+                                         [ClassName, Selector, Class, Error]),
+                            {reply, {error, Error}, State}
+                    end
             end;
         error ->
             {reply, {error, not_found}, State}
@@ -1257,3 +1288,10 @@ build_flattened_methods(CurrentClass, Superclass, LocalMethods, QueryMsg) ->
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
     list_to_existing_atom("class_" ++ atom_to_list(Selector)).
+
+%% BT-440: Check if a class method selector is a test execution command.
+%% These selectors need special handling to avoid gen_server deadlock
+%% (test execution calls back into the class system).
+is_test_execution_selector(runAll) -> true;
+is_test_execution_selector('run:') -> true;
+is_test_execution_selector(_) -> false.

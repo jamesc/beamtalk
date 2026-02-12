@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for BUnit REPL integration (BT-440)
+//
+// Tests TestCase class-side methods:
+//   - runAll: discover and run all test* methods
+//   - run:   run a single test method by name
+
+// Load Counter actor first, then CounterTest (depends on Counter)
+// @load tests/e2e/fixtures/counter.bt
+// @load tests/e2e/fixtures/counter_test.bt
+
+// Verify CounterTest class loaded
+CounterTest
+// => CounterTest
+
+// Run all test* methods — verify output format (timing varies)
+CounterTest runAll
+// => 2 tests, 2 passed (_)
+
+// Run a single test method by symbol name
+CounterTest run: #testIncrement
+// => 1 tests, 1 passed (_)
+
+// Run another single test
+CounterTest run: #testInitialValue
+// => 1 tests, 1 passed (_)
