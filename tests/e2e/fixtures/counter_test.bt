@@ -6,7 +6,7 @@
 
 @load tests/e2e/fixtures/counter.bt
 
-Object subclass: CounterTest
+TestCase subclass: CounterTest
 
   setUp =>
     self.counter := Counter spawn
