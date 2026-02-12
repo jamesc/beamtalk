@@ -122,7 +122,6 @@ _clean-daemon-state:
 
 # Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
-# Integration tests (beamtalk_repl_integration_tests) require daemon and are run separately.
 test-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -135,12 +134,6 @@ test-runtime:
         echo "❌ Runtime tests failed"
         exit 1
     fi
-
-# Run Erlang runtime integration tests (requires daemon)
-test-runtime-integration:
-    @echo "🧪 Running Erlang runtime integration tests..."
-    @echo "⚠️  Make sure daemon is running: just daemon-start"
-    cd runtime && rebar3 eunit --module=beamtalk_repl_integration_tests
 
 # Run a specific Rust test by name
 test-one TEST:

@@ -126,6 +126,17 @@ enum Command {
         #[arg(default_value = "test")]
         path: String,
     },
+
+    /// Generate HTML API documentation from source files (ADR 0008)
+    Doc {
+        /// Source file or directory containing .bt files
+        #[arg(default_value = "lib")]
+        path: String,
+
+        /// Output directory for generated HTML
+        #[arg(long, default_value = "docs/api")]
+        output: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -196,6 +207,7 @@ fn main() -> Result<()> {
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
         Command::Test { path } => commands::test::run_tests(&path),
+        Command::Doc { path, output } => commands::doc::run(&path, &output),
     };
 
     // Exit with appropriate code

@@ -401,12 +401,30 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
+    // Boolean (abstract, not sealed — shared boolean protocol)
+    classes.insert(
+        "Boolean".into(),
+        ClassInfo {
+            name: "Boolean".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: true,
+            state: vec![],
+            methods: vec![
+                builtin_method("isBoolean", 0, "Boolean"),
+                builtin_method("and:", 1, "Boolean"),
+                builtin_method("or:", 1, "Boolean"),
+                builtin_method("xor:", 1, "Boolean"),
+            ],
+        },
+    );
+
     // True (sealed)
     classes.insert(
         "True".into(),
         ClassInfo {
             name: "True".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Boolean".into()),
             is_sealed: true,
             is_abstract: false,
             state: vec![],
@@ -414,8 +432,6 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifTrue:ifFalse:", 2, "True"),
                 builtin_method("ifTrue:", 1, "True"),
                 builtin_method("ifFalse:", 1, "True"),
-                builtin_method("and:", 1, "True"),
-                builtin_method("or:", 1, "True"),
                 builtin_method("not", 0, "True"),
             ],
         },
@@ -426,7 +442,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "False".into(),
         ClassInfo {
             name: "False".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Boolean".into()),
             is_sealed: true,
             is_abstract: false,
             state: vec![],
@@ -434,8 +450,6 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 builtin_method("ifTrue:ifFalse:", 2, "False"),
                 builtin_method("ifTrue:", 1, "False"),
                 builtin_method("ifFalse:", 1, "False"),
-                builtin_method("and:", 1, "False"),
-                builtin_method("or:", 1, "False"),
                 builtin_method("not", 0, "False"),
             ],
         },

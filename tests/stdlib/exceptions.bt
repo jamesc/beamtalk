@@ -30,7 +30,7 @@
 
 // Access exception message from caught error
 [1 / 0] on: Exception do: [:e | e message]
-// => _
+// => badarith
 
 // Access exception kind from caught error
 [42 noSuchMethod] on: Exception do: [:e | e kind]
@@ -46,11 +46,11 @@
 
 // Exception printString returns formatted error
 [42 noSuchMethod] on: Exception do: [:e | e printString]
-// => _
+// => ["Integer does not understand 'noSuchMethod'","\nHint: ","Check spelling or use 'respondsTo:' to verify method exists"]
 
 // Exception hint — nil when no hint available
 [1 / 0] on: Exception do: [:e | e hint]
-// => _
+// => nil
 
 // ===========================================================================
 // BLOCK ensure: — CLEANUP HANDLING

@@ -13,13 +13,13 @@ counter getValue await
 // => 0
 
 (counter setValue: 5) await
-// => _
+// => 5
 
 counter getValue await
 // => 5
 
 (counter setValue: 10) await
-// => _
+// => 10
 
 counter getValue await
 // => 10
@@ -27,7 +27,7 @@ counter getValue await
 // === sumArray: — do: with field mutation (accumulate sum) ===
 
 (counter setValue: 0) await
-// => _
+// => 0
 
 (counter sumArray: #(1, 2, 3)) await
 // => 6
@@ -36,7 +36,7 @@ counter getValue await
 // => 6
 
 (counter setValue: 0) await
-// => _
+// => 0
 
 (counter sumArray: #(10, 20, 30)) await
 // => 60
@@ -60,7 +60,7 @@ acc := FieldMutationAccumulator spawn
 // => #Actor<FieldMutationAccumulator,_>
 
 (acc processArray: #(2, 3, 4)) await
-// => _
+// => {"count":3,"product":24,"sum":9}
 
 acc getSum await
 // => 9

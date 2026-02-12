@@ -95,7 +95,7 @@ format_module_info(#module_info{name = Name, source_file = Source, load_time = L
     TimeAgo = format_time_ago(ElapsedSecs),
     
     #{
-        name => atom_to_list(Name),
+        name => atom_to_binary(Name, utf8),
         source_file => case Source of
             undefined -> "unknown";
             Path -> Path

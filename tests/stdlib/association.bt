@@ -10,22 +10,22 @@
 
 // Symbol key with String value
 #name -> 'James'
-// => _
+// => {"$beamtalk_class":"Association","key":"name","value":"James"}
 
 // Integer key with Integer value
 42 -> 'answer'
-// => _
+// => {"$beamtalk_class":"Association","key":42,"value":"answer"}
 
 // String key
 'city' -> 'London'
-// => _
+// => {"$beamtalk_class":"Association","key":"city","value":"London"}
 
 // ===========================================================================
 // ACCESSORS: key and value
 // ===========================================================================
 
 a := #name -> 'James'
-// => _
+// => {"$beamtalk_class":"Association","key":"name","value":"James"}
 
 a key
 // => name
@@ -34,7 +34,7 @@ a value
 // => James
 
 b := 1 -> 2
-// => _
+// => {"$beamtalk_class":"Association","key":1,"value":2}
 
 b key
 // => 1
@@ -77,7 +77,7 @@ b value
 // ===========================================================================
 
 assocs := #(#a -> 1, #b -> 2, #c -> 3)
-// => _
+// => [{"$beamtalk_class":"Association","key":"a","value":1},{"$beamtalk_class":"Association","key":"b","value":2},{"$beamtalk_class":"Association","key":"c","value":3}]
 
 assocs size
 // => 3

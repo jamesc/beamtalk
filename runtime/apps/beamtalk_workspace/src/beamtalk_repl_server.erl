@@ -11,10 +11,10 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
+-export([start_link/1, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
-         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,
-         term_to_json/1, format_error_message/1]).
+         format_bindings/1, format_loaded/1, format_actors/1, format_modules/1, format_docs/1,
+         term_to_json/1, format_error_message/1, safe_to_existing_atom/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -104,11 +104,13 @@ acceptor_loop(ListenSocket) ->
                     %% Mark activity - new session connected
                     beamtalk_workspace_meta:update_activity(),
                     
-                    %% Spawn client handler with session pid in session mode
-                    %% Monitor session so handler exits if session crashes
+                    %% Spawn client handler monitoring the session.
+                    %% If the session crashes, handle_client eventually
+                    %% gets a recv error (closed socket) or timeout, and
+                    %% the handler exits cleanly.
                     spawn(fun() ->
                         MonRef = erlang:monitor(process, SessionPid),
-                        handle_client(ClientSocket, SessionPid, session),
+                        handle_client(ClientSocket, SessionPid),
                         %% Client disconnected — terminate the session
                         erlang:demonitor(MonRef, [flush]),
                         beamtalk_repl_shell:stop(SessionPid)
@@ -136,65 +138,19 @@ generate_session_id() ->
 
 %%% Client Handling
 
-%% @doc Handle a client connection (runs in separate process).
-%% 
-%% Supports two modes:
-%% - Legacy mode (default): Pid is a beamtalk_repl process (uses message passing)
-%%   Called by: beamtalk_repl:handle_info(accept, ...)
-%% - Session mode: Pid is a beamtalk_repl_shell process (uses gen_server API)
-%%   Called by: beamtalk_repl_server acceptor_loop
-handle_client(Socket, ReplPid) ->
-    %% Default to legacy mode for backward compatibility
-    handle_client(Socket, ReplPid, legacy).
-
-%% @doc Handle a client connection with explicit mode.
--spec handle_client(gen_tcp:socket(), pid(), legacy | session) -> ok.
-handle_client(Socket, Pid, Mode) ->
+%% @doc Handle a client connection in session mode (runs in separate process).
+%%
+%% The SessionPid is a beamtalk_repl_shell process that handles
+%% protocol-aware request routing via beamtalk_repl_protocol.
+%% Called by: beamtalk_repl_server acceptor_loop
+-spec handle_client(gen_tcp:socket(), pid()) -> ok.
+handle_client(Socket, SessionPid) ->
     inet:setopts(Socket, [{active, false}, {packet, line}]),
-    handle_client_loop(Socket, Pid, Mode).
+    handle_client_loop(Socket, SessionPid).
 
 %% @private
-%% Legacy mode: forward requests to beamtalk_repl via message passing (backward compatible)
-handle_client_loop(Socket, ReplPid, legacy) ->
-    try
-        case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-            {ok, Data} ->
-                %% Send request to REPL server via message passing
-                ReplPid ! {client_request, Data, self()},
-                %% Wait for response
-                receive
-                    {response, Response} ->
-                        case gen_tcp:send(Socket, [Response, "\n"]) of
-                            ok ->
-                                handle_client_loop(Socket, ReplPid, legacy);
-                            {error, SendError} ->
-                                logger:warning("REPL client send error: ~p", [SendError]),
-                                gen_tcp:close(Socket)
-                        end
-                after ?RECV_TIMEOUT ->
-                    gen_tcp:send(Socket, [format_error(timeout), "\n"]),
-                    gen_tcp:close(Socket)
-                end;
-            {error, closed} ->
-                ok;
-            {error, timeout} ->
-                gen_tcp:close(Socket);
-            {error, RecvError} ->
-                logger:warning("REPL client recv error: ~p", [RecvError]),
-                gen_tcp:close(Socket)
-        end
-    catch
-        Class:Reason:Stack ->
-            logger:error("REPL client handler crash", #{
-                class => Class,
-                reason => Reason,
-                stack => lists:sublist(Stack, 10)
-            }),
-            catch gen_tcp:close(Socket)
-    end;
-
-%% Session mode: forward requests to beamtalk_repl_shell via gen_server API
-handle_client_loop(Socket, SessionPid, session) ->
+%% Session mode: forward requests to beamtalk_repl_shell via protocol-aware dispatch
+handle_client_loop(Socket, SessionPid) ->
     try
         case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
             {ok, Data} ->
@@ -207,7 +163,7 @@ handle_client_loop(Socket, SessionPid, session) ->
                         %% Send response
                         case gen_tcp:send(Socket, [Response, "\n"]) of
                             ok ->
-                                handle_client_loop(Socket, SessionPid, session);
+                                handle_client_loop(Socket, SessionPid);
                             {error, SendError} ->
                                 logger:warning("REPL client send error: ~p", [SendError]),
                                 gen_tcp:close(Socket)
@@ -216,7 +172,7 @@ handle_client_loop(Socket, SessionPid, session) ->
                         ErrorJson = format_error(DecodeError),
                         case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
                             ok ->
-                                handle_client_loop(Socket, SessionPid, session);
+                                handle_client_loop(Socket, SessionPid);
                             {error, SendError} ->
                                 logger:warning("REPL client send error: ~p", [SendError]),
                                 gen_tcp:close(Socket)
@@ -375,39 +331,17 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
                 {invalid_pid, PidStr}, Msg, fun format_error_message/1)
     end;
 
-handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
-    ClassPids = try beamtalk_object_class:all_classes()
-                catch _:_ -> [] end,
+handle_op(<<"modules">>, _Params, Msg, SessionPid) ->
+    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
+    TrackedModules = beamtalk_repl_modules:list_modules(Tracker),
     RegistryPid = whereis(beamtalk_actor_registry),
-    ModulesWithInfo = lists:filtermap(
-        fun(Pid) ->
-            try
-                Name = gen_server:call(Pid, class_name, 1000),
-                ModName = gen_server:call(Pid, module_name, 1000),
-                SourceFile = case code:is_loaded(ModName) of
-                    {file, F} when is_list(F) -> F;
-                    _ -> "loaded"
-                end,
-                ActorCount = case RegistryPid of
-                    undefined -> 0;
-                    _ ->
-                        case beamtalk_repl_actors:count_actors_for_module(RegistryPid, ModName) of
-                            {ok, N} -> N;
-                            _ -> 0
-                        end
-                end,
-                Info = #{
-                    name => atom_to_binary(Name, utf8),
-                    source_file => SourceFile,
-                    actor_count => ActorCount,
-                    load_time => 0,
-                    time_ago => "n/a"
-                },
-                {true, {Name, Info}}
-            catch _:_ -> false
-            end
+    ModulesWithInfo = lists:map(
+        fun({ModName, ModInfo}) ->
+            ActorCount = beamtalk_repl_modules:get_actor_count(ModName, RegistryPid, Tracker),
+            Info = beamtalk_repl_modules:format_module_info(ModInfo, ActorCount),
+            {ModName, Info}
         end,
-        ClassPids
+        TrackedModules
     ),
     beamtalk_repl_protocol:encode_modules(ModulesWithInfo, Msg, fun term_to_json/1);
 
@@ -494,6 +428,37 @@ handle_op(<<"info">>, Params, Msg, _SessionPid) ->
             jsx:encode(Base#{<<"info">> => Info, <<"status">> => [<<"done">>]})
     end;
 
+handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    case safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                {class_not_found, ClassBin}, Msg, fun format_error_message/1);
+        {ok, ClassName} ->
+            Selector = maps:get(<<"selector">>, Params, undefined),
+            case Selector of
+                undefined ->
+                    case beamtalk_repl_docs:format_class_docs(ClassName) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1)
+                    end;
+                SelectorBin ->
+                    case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1);
+                        {error, {method_not_found, _, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {method_not_found, ClassName, SelectorBin}, Msg, fun format_error_message/1)
+                    end
+            end
+    end;
+
 handle_op(Op, _Params, Msg, _SessionPid) ->
     beamtalk_repl_protocol:encode_error(
         {unknown_op, Op}, Msg, fun format_error_message/1).
@@ -512,6 +477,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     {kill_actor, string()} |
     {list_modules} |
     {unload_module, string()} |
+    {get_docs, binary(), binary() | undefined} |
     {error, term()}.
 parse_request(Data) when is_binary(Data) ->
     try
@@ -558,7 +524,8 @@ parse_request(Data) when is_binary(Data) ->
 -spec op_to_request(binary(), map()) ->
     {eval, string()} | {clear_bindings} | {get_bindings} |
     {load_file, string()} | {list_actors} | {list_modules} |
-    {kill_actor, string()} | {unload_module, string()} | {error, term()}.
+    {kill_actor, string()} | {unload_module, string()} |
+    {get_docs, binary(), binary() | undefined} | {error, term()}.
 op_to_request(<<"eval">>, Map) ->
     Code = maps:get(<<"code">>, Map, <<>>),
     {eval, binary_to_list(Code)};
@@ -579,6 +546,10 @@ op_to_request(<<"unload">>, Map) ->
 op_to_request(<<"kill">>, Map) ->
     Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
     {kill_actor, binary_to_list(Pid)};
+op_to_request(<<"docs">>, Map) ->
+    ClassName = maps:get(<<"class">>, Map, <<>>),
+    Selector = maps:get(<<"selector">>, Map, undefined),
+    {get_docs, ClassName, Selector};
 op_to_request(Op, _Map) ->
     {error, {unknown_op, Op}}.
 
@@ -676,6 +647,11 @@ format_bindings(Bindings) ->
         Bindings
     ),
     jsx:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings}).
+
+%% @doc Format a documentation response as JSON.
+-spec format_docs(binary()) -> binary().
+format_docs(DocText) ->
+    jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText}).
 
 %% @doc Format a loaded file response as JSON.
 %% Classes is a list of #{name => string(), superclass => string()} maps.
@@ -922,6 +898,15 @@ format_error_message({actors_exist, ModuleName, Count}) ->
         <<"Cannot unload ">>, atom_to_binary(ModuleName, utf8), 
         <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
     ]);
+format_error_message({class_not_found, ClassName}) ->
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([<<"Unknown class: ">>, NameBin,
+                      <<". Use :modules to see loaded classes.">>]);
+format_error_message({method_not_found, ClassName, Selector}) ->
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([NameBin, <<" does not understand ">>,
+                      Selector, <<". Use :help ">>, NameBin,
+                      <<" to see available methods.">>]);
 format_error_message({unknown_op, Op}) ->
     iolist_to_binary([<<"Unknown operation: ">>, Op]);
 format_error_message({inspect_failed, PidStr}) ->
@@ -1058,3 +1043,19 @@ format_name(Name) when is_list(Name) ->
     list_to_binary(Name);
 format_name(Name) ->
     iolist_to_binary(io_lib:format("~p", [Name])).
+
+%% @private Convert atom or binary to binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
+to_binary(V) when is_binary(V) -> V.
+
+%% @private Safe atom conversion — returns error instead of creating new atoms.
+-spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
+safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(Bin) when is_binary(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> {error, badarg}
+    end;
+safe_to_existing_atom(_) -> {error, badarg}.

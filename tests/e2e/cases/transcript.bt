@@ -11,13 +11,13 @@
 // BASIC OUTPUT
 // ===========================================================================
 
-// show: prints a string (returns Future from async send)
+// show: prints a string (async send, REPL auto-awaits to nil)
 Transcript show: 'Hello'
-// => _
+// => nil
 
-// cr prints a newline (returns Future from async send)
+// cr prints a newline (async send, REPL auto-awaits to nil)
 Transcript cr
-// => _
+// => nil
 
 // ===========================================================================
 // SHOW: WITH DIFFERENT TYPES
@@ -25,15 +25,15 @@ Transcript cr
 
 // show: with an integer
 Transcript show: 42
-// => _
+// => nil
 
 // show: with a boolean
 Transcript show: true
-// => _
+// => nil
 
 // show: with nil
 Transcript show: nil
-// => _
+// => nil
 
 // ===========================================================================
 // CASCADE (SEMICOLON CHAINING)
@@ -43,6 +43,6 @@ Transcript show: nil
 // requires metaclass dispatch which is not yet implemented.
 // Use separate statements instead:
 Transcript show: 'Hello'
-// => _
+// => nil
 Transcript cr
-// => _
+// => nil

@@ -13,7 +13,7 @@ actor := MutationReturnValues spawn
 // === inject:into: returns accumulator result ===
 
 (actor setValue: 0) await
-// => _
+// => 0
 
 // inject:into: as last expression should return accumulator (6), not nil
 // foldl calls fun(Elem, Acc): first param is list element, second is accumulator
@@ -28,7 +28,7 @@ actor getValue await
 // === on:do: returns try body result on success ===
 
 (actor setValue: 0) await
-// => _
+// => 0
 
 // safeAdd: succeeds, should return self.value after mutation (10)
 (actor safeAdd: 10) await
@@ -40,7 +40,7 @@ actor getValue await
 // === on:do: returns handler result on exception ===
 
 (actor setValue: 0) await
-// => _
+// => 0
 
 // failingAdd triggers exception, handler returns -999
 (actor failingAdd) await
@@ -53,7 +53,7 @@ actor getValue await
 // === ensure: returns try body result ===
 
 (actor setValue: 0) await
-// => _
+// => 0
 
 // addWithCleanup: 5 — body returns self.value (5), cleanup adds 1000
 (actor addWithCleanup: 5) await

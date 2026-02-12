@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// CounterTest — TestCase subclass for testing Counter actor (BT-440)
+// Demonstrates BUnit REPL integration: runAll and run: class-side methods
+//
+// Note: TestCase is a value type (immutable). Method bodies in value types
+// treat := as field writes, so we use message chaining to avoid local vars.
+
+TestCase subclass: CounterTest
+
+  testIncrement =>
+    self assert: (Counter spawn increment await) equals: 1
+
+  testInitialValue =>
+    self assert: (Counter spawn getValue await) equals: 0

@@ -112,29 +112,34 @@ patch Agent >> processMessage: msg {
 
 Beamtalk is purpose-built for multi-agent AI systems:
 
-- **Spawn agent swarms** — millions of concurrent LLM-powered actors
-- **Live inspection** — browse agent state, memory, and message flow
-- **Hot-patch prompts** — edit agent behavior while they run
-- **Fault tolerance** — agents crash and restart cleanly via supervision
-- **Distributed** — spread agents across BEAM clusters transparently
+- **Every actor is a BEAM process** — millions of concurrent isolated agents
+- **Live inspection** — query actor state, methods, and capabilities at runtime
+- **Hot-reload** — edit agent behavior while they run, no restart needed
+- **Fault tolerance** — actors crash and restart cleanly via OTP supervision
+- **Distributed** — spread actors across BEAM clusters transparently
 
 ```beamtalk
-Supervisor subclass: ResearchTeam
-  children: [
-    Researcher spawn model: #claude_opus,
-    Critic spawn model: #gpt4_turbo,
-    Writer spawn model: #claude_sonnet
-  ]
-  strategy: #oneForOne
+// Each agent is its own BEAM process — isolated, supervised, inspectable
+researcher := Researcher spawn
+critic := Critic spawn
 
-team := ResearchTeam spawn
-analysis := team analyze: codeRepo
+// Async messaging — returns futures
+analysis := researcher analyze: codeRepo
+findings := analysis await
 
-// Inspect agents while they work
-team inspect
+// Live introspection while running
+researcher class              // => Researcher
+researcher respondsTo: #plan: // => true
+Researcher methods            // => #(analyze:, plan:, query:, ...)
+
+// Hot-reload: redefine behavior mid-run, takes effect on next message
+// (proposed syntax — see agent-native development doc for design details)
+Researcher >> plan: prompt =>
+  Transcript show: "Planning: ", prompt.
+  ^super plan: prompt
 ```
 
-See [Beamtalk for Agents](docs/beamtalk-for-agents.md) for detailed use cases.
+See [Agent-Native Development](docs/beamtalk-agent-native-development.md) for the full vision.
 
 ---
 
@@ -585,14 +590,11 @@ BEAMTALK_NODE_NAME=beamtalk_custom@localhost
 ### Architecture
 
 - [Architecture](docs/beamtalk-architecture.md) — Compiler pipeline, runtime, hot reload
-- [BEAM Interop](docs/beamtalk-interop.md) — Erlang/Elixir integration specification
-- [Testing Strategy](docs/beamtalk-testing-strategy.md) — How we verify compiler correctness
+- [Testing Strategy](docs/development/testing-strategy.md) — How we verify compiler correctness
 
 ### Tooling & Vision
 
-- [IDE and Live Development](docs/beamtalk-ide.md) — Smalltalk-style integrated environment
-- [Agent Systems](docs/beamtalk-for-agents.md) — Multi-agent AI use cases
-- [Feasibility Assessment](docs/beamtalk-feasibility.md) — Technical and market analysis
+- [Agent-Native Development](docs/beamtalk-agent-native-development.md) — AI agents as developers and live actor systems
 
 ---
 

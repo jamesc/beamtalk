@@ -157,6 +157,10 @@ For each user persona:
 ### 2f. Implementation Feasibility
 
 - **Are phases correctly ordered?** Dependencies between phases must be explicit.
+- **Is there a validation phase?** For broad ADRs introducing new infrastructure (new transport, new dependency, new protocol), check if the implementation starts with a **"napkin" / wire-check phase** — the smallest possible step that proves the core assumption works before building the full feature. If not, recommend adding one. Examples:
+  - New WebSocket transport → Phase 0: single textarea + eval round-trip, before multi-pane UI
+  - New compilation target → Phase 0: compile "hello world", before full language support
+  - New runtime protocol → Phase 0: single message exchange, before full protocol implementation
 - **Are effort estimates realistic?** Compare with similar past work in the codebase.
 - **Are all affected components listed?** Cross-reference the decision with the compilation pipeline:
   ```

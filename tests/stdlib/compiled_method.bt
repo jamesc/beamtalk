@@ -13,7 +13,7 @@
 // ===========================================================================
 
 Counter >> #getValue
-// => _
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 Counter >> #nonExistent
 // => nil
@@ -23,10 +23,10 @@ Counter >> #nonExistent
 // ===========================================================================
 
 cls := Counter
-// => _
+// => Counter
 
 cls >> #getValue
-// => _
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 (cls >> #getValue) selector
 // => getValue

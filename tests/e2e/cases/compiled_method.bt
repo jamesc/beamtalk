@@ -15,10 +15,10 @@
 // ===========================================================================
 
 cls := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 cls >> #getValue
-// => _
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 (cls >> #getValue) selector
 // => getValue

@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
-// => _
+// => Point
 
 cls new
 // => {"$beamtalk_class":"Point","x":0,"y":0}
@@ -39,10 +39,10 @@ cls new
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
-// => _
+// => Point
 
 p := cls new
-// => _
+// => {"$beamtalk_class":"Point","x":0,"y":0}
 
 p getX
 // => 0
@@ -56,8 +56,9 @@ p getX
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
-// => _
+// => Point
 
+// Dynamic methods call: keep wildcard since method list changes when methods are added
 cls methods
 // => _
 
@@ -66,7 +67,7 @@ cls methods
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
-// => _
+// => Point
 
 cls superclass
 // => Object
@@ -76,7 +77,7 @@ cls superclass
 // ---------------------------------------------------------------------------
 
 cls := (Beamtalk classNamed: #Point) await
-// => _
+// => Point
 
 cls class_name
 // => Point
@@ -90,16 +91,16 @@ cls class_name
 // ---------------------------------------------------------------------------
 
 actorCls := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 c := actorCls spawn
-// => _
+// => #Actor<Counter,_>
 
 c increment
-// => _
+// => 1
 
 c increment
-// => _
+// => 2
 
 c getValue await
 // => 2
