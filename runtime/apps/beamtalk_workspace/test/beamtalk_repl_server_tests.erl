@@ -924,7 +924,8 @@ term_to_json_future_pending_test() ->
     timer:sleep(50),
     Result = beamtalk_repl_server:term_to_json(Pid),
     ?assertEqual(<<"#Future<pending>">>, Result),
-    beamtalk_future:resolve(Pid, ok).
+    beamtalk_future:resolve(Pid, ok),
+    exit(Pid, kill).
 
 term_to_json_nested_map_test() ->
     Result = beamtalk_repl_server:term_to_json(#{a => #{b => #{c => 42}}}),
@@ -975,9 +976,11 @@ term_to_json_reference_test() ->
     ?assert(byte_size(Result) > 0).
 
 term_to_json_port_test() ->
-    %% erlang:ports() may return ports; use a fallback
-    Result = beamtalk_repl_server:term_to_json(hd(erlang:ports())),
-    ?assert(is_binary(Result)).
+    %% Create a port deterministically so the test doesn't depend on environment state
+    Port = open_port({spawn, "true"}, []),
+    Result = beamtalk_repl_server:term_to_json(Port),
+    ?assert(is_binary(Result)),
+    catch port_close(Port).
 
 %%% BT-520: format_response fallback/crash safety tests
 
@@ -1129,14 +1132,15 @@ format_error_message_with_complex_reason_test() ->
     Msg = beamtalk_repl_server:format_error_message({read_error, {posix, enoent}}),
     ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
 
-%%% BT-520: format_response internal error fallback (covering lines 565-566)
+%%% BT-520: format_response with port value test
 
 format_response_with_unserializable_test() ->
-    %% Port references should be handled by the fallback path
-    Port = hd(erlang:ports()),
+    %% Port references are handled by term_to_json's fallback via io_lib:format
+    Port = open_port({spawn, "true"}, []),
     Response = beamtalk_repl_server:format_response(Port),
     Decoded = jsx:decode(Response, [return_maps]),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    catch port_close(Port).
 
 %%% BT-520: format_error debug log fallback (covering lines 579, 586)
 %% Note: these paths are hit when format_error_message itself crashes,
@@ -1157,7 +1161,7 @@ tcp_integration_test_() ->
     {setup,
      fun tcp_setup/0,
      fun tcp_cleanup/1,
-     fun(Port) ->
+     fun({Port, _SupPid}) ->
          [
           {"clear op", fun() -> tcp_clear_test(Port) end},
           {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
@@ -1188,7 +1192,13 @@ tcp_integration_test_() ->
 tcp_setup() ->
     process_flag(trap_exit, true),
     application:ensure_all_started(beamtalk_runtime),
-    %% Find a free port
+    %% Find a free port and start workspace, with retry on port conflict
+    {Port, SupPid} = tcp_start_workspace(3),
+    timer:sleep(100),
+    {Port, SupPid}.
+
+tcp_start_workspace(0) -> error(failed_to_start_workspace);
+tcp_start_workspace(Retries) ->
     {ok, LSock} = gen_tcp:listen(0, [{reuseaddr, true}]),
     {ok, Port} = inet:port(LSock),
     gen_tcp:close(LSock),
@@ -1199,16 +1209,14 @@ tcp_setup() ->
         tcp_port => Port,
         auto_cleanup => false
     },
-    {ok, SupPid} = case beamtalk_workspace_sup:start_link(Config) of
-        {ok, Pid} -> {ok, Pid};
-        {error, {already_started, Pid}} -> {ok, Pid}
-    end,
-    timer:sleep(100),
-    put(tcp_test_sup, SupPid),
-    Port.
+    case beamtalk_workspace_sup:start_link(Config) of
+        {ok, Pid} -> {Port, Pid};
+        {error, {already_started, Pid}} -> {Port, Pid};
+        {error, {listen_failed, eaddrinuse}} -> tcp_start_workspace(Retries - 1);
+        {error, Reason} -> error({workspace_start_failed, Reason})
+    end.
 
-tcp_cleanup(_Port) ->
-    SupPid = get(tcp_test_sup),
+tcp_cleanup({_Port, SupPid}) ->
     case is_pid(SupPid) andalso is_process_alive(SupPid) of
         true ->
             unlink(SupPid),
