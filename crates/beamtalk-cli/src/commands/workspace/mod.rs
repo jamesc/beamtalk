@@ -55,6 +55,8 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::paths::socket_path;
+
 /// Default idle timeout in seconds (4 hours)
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
 
@@ -383,6 +385,7 @@ pub fn start_detached_node(
 
     let _child = Command::new("erl")
         .args(&args)
+        .env("BEAMTALK_DAEMON_SOCKET", socket_path()?.as_os_str())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
