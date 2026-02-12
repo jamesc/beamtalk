@@ -14,7 +14,7 @@
 
 // Create a Hanoi instance
 h := Hanoi new
-// => _
+// => {"$beamtalk_class":"Hanoi"}
 
 // ===========================================================================
 // BASE CASE (n=1)
