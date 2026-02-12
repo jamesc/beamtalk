@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Towers of Hanoi example
+// Tests the classic recursive algorithm that moves n disks between three pegs.
+// Hanoi is an Object subclass (not Actor), so use `new` not `spawn`.
+// BT-374: Transcript show:/cr are async sends, REPL auto-awaits to nil.
+
+// @load examples/hanoi.bt
+
+// ===========================================================================
+// INSTANTIATION
+// ===========================================================================
+
+// Create a Hanoi instance
+h := Hanoi new
+// => {"$beamtalk_class":"Hanoi"}
+
+// ===========================================================================
+// BASE CASE (n=1)
+// ===========================================================================
+
+// Solve with 1 disk — single move from A to C
+h solve: 1 from: 'A' to: 'C' via: 'B'
+// => nil
+
+// ===========================================================================
+// RECURSIVE CASE (n=3)
+// ===========================================================================
+
+// Solve with 3 disks — 7 moves (2^3 - 1)
+h solve: 3 from: 'A' to: 'C' via: 'B'
+// => nil
