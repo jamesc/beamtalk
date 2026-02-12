@@ -292,8 +292,17 @@ class_object_tag(ClassName) when is_atom(ClassName) ->
 -spec method(pid() | class_name() | tuple(), selector()) -> map() | nil.
 method(ClassPid, Selector) when is_pid(ClassPid) ->
     gen_server:call(ClassPid, {method, Selector});
-method({beamtalk_object, _ClassTag, _Module, ClassPid}, Selector) when is_pid(ClassPid) ->
-    gen_server:call(ClassPid, {method, Selector});
+method({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when is_pid(ClassPid) ->
+    case is_class_name(ClassTag) of
+        true ->
+            gen_server:call(ClassPid, {method, Selector});
+        false ->
+            Error0 = beamtalk_error:new(type_error, ClassTag),
+            Error1 = beamtalk_error:with_selector(Error0, '>>'),
+            Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(
+                io_lib:format(">> expects a class, got instance ~p", [Obj]))),
+            beamtalk_error:raise(Error2)
+    end;
 method(ClassName, Selector) when is_atom(ClassName) ->
     case whereis_class(ClassName) of
         undefined ->
@@ -303,7 +312,13 @@ method(ClassName, Selector) when is_atom(ClassName) ->
             beamtalk_error:raise(Error2);
         Pid ->
             gen_server:call(Pid, {method, Selector})
-    end.
+    end;
+method(Other, _Selector) ->
+    Error0 = beamtalk_error:new(type_error, 'Object'),
+    Error1 = beamtalk_error:with_selector(Error0, '>>'),
+    Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(
+        io_lib:format(">> expects a class, got ~p", [Other]))),
+    beamtalk_error:raise(Error2).
 
 %% @doc Check if a class has a method (does not walk hierarchy).
 %%
