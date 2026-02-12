@@ -190,6 +190,20 @@ pub enum CodeGenError {
         /// The binding name (e.g., "Transcript", "Beamtalk").
         name: String,
     },
+
+    /// Block arity mismatch in nil-testing method.
+    #[error(
+        "{selector} block must take 0 or 1 arguments, got {arity}.\n\n\
+             Fix: Use a zero-arg block or a one-arg block:\n\
+             \x20 obj ifNotNil: [ 'found' ]\n\
+             \x20 obj ifNotNil: [:v | v printString]"
+    )]
+    BlockArityMismatch {
+        /// The selector (e.g., "ifNotNil:").
+        selector: String,
+        /// The actual arity of the block.
+        arity: usize,
+    },
 }
 
 /// Result type for code generation operations.
