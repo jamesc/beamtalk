@@ -795,7 +795,10 @@ impl CoreErlangGenerator {
     ///
     /// This is the main expression dispatcher that routes each AST node type
     /// to its specialized code generation method.
-    fn generate_expression(&mut self, expr: &Expression) -> Result<()> {
+    ///
+    /// ADR 0018 Phase 3: Returns `Document<'static>` directly for composable
+    /// code generation without string buffer intermediaries.
+    fn generate_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
@@ -804,12 +807,10 @@ impl CoreErlangGenerator {
                 // stored in persistent_term, not class objects from the registry.
                 if dispatch_codegen::is_workspace_binding(&name.name) {
                     if self.workspace_mode {
-                        let doc = Document::String(format!(
+                        return Ok(Document::String(format!(
                             "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
                             name.name
-                        ));
-                        self.write_document(&doc);
-                        return Ok(());
+                        )));
                     }
                     return Err(CodeGenError::WorkspaceBindingInBatchMode {
                         name: name.name.to_string(),
@@ -820,7 +821,7 @@ impl CoreErlangGenerator {
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
 
-                let doc = docvec![
+                Ok(docvec![
                     format!(
                         "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
                         name.name
@@ -835,9 +836,7 @@ impl CoreErlangGenerator {
                         name.name
                     ),
                     "end",
-                ];
-                self.write_document(&doc);
-                Ok(())
+                ])
             }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
@@ -853,7 +852,13 @@ impl CoreErlangGenerator {
                 selector,
                 arguments,
                 ..
-            } => self.generate_message_send(receiver, selector, arguments),
+            } => {
+                let start = self.output.len();
+                self.generate_message_send(receiver, selector, arguments)?;
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                Ok(Document::String(result))
+            }
             Expression::Assignment {
                 target,
                 value,
@@ -1167,7 +1172,7 @@ impl CoreErlangGenerator {
     /// For **structural intrinsics** (unquoted, e.g., `@primitive blockValue`),
     /// these are handled at the call site by `dispatch_codegen`, not here.
     /// The method body for structural intrinsics is never directly called.
-    fn generate_primitive(&mut self, name: &str, is_quoted: bool) -> Result<()> {
+    fn generate_primitive(&mut self, name: &str, is_quoted: bool) -> Result<Document<'static>> {
         let class_name = self
             .class_identity
             .as_ref()
@@ -1185,8 +1190,7 @@ impl CoreErlangGenerator {
             if let Some(code) =
                 primitive_implementations::generate_primitive_bif(&class_name, name, &params)
             {
-                self.write_document(&Document::String(code));
-                return Ok(());
+                return Ok(Document::String(code));
             }
         }
 
@@ -1197,12 +1201,9 @@ impl CoreErlangGenerator {
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         let params_str = self.current_method_params.join(", ");
-        let doc = docvec![format!(
+        Ok(docvec![format!(
             "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
-        ),];
-        self.write_document(&doc);
-
-        Ok(())
+        )])
     }
 }
 
@@ -1226,39 +1227,35 @@ mod tests {
     fn test_generate_literal_integer() {
         let mut generator = CoreErlangGenerator::new("test");
         let lit = Literal::Integer(42);
-        let result = generator.generate_literal(&lit);
-        assert!(result.is_ok());
-        assert_eq!(generator.output, "42");
+        let doc = generator.generate_literal(&lit).unwrap();
+        assert_eq!(doc.to_pretty_string(), "42");
     }
 
     #[test]
     fn test_generate_literal_float() {
         let mut generator = CoreErlangGenerator::new("test");
         let lit = Literal::Float(2.5);
-        let result = generator.generate_literal(&lit);
-        assert!(result.is_ok());
-        assert_eq!(generator.output, "2.5");
+        let doc = generator.generate_literal(&lit).unwrap();
+        assert_eq!(doc.to_pretty_string(), "2.5");
     }
 
     #[test]
     fn test_generate_literal_symbol() {
         let mut generator = CoreErlangGenerator::new("test");
         let lit = Literal::Symbol("ok".into());
-        let result = generator.generate_literal(&lit);
-        assert!(result.is_ok());
-        assert_eq!(generator.output, "'ok'");
+        let doc = generator.generate_literal(&lit).unwrap();
+        assert_eq!(doc.to_pretty_string(), "'ok'");
     }
 
     #[test]
     fn test_generate_literal_string() {
         let mut generator = CoreErlangGenerator::new("test");
         let lit = Literal::String("hello".into());
-        let result = generator.generate_literal(&lit);
-        assert!(result.is_ok());
+        let doc = generator.generate_literal(&lit).unwrap();
         // Core Erlang binary syntax: #{segment, ...}#
         // Each segment is #<charcode>(8,1,'integer',['unsigned'|['big']])
         assert_eq!(
-            generator.output,
+            doc.to_pretty_string(),
             "#\
 {#<104>(8,1,'integer',['unsigned'|['big']]),\
 #<101>(8,1,'integer',['unsigned'|['big']]),\
@@ -2510,9 +2507,8 @@ end
 
         // Access the "Loop" identifier - it should resolve to the user's binding
         let loop_id = Identifier::new("Loop", Span::new(0, 4));
-        generator.generate_identifier(&loop_id).unwrap();
-
-        let output = &generator.output;
+        let doc = generator.generate_identifier(&loop_id).unwrap();
+        let output = doc.to_pretty_string();
 
         // The identifier should resolve to the user's variable, not an internal temp
         assert!(
@@ -2527,9 +2523,8 @@ end
     fn test_generate_empty_map_literal() {
         let mut generator = CoreErlangGenerator::new("test");
         let pairs = vec![];
-        let result = generator.generate_map_literal(&pairs);
-        assert!(result.is_ok());
-        assert_eq!(generator.output.trim(), "~{}~");
+        let doc = generator.generate_map_literal(&pairs).unwrap();
+        assert_eq!(doc.to_pretty_string().trim(), "~{}~");
     }
 
     #[test]
@@ -2549,29 +2544,29 @@ end
             ),
         ];
 
-        let result = generator.generate_map_literal(&pairs);
-        assert!(result.is_ok());
+        let doc = generator.generate_map_literal(&pairs).unwrap();
+        let output = doc.to_pretty_string();
         // Symbols become atoms in Core Erlang
         assert!(
-            generator.output.contains("'name'"),
+            output.contains("'name'"),
             "Output should contain 'name': {}",
-            generator.output
+            output
         );
         // Strings are represented as binaries with character codes
         assert!(
-            generator.output.contains("#<65>"),
+            output.contains("#<65>"),
             "Output should contain character code for 'A': {}",
-            generator.output
+            output
         );
         assert!(
-            generator.output.contains("'age'"),
+            output.contains("'age'"),
             "Output should contain 'age': {}",
-            generator.output
+            output
         );
         assert!(
-            generator.output.contains("30"),
+            output.contains("30"),
             "Output should contain 30: {}",
-            generator.output
+            output
         );
     }
 
@@ -2748,8 +2743,8 @@ end
             span: Span::new(0, 14),
         };
 
-        generator.generate_expression(&cascade).unwrap();
-        let output = &generator.output;
+        let doc = generator.generate_expression(&cascade).unwrap();
+        let output = doc.to_pretty_string();
 
         // Should bind the underlying receiver (x) once
         assert!(
@@ -2824,8 +2819,8 @@ end
             span: Span::new(0, 45),
         };
 
-        generator.generate_expression(&cascade).unwrap();
-        let output = &generator.output;
+        let doc = generator.generate_expression(&cascade).unwrap();
+        let output = doc.to_pretty_string();
 
         // Should bind the underlying receiver (collection) once
         assert!(
@@ -3912,10 +3907,9 @@ end
         generator.class_identity = Some(util::ClassIdentity::new("Integer"));
         generator.current_method_params = vec!["Other".to_string()];
 
-        let result = generator.generate_primitive("+", true);
-        assert!(result.is_ok());
+        let doc = generator.generate_primitive("+", true).unwrap();
         // BT-340: Now emits direct Erlang BIF instead of dispatch delegation
-        assert_eq!(generator.output, "call 'erlang':'+'(Self, Other)");
+        assert_eq!(doc.to_pretty_string(), "call 'erlang':'+'(Self, Other)");
     }
 
     #[test]
@@ -3924,10 +3918,9 @@ end
         generator.class_identity = Some(util::ClassIdentity::new("Block"));
         generator.current_method_params = vec![];
 
-        let result = generator.generate_primitive("blockValue", false);
-        assert!(result.is_ok());
+        let doc = generator.generate_primitive("blockValue", false).unwrap();
         assert_eq!(
-            generator.output,
+            doc.to_pretty_string(),
             "call 'bt@stdlib@block':'dispatch'('blockValue', [], Self)"
         );
     }
@@ -3938,10 +3931,9 @@ end
         generator.class_identity = Some(util::ClassIdentity::new("Integer"));
         generator.current_method_params = vec!["End".to_string(), "Block".to_string()];
 
-        let result = generator.generate_primitive("toDo", false);
-        assert!(result.is_ok());
+        let doc = generator.generate_primitive("toDo", false).unwrap();
         assert_eq!(
-            generator.output,
+            doc.to_pretty_string(),
             "call 'bt@stdlib@integer':'dispatch'('toDo', [End, Block], Self)"
         );
     }

@@ -555,7 +555,9 @@ impl CoreErlangGenerator {
             return Ok(());
         }
         // Fallback
-        self.generate_expression(expr)
+        let doc = self.generate_expression(expr)?;
+        self.write_document(&doc);
+        Ok(())
     }
     ///
     /// Two levels of optimization:
@@ -818,7 +820,9 @@ impl CoreErlangGenerator {
             }
         }
         // Fallback: should not reach here if is_field_assignment check was correct
-        self.generate_expression(expr)
+        let doc = self.generate_expression(expr)?;
+        self.write_document(&doc);
+        Ok(())
     }
 
     /// Generates code for a super message send.

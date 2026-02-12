@@ -134,13 +134,15 @@ impl CoreErlangGenerator {
 
                     // `whileTrue:` - loop while condition block returns true
                     "whileTrue:" => {
-                        self.generate_while_true(receiver, &arguments[0])?;
+                        let doc = self.generate_while_true(receiver, &arguments[0])?;
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
 
                     // `whileFalse:` - loop while condition block returns false
                     "whileFalse:" => {
-                        self.generate_while_false(receiver, &arguments[0])?;
+                        let doc = self.generate_while_false(receiver, &arguments[0])?;
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
 

@@ -74,42 +74,24 @@ impl CoreErlangGenerator {
         self.output.push_str(&rendered);
     }
 
-    /// Captures the output of `generate_expression` as a `String` without
-    /// modifying the output buffer.
+    /// Captures the output of `generate_expression` as a `String`.
     ///
-    /// This is the bridge mechanism for Phase 0 migration (ADR 0018): functions
-    /// that are being migrated to return `Document` can capture expression output
-    /// as owned strings and embed them in document trees.
-    ///
-    /// All side effects on `var_context` and `state_threading` are preserved.
+    /// ADR 0018 Phase 3: Now that `generate_expression` returns `Document`,
+    /// this renders the document to a string. Retained for backward compatibility
+    /// with code that needs string interpolation or direct string manipulation.
     pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
-        let start = self.output.len();
-        match self.generate_expression(expr) {
-            Ok(()) => {
-                let captured = self.output[start..].to_string();
-                self.output.truncate(start);
-                Ok(captured)
-            }
-            Err(err) => {
-                // Roll back any partial output written by generate_expression.
-                self.output.truncate(start);
-                Err(err)
-            }
-        }
+        let doc = self.generate_expression(expr)?;
+        Ok(doc.to_pretty_string())
     }
 
-    /// Transition helper (ADR 0018 Phase 3): captures expression output as a
-    /// `Document::String`, bridging between old `generate_expression` (writes to
-    /// buffer) and new functions that compose `Document` trees.
+    /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
-    /// Replaces `capture_expression` in migrated code — same semantics but
-    /// returns `Document` instead of `String` for direct composition via `docvec!`.
+    /// ADR 0018 Phase 3: Now a simple forwarding to `generate_expression`.
     pub(super) fn expression_doc(
         &mut self,
         expr: &Expression,
     ) -> Result<super::document::Document<'static>> {
-        let s = self.capture_expression(expr)?;
-        Ok(super::document::Document::String(s))
+        self.generate_expression(expr)
     }
 
     /// Generates a fresh variable name and binds it in the current scope.

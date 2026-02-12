@@ -855,7 +855,8 @@ impl CoreErlangGenerator {
                 // Class var assignment or class method self-send: the generated code
                 // ends with `in ` (open scope) so ClassVarsN stays visible for the
                 // remaining body expressions.
-                self.generate_expression(expr)?;
+                let doc = self.generate_expression(expr)?;
+                self.write_document(&doc);
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_str = self.capture_expression(expr)?;

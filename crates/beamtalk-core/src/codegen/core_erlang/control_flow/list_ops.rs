@@ -121,7 +121,8 @@ impl CoreErlangGenerator {
                     // Sequence with previous expression using let _ = ... in
                     self.write_document(&docvec!["let _ = "]);
                 }
-                self.generate_expression(expr)?;
+                let doc = self.generate_expression(expr)?;
+                self.write_document(&doc);
 
                 if !is_last {
                     self.write_document(&docvec![" in "]);
@@ -392,7 +393,8 @@ impl CoreErlangGenerator {
                         format!(" in {{{acc_var}, {final_state}}}"),
                     ]);
                 } else {
-                    self.generate_expression(expr)?;
+                    let doc = self.generate_expression(expr)?;
+                    self.write_document(&doc);
                     self.write_document(&docvec![" in "]);
                 }
             }

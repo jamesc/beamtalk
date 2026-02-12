@@ -15,6 +15,7 @@
 //!
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
+use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector,
@@ -32,34 +33,28 @@ impl CoreErlangGenerator {
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    pub(super) fn generate_literal(&mut self, lit: &Literal) -> Result<()> {
+    pub(super) fn generate_literal(&mut self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
-            Literal::Integer(n) => self.write_document(&docvec![format!("{n}")]),
-            Literal::Float(f) => self.write_document(&docvec![format!("{f}")]),
+            Literal::Integer(n) => Ok(docvec![format!("{n}")]),
+            Literal::Float(f) => Ok(docvec![format!("{f}")]),
             Literal::String(s) => {
-                // Reuse the shared UTF-8 binary literal helper (encodes via .bytes())
                 let result = Self::binary_string_literal(s);
-                self.write_document(&docvec![result]);
+                Ok(docvec![result])
             }
-            Literal::Symbol(s) => self.write_document(&docvec![format!("'{s}'")]),
-            Literal::Character(c) => self.write_document(&docvec![format!("{}", *c as u32)]),
+            Literal::Symbol(s) => Ok(docvec![format!("'{s}'")]),
+            Literal::Character(c) => Ok(docvec![format!("{}", *c as u32)]),
             Literal::List(elements) => {
-                let mut result = String::from("[");
+                let mut parts: Vec<Document<'static>> = vec![Document::String("[".to_string())];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        result.push_str(", ");
+                        parts.push(Document::String(", ".to_string()));
                     }
-                    // Capture recursive literal output
-                    let start = self.output.len();
-                    self.generate_literal(elem)?;
-                    result.push_str(&self.output[start..]);
-                    self.output.truncate(start);
+                    parts.push(self.generate_literal(elem)?);
                 }
-                result.push(']');
-                self.write_document(&docvec![result]);
+                parts.push(Document::String("]".to_string()));
+                Ok(Document::Vec(parts))
             }
         }
-        Ok(())
     }
 
     /// Generates code for an identifier reference.
@@ -71,32 +66,32 @@ impl CoreErlangGenerator {
     ///    - **Actor context**: `State` or `StateAcc` (with threading)
     ///    - **`ValueType` context**: `Self` parameter
     ///    - **Repl context**: `State` from bindings
-    pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
+    pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<Document<'static>> {
         // Handle special reserved identifiers as atoms
         match id.name.as_str() {
-            "true" => self.write_document(&docvec!["'true'"]),
-            "false" => self.write_document(&docvec!["'false'"]),
-            "nil" => self.write_document(&docvec!["'nil'"]),
+            "true" => Ok(docvec!["'true'"]),
+            "false" => Ok(docvec!["'false'"]),
+            "nil" => Ok(docvec!["'nil'"]),
             "self" => {
                 // BT-411: Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
-                    self.write_document(&docvec![var_name]);
+                    Ok(docvec![var_name])
                 } else {
-                    self.write_document(&docvec!["Self"]); // self → Self parameter (BT-161)
+                    Ok(docvec!["Self"]) // self → Self parameter (BT-161)
                 }
             }
             "super" => {
                 // super alone is an error - must be used in message send (super method: args)
-                return Err(CodeGenError::UnsupportedFeature {
+                Err(CodeGenError::UnsupportedFeature {
                     feature: "super used alone (must be in message send like 'super method: arg')"
                         .to_string(),
                     location: format!("byte offset {}", id.span.start()),
-                });
+                })
             }
             _ => {
                 // Check if it's a bound variable in current or outer scopes
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
-                    self.write_document(&docvec![var_name]);
+                    Ok(docvec![var_name])
                 } else {
                     // Field access from state/self
                     // BT-213: Context determines which variable to use
@@ -132,14 +127,13 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    self.write_document(&docvec![format!(
+                    Ok(docvec![format!(
                         "call 'maps':'get'('{}', {state_var})",
                         id.name
-                    )]);
+                    )])
                 }
             }
         }
-        Ok(())
     }
 
     /// Generates code for a map literal: `~{key => value, ...}~`
@@ -149,10 +143,12 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// ~{'name' => <<"Alice">>, 'age' => 30}~
     /// ```
-    pub(super) fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
+    pub(super) fn generate_map_literal(
+        &mut self,
+        pairs: &[MapPair],
+    ) -> Result<Document<'static>> {
         if pairs.is_empty() {
-            self.write_document(&docvec!["~{}~"]);
-            return Ok(());
+            return Ok(docvec!["~{}~"]);
         }
 
         let mut result = String::from("~{ ");
@@ -171,9 +167,7 @@ impl CoreErlangGenerator {
         }
 
         result.push_str(" }~");
-        self.write_document(&docvec![result]);
-
-        Ok(())
+        Ok(Document::String(result))
     }
 
     /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
@@ -183,23 +177,22 @@ impl CoreErlangGenerator {
         &mut self,
         elements: &[Expression],
         tail: Option<&Expression>,
-    ) -> Result<()> {
-        let mut result = String::from("[");
+    ) -> Result<Document<'static>> {
+        let mut parts: Vec<Document<'static>> = vec![Document::String("[".to_string())];
         for (i, elem) in elements.iter().enumerate() {
             if i > 0 {
-                result.push_str(", ");
+                parts.push(Document::String(", ".to_string()));
             }
-            result.push_str(&self.capture_expression(elem)?);
+            parts.push(self.expression_doc(elem)?);
         }
         if let Some(t) = tail {
             if !elements.is_empty() {
-                result.push_str(" | ");
+                parts.push(Document::String(" | ".to_string()));
             }
-            result.push_str(&self.capture_expression(t)?);
+            parts.push(self.expression_doc(t)?);
         }
-        result.push(']');
-        self.write_document(&docvec![result]);
-        Ok(())
+        parts.push(Document::String("]".to_string()));
+        Ok(Document::Vec(parts))
     }
 
     /// Generates code for field access (e.g., `self.value`).
@@ -213,17 +206,16 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         field: &Identifier,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-412: Class methods access class variables directly from ClassVars map
         if self.in_class_method {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
                     let cv = self.current_class_var();
-                    self.write_document(&docvec![format!(
+                    return Ok(docvec![format!(
                         "call 'maps':'get'('{}', {cv})",
                         field.name
                     )]);
-                    return Ok(());
                 }
             }
             return Err(CodeGenError::UnsupportedFeature {
@@ -243,11 +235,10 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
-                self.write_document(&docvec![format!(
+                return Ok(docvec![format!(
                     "call 'maps':'get'('{}', {state_var})",
                     field.name
                 )]);
-                return Ok(());
             }
         }
 
@@ -277,7 +268,7 @@ impl CoreErlangGenerator {
         &mut self,
         field_name: &str,
         value: &Expression,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-412: Class methods assign to class variables via ClassVars map threading.
         // The generated code leaves `let ClassVarsN = ...` open — the caller (sequential
         // expression handler) must provide the continuation.
@@ -294,10 +285,9 @@ impl CoreErlangGenerator {
                         " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
                     )
                 ];
-                self.write_document(&doc);
                 // Store result var name for callers that need to reference it
                 self.last_open_scope_result = Some(val_var);
-                return Ok(());
+                return Ok(doc);
             }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
@@ -336,9 +326,7 @@ impl CoreErlangGenerator {
             ),
             val_var
         ];
-        self.write_document(&doc);
-
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates code for a block (closure).
@@ -347,7 +335,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// fun (Param1, Param2) -> <body> end
     /// ```
-    pub(super) fn generate_block(&mut self, block: &Block) -> Result<()> {
+    pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         // Push a new scope for block parameters
         self.push_scope();
 
@@ -359,13 +347,17 @@ impl CoreErlangGenerator {
             let var_name = self.fresh_var(&param.name);
             params.push_str(&var_name);
         }
-        let doc = docvec!["fun (", params, ") -> "];
-        self.write_document(&doc);
+        let header = docvec!["fun (", params, ") -> "];
+
+        // Capture block body output via buffer
+        let start = self.output.len();
         self.generate_block_body(block)?;
+        let body_str = self.output[start..].to_string();
+        self.output.truncate(start);
 
         // Pop the scope when done with the block
         self.pop_scope();
-        Ok(())
+        Ok(docvec![header, body_str])
     }
 
     /// Generates await expression.
@@ -449,7 +441,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         messages: &[CascadeMessage],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         if messages.is_empty() {
             // Edge case: cascade with no messages just evaluates to the receiver
             return self.generate_expression(receiver);
@@ -566,8 +558,7 @@ impl CoreErlangGenerator {
                 }
             }
 
-            self.write_document(&docvec![result]);
-            Ok(())
+            Ok(Document::String(result))
         } else {
             // Fallback: if the receiver is not a MessageSend (which should not
             // happen for well-formed cascades), preserve the previous behavior:
@@ -617,8 +608,7 @@ impl CoreErlangGenerator {
                 }
             }
 
-            self.write_document(&docvec![result]);
-            Ok(())
+            Ok(Document::String(result))
         }
     }
 
@@ -657,7 +647,8 @@ impl CoreErlangGenerator {
 
             if is_last {
                 // Last expression: generate directly (its value is the block's result)
-                self.generate_expression(expr)?;
+                let doc = self.generate_expression(expr)?;
+                self.write_document(&doc);
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
