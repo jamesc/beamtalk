@@ -88,28 +88,35 @@ impl CoreErlangGenerator {
 
         if is_abstract {
             // BT-105: Abstract classes cannot be spawned — generate error methods
-            self.generate_abstract_spawn_error_method()?;
+            let doc = self.generate_abstract_spawn_error_method()?;
+            self.write_document(&doc);
             self.output.push('\n');
-            self.generate_abstract_spawn_with_args_error_method()?;
+            let doc = self.generate_abstract_spawn_with_args_error_method()?;
+            self.write_document(&doc);
             self.output.push('\n');
         } else {
             // Generate spawn/0 function (class method to instantiate actors)
-            self.generate_spawn_function(module)?;
+            let doc = self.generate_spawn_function(module)?;
+            self.write_document(&doc);
             self.output.push('\n');
 
             // Generate spawn/1 function (class method with init args)
-            self.generate_spawn_with_args_function(module)?;
+            let doc = self.generate_spawn_with_args_function(module)?;
+            self.write_document(&doc);
             self.output.push('\n');
         }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
-        self.generate_actor_new_error_method()?;
+        let doc = self.generate_actor_new_error_method()?;
+            self.write_document(&doc);
         self.output.push('\n');
-        self.generate_actor_new_with_args_error_method()?;
+        let doc = self.generate_actor_new_with_args_error_method()?;
+            self.write_document(&doc);
         self.output.push('\n');
 
         // Generate superclass/0 class method for reflection
-        self.generate_superclass_function(module)?;
+        let doc = self.generate_superclass_function(module)?;
+            self.write_document(&doc);
         self.output.push('\n');
 
         // Generate init/1 function
@@ -146,7 +153,8 @@ impl CoreErlangGenerator {
             self.output.push('\n');
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
-            self.generate_safe_dispatch()?;
+            let doc = self.generate_safe_dispatch()?;
+            self.write_document(&doc);
             self.output.push('\n');
         }
 
@@ -155,11 +163,13 @@ impl CoreErlangGenerator {
         self.output.push('\n');
 
         // Generate method table
-        self.generate_method_table(module)?;
+        let doc = self.generate_method_table(module)?;
+        self.write_document(&doc);
         self.output.push('\n');
 
         // Generate has_method/1 for reflection (BT-242)
-        self.generate_has_method(module)?;
+        let doc = self.generate_has_method(module)?;
+        self.write_document(&doc);
 
         // BT-403: Generate sealed method standalone functions
         if !self.sealed_method_selectors.is_empty() {

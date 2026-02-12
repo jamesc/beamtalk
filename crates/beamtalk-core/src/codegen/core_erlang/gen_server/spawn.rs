@@ -39,7 +39,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-411: Check if class defines an initialize method
         let has_initialize = module
             .classes
@@ -94,8 +94,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Builds the Document for the initialize-with-cleanup block (BT-425).
@@ -154,7 +153,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-411: Check if class defines an initialize method
         let has_initialize = module
             .classes
@@ -251,8 +250,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `new/0` error method for actors (BT-217).
@@ -273,7 +271,7 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &mut self,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let hint_binary = Self::binary_string_literal("Use spawn instead");
         let doc = docvec![
             "'new'/0 = fun () ->",
@@ -294,8 +292,7 @@ impl CoreErlangGenerator {
             ),
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `new/1` error method for actors (BT-217).
@@ -316,7 +313,7 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &mut self,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let hint_binary = Self::binary_string_literal("Use spawnWith: instead");
         let doc = docvec![
             "'new'/1 = fun (_InitArgs) ->",
@@ -337,8 +334,7 @@ impl CoreErlangGenerator {
             ),
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `spawn/0` error method for abstract classes (BT-105).
@@ -349,7 +345,7 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name();
         let hint_binary = Self::binary_string_literal(
             "Abstract classes cannot be instantiated. Subclass it first.",
@@ -375,15 +371,14 @@ impl CoreErlangGenerator {
             ),
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `spawn/1` error method for abstract classes (BT-105).
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name();
         let hint_binary = Self::binary_string_literal(
             "Abstract classes cannot be instantiated. Subclass it first.",
@@ -409,8 +404,7 @@ impl CoreErlangGenerator {
             ),
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Returns a Core Erlang binary string literal for the given string.
@@ -450,7 +444,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_superclass_function(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let superclass_atom = module
             .classes
             .first()
@@ -462,7 +456,6 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 }

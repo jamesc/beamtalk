@@ -8,7 +8,7 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::document::{INDENT, line, nest};
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, MethodKind, Module};
 use crate::docvec;
@@ -29,7 +29,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_method_table(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<(String, usize)> = module
             .expressions
@@ -78,9 +78,8 @@ impl CoreErlangGenerator {
             nest(INDENT, docvec![line(), format!("~{{{entries_str}}}~"),]),
             "\n\n",
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `has_method/1` function for runtime reflection.
@@ -99,7 +98,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_has_method(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<String> = module
             .expressions
@@ -152,9 +151,8 @@ impl CoreErlangGenerator {
             ),
             "\n\n",
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `safe_dispatch/3` function with error isolation.
@@ -177,7 +175,7 @@ impl CoreErlangGenerator {
     ///         {'error', {Type, Error}, State}
     /// ```
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<()> {
+    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<Document<'static>> {
         let module_name = &self.module_name;
 
         let doc = docvec![
@@ -200,9 +198,7 @@ impl CoreErlangGenerator {
             ),
             "\n\n",
         ];
-        self.write_document(&doc);
-
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the dispatch/4 function for message routing.
