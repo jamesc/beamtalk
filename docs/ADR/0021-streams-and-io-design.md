@@ -71,13 +71,13 @@ Stream is not abstract — it's the concrete type. Everything that produces sequ
 // Files
 File lines: 'data.csv'            // => Stream of lines (lazy, constant memory)
 
-// Generators
+// Generators (pure-functional, no process needed)
 Stream from: 1                    // => infinite Stream: 1, 2, 3, ...
 Stream from: 1 by: [:n | n * 2]  // => infinite Stream: 1, 2, 4, 8, ...
-Stream generate: [:yield |        // => custom generator
-  yield value: 'hello'
-  yield value: 'world'
-]
+
+// Stateful generators — use actors (duck-typing or future Behaviours)
+fib := FibonacciGenerator spawn   // Actor that speaks Stream protocol
+fib take: 10                      // => #(0, 1, 1, 2, 3, 5, 8, 13, 21, 34)
 
 // Future integration points (not part of this ADR)
 Console lines                      // => Stream of stdin lines
@@ -408,7 +408,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - Departure from Smalltalk's ReadStream/WriteStream (porting friction for parser-heavy code)
 - Closure-based lazy evaluation is a bigger engineering lift than positional streams
 - No dedicated string building class (use `List join` or string concatenation for now)
-- `Stream generate:` (yield-based generators) requires spawning a helper process on BEAM, which partially contradicts the "no processes per stream" design goal — this constructor should be documented as the exception
+- Imperative yield-style generators (`generate:`) deferred — requires hiding a process inside a value type, which breaks the mental model. Stateful generators use actors instead (duck-typing the Stream protocol). This is the right pattern for BEAM but less convenient than Kotlin's `sequence { yield() }`.
 - Abandoned file streams (not fully consumed, not block-scoped) rely on process exit for handle cleanup — could leak handles in long-lived processes. `File open:do:` is the safe pattern.
 - **Cross-process limitation:** File-backed Streams cannot be sent as messages to actors — BEAM file handles are process-local. A file Stream consumed by a different process than the one that opened it will fail. Collection-backed and generator-backed Streams (pure closures) transfer safely. This limits the "universal" promise in actor-heavy code. Mitigation: use `File open:do:` (block-scoped, same process) or collect to List before sending.
 - **Auto-await interaction:** When an actor method returns a Stream, auto-await resolves the Future but the Stream's closures still reference the actor's process context. File-backed Streams from actors will fail on the caller side. This interaction must be documented clearly; full resolution is deferred to BT-507 (Future class ADR).
@@ -425,7 +425,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - Create `lib/Stream.bt` as sealed Object subclass
 - Implement closure-based generator in `beamtalk_stream.erl`
 - Core protocol: `select:`, `collect:`, `reject:`, `take:`, `drop:`, `do:`, `inject:into:`, `detect:`, `asList`, `anySatisfy:`, `allSatisfy:`
-- Constructors: `Stream from:by:` (generator), `Stream on:` (from collection)
+- Constructors: `Stream from:` (successor), `Stream from:by:` (step function), `Stream on:` (from collection)
 - **Required:** `printString` showing pipeline structure, e.g. `Stream(from: 1 | select: [...])` — critical for REPL inspectability
 - Register in `builtins.rs`, `beamtalk_stdlib.app.src`, `beamtalk_primitive.erl`
 - Add tests in `tests/stdlib/stream.bt`
@@ -446,6 +446,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - **Components:** stdlib updates to existing classes
 
 ### Future Phases (separate ADRs/issues)
+- **Actor-based generators** — Actors that speak the Stream protocol (`take:`, `select:`, etc.) for stateful/imperative generators. This avoids hiding a process inside a value type. When Behaviours land, formalize as `Streamable` behaviour.
 - `Console lines` — Stream of stdin lines
 - Network streaming — TCP/UDP socket lines as Streams
 - `Process output:` — OS command output as Stream
