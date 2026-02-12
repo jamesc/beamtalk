@@ -183,7 +183,7 @@ EEP-48's `Docs` list uses `{Kind, Name, Arity}` tuples designed for Erlang's `fu
 
 In Smalltalk, you can programmatically modify documentation — `MyClass comment: 'Updated docs'`. Docs are part of the live image. EEP-48 docs are frozen at compile time. For an "interactive-first" language promising hot code reloading and live development, static docs in `.beam` files mean the live environment can't evolve its own documentation. This contradicts Principle #1 (Interactive-first).
 
-**Why we accept this cost:** EEP-48 docs are frozen per-module, but modules are hot-reloadable. When a class is redefined in the REPL, the new `.beam` includes updated docs. Full Smalltalk-style `comment:` mutation (changing docs without recompiling) is deferred to the source retention future work. For now, "recompile to update docs" is acceptable — Elixir works this way and developers find it natural.
+**Why this tension resolves itself:** Beamtalk uses files-as-image with continuous compilation (ADR 0004). When the workspace supports `Integer doc: 'Updated docs'`, the flow is: (1) workspace writes updated `///` comments back to `lib/Integer.bt`, (2) file watcher detects change and recompiles, (3) hot-reloads the module with new EEP-48 chunk, (4) `code:get_doc/1` returns updated docs immediately. Git versions the change automatically. The "frozen" limitation of EEP-48 disappears because **compilation is continuous, not batch** — editing docs is just another source edit that flows through the normal live-reload pipeline. This is architecturally equivalent to Pharo's `comment:` but with files as the backing store instead of an image.
 
 #### 4. "`README.md` for package docs is un-Smalltalk" (Philosophy)
 
@@ -193,7 +193,7 @@ In Smalltalk, everything lives in the image — there are no external files. Usi
 
 ### Residual Tension
 
-- **"Docs as objects" remains the strongest unresolved philosophical tension** — EEP-48 is pragmatically correct but philosophically un-Smalltalk. Source retention (future work) would close this gap.
+- **"Docs as objects" resolves with workspace maturity** — EEP-48 + continuous compilation means `doc:` edits flow naturally through the live-reload pipeline. The gap is one of *sequencing* (workspace needs file-write + recompile support from ADR 0004), not of architecture. No separate "source retention" feature needed.
 - **EEP-48 format mapping** needs a concrete design decision during Phase 2 implementation: how selectors map to `{Kind, Name, Arity}` tuples.
 - **The two-system cost** is real but bounded — the doc chunk injection is a well-understood post-processing step, not an ongoing maintenance burden.
 
