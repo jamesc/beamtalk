@@ -223,7 +223,9 @@ This means collections keep their eager `do:`, `collect:`, `select:` for simple 
 ### Kotlin
 - `Sequence` — lazy pipeline, same API as eager collections but deferred
 - `sequence { yield(value) }` for generator-based streams
+- Known confusion: `List.filter {}` vs `Sequence.filter {}` — same name, different semantics, hidden by extension functions and type inference
 - **Adopted:** Same protocol for eager (Collection) and lazy (Stream) — `select:`, `collect:`, `take:`
+- **Key difference:** Smalltalk's explicit message-send-to-receiver makes the eager/lazy boundary visible at the call site, unlike Kotlin's extension functions
 
 ### Ruby
 - `IO` class with `each_line`, `read`, `write`
@@ -301,7 +303,14 @@ Kotlin has this exact problem: `List.filter {}` vs `Sequence.filter {}` — same
 
 The cleaner design: make ONE of them primary. Either collections are lazy by default (like Haskell), or streams use different method names (like Elixir's `Stream.map` vs `Enum.map`).
 
-**Counter:** The shared protocol is a *feature*, not a bug. It means code that does `data select: [:x | x > 0]` works regardless of whether `data` is a List or a Stream — that's polymorphism, the core of object-oriented design. Kotlin's experience shows this is learnable: developers quickly internalize "List = eager, Sequence = lazy." The alternative (different names) means you can't write generic code. And making collections lazy by default would break the simplicity of `#(1,2,3) select: [:x | x > 0]` returning a List, not something you have to materialize. The Kotlin model works — we're consciously adopting it.
+**Counter:** Smalltalk's message-send model resolves this more cleanly than Kotlin. The Kotlin confusion arises because extension functions and type inference hide which type you're calling on — `things.filter {}` looks identical whether `things` is a `List` or `Sequence`. In Beamtalk, you're *always* sending a message to a *known receiver*:
+
+```beamtalk
+aList select: [:x | x > 0]            // I know this is a List → eager
+aList stream select: [:x | x > 0]     // I explicitly opted into Stream → lazy
+```
+
+The opt-in to laziness is visible at the call site — you wrote `stream`. In the REPL, you can inspect the receiver's class at any time. Polymorphism — same name, different behavior based on receiver — is literally the *point* of Smalltalk's design. `select:` on List returns a List. `select:` on Stream returns a Stream. The receiver IS the boundary, and it's always explicit. Making collections lazy by default (Haskell) would break the simplicity of `#(1,2,3) select: [:x | x > 0]` returning a List. Using different names (Elixir's `Enum.map` vs `Stream.map`) means you can't write generic code that works with both. Same names with explicit opt-in is the right balance — and Smalltalk's paradigm makes it work better than Kotlin's.
 
 **Chaining syntax note:** Message-send languages (Smalltalk, Newspeak, Beamtalk) have a known limitation where keyword messages cannot chain without parentheses or temporary variables. No satisfying syntax sugar has been found in the Smalltalk literature — the Pharo [Sequence](https://ceur-ws.org/Vol-3627/paper11.pdf) framework (IWST 2023) addresses this at the library level but not syntactically. Temporary variables are the pragmatic approach and align with Beamtalk's interactive-first philosophy (each step is inspectable in the REPL). Research into novel pipeline syntax is tracked in BT-506.
 
