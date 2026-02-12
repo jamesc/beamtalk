@@ -160,6 +160,27 @@ wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
     end,
     #{'$beamtalk_class' => Class, error => Error};
 wrap(Other) ->
+    wrap_raw(Other).
+
+%% @doc Wrap raw Erlang errors into structured beamtalk errors.
+%% Recognizes common Erlang error patterns and produces better messages.
+wrap_raw({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
+    {arity, Expected} = erlang:fun_info(Fun, arity),
+    Actual = length(Args),
+    Message = iolist_to_binary(io_lib:format(
+        "Wrong number of arguments: block expects ~B but was called with ~B",
+        [Expected, Actual])),
+    Hint = <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
+    GenError = #beamtalk_error{
+        kind = arity_mismatch,
+        class = 'Block',
+        selector = undefined,
+        message = Message,
+        hint = Hint,
+        details = #{expected_args => Expected, actual_args => Actual}
+    },
+    #{'$beamtalk_class' => kind_to_class(arity_mismatch), error => GenError};
+wrap_raw(Other) ->
     GenError = #beamtalk_error{
         kind = runtime_error,
         class = undefined,

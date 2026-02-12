@@ -29,9 +29,9 @@ sealed Number subclass: Integer
   max: other => (self > other) ifTrue: [self] ifFalse: [other]
 
   // Structural intrinsics — loop constructs
-  timesRepeat: block => @primitive timesRepeat
-  to: end do: block => @primitive toDo
-  to: end by: step do: block => @primitive toByDo
+  timesRepeat: block => @intrinsic timesRepeat
+  to: end do: block => @intrinsic toDo
+  to: end by: step do: block => @intrinsic toByDo
 
   // Conversion — selector-based runtime dispatch
   asFloat => @primitive 'asFloat'

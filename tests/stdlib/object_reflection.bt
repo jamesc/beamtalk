@@ -83,11 +83,21 @@ nil ifNil: ['default']
 'hello' ifNotNil: [:s | s ++ ' world']
 // => hello world
 
+// Zero-arg block (no receiver passed)
+42 ifNotNil: [ 99 ]
+// => 99
+
+'hello' ifNotNil: [ 'yes' ]
+// => yes
+
 // ---------------------------------------------------------------------------
 // ifNotNil: on nil
 // ---------------------------------------------------------------------------
 
 nil ifNotNil: [:v | v + 1]
+// => nil
+
+nil ifNotNil: [ 99 ]
 // => nil
 
 // ---------------------------------------------------------------------------
@@ -99,6 +109,10 @@ nil ifNotNil: [:v | v + 1]
 
 'hello' ifNil: [''] ifNotNil: [:s | s ++ '!']
 // => hello!
+
+// Zero-arg notNil block
+42 ifNil: [0] ifNotNil: [ 99 ]
+// => 99
 
 // ---------------------------------------------------------------------------
 // ifNil:ifNotNil: two-way conditional on nil
@@ -116,6 +130,10 @@ nil ifNil: ['empty'] ifNotNil: [:s | s ++ '!']
 
 42 ifNotNil: [:v | v * 2] ifNil: [0]
 // => 84
+
+// Zero-arg notNil block
+42 ifNotNil: [ 99 ] ifNil: [0]
+// => 99
 
 // ---------------------------------------------------------------------------
 // ifNotNil:ifNil: reversed order on nil

@@ -49,8 +49,8 @@ undefinedVar + 5
 
 // Wrong number of block arguments (too few)
 [:x :y | x + y] value: 5
-// => ERROR: badarity
+// => ERROR: Wrong number of arguments: block expects 2 but was called with 1
 
 // Wrong number of block arguments (too many)
 [:x | x + 1] value: 5 value: 10
-// => ERROR: badarity
+// => ERROR: Wrong number of arguments: block expects 1 but was called with 2
