@@ -119,3 +119,8 @@ abstract Object subclass: Collection
 
   /// Return a string representation.
   asString => self printString
+
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// Subclasses must override this with their own iteration logic.
+  do: block => self subclassResponsibility
