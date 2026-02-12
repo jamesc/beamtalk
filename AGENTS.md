@@ -1583,7 +1583,7 @@ beamtalk_stdlib (compiled stdlib)
 - See `docs/development/testing-strategy.md` for compilation workflow details
 
 #### 4. Stdlib Tests (Compiled Expression Tests) — ADR 0014
-**Location:** `tests/stdlib/*.bt` (~32 files, ~654 assertions)
+**Location:** `tests/stdlib/*.bt` (~57 files)
 - **Pure language feature tests** compiled directly to EUnit (no REPL needed)
 - Uses same `// =>` assertion format as E2E tests
 - Runs via `just test-stdlib` (fast, ~14s vs ~50s for E2E)
@@ -1591,20 +1591,32 @@ beamtalk_stdlib (compiled stdlib)
 - Supports `@load` directives for fixture-dependent tests (actors, sealed classes)
 - **Use this for any new test that doesn't need REPL/workspace features**
 
-#### 5. End-to-End Tests (REPL Integration)
-**Location:** `tests/e2e/cases/*.bt` (~23 files)
+#### 5. BUnit Tests (TestCase Classes) — ADR 0014 Phase 2
+**Location:** `test/*.bt` (project test directory)
+- **SUnit-style test classes** that subclass `TestCase`
+- Methods starting with `test` are auto-discovered and run with fresh instances
+- `setUp`/`tearDown` lifecycle methods for test fixtures
+- Assertion methods: `assert:`, `assert:equals:`, `deny:`, `should:raise:`, `fail:`
+- Runs via `beamtalk test` (compiles to EUnit, fast)
+- Can also run interactively in REPL: `CounterTest runAll` or `CounterTest run: #testName`
+- **Use this for stateful tests, complex actor interactions, multi-assertion scenarios**
+
+#### 6. End-to-End Tests (REPL Integration)
+**Location:** `tests/e2e/cases/*.bt` (~18 files)
 - Require a running REPL daemon (started automatically by test harness)
 - Test workspace bindings, REPL commands, variable persistence, auto-await
 - Test `ERROR:` assertion patterns and `@load-error` directives
 - Runs via `just test-e2e` (~50s)
 - **Only use for tests that genuinely need the REPL**
 
-**When choosing between stdlib and E2E tests:**
+**When choosing between stdlib, BUnit, and E2E tests:**
 | Test needs... | Where |
 |---|---|
 | Pure language features (arithmetic, strings, blocks) | `tests/stdlib/` |
 | Collections (List, Dictionary, Set, Tuple) | `tests/stdlib/` |
 | Actor spawn + messaging (with `@load`) | `tests/stdlib/` |
+| Stateful tests with setUp/tearDown | `test/*.bt` (BUnit) |
+| Complex actor interactions, multiple assertions | `test/*.bt` (BUnit) |
 | Workspace bindings (Transcript, Beamtalk) | `tests/e2e/cases/` |
 | REPL commands, variable persistence | `tests/e2e/cases/` |
 | Auto-await, `ERROR:` assertions | `tests/e2e/cases/` |
@@ -1649,6 +1661,7 @@ just --list                  # See all available commands
 just build                   # Build Rust + Erlang runtime
 just test                    # Run fast tests (~10s)
 just test-stdlib             # Compiled language feature tests (~14s)
+beamtalk test                # Run BUnit TestCase tests
 just test-e2e                # Run E2E tests (~50s)
 just ci                      # Run all CI checks
 

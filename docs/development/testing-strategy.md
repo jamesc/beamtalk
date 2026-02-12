@@ -12,6 +12,7 @@ Beamtalk uses a multi-layered testing strategy covering the Rust compiler, Erlan
 | Snapshot Tests | insta | `test-package-compiler/` | Validate lexer, parser, and codegen output |
 | Compilation Tests | erlc | `test-package-compiler/` | Verify generated Core Erlang compiles |
 | **Stdlib Tests** | **EUnit (compiled)** | **`tests/stdlib/*.bt`** | **Language feature validation (no REPL needed)** |
+| **BUnit Tests** | **EUnit (TestCase)** | **`test/*.bt`** | **User-written TestCase subclasses (`beamtalk test`)** |
 | Runtime Unit Tests | EUnit | `runtime/apps/beamtalk_runtime/test/*_tests.erl` | Test Erlang runtime modules |
 | Integration Tests | EUnit + daemon | `runtime/apps/beamtalk_runtime/test/*_integration_tests.erl` | Test REPL ↔ daemon communication |
 | Codegen Simulation Tests | EUnit | `runtime/apps/beamtalk_runtime/test/beamtalk_codegen_simulation_tests.erl` | Simulate compiler output, test runtime behavior |
@@ -283,6 +284,72 @@ Counter spawn
 
 ---
 
+### 4b. BUnit Tests (TestCase Classes)
+
+SUnit-style test classes that subclass `TestCase`. Part of ADR 0014 Phase 2.
+
+**Location:** `test/*.bt` (project test directory)
+
+**Command:** `beamtalk test`
+
+**How it works:** The `beamtalk test` command discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance.
+
+**Test file format:**
+```beamtalk
+// test/counter_test.bt
+
+TestCase subclass: CounterTest
+
+  testInitialValue =>
+    self assert: (Counter spawn getValue await) equals: 0
+
+  testIncrement =>
+    self assert: (Counter spawn increment await) equals: 1
+
+  testMultipleIncrements =>
+    | counter |
+    counter := Counter spawn
+    3 timesRepeat: [counter increment await]
+    self assert: (counter getValue await) equals: 3
+```
+
+**Lifecycle:** For each test method: create fresh instance → `setUp` → test method → `tearDown`
+
+**Assertion methods:**
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `assert:` | Assert condition is true | `self assert: (x > 0)` |
+| `assert:equals:` | Assert two values equal | `self assert: result equals: 42` |
+| `deny:` | Assert condition is false | `self deny: list isEmpty` |
+| `should:raise:` | Assert block raises error | `self should: [1 / 0] raise: #badarith` |
+| `fail:` | Unconditional failure | `self fail: 'not implemented'` |
+
+**REPL integration:** TestCase classes can also be run interactively:
+```text
+> :load test/counter_test.bt
+> CounterTest runAll        // Run all tests in class
+> CounterTest run: #testIncrement  // Run single test
+```
+
+**When to use BUnit tests:**
+| Test needs... | Use BUnit? |
+|---|---|
+| Stateful test setup/teardown | ✅ Yes |
+| Multiple assertions per test | ✅ Yes |
+| Testing complex actor interactions | ✅ Yes |
+| Simple expression → result checks | ❌ No — use stdlib tests |
+| REPL command testing | ❌ No — use E2E |
+
+**Adding a BUnit test:**
+1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
+2. Add test methods prefixed with `test`
+3. Run `beamtalk test`
+
+**Design:** See [ADR 0014](../ADR/0014-beamtalk-test-framework.md) Phase 2 for the full TestCase framework rationale.
+
+---
+
 ### 5. Erlang Runtime Unit Tests
 
 EUnit tests for the Erlang runtime modules.
@@ -473,16 +540,19 @@ just ci
 The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-beamtalk-test-framework.md):
 
 ```
-         ╱╲
-        ╱  ╲        E2E Tests (~23 files)
-       ╱    ╲       REPL/workspace integration — slow (~50s)
-      ╱──────╲
-     ╱        ╲     Stdlib Tests (~32 files, ~654 assertions)
-    ╱          ╲    Compiled language features — fast (~14s)
-   ╱────────────╲
-  ╱              ╲  Rust + Erlang Unit Tests (~600+ tests)
- ╱                ╲ Parser, codegen, runtime modules — fast (~10s)
-╱──────────────────╲
+            ╱╲
+           ╱  ╲        E2E Tests (~18 files)
+          ╱    ╲       REPL/workspace integration — slow (~50s)
+         ╱──────╲
+        ╱        ╲     BUnit Tests (TestCase classes)
+       ╱          ╲    User-written test suites — fast (`beamtalk test`)
+      ╱────────────╲
+     ╱              ╲  Stdlib Tests (~57 files)
+    ╱                ╲ Compiled expression tests — fast (~14s)
+   ╱──────────────────╲
+  ╱                    ╲ Rust + Erlang Unit Tests (~600+ tests)
+ ╱                      ╲ Parser, codegen, runtime modules — fast (~10s)
+╱────────────────────────╲
 ```
 
 | Layer | Count | Speed | What it tests |
@@ -490,8 +560,9 @@ The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-bea
 | Rust unit tests | ~600 tests | ~5s | Parser, AST, codegen |
 | Erlang unit tests | ~100 tests | ~3s | Runtime, primitives, object system |
 | Compiler snapshots | ~51 cases | ~2s | Codegen output stability |
-| **Stdlib tests** | **~654 assertions** | **~14s** | **Language features (compiled)** |
-| E2E tests | ~23 files | ~50s | REPL/workspace integration |
+| **Stdlib tests** | **~57 files** | **~14s** | **Language features (compiled)** |
+| **BUnit tests** | **TestCase classes** | **fast** | **User test suites (`beamtalk test`)** |
+| E2E tests | ~18 files | ~50s | REPL/workspace integration |
 
 ---
 
@@ -633,6 +704,28 @@ sideEffectExpression
 ```
 
 **Use this for:** Pure language features, arithmetic, strings, blocks, closures, collections, actor spawn/messaging (with `@load`).
+
+### Adding a BUnit Test (TestCase Classes)
+
+1. Create `test/my_feature_test.bt` with `TestCase subclass: MyFeatureTest`
+2. Add test methods prefixed with `test` (auto-discovered)
+3. Optionally add `setUp`/`tearDown` for fixtures
+4. Run `beamtalk test`
+
+Example test file:
+```beamtalk
+TestCase subclass: MyFeatureTest
+  setUp =>
+    self.thing := MyThing new
+
+  testBasicBehavior =>
+    self assert: (self.thing doSomething) equals: 42
+
+  testErrorCase =>
+    self should: [self.thing badMethod] raise: #does_not_understand
+```
+
+**Use this for:** Stateful tests with setup/teardown, complex scenarios with multiple assertions, actor interaction tests.
 
 ### Adding an E2E Test (REPL/Workspace Integration)
 

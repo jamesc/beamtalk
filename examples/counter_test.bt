@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Example: BUnit test for Counter actor (ADR 0014)
+//
+// Demonstrates TestCase subclass with assertion methods.
+// Run with: beamtalk test
+// Or interactively in the REPL:
+//   > :load examples/counter.bt
+//   > :load examples/counter_test.bt
+//   > CounterTest runAll
+//
+// Note: TestCase is a value type (Object subclass), so each test method
+// creates its own objects rather than sharing state via setUp fields.
+
+TestCase subclass: CounterTest
+
+  testInitialValue =>
+    self assert: (Counter spawn getValue await) equals: 0
+
+  testIncrement =>
+    self assert: (Counter spawn increment await) equals: 1
+
+  testDecrement =>
+    self assert: (Counter spawn decrement await) equals: -1
+
+  testMultipleIncrements =>
+    | counter |
+    counter := Counter spawn
+    3 timesRepeat: [counter increment await]
+    self assert: (counter getValue await) equals: 3
+
+  testIncrementAndDecrement =>
+    | counter |
+    counter := Counter spawn
+    counter increment await
+    counter increment await
+    counter decrement await
+    self assert: (counter getValue await) equals: 1
+
+  testDenyInitialNonPositive =>
+    self deny: (Counter spawn getValue await) > 0

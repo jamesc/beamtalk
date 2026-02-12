@@ -1084,36 +1084,92 @@ patch Counter >> #increment {
 counter eval: [self.value := 100]
 ```
 
-### Testing Framework
+### Testing Framework (ADR 0014)
 
+Beamtalk includes a native test framework inspired by Smalltalk's SUnit. Tests are compiled directly to EUnit modules and run on BEAM — no REPL daemon needed.
+
+#### Expression Tests (`// =>` assertions)
+
+The simplest way to test — expressions with expected results:
+
+```beamtalk
+// test/arithmetic_test.bt
+
+1 + 2
+// => 3
+
+'hello' size
+// => 5
+
+'hello' , ' world'
+// => hello world
 ```
-// Unit tests for actors
+
+Run with `beamtalk test` or `just test-stdlib`.
+
+#### TestCase Classes (✅ Implemented)
+
+SUnit-style test classes with lifecycle methods and assertions:
+
+```beamtalk
+// test/counter_test.bt
+
 TestCase subclass: CounterTest
 
+  testInitialValue =>
+    self assert: (Counter spawn getValue await) equals: 0
+
   testIncrement =>
+    self assert: (Counter spawn increment await) equals: 1
+
+  testMultipleIncrements =>
     | counter |
     counter := Counter spawn
-    counter increment await
-    self assert: (counter getValue await) equals: 1
+    3 timesRepeat: [counter increment await]
+    self assert: (counter getValue await) equals: 3
+```
 
-  testConcurrency =>
-    | counter futures |
-    counter := Counter spawn
-    futures := (1 to: 100) collect: [:_ | counter increment]
-    futures do: [:f | f await]
-    self assert: (counter getValue await) equals: 100
+Each test method gets a fresh instance with `setUp` → test → `tearDown` lifecycle.
 
-// Property-based testing
-PropertyTest subclass: CounterProperties
+#### Assertion Methods
 
-  incrementNeverNegative =>
-    forAll: [n in: PositiveInteger]
-    check: [
-      | counter |
-      counter := Counter spawn
-      n timesRepeat: [counter increment await]
-      (counter getValue await) >= 0
-    ]
+| Method | Description | Example |
+|--------|-------------|---------|
+| `assert:` | Assert condition is true | `self assert: (x > 0)` |
+| `assert:equals:` | Assert two values are equal | `self assert: result equals: 42` |
+| `deny:` | Assert condition is false | `self deny: list isEmpty` |
+| `should:raise:` | Assert block raises error | `self should: [1 / 0] raise: #badarith` |
+| `fail:` | Unconditional failure | `self fail: 'not implemented'` |
+
+#### Running Tests
+
+```bash
+# Run TestCase tests in test/ directory
+beamtalk test
+
+# Run expression tests (stdlib)
+just test-stdlib
+
+# Run all tests (unit + stdlib + E2E)
+just test-all
+```
+
+#### REPL Integration (✅ Implemented)
+
+Run tests interactively from the REPL:
+
+```text
+> :load test/counter_test.bt
+Loaded CounterTest
+
+> CounterTest runAll
+Running 2 tests...
+  ✓ testIncrement
+  ✓ testMultipleIncrements
+2 passed, 0 failed
+
+> CounterTest run: #testIncrement
+  ✓ testIncrement
 ```
 
 ### Observability Integration
