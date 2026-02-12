@@ -51,7 +51,96 @@ Smalltalk recognized this problem in 1972. The solution was the **live image**: 
 
 ---
 
-## 2. Smalltalk Was Accidentally Designed for Agents
+## 2. What is Beamtalk?
+
+### The language
+
+Beamtalk is a new programming language that compiles to the **BEAM virtual machine** — the same runtime that powers Erlang, Elixir, WhatsApp (2B+ users), Discord, and RabbitMQ. The BEAM is arguably the best platform ever built for concurrent, fault-tolerant, distributed systems. But its two main languages — Erlang (1986, Prolog-derived syntax) and Elixir (2011, functional-first) — remain niche, accessible mainly to developers willing to learn unfamiliar paradigms.
+
+Beamtalk's syntax descends from Smalltalk, the 1970s language that pioneered live programming, objects, and graphical user interfaces. The core idea: **everything is an object, and all communication happens by sending messages.** There are no standalone functions, no static methods, no special syntax for control flow — just objects sending messages to other objects.
+
+### A complete class in 6 lines
+
+```beamtalk
+Actor subclass: Counter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
+  getValue => ^self.value
+```
+
+This defines a `Counter` that's a subclass of `Actor`. It has one piece of state (`value`, initialized to 0) and three methods. The `^` means "return this value." That's the entire class — no boilerplate, no imports, no ceremony.
+
+For comparison, the equivalent Erlang is ~50 lines of `gen_server` callbacks. The equivalent Elixir is ~20 lines. Beamtalk hides the OTP machinery behind the object model most developers already know.
+
+### Using it
+
+```beamtalk
+c := Counter spawn           // Create a new Counter (spawns a BEAM process)
+c increment                  // Send the 'increment' message
+c increment                  // Send it again
+c getValue                   // => 2
+```
+
+`spawn` creates a BEAM process. `increment` is a message send that becomes an inter-process call. The BEAM handles scheduling, memory isolation, and garbage collection per-process. If this Counter crashes, nothing else in the system is affected — that's fault isolation at the language level.
+
+### Syntax at a glance
+
+Beamtalk's syntax is Smalltalk-**inspired**, not Smalltalk-**compatible**. We keep Smalltalk's core innovation (keyword messages) while modernizing the rough edges:
+
+| Feature | Beamtalk | What it means |
+|---------|----------|---------------|
+| **Keyword messages** | `array at: 1 put: "hello"` | Named parameters built into the syntax — reads like English |
+| **Unary messages** | `counter increment` | No parentheses needed for zero-argument calls |
+| **Binary messages** | `3 + 4` | Arithmetic and comparison operators work as expected |
+| **Blocks (closures)** | `[:x | x + 1]` | Concise anonymous functions |
+| **Assignment** | `count := 0` | `:=` clearly distinct from equality (`=`) |
+| **Comments** | `// single line` | Familiar to C/JS/Rust developers |
+| **State declaration** | `state: name = default` | Instance variables with initial values |
+| **Implicit returns** | Last expression is the return value | `^` only for early returns |
+
+No semicolons, no periods, no curly braces. Newlines separate statements. Indentation is conventional, not significant.
+
+### The compilation pipeline
+
+```
+Beamtalk source (.bt)
+    → Rust compiler (lexer, parser, semantic analysis, codegen)
+    → Core Erlang (.core)
+    → erlc (standard Erlang compiler)
+    → BEAM bytecode (.beam)
+    → Hot-loaded into running BEAM node
+```
+
+The Rust compiler is build infrastructure — it's not part of the runtime. What runs is BEAM bytecode, identical to what Erlang and Elixir produce. This means beamtalk inherits the BEAM's entire runtime for free:
+
+- **Hot code reloading** — change a method, it takes effect on the next message send. No restart.
+- **Preemptive scheduling** — millions of lightweight processes, fairly scheduled. No process can starve others.
+- **Per-process GC** — no stop-the-world pauses. Each actor has its own heap.
+- **Fault isolation** — one process crashing cannot corrupt another's state.
+- **Transparent distribution** — processes can span cluster nodes. Same syntax whether local or remote.
+- **OTP supervision** — automatic restart of crashed processes with configurable strategies.
+
+### What makes it different
+
+Beamtalk occupies a unique position:
+
+| | Erlang | Elixir | Beamtalk |
+|---|--------|--------|----------|
+| **Paradigm** | Functional | Functional | Object-oriented (message passing) |
+| **Syntax heritage** | Prolog | Ruby | Smalltalk |
+| **Concurrency model** | Processes + messages | Processes + messages | Actors (processes hidden behind objects) |
+| **State management** | Explicit in callbacks | Explicit in callbacks | Implicit via `state:` declarations |
+| **Primary interface** | Shell | IEx REPL | Live workspace |
+| **OTP boilerplate** | Heavy | Moderate (macros hide some) | None (objects *are* OTP processes) |
+| **Live programming** | Hot reload | Hot reload | Hot reload + reflection + introspection |
+
+The key insight: **objects are the right abstraction over BEAM processes.** The BEAM's actor model (isolated processes communicating by messages) *is* the object-oriented paradigm that Smalltalk invented. Beamtalk makes this connection explicit — every object is a process, every method call is a message, every class is a supervision boundary.
+
+---
+
+## 3. Smalltalk Was Accidentally Designed for Agents
 
 Alan Kay designed Smalltalk for children learning to program — people who think by doing, need immediate feedback, and learn by poking things and seeing what happens. That description also perfectly fits an AI coding agent.
 
@@ -72,53 +161,11 @@ These aren't incidental features. They're the **core design** of Smalltalk, and 
 
 ---
 
-## 3. How Beamtalk Changes Agent Development
+## 4. How Beamtalk Changes Agent Development
 
-### What is beamtalk?
+With that foundation, here's how each of beamtalk's properties helps AI coding agents:
 
-Beamtalk is a new programming language that compiles to the BEAM virtual machine — the same runtime that powers Erlang, Elixir, WhatsApp, and Discord. Its syntax is inspired by Smalltalk, the 1970s language that pioneered live programming, objects, and graphical user interfaces.
-
-The core idea: **everything is an object, and all communication happens by sending messages.** There are no functions, no static methods, no special syntax for control flow — just objects sending messages to other objects.
-
-Here's what a complete beamtalk class looks like:
-
-```beamtalk
-Actor subclass: Counter
-  state: value = 0
-
-  increment => self.value := self.value + 1
-  decrement => self.value := self.value - 1
-  getValue => ^self.value
-```
-
-This defines a `Counter` that's a subclass of `Actor`. It has one piece of state (`value`, initialized to 0) and three methods. The `^` means "return this value." That's the entire class — no boilerplate, no imports, no ceremony.
-
-Under the hood, `Actor subclass: Counter` creates a BEAM process (an Erlang `gen_server`), so every Counter instance is a lightweight concurrent process with its own isolated heap and mailbox. But the developer doesn't see any of that — they see an object with methods.
-
-Using it in the REPL:
-
-```beamtalk
-c := Counter spawn           // Create a new Counter (spawns a BEAM process)
-c increment                  // Send the 'increment' message
-c increment                  // Send it again
-c getValue                   // => 2
-```
-
-`spawn` creates the process. `increment` is a message send that becomes an inter-process call. The BEAM handles scheduling, memory isolation, and garbage collection per-process. If this Counter crashes, nothing else in the system is affected.
-
-**Key language properties:**
-- **Keyword messages** — named parameters built into the syntax: `array at: 1 put: "hello"` reads like English
-- **Blocks** — closures with concise syntax: `[:x | x + 1]`
-- **`:=` for assignment** — clearly distinct from equality (`=`)
-- **`//` comments** — familiar to C/JavaScript developers (Smalltalk traditionally used `"..."` for comments)
-- **No semicolons or periods** — newlines separate statements
-- **Implicit returns** — last expression is the return value; `^` is only for early returns
-
-The language compiles `.bt` source files to Core Erlang (an intermediate representation), which the standard Erlang compiler (`erlc`) then compiles to BEAM bytecode. This means beamtalk gets BEAM's battle-tested runtime — hot code reloading, preemptive scheduling, per-process garbage collection, and transparent distribution across cluster nodes — for free.
-
-Now, here's how each of these properties helps AI coding agents:
-
-### 3.1 Live Workspace Eliminates the Compile-Wait Cycle
+### 4.1 Live Workspace Eliminates the Compile-Wait Cycle
 
 **Today (file-based development):**
 ```
@@ -146,7 +193,7 @@ c increment    // => 2
 
 The BEAM's hot code loading means a changed method takes effect on the *next message send*. The agent doesn't wait for a build — it sees the result of its change instantly.
 
-### 3.2 Reflection Replaces Grep
+### 4.2 Reflection Replaces Grep
 
 **Today:** To understand what methods a class has, an agent searches source files:
 ```bash
@@ -172,7 +219,7 @@ Counter respondsTo: #size
 
 The agent **asks the system directly**. No parsing, no inference, no missed cases. The program describes itself.
 
-### 3.3 Structured Errors Guide the Agent
+### 4.3 Structured Errors Guide the Agent
 
 **Today:** Agent parses error output as text:
 ```
@@ -202,7 +249,7 @@ The error is a structured object (`#beamtalk_error{}`), not a string. The agent 
 ]
 ```
 
-### 3.4 Persistent Workspace Preserves Context (Planned)
+### 4.4 Persistent Workspace Preserves Context (Planned)
 
 **Today:** Every agent session starts from scratch. Previous experiments are gone. Variables, spawned processes, modified classes — all lost when the session ends. (This is the current state — the REPL starts a fresh BEAM node that terminates when the session ends.)
 
@@ -223,7 +270,7 @@ server addRoom: "dev" // Continue where we left off
 
 The workspace **becomes** the agent's memory. Not a text file the agent re-reads, but living objects the agent picks back up. ADR 0004 designs this using detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
 
-### 3.5 Incremental Verification, Not Batch Testing
+### 4.5 Incremental Verification, Not Batch Testing
 
 **Today:** Agent runs entire test suite, waits, reads pass/fail summary. A single-character typo costs 30 seconds of test runtime to discover.
 
@@ -245,7 +292,7 @@ TestRunner run: CounterTests
 
 The agent uses the live workspace as a **scratchpad**, verifying incrementally before committing to a full test run. This matches how expert human developers use Smalltalk — and it's the natural workflow for an agent that wants fast feedback.
 
-### 3.6 Actors Enable Isolated Experiments
+### 4.6 Actors Enable Isolated Experiments
 
 Agents need to try things without breaking the system. BEAM actors are perfectly isolated — each is a separate process with its own heap.
 
@@ -267,7 +314,7 @@ This is natural A/B testing for code changes. The agent can run the old and new 
 
 ---
 
-## 4. Provenance Annotations: Code That Knows Why It Exists
+## 5. Provenance Annotations: Code That Knows Why It Exists
 
 ### The observation
 
@@ -347,7 +394,7 @@ The boundary between the issue tracker and the codebase dissolves. The workspace
 
 ---
 
-## 5. The Agent Development Loop in Beamtalk
+## 6. The Agent Development Loop in Beamtalk
 
 ### Today's loop (file-based)
 
@@ -417,7 +464,7 @@ The difference isn't incremental — it's **an order of magnitude**. And the qua
 
 ---
 
-## 6. Features That Make Beamtalk Agent-Native
+## 7. Features That Make Beamtalk Agent-Native
 
 ### Already implemented
 
@@ -440,7 +487,7 @@ The difference isn't incremental — it's **an order of magnitude**. And the qua
 | Feature | Agent benefit | Reference |
 |---------|--------------|-----------|
 | **Persistent workspace** | State survives across agent sessions | [ADR 0004](ADR/0004-persistent-workspace-management.md) |
-| **Provenance annotations** | Code knows *why* it exists (issues, ADRs, authorship) | This document §4 |
+| **Provenance annotations** | Code knows *why* it exists (issues, ADRs, authorship) | This document §5 |
 | **Workspace-level undo** | Agent checkpoints before risky changes, rolls back on failure | Future |
 | **Observable message traces** | "Trace all messages to Counter for next 10 sends" | Future |
 | **Workspace task context** | `Workspace currentIssue` returns the Linear issue being worked on | Future |
@@ -449,7 +496,7 @@ The difference isn't incremental — it's **an order of magnitude**. And the qua
 
 ---
 
-## 7. What Other Languages Can't Do
+## 8. What Other Languages Can't Do
 
 ### Why not just add a REPL to Rust/Go/TypeScript?
 
@@ -485,7 +532,7 @@ Beamtalk is the intersection: **Smalltalk's liveness + BEAM's concurrency and fa
 
 ---
 
-## 8. Dialogue: Ronacher's "Language for Agents" and the Beamtalk Response
+## 9. Dialogue: Ronacher's "Language for Agents" and the Beamtalk Response
 
 Armin Ronacher's ["A Language for Agents"](https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/) (February 2026) lays out what a new programming language designed for AI agents should look like. His observations are sharp and grounded in real experience. But they operate within an assumption: **agents will continue to work with source files**. Beamtalk challenges that assumption — and in doing so, many of his problems dissolve while new opportunities appear.
 
@@ -594,7 +641,7 @@ Both questions are worth pursuing. But only beamtalk is currently exploring the 
 
 ---
 
-## 9. Why Beamtalk, Not SemanticSqueak?
+## 10. Why Beamtalk, Not SemanticSqueak?
 
 SemanticSqueak proved that talking to live objects is the right interaction model for AI agents. So why build a new language instead of contributing upstream?
 
@@ -624,7 +671,7 @@ SemanticSqueak retrofits AI interaction onto a system designed in the 1970s–80
 
 ---
 
-## 10. Making the BEAM Accessible — and Why Typing Matters
+## 11. Making the BEAM Accessible — and Why Typing Matters
 
 ### The Erlang problem
 
@@ -746,7 +793,7 @@ No other language combines all three:
 
 ---
 
-## 11. The Vision: Agent-Native Software Development
+## 12. The Vision: Agent-Native Software Development
 
 ### What "agent-native" means
 
@@ -804,11 +851,11 @@ The agent never left the conversation. No file I/O, no shell commands, no output
 
 ---
 
-## 12. Related Work
+## 13. Related Work
 
 The idea that live, reflective programming environments are well-suited for AI agents is emerging across several independent research efforts. No single project combines all the elements beamtalk targets, but together they validate the core thesis from different angles.
 
-### 12.1 SemanticSqueak — Talking to Objects in Natural Language (HPI, Onward! 2024)
+### 13.1 SemanticSqueak — Talking to Objects in Natural Language (HPI, Onward! 2024)
 
 The most directly relevant work. Researchers at Hasso Plattner Institute built **SemanticSqueak**, a system that lets programmers (and AI agents) interact with live Squeak/Smalltalk objects using natural language. An "exploratory programming agent" translates questions like "when was this order created?" into method calls on running objects, then returns human-readable answers.
 
@@ -822,7 +869,7 @@ This is direct proof that Smalltalk's reflective, live object system is a *drama
 - Paper: Thiede et al., ["Talking to Objects in Natural Language: Toward Semantic Tools for Exploratory Programming"](https://dl.acm.org/doi/10.1145/3689492.3690049), Onward! 2024
 - Repository: [github.com/hpi-swa-lab/SemanticSqueak](https://github.com/hpi-swa-lab/SemanticSqueak)
 
-### 12.2 SemanticText — Generative AI Framework for Squeak/Smalltalk
+### 13.2 SemanticText — Generative AI Framework for Squeak/Smalltalk
 
 A complementary framework to SemanticSqueak, **SemanticText** provides LLM tooling deeply integrated into the Squeak environment: prompt prototyping, in-system debugging of LLM interactions, cost tracking, function calling, audio interaction via OpenAI APIs, and editor integration for code explanation and method generation.
 
@@ -830,7 +877,7 @@ The key insight: a live Smalltalk environment doesn't just *benefit* from AI —
 
 - Discussion: [OpenAI Community Forum](https://community.openai.com/t/semantictext-generative-ai-framework-llm-tooling-and-natural-language-debugging-for-squeak-smalltalk/1031820)
 
-### 12.3 Craig Latta — Livecoding Language Models (2024–2025)
+### 13.3 Craig Latta — Livecoding Language Models (2024–2025)
 
 Craig Latta (longtime Smalltalk community figure, creator of Spoon/Naiad) has been demonstrating how selecting objects in Smalltalk inspectors provides **rich, structured context** for AI models — far richer than files can. His "contextual co-pilot" concept uses the live Smalltalk environment as the context source rather than the traditional file + LSP approach.
 
@@ -839,7 +886,7 @@ Key observation: when you select an object in a Smalltalk inspector, the AI know
 - Blog: [thiscontext.com — Context-Aware AI Conversations in Smalltalk](https://thiscontext.com/2024/12/03/context-aware-ai-conversations-in-smalltalk/)
 - Talk: [UK Smalltalk User Group, 2025](https://www.youtube.com/watch?v=5HbbIa5NT0A)
 
-### 12.4 Examples out of Thin Air (MIT, ‹Programming› 2024)
+### 13.4 Examples out of Thin Air (MIT, ‹Programming› 2024)
 
 MIT researchers built a system that uses LLMs to **auto-generate runnable code examples** inside a Smalltalk IDE. The AI proposes plausible method invocations with realistic input data; the developer runs them live and sees concrete results. This addresses the "how do I use this code?" problem without requiring documentation.
 
@@ -847,19 +894,19 @@ The critical insight for beamtalk: in a live environment, AI-generated examples 
 
 - Paper: ["Examples out of Thin Air: AI-Generated Dynamic Context to Assist Program Comprehension by Example"](https://dl.acm.org/doi/fullHtml/10.1145/3660829.3660845), ‹Programming› Companion 2024
 
-### 12.5 Ronacher — A Language for Agents (February 2026)
+### 13.5 Ronacher — A Language for Agents (February 2026)
 
-Armin Ronacher's [blog post](https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/) (discussed in §8 above) represents the **file-based optimization** school. His observations about what agents need — greppability, explicit context, structured errors, no macros, dependency-aware builds — are sharp and practical. He's designing a better experience for agents that read and write source files.
+Armin Ronacher's [blog post](https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/) (discussed in §9 above) represents the **file-based optimization** school. His observations about what agents need — greppability, explicit context, structured errors, no macros, dependency-aware builds — are sharp and practical. He's designing a better experience for agents that read and write source files.
 
 Beamtalk's response: many of these problems dissolve when the agent interacts with running objects instead of text. But Ronacher's insights about syntax familiarity and the importance of single build commands apply to beamtalk's file-based mode as well.
 
-### 12.6 Nedelcu — Programming Languages in the Age of AI Agents (November 2025)
+### 13.6 Nedelcu — Programming Languages in the Age of AI Agents (November 2025)
 
 Alexandru Nedelcu [argues](https://alexn.org/blog/2025/11/16/programming-languages-in-the-age-of-ai-agents/) that **static type systems give agents faster feedback loops** — if the code compiles, it's closer to correct. Languages like Scala, Rust, and Haskell provide compile-time guardrails that help agents converge on working code more quickly.
 
 This creates an interesting tension with beamtalk's dynamic typing. In a file-based world, Nedelcu is right — types are the cheapest form of feedback. But in a live workspace where the agent can interrogate objects directly (`c class`, `c count class`), runtime type information is always available. Whether optional/gradual typing would further help agents in live environments is an open question.
 
-### 12.7 Replit Agent 3 and Model Context Protocol (2025–2026)
+### 13.7 Replit Agent 3 and Model Context Protocol (2025–2026)
 
 Replit's cloud IDE is the closest **commercial product** to some of beamtalk's ideas: persistent workspaces, agent autonomy (up to 200 minutes of autonomous operation), agents spawning agents, and deep MCP integration for tool access. Their RAG architecture indexes source code, commit history, and runtime state into high-dimensional vectors for agent context.
 
@@ -867,13 +914,13 @@ However, Replit is still fundamentally **file-based with a cloud wrapper**. The 
 
 - [Replit Agent Architecture Case Study](https://www.langchain.com/breakoutagents/replit)
 
-### 12.8 Anthropic — Code Execution with MCP (2025)
+### 13.8 Anthropic — Code Execution with MCP (2025)
 
 Anthropic's engineering team [demonstrated](https://www.anthropic.com/engineering/code-execution-with-mcp) that agents are more efficient when they **write code to call tools** rather than having all tool definitions stuffed into the context window. This is a move toward "agent programs the environment" rather than "agent reads tool schemas."
 
 This is philosophically aligned with beamtalk's approach — the agent sends messages to objects rather than invoking predefined tool APIs. The difference is that beamtalk makes this the *primary* interaction mode, not an optimization on top of a tool-calling protocol.
 
-### 12.9 Where beamtalk sits in the landscape
+### 13.9 Where beamtalk sits in the landscape
 
 ```
                     File-based ◄──────────────────────► Live objects
@@ -902,7 +949,7 @@ The Smalltalk research (SemanticSqueak, Latta, MIT) validates that live objects 
 
 ---
 
-## 13. Relation to Existing Documents
+## 14. Relation to Existing Documents
 
 | Document | Focus | Relationship |
 |----------|-------|-------------|
