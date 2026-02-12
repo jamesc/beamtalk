@@ -198,3 +198,23 @@
 
 ((Stream on: #(1, 2, 3)) drop: 10) asList
 // => []
+
+// === Error paths: instance method type errors ===
+// Note: constructor error paths (Stream from: "x") cannot be tested in
+// stdlib tests due to gen_server calling_self limitation. These are
+// validated by the runtime fallback clauses using raise_type_error/2.
+
+(Stream from: 1) select: "not a block"
+// => ERROR: type_error
+
+(Stream from: 1) collect: 42
+// => ERROR: type_error
+
+(Stream from: 1) take: "five"
+// => ERROR: type_error
+
+(Stream from: 1) inject: 0 into: "not a block"
+// => ERROR: type_error
+
+(Stream from: 1) detect: 42
+// => ERROR: type_error

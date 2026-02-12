@@ -61,30 +61,24 @@ make_stream(Generator, Description) ->
 -spec from(integer()) -> map().
 from(Start) when is_integer(Start) ->
     make_stream(make_successor_gen(Start), iolist_to_binary([<<"Stream(from: ">>, integer_to_binary(Start), <<")">>]));
-from(Start) ->
-    Error0 = beamtalk_error:new(type_error, 'Stream'),
-    Error1 = beamtalk_error:with_selector(Error0, 'from:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected an Integer argument">>)).
+from(_) ->
+    raise_type_error('from:', <<"Expected an Integer argument">>).
 
 %% @doc Create an infinite Stream starting from Start, applying StepFun to get next.
 %% `Stream from: 1 by: [:n | n * 2]` => 1, 2, 4, 8, ...
 -spec from_by(term(), fun((term()) -> term())) -> map().
 from_by(Start, StepFun) when is_function(StepFun, 1) ->
     make_stream(make_step_gen(Start, StepFun), iolist_to_binary([<<"Stream(from: ">>, format_value(Start), <<" by: [...])">>]));
-from_by(_Start, _NotFun) ->
-    Error0 = beamtalk_error:new(type_error, 'Stream'),
-    Error1 = beamtalk_error:with_selector(Error0, 'from:by:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected a Block as step function">>)).
+from_by(_, _) ->
+    raise_type_error('from:by:', <<"Expected a Block as step function">>).
 
 %% @doc Create a Stream from a collection (list).
 %% `Stream on: #(1, 2, 3)` => 1, 2, 3
 -spec on(list()) -> map().
 on(List) when is_list(List) ->
     make_stream(make_list_gen(List), <<"Stream(on: [...])">>);
-on(_NonList) ->
-    Error0 = beamtalk_error:new(type_error, 'Stream'),
-    Error1 = beamtalk_error:with_selector(Error0, 'on:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected a List argument">>)).
+on(_) ->
+    raise_type_error('on:', <<"Expected a List argument">>).
 
 %%% ============================================================================
 %%% Lazy Operations (return new Stream)
