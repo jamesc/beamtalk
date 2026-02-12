@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for TestCase assertions (ADR 0014 Phase 2)
+// TestCase provides the foundation for BUnit testing framework
+
+// Test setUp/tearDown exist (no-op by default)
+testCase := TestCase new
+// => _
+
+testCase setUp
+// => nil
+
+testCase tearDown
+// => nil
+
+// Test assert: with true condition
+TestCase new assert: true
+// => nil
+
+// Test assert:equals: with matching values
+TestCase new assert: 3 equals: 3
+// => nil
+
+TestCase new assert: 'hello' equals: 'hello'
+// => nil
+
+TestCase new assert: true equals: true
+// => nil
+
+TestCase new assert: false equals: false
+// => nil
+
+// Test assert:equals: with integers
+TestCase new assert: 42 equals: 42
+// => nil
+
+TestCase new assert: 0 equals: 0
+// => nil
+
+// Test assert:equals: with negative numbers
+TestCase new assert: -5 equals: -5
+// => nil
+
+// Test deny: with false condition
+TestCase new deny: false
+// => nil
+
+// Test that TestCase is a proper Object subclass
+TestCase class
+// => TestCase class
+
+testInstance := TestCase new
+// => _
+
+testInstance class
+// => TestCase
+
+// Test that multiple instances can be created
+tc2 := TestCase new
+// => _
+
+tc2 class
+// => TestCase
+
+// Test lifecycle methods can be called on different instances
+tc3 := TestCase new
+// => _
+
+tc3 setUp
+// => nil
+
+tc3 tearDown
+// => nil
+
