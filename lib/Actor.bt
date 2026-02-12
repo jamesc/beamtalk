@@ -8,8 +8,8 @@
 
 Object subclass: Actor
   // Spawn — structural intrinsics, compiler generates gen_server wrapping
-  sealed spawn => @primitive actorSpawn
-  sealed spawnWith: initArgs => @primitive actorSpawnWith
+  sealed spawn => @intrinsic actorSpawn
+  sealed spawnWith: initArgs => @intrinsic actorSpawnWith
 
   // Override new with error — pure Beamtalk
   sealed new => self error: 'Actors must use spawn, not new'
