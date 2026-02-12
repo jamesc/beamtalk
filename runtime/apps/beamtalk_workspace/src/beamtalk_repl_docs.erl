@@ -22,39 +22,44 @@ format_class_docs(ClassName) ->
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
-            ModuleName = gen_server:call(ClassPid, module_name, 5000),
-            Superclass = gen_server:call(ClassPid, superclass, 5000),
-            {ok, Flattened} = gen_server:call(ClassPid, get_flattened_methods, 5000),
+            try
+                ModuleName = gen_server:call(ClassPid, module_name, 5000),
+                Superclass = gen_server:call(ClassPid, superclass, 5000),
+                {ok, Flattened} = gen_server:call(ClassPid, get_flattened_methods, 5000),
 
-            %% Get module doc from EEP-48 chunks
-            ModuleDoc = get_module_doc(ModuleName),
+                %% Get module doc from EEP-48 chunks
+                ModuleDoc = get_module_doc(ModuleName),
 
-            %% Build method listing grouped by defining class
-            OwnMethods = [],
-            InheritedMethods = [],
-            {Own, Inherited} = maps:fold(
-                fun(Selector, {DefiningClass, _MethodInfo}, {OwnAcc, InhAcc}) ->
-                    case DefiningClass of
-                        ClassName ->
-                            {[Selector | OwnAcc], InhAcc};
-                        _ ->
-                            {OwnAcc, [{Selector, DefiningClass} | InhAcc]}
-                    end
-                end,
-                {OwnMethods, InheritedMethods},
-                Flattened
-            ),
+                %% Build method listing grouped by defining class
+                {Own, Inherited} = maps:fold(
+                    fun(Selector, {DefiningClass, _MethodInfo}, {OwnAcc, InhAcc}) ->
+                        case DefiningClass of
+                            ClassName ->
+                                {[Selector | OwnAcc], InhAcc};
+                            _ ->
+                                {OwnAcc, [{Selector, DefiningClass} | InhAcc]}
+                        end
+                    end,
+                    {[], []},
+                    Flattened
+                ),
 
-            %% Get EEP-48 method signatures for own methods
-            OwnDocs = get_method_signatures(ModuleName, lists:sort(Own)),
+                %% Get EEP-48 method signatures for own methods
+                OwnDocs = get_method_signatures(ModuleName, lists:sort(Own)),
 
-            %% Group inherited by defining class
-            InheritedGrouped = group_by_class(lists:sort(Inherited)),
+                %% Group inherited by defining class
+                InheritedGrouped = group_by_class(lists:sort(Inherited)),
 
-            %% Format the output
-            Output = format_class_output(ClassName, Superclass, ModuleDoc,
-                                          OwnDocs, InheritedGrouped),
-            {ok, Output}
+                %% Format the output
+                Output = format_class_output(ClassName, Superclass, ModuleDoc,
+                                              OwnDocs, InheritedGrouped),
+                {ok, Output}
+            catch
+                exit:{timeout, _} ->
+                    {error, {class_not_found, ClassName}};
+                exit:{noproc, _} ->
+                    {error, {class_not_found, ClassName}}
+            end
     end.
 
 %% @doc Format documentation for a specific method on a class.
@@ -66,26 +71,40 @@ format_method_doc(ClassName, SelectorBin) ->
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
-            SelectorAtom = binary_to_atom(SelectorBin, utf8),
-            case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
-                {ok, DefiningClass, _MethodInfo} ->
-                    %% Found the method — get its doc from the defining class
-                    DocInfo = case beamtalk_object_class:whereis_class(DefiningClass) of
-                        undefined ->
-                            {atom_to_binary(SelectorAtom, utf8), none};
-                        DefClassPid ->
-                            DefModule = gen_server:call(DefClassPid, module_name, 5000),
-                            get_method_doc(DefModule, SelectorAtom)
-                    end,
-                    Output = format_method_output(ClassName, SelectorBin,
-                                                   DefiningClass, DocInfo),
-                    {ok, Output};
-                not_found ->
-                    {error, {method_not_found, ClassName, SelectorBin}}
+            case safe_to_existing_atom(SelectorBin) of
+                {error, badarg} ->
+                    {error, {method_not_found, ClassName, SelectorBin}};
+                {ok, SelectorAtom} ->
+                    case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
+                        {ok, DefiningClass, _MethodInfo} ->
+                            %% Found the method — get its doc from the defining class
+                            DocInfo = case beamtalk_object_class:whereis_class(DefiningClass) of
+                                undefined ->
+                                    {atom_to_binary(SelectorAtom, utf8), none};
+                                DefClassPid ->
+                                    DefModule = gen_server:call(DefClassPid, module_name, 5000),
+                                    get_method_doc(DefModule, SelectorAtom)
+                            end,
+                            Output = format_method_output(ClassName, SelectorBin,
+                                                           DefiningClass, DocInfo),
+                            {ok, Output};
+                        not_found ->
+                            {error, {method_not_found, ClassName, SelectorBin}}
+                    end
             end
     end.
 
 %%% Internal functions
+
+%% @private Safe atom conversion — returns error instead of creating new atoms.
+-spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
+safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(Bin) when is_binary(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> {error, badarg}
+    end.
 
 %% @private Get module-level doc from EEP-48 chunks.
 -spec get_module_doc(atom()) -> binary() | none.

@@ -14,7 +14,7 @@
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1, format_docs/1,
-         term_to_json/1, format_error_message/1]).
+         term_to_json/1, format_error_message/1, safe_to_existing_atom/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -495,29 +495,33 @@ handle_op(<<"info">>, Params, Msg, _SessionPid) ->
     end;
 
 handle_op(<<"docs">>, Params, Msg, _SessionPid) ->
-    ClassName = binary_to_atom(maps:get(<<"class">>, Params, <<>>), utf8),
-    Selector = maps:get(<<"selector">>, Params, undefined),
-    case Selector of
-        undefined ->
-            %% :help ClassName — show class overview
-            case beamtalk_repl_docs:format_class_docs(ClassName) of
-                {ok, DocText} ->
-                    beamtalk_repl_protocol:encode_docs(DocText, Msg);
-                {error, {class_not_found, _}} ->
-                    beamtalk_repl_protocol:encode_error(
-                        {class_not_found, ClassName}, Msg, fun format_error_message/1)
-            end;
-        SelectorBin ->
-            %% :help ClassName selector — show method doc
-            case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
-                {ok, DocText} ->
-                    beamtalk_repl_protocol:encode_docs(DocText, Msg);
-                {error, {class_not_found, _}} ->
-                    beamtalk_repl_protocol:encode_error(
-                        {class_not_found, ClassName}, Msg, fun format_error_message/1);
-                {error, {method_not_found, _, _}} ->
-                    beamtalk_repl_protocol:encode_error(
-                        {method_not_found, ClassName, SelectorBin}, Msg, fun format_error_message/1)
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    case safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                {class_not_found, ClassBin}, Msg, fun format_error_message/1);
+        {ok, ClassName} ->
+            Selector = maps:get(<<"selector">>, Params, undefined),
+            case Selector of
+                undefined ->
+                    case beamtalk_repl_docs:format_class_docs(ClassName) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1)
+                    end;
+                SelectorBin ->
+                    case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
+                        {ok, DocText} ->
+                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                        {error, {class_not_found, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {class_not_found, ClassName}, Msg, fun format_error_message/1);
+                        {error, {method_not_found, _, _}} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {method_not_found, ClassName, SelectorBin}, Msg, fun format_error_message/1)
+                    end
             end
     end;
 
@@ -961,11 +965,13 @@ format_error_message({actors_exist, ModuleName, Count}) ->
         <<": ">>, CountStr, <<" ">>, ActorWord, <<" still running. Kill them first with :kill">>
     ]);
 format_error_message({class_not_found, ClassName}) ->
-    iolist_to_binary([<<"Unknown class: ">>, atom_to_binary(ClassName, utf8),
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([<<"Unknown class: ">>, NameBin,
                       <<". Use :modules to see loaded classes.">>]);
 format_error_message({method_not_found, ClassName, Selector}) ->
-    iolist_to_binary([atom_to_binary(ClassName, utf8), <<" does not understand ">>,
-                      Selector, <<". Use :help ">>, atom_to_binary(ClassName, utf8),
+    NameBin = to_binary(ClassName),
+    iolist_to_binary([NameBin, <<" does not understand ">>,
+                      Selector, <<". Use :help ">>, NameBin,
                       <<" to see available methods.">>]);
 format_error_message({unknown_op, Op}) ->
     iolist_to_binary([<<"Unknown operation: ">>, Op]);
@@ -1103,3 +1109,19 @@ format_name(Name) when is_list(Name) ->
     list_to_binary(Name);
 format_name(Name) ->
     iolist_to_binary(io_lib:format("~p", [Name])).
+
+%% @private Convert atom or binary to binary.
+-spec to_binary(atom() | binary()) -> binary().
+to_binary(V) when is_atom(V) -> atom_to_binary(V, utf8);
+to_binary(V) when is_binary(V) -> V.
+
+%% @private Safe atom conversion — returns error instead of creating new atoms.
+-spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
+safe_to_existing_atom(<<>>) -> {error, badarg};
+safe_to_existing_atom(Bin) when is_binary(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> {error, badarg}
+    end;
+safe_to_existing_atom(_) -> {error, badarg}.
