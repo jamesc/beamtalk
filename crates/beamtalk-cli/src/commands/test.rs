@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::time::Instant;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
@@ -61,21 +61,30 @@ fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, 
         .filter_map(|line| {
             let trimmed = line.trim();
             trimmed
-                .strip_prefix("// @load")
+                .strip_prefix("// @load ")
                 .map(|path| path.trim().to_string())
         })
         .filter(|p| !p.is_empty())
         .collect();
 
-    for class in &module.classes {
-        let superclass = class.superclass_name();
+    // Compiler only generates one module per .bt file (uses first class).
+    // Warn if multiple TestCase subclasses are found and take only the first.
+    let test_case_classes: Vec<_> = module
+        .classes
+        .iter()
+        .filter(|c| c.superclass_name() == "TestCase")
+        .collect();
 
-        // Only include classes that descend from TestCase
-        // (direct subclass check — for now, only `TestCase subclass:`)
-        if superclass != "TestCase" {
-            continue;
-        }
+    if test_case_classes.len() > 1 {
+        warn!(
+            "File '{}' contains {} TestCase subclasses; only the first will be compiled. \
+             Split into separate files.",
+            source_path,
+            test_case_classes.len()
+        );
+    }
 
+    for class in test_case_classes.into_iter().take(1) {
         let class_name = class.name.name.to_string();
         let stem = beamtalk_core::codegen::core_erlang::to_module_name(&class_name);
         let module_name = format!("bt@{stem}");
@@ -98,7 +107,7 @@ fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, 
         if !test_methods.is_empty() {
             test_classes.push(TestCaseClass {
                 class_name,
-                superclass_name: superclass.to_string(),
+                superclass_name: class.superclass_name().to_string(),
                 module_name,
                 test_methods,
                 has_setup,
@@ -329,7 +338,7 @@ fn run_eunit_tests(
            [] -> init:stop(0); \
            _ -> \
              lists:foreach(fun(M) -> \
-               io:format(\"FAILED_MODULE:~s~n\", [M]) \
+               io:format(\"FAILED_MODULE:~s~n\", [atom_to_list(M)]) \
              end, Failed), \
              init:stop(1) \
          end."
@@ -485,15 +494,9 @@ pub fn run_tests(path: &str) -> Result<()> {
             continue;
         }
 
-        // Compile @load fixtures
+        // Compile @load fixtures (paths are CWD-relative, matching E2E/test_stdlib semantics)
         for load_path in &load_files {
             let fixture_path = Utf8PathBuf::from(load_path);
-            let fixture_path = if fixture_path.is_relative() {
-                let base = test_file.parent().unwrap_or_else(|| Utf8Path::new("."));
-                base.join(fixture_path)
-            } else {
-                fixture_path
-            };
 
             let fixture_module = fixture_module_name(&fixture_path)?;
             if let Some(existing_path) = fixture_modules_by_name.get(&fixture_module) {
@@ -504,9 +507,10 @@ pub fn run_tests(path: &str) -> Result<()> {
                         fixture_path
                     );
                 }
-            } else {
-                fixture_modules_by_name.insert(fixture_module.clone(), fixture_path.clone());
+                // Already compiled this fixture — skip
+                continue;
             }
+            fixture_modules_by_name.insert(fixture_module.clone(), fixture_path.clone());
 
             if !fixture_path.exists() {
                 miette::bail!(
