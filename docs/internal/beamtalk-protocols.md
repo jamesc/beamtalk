@@ -2,9 +2,9 @@
 
 **Status:** In Progress - Core protocols defined, future extensions planned
 
-This document describes the network protocols used for communication between Beamtalk components. It covers the CLI ↔ REPL backend protocol, the compiler daemon JSON-RPC API, and the actor message protocol.
+This document describes the internal protocols used for communication between Beamtalk components: the compiler daemon JSON-RPC API, the actor message protocol, and the future resolution protocol.
 
-For architecture context, see [beamtalk-architecture.md](beamtalk-architecture.md). For the actor runtime model, see [beamtalk-object-model.md](beamtalk-object-model.md).
+For the CLI ↔ REPL protocol, see [repl-protocol.md](../repl-protocol.md) (the authoritative reference). For architecture context, see [beamtalk-architecture.md](../beamtalk-architecture.md).
 
 ---
 
@@ -16,7 +16,7 @@ The Beamtalk system uses three main communication protocols:
 ┌─────────────────┐         ┌─────────────────────────────────┐
 │   REPL CLI      │  TCP    │         BEAM Node               │
 │   (Rust)        │◄───────►│                                 │
-│                 │  :9000  │  ┌─────────────────────────┐    │
+│                 │ :49152  │  ┌─────────────────────────┐    │
 └─────────────────┘         │  │   REPL Backend          │    │
                             │  │   (beamtalk_repl.erl)   │    │
                             │  └───────────┬─────────────┘    │
@@ -39,221 +39,12 @@ The Beamtalk system uses three main communication protocols:
 └─────────────────┘
 ```
 
-| Protocol | Transport | Use Case |
-|----------|-----------|----------|
-| [CLI ↔ REPL Backend](#cli--repl-backend-protocol) | TCP (localhost:9000) | Interactive REPL sessions |
-| [Clients ↔ Compiler Daemon](#compiler-daemon-protocol-json-rpc-20) | Unix socket | Compilation, diagnostics, IDE support |
-| [Actor Messages](#actor-message-protocol) | BEAM process messages | Runtime message passing |
-
----
-
-## CLI ↔ REPL Backend Protocol
-
-**Transport:** TCP on `localhost:9000` (configurable)  
-**Format:** Newline-delimited JSON  
-**Implementation:**
-- Client: `crates/beamtalk-cli/src/commands/repl.rs`
-- Server: `runtime/src/beamtalk_repl.erl`
-
-### Connection Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant CLI as REPL CLI
-    participant Backend as REPL Backend
-    participant Daemon as Compiler Daemon
-
-    Note over Backend: Start listening on TCP :9000
-    CLI->>Backend: TCP Connect
-    Note over CLI,Backend: Connection established
-
-    loop REPL Session
-        CLI->>Backend: Request (JSON)
-        Backend->>Daemon: compile_expression (JSON-RPC)
-        Daemon-->>Backend: Core Erlang
-        Backend->>Backend: Load & Evaluate
-        Backend-->>CLI: Response (JSON)
-    end
-
-    CLI->>Backend: TCP Close (or :exit command)
-    Note over CLI,Backend: Connection closed
-```
-
-### Request Types
-
-#### 1. Evaluate Expression
-
-Compile and execute a Beamtalk expression.
-
-**Request:**
-```json
-{
-  "type": "eval",
-  "expression": "x := 42"
-}
-```
-
-**Response (success):**
-```json
-{
-  "type": "result",
-  "value": 42
-}
-```
-
-**Response (error):**
-```json
-{
-  "type": "error",
-  "message": "Undefined variable: foo"
-}
-```
-
-#### 2. Clear Bindings
-
-Clear all variable bindings from the current session.
-
-**Request:**
-```json
-{
-  "type": "clear"
-}
-```
-
-**Response:**
-```json
-{
-  "type": "result",
-  "value": "ok"
-}
-```
-
-#### 3. Get Bindings
-
-Retrieve all current variable bindings.
-
-**Request:**
-```json
-{
-  "type": "bindings"
-}
-```
-
-**Response:**
-```json
-{
-  "type": "bindings",
-  "bindings": {
-    "counter": "#Actor<0.123.0>",
-    "x": 42,
-    "name": "Alice"
-  }
-}
-```
-
-#### 4. Load File
-
-Load and compile a Beamtalk source file, registering its classes.
-
-**Request:**
-```json
-{
-  "type": "load",
-  "path": "examples/counter.bt"
-}
-```
-
-**Response (success):**
-```json
-{
-  "type": "loaded",
-  "classes": ["Counter", "Helper"]
-}
-```
-
-**Response (error):**
-```json
-{
-  "type": "error",
-  "message": "File not found: examples/counter.bt"
-}
-```
-
-### Value Serialization
-
-Values returned in responses are serialized to JSON according to these rules:
-
-| Erlang Type | JSON Representation | Example |
-|-------------|---------------------|---------|
-| Integer | Number | `42` |
-| Float | Number | `3.14` |
-| Boolean | Boolean | `true` |
-| Atom | String | `"ok"` |
-| Binary/String | String | `"hello"` |
-| List | Array | `[1, 2, 3]` |
-| PID (Actor) | String | `"#Actor<0.123.0>"` |
-| PID (with class) | String | `"#Counter<0.123.0>"` |
-| Function (Block) | String | `"a Block/2"` |
-| Tuple | Object with marker | `{"__tuple__": [1, "hello"]}` |
-| Map | Object | `{"key": "value"}` |
-
-### Error Messages
-
-| Error | Message |
-|-------|---------|
-| Empty expression | `"Empty expression"` |
-| Request timeout | `"Request timed out"` |
-| Undefined variable | `"Undefined variable: <name>"` |
-| Parse error | `"Parse error: <details>"` |
-| Compile error | `"<diagnostic message>"` |
-| Evaluation error | `"Evaluation error: <class>:<reason>"` |
-| Load error | `"Failed to load bytecode: <reason>"` |
-| File not found | `"File not found: <path>"` |
-| Daemon unavailable | `"Unable to connect to compiler daemon. Start with: beamtalk daemon start --foreground"` |
-
-### Session State
-
-The REPL backend maintains session state across requests:
-
-```erlang
-#{
-  bindings => #{"counter" => <0.123.0>, "x" => 42},
-  eval_counter => 5,
-  loaded_modules => [counter, helper],
-  daemon_socket_path => "/home/user/.beamtalk/daemon.sock"
-}
-```
-
-- **bindings**: Variable names mapped to their current values
-- **eval_counter**: Incremented for each evaluation to generate unique module names
-- **loaded_modules**: List of modules loaded via `:load` command
-- **daemon_socket_path**: Path to compiler daemon Unix socket
-
-### Example Session
-
-```
-> x := 42
-42
-
-> y := x + 10
-52
-
-> Counter spawn
-#Counter<0.234.0>
-
-> :bindings
-x = 42
-y = 52
-
-> :clear
-Bindings cleared.
-
-> :load examples/counter.bt
-Loaded Counter
-
-> :exit
-Goodbye!
-```
+| Protocol | Transport | Reference |
+|----------|-----------|-----------|
+| CLI ↔ REPL Backend | TCP (localhost:49152) | [repl-protocol.md](../repl-protocol.md) |
+| Clients ↔ Compiler Daemon | Unix socket | [Below](#compiler-daemon-protocol-json-rpc-20) |
+| Actor Messages | BEAM process messages | [Below](#actor-message-protocol) |
+| Future Resolution | BEAM process messages | [Below](#future-resolution-protocol) |
 
 ---
 
@@ -556,8 +347,8 @@ gen_tcp:close(Socket).
 **Transport:** BEAM process messages via `gen_server`  
 **Format:** Erlang terms  
 **Implementation:**
-- `runtime/src/beamtalk_actor.erl`
-- `runtime/src/beamtalk_future.erl`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_actor.erl`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_future.erl`
 
 ### Overview
 
@@ -702,7 +493,7 @@ Each actor maintains state in a map:
 ## Future Resolution Protocol
 
 **Transport:** BEAM process messages  
-**Implementation:** `runtime/src/beamtalk_future.erl`
+**Implementation:** `runtime/apps/beamtalk_runtime/src/beamtalk_future.erl`
 
 ### Future States
 
@@ -821,4 +612,4 @@ end.
 
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)
 - [Erlang gen_server Behaviour](https://www.erlang.org/doc/man/gen_server.html)
-- [Beamtalk Architecture](beamtalk-architecture.md)
+- [Beamtalk Architecture](../beamtalk-architecture.md)
