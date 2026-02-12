@@ -376,7 +376,7 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
             TestClass:TestReason:TestST ->
                 FailMsg = iolist_to_binary(
                     io_lib:format("~p:~p", [TestClass, TestReason])),
-                logger:debug("Test ~s:~s failed with stacktrace: ~p",
+                logger:debug("Test ~p:~p failed with stacktrace: ~p",
                              [ClassName, MethodName, TestST]),
                 {fail, MethodName, FailMsg}
         after

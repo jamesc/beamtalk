@@ -830,16 +830,16 @@ handle_call({class_method_call, Selector, Args}, From,
                  DefiningClass =:= 'TestCase' of
                 true ->
                     spawn(fun() ->
-                        Result = try
-                            beamtalk_test_case:execute_tests(
-                                Selector, Args, ClassName, Module, FlatMethods)
+                        try
+                            Result = beamtalk_test_case:execute_tests(
+                                Selector, Args, ClassName, Module, FlatMethods),
+                            gen_server:reply(From, {ok, Result})
                         catch
                             C:E ->
                                 logger:error("Test execution ~p:~p failed: ~p:~p",
                                              [ClassName, Selector, C, E]),
-                                {error, E}
-                        end,
-                        gen_server:reply(From, {ok, Result})
+                                gen_server:reply(From, {error, E})
+                        end
                     end),
                     {noreply, State};
                 false ->
