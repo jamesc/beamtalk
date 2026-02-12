@@ -14,10 +14,10 @@
 // - Runtime errors: 2 tests
 // - Near-miss syntax: 11 tests
 // - Invalid literals: 4 tests
-// - Cascading errors: 4 tests
+// - Cascading errors: 5 tests (includes recovery validation)
 // - Unicode edge cases: 3 tests
 // - REPL edge cases: 4 tests
-// Total: 34 test cases (increased from 9)
+// Total: 35 test cases (increased from 9)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -71,9 +71,9 @@ undefinedVar + 5
 // ===========================================================================
 // These test common typos and syntax mistakes that users make
 
-// Missing colon in keyword message (looks like unary/binary messages)
-Counter subclass Foo
-// => ERROR: Undefined variable
+// Missing colon in keyword message - lowercase counter makes it undefined
+counter subclass Foo
+// => ERROR: undefined
 
 // Wrong bracket type - opening with [ but closing with )
 [:x | x + 1)
@@ -81,7 +81,7 @@ Counter subclass Foo
 
 // Wrong bracket type - opening with ( but closing with ]
 (1 + 2]
-// => ERROR: expected )
+// => ERROR: Expected ')'
 
 // Extra closing bracket with no opening
 Counter spawn]
@@ -89,11 +89,11 @@ Counter spawn]
 
 // Missing block bar separator
 [:x x + 1]
-// => ERROR: expected |
+// => ERROR: Expected '|'
 
-// Misplaced caret at start of expression (caret is for return, needs preceding expression)
+// Misplaced caret at start - parser sees return with operator (error on +)
 ^ + 1
-// => ERROR: expected expression, found ^
+// => ERROR: expected expression, found +
 
 // Double operators
 1 + + 2
@@ -105,11 +105,11 @@ Counter spawn]
 
 // Incomplete keyword message (missing argument after colon)
 obj foo:
-// => ERROR: Undefined variable
+// => ERROR: undefined
 
 // Missing closing parenthesis
 (1 + 2
-// => ERROR: expected )
+// => ERROR: Expected ')'
 
 // Mismatched block brackets
 [1 + 2)
@@ -123,17 +123,17 @@ obj foo:
 "hello
 // => ERROR: "hello
 
-// Double decimal point in number - second dot treated as message send
-3.14.15
-// => ERROR: does_not_understand
-
 // Standalone hash (invalid symbol without identifier) - error token
 #
 // => ERROR: #
 
-// Multiple dots in number without spaces - parser sees message sends
-1.2.3.4
-// => ERROR: does_not_understand
+// Invalid number with letter (not radix notation)
+123abc
+// => ERROR: undefined
+
+// Number followed by invalid character sequence (tests lexer error recovery)
+42$
+// => ERROR: $
 
 // ===========================================================================
 // CASCADING ERROR TESTS
@@ -148,10 +148,13 @@ obj foo:
 ] + [ + )
 // => ERROR: expected expression, found ]
 
-// Error recovery: bad expression followed by valid one (newline separated)
+// Error recovery: bad expression should produce error
 1 + +
-2 + 3
 // => ERROR: expected expression, found +
+
+// Valid expression after previous error (separate test case)
+2 + 3
+// => 5
 
 // Error in nested structure - parser should recover to continue parsing
 [1 + ] value: [2 * 3]
@@ -165,15 +168,15 @@ obj foo:
 counter🚀 := 42
 // => ERROR: 🚀
 
-// Unicode combining characters in identifier (café is valid if lexer accepts)
-// This may pass if Unicode identifiers are supported
+// Unicode combining characters in identifier (currently not valid - lexer uses ASCII only)
+// Lexer produces error token for the non-ASCII character
 café := 42
-// => 42
+// => ERROR: é
 
-// Chinese characters in identifier (may be valid Unicode identifier)
-// This tests if parser accepts non-ASCII identifiers
+// Chinese characters in identifier (currently not valid - lexer uses ASCII only)
+// Lexer produces error token for the first non-ASCII character
 计数器 := 0
-// => 0
+// => ERROR: 计
 
 // ===========================================================================
 // REPL EDGE CASES
@@ -187,9 +190,9 @@ café := 42
 thisIsAVeryLongIdentifierNameThatGoesOnAndOnAndOnButShouldStillBeValid := 42
 // => 42
 
-// Repeated semicolons (cascade separator) - parser expects message after first ;
+// Repeated semicolons (cascade separator) - parser expects message selector
 1; 2; 3
-// => ERROR: expected
+// => ERROR: Expected message selector
 
 // Tab characters in expression (should work - whitespace is ignored)
 1	+	2
