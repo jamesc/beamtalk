@@ -1,0 +1,269 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc REPL documentation helper — fetches and formats EEP-48 docs.
+%%%
+%%% **DDD Context:** REPL — Documentation
+%%%
+%%% Provides documentation lookup for `:help ClassName` and
+%%% `:help ClassName selector` commands. Fetches EEP-48 doc chunks
+%%% from compiled .beam files via `code:get_doc/1` and walks the
+%%% class hierarchy for inherited method docs.
+
+-module(beamtalk_repl_docs).
+
+-export([format_class_docs/1, format_method_doc/2]).
+
+%% @doc Format documentation for a class, including method listing.
+%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-spec format_class_docs(atom()) -> {ok, binary()} | {error, term()}.
+format_class_docs(ClassName) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined ->
+            {error, {class_not_found, ClassName}};
+        ClassPid ->
+            ModuleName = gen_server:call(ClassPid, module_name, 5000),
+            Superclass = gen_server:call(ClassPid, superclass, 5000),
+            {ok, Flattened} = gen_server:call(ClassPid, get_flattened_methods, 5000),
+
+            %% Get module doc from EEP-48 chunks
+            ModuleDoc = get_module_doc(ModuleName),
+
+            %% Build method listing grouped by defining class
+            OwnMethods = [],
+            InheritedMethods = [],
+            {Own, Inherited} = maps:fold(
+                fun(Selector, {DefiningClass, _MethodInfo}, {OwnAcc, InhAcc}) ->
+                    case DefiningClass of
+                        ClassName ->
+                            {[Selector | OwnAcc], InhAcc};
+                        _ ->
+                            {OwnAcc, [{Selector, DefiningClass} | InhAcc]}
+                    end
+                end,
+                {OwnMethods, InheritedMethods},
+                Flattened
+            ),
+
+            %% Get EEP-48 method signatures for own methods
+            OwnDocs = get_method_signatures(ModuleName, lists:sort(Own)),
+
+            %% Group inherited by defining class
+            InheritedGrouped = group_by_class(lists:sort(Inherited)),
+
+            %% Format the output
+            Output = format_class_output(ClassName, Superclass, ModuleDoc,
+                                          OwnDocs, InheritedGrouped),
+            {ok, Output}
+    end.
+
+%% @doc Format documentation for a specific method on a class.
+%% Walks class hierarchy to find the method.
+%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-spec format_method_doc(atom(), binary()) -> {ok, binary()} | {error, term()}.
+format_method_doc(ClassName, SelectorBin) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined ->
+            {error, {class_not_found, ClassName}};
+        ClassPid ->
+            SelectorAtom = binary_to_atom(SelectorBin, utf8),
+            case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
+                {ok, DefiningClass, _MethodInfo} ->
+                    %% Found the method — get its doc from the defining class
+                    DefClassPid = beamtalk_object_class:whereis_class(DefiningClass),
+                    DefModule = gen_server:call(DefClassPid, module_name, 5000),
+                    DocInfo = get_method_doc(DefModule, SelectorAtom),
+                    Output = format_method_output(ClassName, SelectorBin,
+                                                   DefiningClass, DocInfo),
+                    {ok, Output};
+                not_found ->
+                    {error, {method_not_found, ClassName, SelectorBin}}
+            end
+    end.
+
+%%% Internal functions
+
+%% @private Get module-level doc from EEP-48 chunks.
+-spec get_module_doc(atom()) -> binary() | none.
+get_module_doc(ModuleName) ->
+    case code:get_doc(ModuleName) of
+        {ok, {docs_v1, _Anno, _Lang, _Format, ModDoc, _Meta, _Docs}} ->
+            case ModDoc of
+                #{<<"en">> := Text} -> Text;
+                _ -> none
+            end;
+        _ ->
+            none
+    end.
+
+%% @private Get method signatures from EEP-48 doc entries.
+-spec get_method_signatures(atom(), [atom()]) -> [{atom(), binary(), binary() | none}].
+get_method_signatures(ModuleName, Selectors) ->
+    DocEntries = get_doc_entries(ModuleName),
+    lists:filtermap(
+        fun(Selector) ->
+            case find_doc_entry(Selector, DocEntries) of
+                {ok, Signature, Doc} ->
+                    {true, {Selector, Signature, Doc}};
+                not_found ->
+                    %% Method exists but no doc entry — show selector name
+                    {true, {Selector, atom_to_binary(Selector, utf8), none}}
+            end
+        end,
+        Selectors
+    ).
+
+%% @private Get full method doc (signature + doc text) for a specific selector.
+-spec get_method_doc(atom(), atom()) -> {binary(), binary() | none}.
+get_method_doc(ModuleName, Selector) ->
+    DocEntries = get_doc_entries(ModuleName),
+    case find_doc_entry(Selector, DocEntries) of
+        {ok, Signature, Doc} -> {Signature, Doc};
+        not_found -> {atom_to_binary(Selector, utf8), none}
+    end.
+
+%% @private Extract doc entries from EEP-48 chunks.
+-spec get_doc_entries(atom()) -> list().
+get_doc_entries(ModuleName) ->
+    case code:get_doc(ModuleName) of
+        {ok, {docs_v1, _Anno, _Lang, _Format, _ModDoc, _Meta, Docs}} ->
+            Docs;
+        _ ->
+            []
+    end.
+
+%% @private Find a doc entry by selector atom.
+-spec find_doc_entry(atom(), list()) -> {ok, binary(), binary() | none} | not_found.
+find_doc_entry(Selector, DocEntries) ->
+    Result = lists:dropwhile(
+        fun(Entry) ->
+            case Entry of
+                {{function, _Name, _Arity}, _Anno, _Sigs, _Doc, #{selector := S}} ->
+                    S =/= Selector;
+                _ ->
+                    true
+            end
+        end,
+        DocEntries
+    ),
+    case Result of
+        [{{function, _Name, _Arity}, _Anno, Sigs, Doc, _Meta} | _] ->
+            Signature = case Sigs of
+                [S | _] -> S;
+                _ -> atom_to_binary(Selector, utf8)
+            end,
+            DocText = case Doc of
+                #{<<"en">> := Text} -> Text;
+                _ -> none
+            end,
+            {ok, Signature, DocText};
+        _ ->
+            not_found
+    end.
+
+%% @private Group inherited methods by defining class.
+-spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].
+group_by_class(Methods) ->
+    Grouped = lists:foldl(
+        fun({Selector, DefClass}, Acc) ->
+            Existing = maps:get(DefClass, Acc, []),
+            maps:put(DefClass, [Selector | Existing], Acc)
+        end,
+        #{},
+        Methods
+    ),
+    %% Convert to sorted list of {ClassName, SortedSelectors}
+    lists:sort(
+        maps:fold(
+            fun(Class, Selectors, Acc) ->
+                [{Class, lists:sort(Selectors)} | Acc]
+            end,
+            [],
+            Grouped
+        )
+    ).
+
+%% @private Format the complete class documentation output.
+-spec format_class_output(atom(), atom() | none, binary() | none,
+                          [{atom(), binary(), binary() | none}],
+                          [{atom(), [atom()]}]) -> binary().
+format_class_output(ClassName, Superclass, ModuleDoc, OwnDocs, InheritedGrouped) ->
+    Parts = [
+        %% Header
+        iolist_to_binary([<<"== ">>, atom_to_binary(ClassName, utf8),
+                          format_superclass(Superclass), <<" ==">>]),
+
+        %% Module doc (first paragraph only for overview)
+        case ModuleDoc of
+            none -> <<>>;
+            Text ->
+                FirstPara = first_paragraph(Text),
+                iolist_to_binary([<<"\n">>, FirstPara])
+        end,
+
+        %% Own methods
+        case OwnDocs of
+            [] -> <<>>;
+            _ ->
+                MethodLines = lists:map(
+                    fun({_Sel, Sig, _Doc}) ->
+                        iolist_to_binary([<<"  ">>, Sig])
+                    end,
+                    OwnDocs
+                ),
+                iolist_to_binary([<<"\nInstance methods:\n">>,
+                                  lists:join(<<"\n">>, MethodLines)])
+        end,
+
+        %% Inherited methods (grouped by class)
+        lists:map(
+            fun({FromClass, Selectors}) ->
+                SelectorStrs = lists:map(
+                    fun(S) -> iolist_to_binary([<<"  ">>, atom_to_binary(S, utf8)]) end,
+                    Selectors
+                ),
+                iolist_to_binary([<<"\nInherited from ">>,
+                                  atom_to_binary(FromClass, utf8), <<":\n">>,
+                                  lists:join(<<"\n">>, SelectorStrs)])
+            end,
+            InheritedGrouped
+        ),
+
+        %% Hint
+        <<"\nUse :help ClassName selector for method details.">>
+    ],
+    iolist_to_binary(lists:filter(fun(<<>>) -> false; (_) -> true end,
+                                   lists:flatten(Parts))).
+
+%% @private Format superclass portion of header.
+-spec format_superclass(atom() | none) -> iolist().
+format_superclass(none) -> [];
+format_superclass(Superclass) ->
+    [<<" < ">>, atom_to_binary(Superclass, utf8)].
+
+%% @private Format method-specific documentation output.
+-spec format_method_output(atom(), binary(), atom(),
+                           {binary(), binary() | none}) -> binary().
+format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}) ->
+    Header = iolist_to_binary([atom_to_binary(ClassName, utf8),
+                                <<" >> ">>, SelectorBin]),
+    Inherited = case DefiningClass of
+        ClassName -> <<>>;
+        _ -> iolist_to_binary([<<"\n(inherited from ">>,
+                                atom_to_binary(DefiningClass, utf8), <<")">>])
+    end,
+    SignatureLine = iolist_to_binary([<<"\n  ">>, Signature]),
+    Doc = case DocText of
+        none -> <<>>;
+        Text -> iolist_to_binary([<<"\n\n">>, Text])
+    end,
+    iolist_to_binary([Header, Inherited, SignatureLine, Doc]).
+
+%% @private Extract first paragraph from markdown text.
+-spec first_paragraph(binary()) -> binary().
+first_paragraph(Text) ->
+    %% Split on double newline to get first paragraph
+    case binary:split(Text, <<"\n\n">>) of
+        [First | _] -> First;
+        _ -> Text
+    end.

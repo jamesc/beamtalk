@@ -130,4 +130,17 @@ impl ReplClient {
             "actor": pid_str
         }))
     }
+
+    /// Get documentation for a class or method.
+    pub(super) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
+        let mut req = serde_json::json!({
+            "op": "docs",
+            "id": protocol::next_msg_id(),
+            "class": class
+        });
+        if let Some(sel) = selector {
+            req["selector"] = serde_json::Value::String(sel.to_string());
+        }
+        self.send_request(&req)
+    }
 }
