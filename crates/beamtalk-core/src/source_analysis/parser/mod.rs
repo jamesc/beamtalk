@@ -329,8 +329,9 @@ impl Parser {
     ///
     /// Collects consecutive `///` lines immediately preceding the token,
     /// strips the `/// ` or `///` prefix, and joins them with newlines.
-    /// A regular comment (`//`) between doc lines resets the collection,
-    /// so only the last consecutive block of `///` lines is returned.
+    /// A regular comment (`//`) or blank line between doc lines resets
+    /// the collection, so only the last consecutive block of `///` lines
+    /// is returned.
     pub(super) fn collect_doc_comment(&self) -> Option<String> {
         let mut lines = Vec::new();
         for trivia in self.current_token().leading_trivia() {
@@ -343,8 +344,13 @@ impl Parser {
                         .unwrap_or_else(|| text.strip_prefix("///").unwrap_or(text));
                     lines.push(stripped.to_string());
                 }
-                super::Trivia::Whitespace(_) => {} // whitespace between lines is fine
-                _ => lines.clear(),                // non-doc comment resets collection
+                super::Trivia::Whitespace(ws) => {
+                    // A blank line (>1 newline) breaks consecutive doc comments
+                    if ws.chars().filter(|&c| c == '\n').count() > 1 {
+                        lines.clear();
+                    }
+                }
+                _ => lines.clear(), // non-doc comment resets collection
             }
         }
         if lines.is_empty() {
@@ -2531,6 +2537,24 @@ abstract Actor subclass: Collection
         assert_eq!(
             module.classes[0].doc_comment.as_deref(),
             Some("An abstract collection.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_blank_line_resets() {
+        let module = parse_ok(
+            "/// Orphaned doc comment.
+
+/// Actual class doc.
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        // Blank line separates the two doc blocks; only the last is attached
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("Actual class doc.")
         );
     }
 }
