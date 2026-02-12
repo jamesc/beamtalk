@@ -12,7 +12,7 @@
 /// (Set new add: 1) includes: 1    // => true
 /// (Set new add: 1) size           // => 1
 /// ```
-sealed Object subclass: Set
+sealed Collection subclass: Set
   state: elements = #()
 
   /// Number of elements in the set.
