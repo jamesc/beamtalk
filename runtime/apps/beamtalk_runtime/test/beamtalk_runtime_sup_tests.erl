@@ -121,3 +121,43 @@ exports_required_callbacks_test() ->
     Exports = beamtalk_runtime_sup:module_info(exports),
     ?assert(lists:member({start_link, 0}, Exports)),
     ?assert(lists:member({init, 1}, Exports)).
+
+%%% Startup smoke tests
+
+all_children_alive_test() ->
+    %% Set trap_exit before start_link to avoid dying if supervisor crashes early
+    OldTrap = process_flag(trap_exit, true),
+
+    %% Handle already-started supervisor (registered name)
+    {Sup, WeStarted} = case beamtalk_runtime_sup:start_link() of
+        {ok, Pid} -> {Pid, true};
+        {error, {already_started, Pid}} -> {Pid, false}
+    end,
+
+    try
+        %% Get all children
+        Children = supervisor:which_children(Sup),
+
+        %% Expected: 3 children (bootstrap, stdlib, instances)
+        ?assertEqual(3, length(Children)),
+
+        %% Verify each child has correct ID and is alive
+        ExpectedIds = [beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances],
+        ActualIds = [Id || {Id, _Pid, _Type, _Modules} <- Children],
+        ?assertEqual(lists:sort(ExpectedIds), lists:sort(ActualIds)),
+
+        %% Verify each child process is alive
+        lists:foreach(fun({_Id, ChildPid, _Type, _Modules}) ->
+            ?assert(is_process_alive(ChildPid))
+        end, Children)
+    after
+        %% Only shut down supervisor if we started it
+        case WeStarted of
+            true ->
+                exit(Sup, shutdown),
+                receive {'EXIT', Sup, _} -> ok after 1000 -> ok end;
+            false ->
+                ok
+        end,
+        process_flag(trap_exit, OldTrap)
+    end.
