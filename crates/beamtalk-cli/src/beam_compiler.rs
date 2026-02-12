@@ -430,6 +430,9 @@ pub fn write_core_erlang_with_source(
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
 
+    // BT-499: Write EEP-48 doc chunk file if module has doc comments
+    write_docs_file(module, output_path);
+
     Ok(())
 }
 
@@ -471,7 +474,30 @@ pub fn write_core_erlang_with_bindings(
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
 
+    // BT-499: Write EEP-48 doc chunk file if module has doc comments
+    write_docs_file(module, output_path);
+
     Ok(())
+}
+
+/// Writes an EEP-48 `.docs` file alongside a `.core` file if the module has doc comments.
+///
+/// BT-499: The `.docs` file contains an Erlang term that will be injected as a "Docs"
+/// chunk into the compiled `.beam` file by `compile.escript`.
+fn write_docs_file(module: &beamtalk_core::ast::Module, core_output_path: &Utf8Path) {
+    let docs_path = core_output_path.with_extension("docs");
+    if let Some(docs_term) =
+        beamtalk_core::codegen::core_erlang::doc_chunks::generate_docs_term(module)
+    {
+        if let Err(e) = std::fs::write(&docs_path, &docs_term) {
+            debug!("Failed to write docs file '{}': {}", docs_path, e);
+            // Clean up on write failure so stale .docs aren't injected
+            let _ = std::fs::remove_file(&docs_path);
+        }
+    } else {
+        // Remove stale .docs file if no docs to generate
+        let _ = std::fs::remove_file(&docs_path);
+    }
 }
 
 /// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).

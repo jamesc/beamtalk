@@ -1,0 +1,196 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for chat room demo (BT-431)
+//
+// Tests:
+// - Actor references stored in Set (ordsets with PIDs)
+// - Actor method calls inside do: block (broadcasting)
+// - Multi-actor message passing
+// - Set and List operations with actors
+
+// @load tests/e2e/fixtures/chat_room.bt
+// @load tests/e2e/fixtures/chat_member.bt
+
+// ===========================================================================
+// CHAT ROOM CREATION & BASIC OPERATIONS
+// ===========================================================================
+
+// Create a chat room
+room := ChatRoom spawn
+// => #Actor<ChatRoom,_>
+
+// Initially no members
+online := room online
+// => {"$beamtalk_class":"Set","elements":[]}
+
+online isEmpty
+// => true
+
+// No message history
+hist := room getHistory
+// => []
+
+hist size
+// => 0
+
+// ===========================================================================
+// MEMBERS & SET OPERATIONS
+// ===========================================================================
+
+// Create members
+alice := ChatMember spawn
+// => #Actor<ChatMember,_>
+
+bob := ChatMember spawn
+// => #Actor<ChatMember,_>
+
+// Set member names
+alice setName: "Alice"
+// => Alice
+
+bob setName: "Bob"
+// => Bob
+
+// Verify names were set
+alice getName
+// => Alice
+
+bob getName
+// => Bob
+
+// Set room references for members
+alice setRoom: room
+// => #Actor<ChatRoom,_>
+
+bob setRoom: room
+// => #Actor<ChatRoom,_>
+
+// Join the room
+room join: alice
+// => {"$beamtalk_class":"Set","elements":_}
+
+room join: bob
+// => {"$beamtalk_class":"Set","elements":_}
+
+// Check online members (Set of actor references)
+members := room online
+// => {"$beamtalk_class":"Set","elements":_}
+
+members size
+// => 2
+
+// Verify members includes alice (PID comparison in Set)
+members includes: alice
+// => true
+
+members includes: bob
+// => true
+
+// ===========================================================================
+// MESSAGE BROADCASTING (actor method calls in do: block)
+// ===========================================================================
+
+// Send a message from Alice
+room say: "Hello everyone!" from: alice
+// => nil
+
+// Check message history
+history := room getHistory
+// => ["Hello everyone!"]
+
+history size
+// => 1
+
+history first
+// => Hello everyone!
+
+// Check that alice received the message (via do: broadcast)
+aliceInbox := alice getInbox
+// => ["Hello everyone!"]
+
+aliceInbox size
+// => 1
+
+aliceInbox first
+// => Hello everyone!
+
+// Check that bob also received it
+bobInbox := bob getInbox
+// => ["Hello everyone!"]
+
+bobInbox size
+// => 1
+
+bobInbox first
+// => Hello everyone!
+
+// ===========================================================================
+// MULTIPLE MESSAGES
+// ===========================================================================
+
+// Bob replies
+room say: "Hey Alice!" from: bob
+// => nil
+
+// History now has 2 messages
+history2 := room getHistory
+// => ["Hello everyone!","Hey Alice!"]
+
+history2 size
+// => 2
+
+// Both members received both messages
+aliceInbox2 := alice getInbox
+// => ["Hello everyone!","Hey Alice!"]
+
+aliceInbox2 size
+// => 2
+
+bobInbox2 := bob getInbox
+// => ["Hello everyone!","Hey Alice!"]
+
+bobInbox2 size
+// => 2
+
+// ===========================================================================
+// MEMBER LEAVING
+// ===========================================================================
+
+// Alice leaves
+room leave: alice
+// => {"$beamtalk_class":"Set","elements":_}
+
+// Online members now has only bob
+onlineAfter := room online
+// => {"$beamtalk_class":"Set","elements":_}
+
+onlineAfter size
+// => 1
+
+onlineAfter includes: alice
+// => false
+
+onlineAfter includes: bob
+// => true
+
+// Message sent after alice leaves
+room say: "Anyone there?" from: bob
+// => nil
+
+// Alice doesn't receive the new message
+aliceInbox3 := alice getInbox
+// => ["Hello everyone!","Hey Alice!"]
+
+aliceInbox3 size
+// => 2
+
+// Bob receives it
+bobInbox3 := bob getInbox
+// => ["Hello everyone!","Hey Alice!","Anyone there?"]
+
+bobInbox3 size
+// => 3
+
+bobInbox3 last
+// => Anyone there?

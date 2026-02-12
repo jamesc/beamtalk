@@ -287,21 +287,12 @@ class_object_tag(ClassName) when is_atom(ClassName) ->
 
 %% @doc Get a compiled method object.
 %%
-%% Accepts either a class process pid or a class name atom.
+%% Delegates to beamtalk_method_resolver for the actual resolution logic.
+%% Accepts a class process pid, a class name atom, or a class object tuple.
 %% Returns a CompiledMethod map or nil if the method is not found.
--spec method(pid() | class_name(), selector()) -> map() | nil.
-method(ClassPid, Selector) when is_pid(ClassPid) ->
-    gen_server:call(ClassPid, {method, Selector});
-method(ClassName, Selector) when is_atom(ClassName) ->
-    case whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, '>>'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
-            beamtalk_error:raise(Error2);
-        Pid ->
-            gen_server:call(Pid, {method, Selector})
-    end.
+-spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | nil.
+method(ClassRef, Selector) ->
+    beamtalk_method_resolver:resolve(ClassRef, Selector).
 
 %% @doc Check if a class has a method (does not walk hierarchy).
 %%
@@ -565,11 +556,16 @@ handle_call({spawn, Args}, _From, #class_state{
         SpawnResult = case Args of
             [] ->
                 erlang:apply(Module, spawn, []);
-            [InitMap] when is_map(InitMap) ->
-                erlang:apply(Module, spawn, [InitMap]);
+            [InitArgs] ->
+                %% BT-476: Delegate is_map validation to generated Module:spawn/1.
+                %% The generated spawn/1 validates argument type and raises type_error
+                %% for non-map args (single source of truth for spawnWith: validation).
+                %% See: crates/beamtalk-core/src/codegen/core_erlang/gen_server/spawn.rs
+                %%      generate_spawn_with_args_function()
+                erlang:apply(Module, spawn, [InitArgs]);
             _ ->
-                %% BT-473: Reject non-map arguments with type_error.
-                %% Actors are always spawnable, so wrong arg type is the issue.
+                %% Defensive: class_send always provides [] or [Arg], but guard
+                %% against unexpected multi-arg calls with a structured error.
                 Error0 = beamtalk_error:new(type_error, ClassName),
                 Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
                 Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
@@ -666,6 +662,9 @@ handle_call({new, Args}, _From, #class_state{
             %% generated new/0 returns an appropriate error.
             %% BT-422: Wrap in try/catch to prevent class gen_server crash
             %% when new/0 or new/1 raises (e.g., instantiation_error for primitives).
+            %% BT-476: Unlike spawnWith: (where validation lives in generated code),
+            %% new: validation stays here because generated new/1 may not exist
+            %% for all classes. See also: spawn.rs for spawnWith: validation.
             try
                 Result = case Args of
                     [] ->

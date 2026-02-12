@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for CompiledMethod introspection (BT-101, BT-454)
+// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
 //
 // Tests the >> operator and CompiledMethod protocol:
 // selector, source, argumentCount, class
@@ -13,10 +13,30 @@
 // ===========================================================================
 
 Counter >> #getValue
-// => _
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 Counter >> #nonExistent
 // => nil
+
+// ===========================================================================
+// METHOD LOOKUP ON VARIABLE RECEIVERS (BT-323)
+// ===========================================================================
+
+cls := Counter
+// => Counter
+
+cls >> #getValue
+// => {"$beamtalk_class":"CompiledMethod",_}
+
+(cls >> #getValue) selector
+// => getValue
+
+cls >> #nonExistent
+// => nil
+
+// >> on non-class value produces type_error
+42 >> #foo
+// => ERROR: type_error
 
 // ===========================================================================
 // CLASS

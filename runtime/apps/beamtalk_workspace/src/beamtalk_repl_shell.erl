@@ -35,7 +35,7 @@ stop(SessionPid) ->
     gen_server:stop(SessionPid, normal, 5000).
 
 %% @doc Evaluate an expression in this session.
--spec eval(pid(), string()) -> {ok, term(), binary()} | {error, term(), binary()}.
+-spec eval(pid(), string()) -> {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 
@@ -78,10 +78,10 @@ init(SessionId) ->
 %% @private
 handle_call({eval, Expression}, _From, {SessionId, State}) ->
     case beamtalk_repl_eval:do_eval(Expression, State) of
-        {ok, Result, Output, NewState} ->
-            {reply, {ok, Result, Output}, {SessionId, NewState}};
-        {error, Reason, Output, NewState} ->
-            {reply, {error, Reason, Output}, {SessionId, NewState}}
+        {ok, Result, Output, Warnings, NewState} ->
+            {reply, {ok, Result, Output, Warnings}, {SessionId, NewState}};
+        {error, Reason, Output, Warnings, NewState} ->
+            {reply, {error, Reason, Output, Warnings}, {SessionId, NewState}}
     end;
 
 handle_call(get_bindings, _From, {SessionId, State}) ->

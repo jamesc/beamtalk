@@ -22,9 +22,41 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::{CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, Literal, MessageSelector};
-use std::fmt::Write;
+use crate::docvec;
+
+/// Returns the arity of a block expression, or `None` if the expression is not a block literal.
+fn block_arity(expr: &Expression) -> Option<usize> {
+    match expr {
+        Expression::Block(b) => Some(b.parameters.len()),
+        _ => None,
+    }
+}
+
+/// Validates that an `ifNotNil:` block has arity 0 or 1.
+/// Returns `true` if the block takes an argument (arity 1 or non-literal), `false` for arity 0.
+fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> {
+    match block_arity(expr) {
+        Some(0) => Ok(false),
+        Some(n) if n > 1 => Err(CodeGenError::BlockArityMismatch {
+            selector: selector.to_string(),
+            arity: n,
+        }),
+        // Arity 1 or non-literal block — pass the receiver (Smalltalk convention)
+        _ => Ok(true),
+    }
+}
+
+/// Generates a Core Erlang `apply` call that adapts to block arity.
+/// For 0-arg blocks: `apply BlockVar ()`, for 1-arg blocks: `apply BlockVar (RecvVar)`.
+fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> String {
+    if block_takes_arg {
+        format!("apply {block_var} ({recv_var})")
+    } else {
+        format!("apply {block_var} ()")
+    }
+}
 
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
@@ -67,15 +99,18 @@ impl CoreErlangGenerator {
                     self.generate_block_value_call(receiver, &[])?;
                 } else {
                     let recv_var = self.fresh_temp_var("ValRecv");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in case call 'erlang':'is_function'({recv_var}) of \
-                         'true' when 'true' -> apply {recv_var} () \
-                         'false' when 'true' -> \
-                         call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
-                    )?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    let doc = docvec![
+                        format!("let {recv_var} = "),
+                        recv_code,
+                        format!(
+                            " in case call 'erlang':'is_function'({recv_var}) of \
+                             'true' when 'true' -> apply {recv_var} () \
+                             'false' when 'true' -> \
+                             call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
+                        ),
+                    ];
+                    self.write_document(&doc);
                 }
                 Ok(Some(()))
             }
@@ -233,19 +268,24 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         arguments: &[Expression],
     ) -> Result<()> {
-        // Bind receiver to a variable first for proper evaluation
-        // Use fresh_temp_var to avoid shadowing user identifiers named "Fun"
         let fun_var = self.fresh_temp_var("Fun");
-        write!(self.output, "let {fun_var} = ")?;
-        self.generate_expression(receiver)?;
-        write!(self.output, " in apply {fun_var} (")?;
+        let recv_code = self.capture_expression(receiver)?;
+
+        let mut arg_parts: Vec<String> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
-                write!(self.output, ", ")?;
+                arg_parts.push(", ".to_string());
             }
-            self.generate_expression(arg)?;
+            arg_parts.push(self.capture_expression(arg)?);
         }
-        write!(self.output, ")")?;
+        let args_str = arg_parts.join("");
+
+        let doc = docvec![
+            format!("let {fun_var} = "),
+            recv_code,
+            format!(" in apply {fun_var} ({args_str})"),
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -303,14 +343,14 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "class" if arguments.is_empty() => {
                     // BT-412: Return class as first-class object (#beamtalk_object{})
-                    // class_of_object/1 handles all types: primitives, actors, maps, etc.
                     let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in call 'beamtalk_primitive':'class_of_object'({recv_var})"
-                    )?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    let doc = docvec![
+                        format!("let {recv_var} = "),
+                        recv_code,
+                        format!(" in call 'beamtalk_primitive':'class_of_object'({recv_var})"),
+                    ];
+                    self.write_document(&doc);
                     Ok(Some(()))
                 }
                 _ => Ok(None),
@@ -320,55 +360,45 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "perform:withArguments:" if arguments.len() == 2 => {
-                        // Dynamic message dispatch: receiver perform: selector withArguments: args
-                        // Routes through unified message dispatch (actors, class objects, primitives).
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
                         let args_var = self.fresh_var("Args");
 
-                        // Bind receiver
-                        write!(self.output, "let {receiver_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in ")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let sel_code = self.capture_expression(&arguments[0])?;
+                        let args_code = self.capture_expression(&arguments[1])?;
 
-                        // Bind selector (should be an atom)
-                        write!(self.output, "let {selector_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in ")?;
-
-                        // Bind arguments (should be a list)
-                        write!(self.output, "let {args_var} = ")?;
-                        self.generate_expression(&arguments[1])?;
-                        write!(self.output, " in ")?;
-
-                        write!(
-                            self.output,
-                            "call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, {args_var})"
-                        )?;
-
+                        let doc = docvec![
+                            format!("let {receiver_var} = "),
+                            recv_code,
+                            format!(" in let {selector_var} = "),
+                            sel_code,
+                            format!(" in let {args_var} = "),
+                            args_code,
+                            format!(
+                                " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, {args_var})"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "perform:" if arguments.len() == 1 => {
-                        // Dynamic message dispatch (zero-arity): receiver perform: selector
-                        // Routes through unified message dispatch with empty args list.
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        // Bind receiver
-                        write!(self.output, "let {receiver_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in ")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let sel_code = self.capture_expression(&arguments[0])?;
 
-                        // Bind selector (should be an atom)
-                        write!(self.output, "let {selector_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in ")?;
-
-                        write!(
-                            self.output,
-                            "call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, [])"
-                        )?;
-
+                        let doc = docvec![
+                            format!("let {receiver_var} = "),
+                            recv_code,
+                            format!(" in let {selector_var} = "),
+                            sel_code,
+                            format!(
+                                " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, [])"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     _ => Ok(None),
@@ -421,6 +451,10 @@ impl CoreErlangGenerator {
     /// - `ifNil:` — Conditional execution if nil
     /// - `ifNotNil:` — Conditional execution if not nil
     /// - `ifNil:ifNotNil:` / `ifNotNil:ifNil:` — Two-way conditional
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Six nil-testing variants (isNil, notNil, ifNil:, ifNotNil:, ifNil:ifNotNil:, ifNotNil:ifNil:) in single match"
+    )]
     fn try_generate_nil_protocol(
         &mut self,
         receiver: &Expression,
@@ -430,25 +464,29 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "isNil" if arguments.is_empty() => {
-                    // Check if value is nil: case Receiver of 'nil' -> true; _ -> false
                     let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in case {recv_var} of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end"
-                    )?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    let doc = docvec![
+                        format!("let {recv_var} = "),
+                        recv_code,
+                        format!(
+                            " in case {recv_var} of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end"
+                        ),
+                    ];
+                    self.write_document(&doc);
                     Ok(Some(()))
                 }
                 "notNil" if arguments.is_empty() => {
-                    // Check if value is not nil: case Receiver of 'nil' -> false; _ -> true
                     let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(
-                        self.output,
-                        " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
-                    )?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    let doc = docvec![
+                        format!("let {recv_var} = "),
+                        recv_code,
+                        format!(
+                            " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
+                        ),
+                    ];
+                    self.write_document(&doc);
                     Ok(Some(()))
                 }
                 _ => Ok(None),
@@ -458,65 +496,91 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "ifNil:" if arguments.len() == 1 => {
-                        // case Receiver of 'nil' -> apply Block (); _ -> Receiver end
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NilBlk");
-                        write!(self.output, "let {recv_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in let {block_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(
-                            self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> apply {block_var} () <_> when 'true' -> {recv_var} end"
-                        )?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let block_code = self.capture_expression(&arguments[0])?;
+                        let doc = docvec![
+                            format!("let {recv_var} = "),
+                            recv_code,
+                            format!(" in let {block_var} = "),
+                            block_code,
+                            format!(
+                                " in case {recv_var} of <'nil'> when 'true' -> apply {block_var} () <_> when 'true' -> {recv_var} end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "ifNotNil:" if arguments.len() == 1 => {
-                        // case Receiver of 'nil' -> 'nil'; _ -> apply Block (Receiver) end
+                        // If the block has 0 parameters, don't pass the receiver (avoids badarity)
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NotNilBlk");
-                        write!(self.output, "let {recv_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in let {block_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(
-                            self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> apply {block_var} ({recv_var}) end"
-                        )?;
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let block_code = self.capture_expression(&arguments[0])?;
+                        let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
+                        let doc = docvec![
+                            format!("let {recv_var} = "),
+                            recv_code,
+                            format!(" in let {block_var} = "),
+                            block_code,
+                            format!(
+                                " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> {apply} end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "ifNil:ifNotNil:" if arguments.len() == 2 => {
-                        // case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        // If the notNil block has 0 parameters, don't pass the receiver
                         let recv_var = self.fresh_temp_var("Obj");
                         let nil_var = self.fresh_temp_var("NilBlk");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                        write!(self.output, "let {recv_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in let {nil_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in let {not_nil_var} = ")?;
-                        self.generate_expression(&arguments[1])?;
-                        write!(
-                            self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
-                        )?;
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let nil_code = self.capture_expression(&arguments[0])?;
+                        let not_nil_code = self.capture_expression(&arguments[1])?;
+                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                        let doc = docvec![
+                            format!("let {recv_var} = "),
+                            recv_code,
+                            format!(" in let {nil_var} = "),
+                            nil_code,
+                            format!(" in let {not_nil_var} = "),
+                            not_nil_code,
+                            format!(
+                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "ifNotNil:ifNil:" if arguments.len() == 2 => {
-                        // Reversed order: case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        // If the notNil block has 0 parameters, don't pass the receiver
                         let recv_var = self.fresh_temp_var("Obj");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
                         let nil_var = self.fresh_temp_var("NilBlk");
-                        write!(self.output, "let {recv_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in let {not_nil_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in let {nil_var} = ")?;
-                        self.generate_expression(&arguments[1])?;
-                        write!(
-                            self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
-                        )?;
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let not_nil_code = self.capture_expression(&arguments[0])?;
+                        let nil_code = self.capture_expression(&arguments[1])?;
+                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                        let doc = docvec![
+                            format!("let {recv_var} = "),
+                            recv_code,
+                            format!(" in let {not_nil_var} = "),
+                            not_nil_code,
+                            format!(" in let {nil_var} = "),
+                            nil_code,
+                            format!(
+                                " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     _ => Ok(None),
@@ -543,25 +607,28 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "error:" if arguments.len() == 1 => {
-                        // Smalltalk-style error signaling: self error: 'message'
-                        // Creates a #beamtalk_error{kind=user_error} with receiver's class
                         let recv_var = self.fresh_temp_var("Obj");
                         let msg_var = self.fresh_temp_var("Msg");
                         let class_var = self.fresh_temp_var("Class");
                         let err0 = self.fresh_temp_var("Err");
                         let err1 = self.fresh_temp_var("Err");
 
-                        write!(self.output, "let {recv_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in let {msg_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(
-                            self.output,
-                            " in let {class_var} = call 'beamtalk_primitive':'class_of'({recv_var}) in \
-                             let {err0} = call 'beamtalk_error':'new'('user_error', {class_var}) in \
-                             let {err1} = call 'beamtalk_error':'with_message'({err0}, {msg_var}) in \
-                             call 'beamtalk_error':'raise'({err1})"
-                        )?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let msg_code = self.capture_expression(&arguments[0])?;
+
+                        let doc = docvec![
+                            format!("let {recv_var} = "),
+                            recv_code,
+                            format!(" in let {msg_var} = "),
+                            msg_code,
+                            format!(
+                                " in let {class_var} = call 'beamtalk_primitive':'class_of'({recv_var}) in \
+                                 let {err0} = call 'beamtalk_error':'new'('user_error', {class_var}) in \
+                                 let {err1} = call 'beamtalk_error':'with_message'({err0}, {msg_var}) in \
+                                 call 'beamtalk_error':'raise'({err1})"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     _ => Ok(None),
@@ -587,15 +654,19 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
                     // Identity: just return the receiver
-                    self.generate_expression(receiver)?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    self.write_document(&docvec![recv_code]);
                     Ok(Some(()))
                 }
                 "hash" if arguments.is_empty() => {
-                    // Hash using erlang:phash2/1 — works for all BEAM types
                     let recv_var = self.fresh_temp_var("Obj");
-                    write!(self.output, "let {recv_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, " in call 'erlang':'phash2'({recv_var})")?;
+                    let recv_code = self.capture_expression(receiver)?;
+                    let doc = docvec![
+                        format!("let {recv_var} = "),
+                        recv_code,
+                        format!(" in call 'erlang':'phash2'({recv_var})"),
+                    ];
+                    self.write_document(&doc);
                     Ok(Some(()))
                 }
                 // BT-477: printString removed as intrinsic — now uses polymorphic
@@ -627,39 +698,23 @@ impl CoreErlangGenerator {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "instVarNames" if arguments.is_empty() => {
-                    // For actors: Extract instance variable names from state map
-                    // For primitives: Intended future semantics is to return empty list
-                    //                 (they have no instance vars); current implementation
-                    //                 only supports actor instances (see BT-164).
-                    //
-                    // Generate async call since actors need mailbox serialization:
-                    // beamtalk_actor:async_send(Pid, instVarNames, [], Future)
-
                     let receiver_var = self.fresh_var("Receiver");
                     let pid_var = self.fresh_var("Pid");
                     let future_var = self.fresh_var("Future");
 
-                    write!(self.output, "let {receiver_var} = ")?;
-                    self.generate_expression(receiver)?;
-                    write!(self.output, " in ")?;
+                    let recv_code = self.capture_expression(receiver)?;
 
-                    write!(
-                        self.output,
-                        "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-                    )?;
-
-                    write!(
-                        self.output,
-                        "let {future_var} = call 'beamtalk_future':'new'() in "
-                    )?;
-
-                    write!(
-                        self.output,
-                        "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in "
-                    )?;
-
-                    write!(self.output, "{future_var}")?;
-
+                    let doc = docvec![
+                        format!("let {receiver_var} = "),
+                        recv_code,
+                        format!(
+                            " in let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
+                                 let {future_var} = call 'beamtalk_future':'new'() in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarNames', [], {future_var}) in \
+                                 {future_var}"
+                        ),
+                    ];
+                    self.write_document(&doc);
                     Ok(Some(()))
                 }
                 _ => Ok(None),
@@ -669,34 +724,25 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "respondsTo:" if arguments.len() == 1 => {
-                        // Check if object responds to a selector
-                        // Use beamtalk_primitive:responds_to/2 which handles both actors and primitives
-                        // This is a synchronous call that returns a boolean immediately
-
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        write!(self.output, "let {receiver_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in ")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let sel_code = self.capture_expression(&arguments[0])?;
 
-                        write!(self.output, "let {selector_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in ")?;
-
-                        // Call beamtalk_primitive:responds_to/2 for uniform handling
-                        write!(
-                            self.output,
-                            "call 'beamtalk_primitive':'responds_to'({receiver_var}, {selector_var})"
-                        )?;
-
+                        let doc = docvec![
+                            format!("let {receiver_var} = "),
+                            recv_code,
+                            format!(" in let {selector_var} = "),
+                            sel_code,
+                            format!(
+                                " in call 'beamtalk_primitive':'responds_to'({receiver_var}, {selector_var})"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "instVarAt:" if arguments.len() == 1 => {
-                        // Read instance variable by name (BT-359)
-                        // For actors: Read from state map via gen_server
-                        // For primitives/value types: Raise immutable_value error
-
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let pid_var = self.fresh_var("Pid");
@@ -706,64 +752,46 @@ impl CoreErlangGenerator {
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
                         let hint =
-                            core_erlang_binary_string("Value types have no instance variables");
+                            Self::binary_string_literal("Value types have no instance variables");
 
-                        write!(self.output, "let {receiver_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in ")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let name_code = self.capture_expression(&arguments[0])?;
 
-                        write!(self.output, "let {name_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in ")?;
-
-                        // Type guard: full beamtalk_object check (is_tuple + size==4 + tag)
-                        // Same pattern as perform:withArguments: intrinsic
-                        write!(
-                            self.output,
-                            "case case call 'erlang':'is_tuple'({receiver_var}) of \
-                             <'true'> when 'true' -> \
-                             case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
-                             <'true'> when 'true' -> \
-                             call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
-                             <_> when 'true' -> 'false' end \
-                             <_> when 'true' -> 'false' end of "
-                        )?;
-
-                        // Actor path: extract pid and send async message
-                        write!(self.output, "<'true'> when 'true' -> ")?;
-                        write!(
-                            self.output,
-                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-                        )?;
-                        write!(
-                            self.output,
-                            "let {future_var} = call 'beamtalk_future':'new'() in "
-                        )?;
-                        write!(
-                            self.output,
-                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:', [{name_var}], {future_var}) in "
-                        )?;
-                        write!(self.output, "{future_var} ")?;
-
-                        // Primitive path: raise immutable_value error
-                        write!(
-                            self.output,
-                            "<_> when 'true' -> \
-                             let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
-                             let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                             let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:') in \
-                             let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                             call 'beamtalk_error':'raise'({error_hint}) \
-                             end"
-                        )?;
-
+                        let doc = docvec![
+                            format!("let {receiver_var} = "),
+                            recv_code,
+                            format!(" in let {name_var} = "),
+                            name_code,
+                            format!(
+                                " in case case call 'erlang':'is_tuple'({receiver_var}) of \
+                                 <'true'> when 'true' -> \
+                                 case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
+                                 <'true'> when 'true' -> \
+                                 call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
+                                 <_> when 'true' -> 'false' end \
+                                 <_> when 'true' -> 'false' end of "
+                            ),
+                            format!(
+                                "<'true'> when 'true' -> \
+                                 let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
+                                 let {future_var} = call 'beamtalk_future':'new'() in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:', [{name_var}], {future_var}) in \
+                                 {future_var} "
+                            ),
+                            format!(
+                                "<_> when 'true' -> \
+                                 let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
+                                 let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
+                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:') in \
+                                 let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
+                                 call 'beamtalk_error':'raise'({error_hint}) \
+                                 end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     "instVarAt:put:" if arguments.len() == 2 => {
-                        // Set instance variable by name (BT-359)
-                        // For actors: Write to state map via gen_server
-                        // For primitives/value types: Raise immutable_value error
-
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
@@ -773,63 +801,48 @@ impl CoreErlangGenerator {
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
-                        let hint = core_erlang_binary_string(
+                        let hint = Self::binary_string_literal(
                             "Value types are immutable. Use a method that returns a new instance instead.",
                         );
 
-                        write!(self.output, "let {receiver_var} = ")?;
-                        self.generate_expression(receiver)?;
-                        write!(self.output, " in ")?;
+                        let recv_code = self.capture_expression(receiver)?;
+                        let name_code = self.capture_expression(&arguments[0])?;
+                        let value_code = self.capture_expression(&arguments[1])?;
 
-                        write!(self.output, "let {name_var} = ")?;
-                        self.generate_expression(&arguments[0])?;
-                        write!(self.output, " in ")?;
-
-                        write!(self.output, "let {value_var} = ")?;
-                        self.generate_expression(&arguments[1])?;
-                        write!(self.output, " in ")?;
-
-                        // Type guard: full beamtalk_object check (is_tuple + size==4 + tag)
-                        // Same pattern as perform:withArguments: intrinsic
-                        write!(
-                            self.output,
-                            "case case call 'erlang':'is_tuple'({receiver_var}) of \
-                             <'true'> when 'true' -> \
-                             case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
-                             <'true'> when 'true' -> \
-                             call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
-                             <_> when 'true' -> 'false' end \
-                             <_> when 'true' -> 'false' end of "
-                        )?;
-
-                        // Actor path: extract pid and send async message
-                        write!(self.output, "<'true'> when 'true' -> ")?;
-                        write!(
-                            self.output,
-                            "let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in "
-                        )?;
-                        write!(
-                            self.output,
-                            "let {future_var} = call 'beamtalk_future':'new'() in "
-                        )?;
-                        write!(
-                            self.output,
-                            "let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:put:', [{name_var}, {value_var}], {future_var}) in "
-                        )?;
-                        write!(self.output, "{future_var} ")?;
-
-                        // Primitive path: raise immutable_value error
-                        write!(
-                            self.output,
-                            "<_> when 'true' -> \
-                             let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
-                             let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
-                             let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:put:') in \
-                             let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
-                             call 'beamtalk_error':'raise'({error_hint}) \
-                             end"
-                        )?;
-
+                        let doc = docvec![
+                            format!("let {receiver_var} = "),
+                            recv_code,
+                            format!(" in let {name_var} = "),
+                            name_code,
+                            format!(" in let {value_var} = "),
+                            value_code,
+                            format!(
+                                " in case case call 'erlang':'is_tuple'({receiver_var}) of \
+                                 <'true'> when 'true' -> \
+                                 case call 'erlang':'=='(call 'erlang':'tuple_size'({receiver_var}), 4) of \
+                                 <'true'> when 'true' -> \
+                                 call 'erlang':'=='(call 'erlang':'element'(1, {receiver_var}), 'beamtalk_object') \
+                                 <_> when 'true' -> 'false' end \
+                                 <_> when 'true' -> 'false' end of "
+                            ),
+                            format!(
+                                "<'true'> when 'true' -> \
+                                 let {pid_var} = call 'erlang':'element'(4, {receiver_var}) in \
+                                 let {future_var} = call 'beamtalk_future':'new'() in \
+                                 let _ = call 'beamtalk_actor':'async_send'({pid_var}, 'instVarAt:put:', [{name_var}, {value_var}], {future_var}) in \
+                                 {future_var} "
+                            ),
+                            format!(
+                                "<_> when 'true' -> \
+                                 let {class_var} = call 'beamtalk_primitive':'class_of'({receiver_var}) in \
+                                 let {error_base} = call 'beamtalk_error':'new'('immutable_value', {class_var}) in \
+                                 let {error_sel} = call 'beamtalk_error':'with_selector'({error_base}, 'instVarAt:put:') in \
+                                 let {error_hint} = call 'beamtalk_error':'with_hint'({error_sel}, {hint}) in \
+                                 call 'beamtalk_error':'raise'({error_hint}) \
+                                 end"
+                            ),
+                        ];
+                        self.write_document(&doc);
                         Ok(Some(()))
                     }
                     _ => Ok(None),
@@ -840,16 +853,56 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Converts a Rust string to Core Erlang binary literal format.
-///
-/// Core Erlang represents binaries as: `#{#<byte>(8,1,'integer',['unsigned'|['big']]), ...}#`
-fn core_erlang_binary_string(s: &str) -> String {
-    if s.is_empty() {
-        return "#{}#".to_string();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Block, BlockParameter, Literal};
+    use crate::source_analysis::Span;
+
+    #[test]
+    fn test_validate_if_not_nil_block_zero_args() {
+        let block = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+            span: Span::new(0, 3),
+        });
+        assert!(!validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
     }
-    let segments: Vec<String> = s
-        .bytes()
-        .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
-        .collect();
-    format!("#{{{}}}#", segments.join(","))
+
+    #[test]
+    fn test_validate_if_not_nil_block_one_arg() {
+        let block = Expression::Block(Block {
+            parameters: vec![BlockParameter::new("v", Span::new(1, 2))],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(5, 6))],
+            span: Span::new(0, 7),
+        });
+        assert!(validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_if_not_nil_block_two_args_errors() {
+        let block = Expression::Block(Block {
+            parameters: vec![
+                BlockParameter::new("a", Span::new(1, 2)),
+                BlockParameter::new("b", Span::new(3, 4)),
+            ],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
+            span: Span::new(0, 9),
+        });
+        let result = validate_if_not_nil_block(&block, "ifNotNil:");
+        assert!(result.is_err());
+        if let Err(CodeGenError::BlockArityMismatch { selector, arity }) = result {
+            assert_eq!(selector, "ifNotNil:");
+            assert_eq!(arity, 2);
+        } else {
+            panic!("Expected BlockArityMismatch error");
+        }
+    }
+
+    #[test]
+    fn test_validate_if_not_nil_block_non_literal() {
+        // Non-block expression (variable) — assumes 1 arg
+        let expr = Expression::Identifier(crate::ast::Identifier::new("myBlock", Span::new(0, 7)));
+        assert!(validate_if_not_nil_block(&expr, "ifNotNil:").unwrap());
+    }
 }

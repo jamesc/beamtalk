@@ -14,7 +14,7 @@
 
 // Basic test to verify spawn and class work
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 c class
 // => Counter

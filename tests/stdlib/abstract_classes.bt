@@ -11,10 +11,10 @@
 // @load tests/e2e/fixtures/circle.bt
 
 c := Circle spawn
-// => _
+// => #Actor<Circle,_>
 
 (c setRadius: 5) await
-// => _
+// => 5
 
 c area await
 // => 25

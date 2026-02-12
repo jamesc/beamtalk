@@ -282,6 +282,29 @@ fn write_error_assertion(
     );
 }
 
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. This preserves literal underscores in identifiers like
+/// `does_not_understand` or `beamtalk_class`.
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "EUnit wrapper includes format_result + matches_pattern helpers"
+)]
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -340,7 +363,50 @@ fn generate_eunit_wrapper(
          \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
          \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
          \x20   end;\n\
-         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n",
+         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
+         %% BT-502: Glob-style pattern matching where _ matches any substring,\n\
+         %% but only when _ is NOT flanked by alphanumeric characters on both sides.\n\
+         %% This preserves literal underscores in identifiers like does_not_understand.\n\
+         matches_pattern(Pattern, Actual) ->\n\
+         \x20   Segments = wildcard_segments(Pattern),\n\
+         \x20   matches_segments(Segments, Actual, 0, true).\n\
+         wildcard_segments(Pattern) ->\n\
+         \x20   Chars = binary_to_list(Pattern),\n\
+         \x20   [list_to_binary(S) || S <- wildcard_split(Chars, [], [], none)].\n\
+         wildcard_split([], CurRev, SegsRev, _Prev) ->\n\
+         \x20   lists:reverse([lists:reverse(CurRev) | SegsRev]);\n\
+         wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->\n\
+         \x20   Next = case Rest of [N | _] -> N; [] -> none end,\n\
+         \x20   case is_alnum(Prev) andalso is_alnum(Next) of\n\
+         \x20       true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);\n\
+         \x20       false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)\n\
+         \x20   end;\n\
+         wildcard_split([C | Rest], CurRev, SegsRev, _Prev) ->\n\
+         \x20   wildcard_split(Rest, [C | CurRev], SegsRev, C).\n\
+         is_alnum(C) when is_integer(C), C >= $0, C =< $9 -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $A, C =< $Z -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $a, C =< $z -> true;\n\
+         is_alnum(_) -> false.\n\
+         matches_segments([], _Actual, _Pos, IsFirst) -> not IsFirst;\n\
+         matches_segments([<<>> | Rest], Actual, Pos, _IsFirst) ->\n\
+         \x20   matches_segments(Rest, Actual, Pos, false);\n\
+         matches_segments([Seg | Rest], Actual, Pos, true) ->\n\
+         \x20   %% First segment must match at start\n\
+         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+         \x20       {0, Len} -> matches_segments(Rest, Actual, Len, false);\n\
+         \x20       _ -> false\n\
+         \x20   end;\n\
+         matches_segments([Seg], Actual, Pos, false) ->\n\
+         \x20   %% Last non-empty segment must match at end\n\
+         \x20   SLen = byte_size(Seg),\n\
+         \x20   ALen = byte_size(Actual),\n\
+         \x20   Start = ALen - SLen,\n\
+         \x20   Start >= Pos andalso binary:part(Actual, Start, SLen) =:= Seg;\n\
+         matches_segments([Seg | Rest], Actual, Pos, false) ->\n\
+         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+         \x20       {Found, Len} -> matches_segments(Rest, Actual, Found + Len, false);\n\
+         \x20       nomatch -> false\n\
+         \x20   end.\n\n",
     );
 
     // Single test function with all assertions (stateful test)
@@ -376,8 +442,17 @@ fn generate_eunit_wrapper(
                     let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
                 }
 
-                // Add value assertion (unless wildcard)
-                if v != "_" {
+                // Add value assertion (unless bare wildcard)
+                if v == "_" {
+                    // Bare wildcard: run but don't check result
+                } else if has_wildcard_underscore(v) {
+                    // Pattern with wildcards: use glob-style matching (BT-502)
+                    let expected_bin = expected_to_binary_literal(v);
+                    let _ = writeln!(
+                        erl,
+                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var}))),"
+                    );
+                } else {
                     let expected_bin = expected_to_binary_literal(v);
                     let _ = writeln!(
                         erl,
@@ -1016,6 +1091,21 @@ mod tests {
         let eval_modules = vec!["test_spawn_0".to_string()];
         let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
         assert!(wrapper.contains("test_spawn_0"));
+        // Bare wildcard should not generate assertEqual or assert(matches_pattern(...))
+        assert!(!wrapper.contains("assertEqual"));
+        assert!(!wrapper.contains("?assert(matches_pattern"));
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_pattern() {
+        let cases = vec![TestCase {
+            expression: "Counter spawn".to_string(),
+            expected: Expected::Value("#Actor<Counter,_>".to_string()),
+            line: 1,
+        }];
+        let eval_modules = vec!["test_spawn_0".to_string()];
+        let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
+        assert!(wrapper.contains("matches_pattern"));
         assert!(!wrapper.contains("assertEqual"));
     }
 

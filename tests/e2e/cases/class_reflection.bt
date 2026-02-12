@@ -29,7 +29,7 @@
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass class_name
 // => String
@@ -39,7 +39,7 @@ stringClass class_name
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass class_name
 // => Counter
@@ -60,8 +60,9 @@ counterClass class_name
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
+// Method lists are fragile (change when methods are added), keep wildcard
 methods := stringClass methods
 // => _
 
@@ -71,21 +72,16 @@ methods isEmpty
 // => false
 
 // ---------------------------------------------------------------------------
-// Get methods list from Counter class (SKIPPED - Dynamic class issue)
+// Get methods list from Counter class
 // ---------------------------------------------------------------------------
 
-// Counter is a dynamically loaded class and currently returns empty methods
-// This is a known issue with how :load creates class objects
-// See related tests with primitive classes (String, Integer) which work correctly
+counterClass := (Beamtalk classNamed: #Counter) await
+// => Counter
 
-// counterClass := (Beamtalk classNamed: #Counter) await
+counterMethods := counterClass methods
 // => _
 
-// counterMethods := counterClass methods
-// => _
-
-// TODO(BT-XXX): Fix dynamic class method registration
-// counterMethods isEmpty
+counterMethods isEmpty
 // => false
 
 // ---------------------------------------------------------------------------
@@ -93,8 +89,9 @@ methods isEmpty
 // ---------------------------------------------------------------------------
 
 intClass := (Beamtalk classNamed: #Integer) await
-// => _
+// => Integer
 
+// Method list fragile (changes when methods are added), keep wildcard
 intMethods := intClass methods
 // => _
 
@@ -111,7 +108,7 @@ intMethods isEmpty
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass superclass
 // => Object
@@ -121,7 +118,7 @@ stringClass superclass
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass superclass
 // => Actor
@@ -131,7 +128,7 @@ counterClass superclass
 // ---------------------------------------------------------------------------
 
 actorClass := (Beamtalk classNamed: #Actor) await
-// => _
+// => Actor
 
 actorClass superclass
 // => Object
@@ -145,7 +142,7 @@ actorClass superclass
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass module_name
 // => bt@stdlib@string
@@ -155,7 +152,7 @@ stringClass module_name
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass module_name
 // => bt@counter
@@ -169,19 +166,19 @@ counterClass module_name
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass class_name
 // => String
 
 integerClass := (Beamtalk classNamed: #Integer) await
-// => _
+// => Integer
 
 integerClass class_name
 // => Integer
 
 trueClass := (Beamtalk classNamed: #True) await
-// => _
+// => True
 
 trueClass class_name
 // => True

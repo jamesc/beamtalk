@@ -13,7 +13,7 @@
 
 // Spawn actor
 a := SelfRefActor spawn
-// => _
+// => #Actor<SelfRefActor,_>
 
 // ===========================================================================
 // METHOD RETURNING SELF
@@ -21,7 +21,7 @@ a := SelfRefActor spawn
 
 // returnSelf returns the actor's self reference
 ref := a returnSelf await
-// => _
+// => #Actor<SelfRefActor,_>
 
 // The returned reference responds to class
 ref class
@@ -29,7 +29,7 @@ ref class
 
 // The returned reference is the same actor (can send messages through it)
 (ref setValue: 99) await
-// => _
+// => 99
 
 // Verify the state changed on the original actor (same process)
 a getValue await
@@ -54,7 +54,7 @@ a classInBlock await
 
 // perform:withArguments: dispatches methods with arguments on actors
 (a perform: #setValue: withArguments: #(42)) await
-// => _
+// => 42
 
 a getValue await
 // => 42

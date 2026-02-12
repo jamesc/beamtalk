@@ -118,6 +118,8 @@ pub enum TokenKind {
     // === Pragmas ===
     /// The `@primitive` directive for primitive method injection (ADR 0007)
     AtPrimitive,
+    /// The `@intrinsic` directive, synonym for `@primitive` (ADR 0007 Amendment)
+    AtIntrinsic,
 
     // === Special ===
     /// End of file
@@ -216,6 +218,7 @@ impl TokenKind {
             | Self::Hash
             | Self::FatArrow
             | Self::AtPrimitive
+            | Self::AtIntrinsic
             | Self::Eof => None,
         }
     }
@@ -254,6 +257,7 @@ impl std::fmt::Display for TokenKind {
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
             Self::AtPrimitive => write!(f, "@primitive"),
+            Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::Eof => write!(f, "<eof>"),
         }
     }
@@ -273,6 +277,9 @@ pub enum Trivia {
 
     /// A block comment: `/* comment text */`
     BlockComment(EcoString),
+
+    /// A doc comment: `/// doc text`
+    DocComment(EcoString),
 }
 
 impl Trivia {
@@ -280,7 +287,10 @@ impl Trivia {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Whitespace(s) | Self::LineComment(s) | Self::BlockComment(s) => s,
+            Self::Whitespace(s)
+            | Self::LineComment(s)
+            | Self::BlockComment(s)
+            | Self::DocComment(s) => s,
         }
     }
 
@@ -299,7 +309,16 @@ impl Trivia {
     /// Returns `true` if this is a comment.
     #[must_use]
     pub const fn is_comment(&self) -> bool {
-        matches!(self, Self::LineComment(_) | Self::BlockComment(_))
+        matches!(
+            self,
+            Self::LineComment(_) | Self::BlockComment(_) | Self::DocComment(_)
+        )
+    }
+
+    /// Returns `true` if this is a doc comment.
+    #[must_use]
+    pub const fn is_doc_comment(&self) -> bool {
+        matches!(self, Self::DocComment(_))
     }
 }
 
@@ -444,6 +463,7 @@ mod tests {
         assert_eq!(TokenKind::Assign.to_string(), ":=");
         assert_eq!(TokenKind::Caret.to_string(), "^");
         assert_eq!(TokenKind::AtPrimitive.to_string(), "@primitive");
+        assert_eq!(TokenKind::AtIntrinsic.to_string(), "@intrinsic");
     }
 
     #[test]

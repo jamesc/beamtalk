@@ -10,7 +10,7 @@
 
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_while_true(
@@ -48,29 +48,26 @@ impl CoreErlangGenerator {
         // in apply '_LoopN'/0 ()
 
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
-        // Bind condition block to a variable
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in ")?;
-
-        write!(self.output, "case apply {cond_var} () of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        // Bind body block to a variable
+        let cond_code = self.capture_expression(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let doc = docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {cond_var} = "),
+            cond_code,
+            " in ",
+            format!("case apply {cond_var} () of "),
+            "<'true'> when 'true' -> ",
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply '{loop_fn}'/0 ()"),
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -96,12 +93,12 @@ impl CoreErlangGenerator {
         //     end
         // in apply 'while'/1 (State)
 
-        write!(self.output, "letrec 'while'/1 = fun (StateAcc) -> ")?;
-
-        // Generate condition check - bind block to variable and apply it
-        // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+
+        self.write_document(&docvec![
+            "letrec 'while'/1 = fun (StateAcc) -> ",
+            format!("let {cond_var} = fun (StateAcc) -> "),
+        ]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
@@ -120,25 +117,31 @@ impl CoreErlangGenerator {
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
-        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
+
+        self.write_document(&docvec![
+            format!(" in case apply {cond_var} (StateAcc) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
         // True case: execute body and recurse
-        write!(self.output, "<'true'> when 'true' -> ")?;
         let final_state_version = self.generate_while_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
-        write!(self.output, " apply 'while'/1 ({final_state_var}) ")?;
 
-        // False case: return final state
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
+        // BT-483: Return {Result, State} tuple
+        // False case: loop terminated, return {nil, StateAcc}
+        self.write_document(&docvec![
+            format!(" apply 'while'/1 ({final_state_var}) "),
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
+            "end ",
+        ]);
 
         // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'while'/1 ({prev_state})")?;
+        self.write_document(&docvec![format!("in apply 'while'/1 ({prev_state})")]);
 
         Ok(())
     }
@@ -163,16 +166,13 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             }
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                // Field assignment handles state version internally
-                // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
-                // Note: generate_field_assignment_open already writes trailing " in "
             } else if self.is_actor_self_send(expr) {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
                 self.generate_self_dispatch_open(expr)?;
@@ -180,19 +180,22 @@ impl CoreErlangGenerator {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
             } else if is_last && !has_direct_field_assignments {
-                // BT-478: Last expression with no direct field assignments in body.
+                // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
-                // Bind the nested construct's returned state to the next StateAcc.
+                // Nested constructs return {Result, State} — extract State via element(2).
                 let next_version = self.state_version() + 1;
                 let next_var = format!("StateAcc{next_version}");
-                write!(self.output, "let {next_var} = ")?;
-                self.generate_expression(expr)?;
+                let tuple_var = format!("_NestTuple{next_version}");
+                let expr_code = self.capture_expression(expr)?;
                 self.set_state_version(next_version);
-                write!(self.output, " in")?;
+                self.write_document(&docvec![
+                    format!("let {tuple_var} = "),
+                    expr_code,
+                    format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                ]);
             } else {
-                write!(self.output, "let _ = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in")?;
+                let expr_code = self.capture_expression(expr)?;
+                self.write_document(&docvec!["let _ = ", expr_code, " in"]);
             }
         }
 
@@ -231,27 +234,26 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Generate: whileFalse is whileTrue with negated condition
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in ")?;
-
-        write!(self.output, "case apply {cond_var} () of ")?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-
+        let cond_code = self.capture_expression(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, "<'true'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let doc = docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {cond_var} = "),
+            cond_code,
+            " in ",
+            format!("case apply {cond_var} () of "),
+            "<'false'> when 'true' -> ",
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            "<'true'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply '{loop_fn}'/0 ()"),
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -270,12 +272,12 @@ impl CoreErlangGenerator {
 
         // Same as while_true but with false/true swapped in the case
 
-        write!(self.output, "letrec 'while'/1 = fun (StateAcc) -> ")?;
-
-        // Generate condition check - bind block to variable and apply it
-        // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+
+        self.write_document(&docvec![
+            "letrec 'while'/1 = fun (StateAcc) -> ",
+            format!("let {cond_var} = fun (StateAcc) -> "),
+        ]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
@@ -292,25 +294,31 @@ impl CoreErlangGenerator {
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
-        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
+
+        self.write_document(&docvec![
+            format!(" in case apply {cond_var} (StateAcc) of "),
+            "<'false'> when 'true' -> ",
+        ]);
 
         // FALSE case: execute body and recurse
-        write!(self.output, "<'false'> when 'true' -> ")?;
         let final_state_version = self.generate_while_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
-        write!(self.output, " apply 'while'/1 ({final_state_var}) ")?;
 
-        // TRUE case: return final state
-        write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
+        // BT-483: Return {Result, State} tuple
+        // TRUE case: loop terminated, return {nil, StateAcc}
+        self.write_document(&docvec![
+            format!(" apply 'while'/1 ({final_state_var}) "),
+            "<'true'> when 'true' -> {'nil', StateAcc} ",
+            "end ",
+        ]);
 
         // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'while'/1 ({prev_state})")?;
+        self.write_document(&docvec![format!("in apply 'while'/1 ({prev_state})")]);
 
         Ok(())
     }

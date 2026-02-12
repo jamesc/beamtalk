@@ -1,20 +1,102 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// UndefinedObject - The absence of a value
-//
-// nil is the singleton instance of UndefinedObject (Smalltalk convention).
-// All methods are pure Beamtalk — no primitives needed.
-
+/// UndefinedObject — The absence of a value.
+///
+/// `nil` is the singleton instance of UndefinedObject (Smalltalk convention).
+/// All methods are pure Beamtalk — no primitives needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// nil class                    // => UndefinedObject
+/// nil isNil                    // => true
+/// nil ifNil: ['nothing']       // => 'nothing'
+/// ```
 sealed Object subclass: UndefinedObject
+  /// Returns true. nil is nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil isNil                   // => true
+  /// ```
   isNil => true
+
+  /// Returns false. nil is not "not nil".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil notNil                  // => false
+  /// ```
   notNil => false
+
+  /// Evaluate `nilBlock` since the receiver is nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil ifNil: ['nothing']      // => 'nothing'
+  /// ```
   ifNil: nilBlock => nilBlock value
+
+  /// Return self (nil) since the receiver is nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil ifNotNil: [:v | v + 1]  // => nil
+  /// ```
   ifNotNil: notNilBlock => self
+
+  /// Evaluate `nilBlock` since the receiver is nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
+  /// ```
   ifNil: nilBlock ifNotNil: notNilBlock => nilBlock value
+
+  /// Evaluate `nilBlock` since the receiver is nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
+  /// ```
   ifNotNil: notNilBlock ifNil: nilBlock => nilBlock value
+
+  /// Return self. nil is immutable and unique.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil copy                    // => nil
+  /// ```
   copy => self
+
+  /// Return self. nil is immutable and unique.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil deepCopy                // => nil
+  /// ```
   deepCopy => self
+
+  /// Return self. nil is immutable and unique.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil shallowCopy             // => nil
+  /// ```
   shallowCopy => self
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil describe                // => 'nil'
+  /// ```
   describe => 'nil'
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil printString             // => 'nil'
+  /// ```
   printString => 'nil'

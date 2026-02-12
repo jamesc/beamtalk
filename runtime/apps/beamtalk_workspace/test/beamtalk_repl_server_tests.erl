@@ -467,8 +467,17 @@ term_to_json_atom_test() ->
 term_to_json_binary_test() ->
     ?assertEqual(<<"foo">>, beamtalk_repl_server:term_to_json(<<"foo">>)).
 
+term_to_json_invalid_utf8_binary_test() ->
+    Result = beamtalk_repl_server:term_to_json(<<255, 254>>),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(<<255, 254>>, Result).
+
 term_to_json_printable_list_test() ->
     ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json("hello")).
+
+term_to_json_printable_list_unicode_test() ->
+    %% Use explicit codepoints for encoding independence
+    ?assertEqual(<<"café"/utf8>>, beamtalk_repl_server:term_to_json("caf" ++ [16#00E9])).
 
 term_to_json_non_printable_list_test() ->
     Result = beamtalk_repl_server:term_to_json([1, 2, 3]),

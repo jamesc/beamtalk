@@ -1,29 +1,114 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Block - Closures (anonymous functions)
-//
-// First-class closures that capture their lexical environment.
-// Foundation of control flow and functional programming in Beamtalk.
-
+/// Block — First-class closures (anonymous functions).
+///
+/// Blocks capture their lexical environment and are the foundation
+/// of control flow and functional programming in Beamtalk.
+///
+/// ## BEAM Mapping
+/// Beamtalk blocks compile to Erlang funs.
+///
+/// ## Examples
+/// ```beamtalk
+/// [2 + 3] value                // => 5
+/// [:x | x * 2] value: 3       // => 6
+/// [true] whileTrue: [Transcript show: 'loop']
+/// ```
 sealed Object subclass: Block
-  // Evaluation — structural intrinsics
-  value => @primitive blockValue
-  value: arg => @primitive blockValue1
-  value: arg1 value: arg2 => @primitive blockValue2
-  value: arg1 value: arg2 value: arg3 => @primitive blockValue3
+  /// Evaluate a zero-argument block.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [2 + 3] value              // => 5
+  /// ```
+  value => @intrinsic blockValue
 
-  // Control flow — structural intrinsics
-  whileTrue: bodyBlock => @primitive whileTrue
-  whileFalse: bodyBlock => @primitive whileFalse
-  repeat => @primitive repeat
+  /// Evaluate a one-argument block with `arg`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [:x | x * 2] value: 3     // => 6
+  /// ```
+  value: arg => @intrinsic blockValue1
 
-  // Exception handling — structural intrinsics (try/catch, try/after)
-  on: exClass do: handler => @primitive onDo
-  ensure: cleanupBlock => @primitive ensure
+  /// Evaluate a two-argument block.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [:a :b | a + b] value: 3 value: 4   // => 7
+  /// ```
+  value: arg1 value: arg2 => @intrinsic blockValue2
 
-  // Reflection
+  /// Evaluate a three-argument block.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [:a :b :c | a + b + c] value: 1 value: 2 value: 3   // => 6
+  /// ```
+  value: arg1 value: arg2 value: arg3 => @intrinsic blockValue3
+
+  /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// x := 0. [x < 3] whileTrue: [x := x + 1]
+  /// ```
+  whileTrue: bodyBlock => @intrinsic whileTrue
+
+  /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// x := 0. [x >= 3] whileFalse: [x := x + 1]
+  /// ```
+  whileFalse: bodyBlock => @intrinsic whileFalse
+
+  /// Evaluate the block repeatedly forever (until an exception is raised).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [self processNextMessage] repeat
+  /// ```
+  repeat => @intrinsic repeat
+
+  /// Evaluate the block; if an exception of class `exClass` is raised, evaluate `handler`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1 / 0] on: Error do: [:e | e message]
+  /// ```
+  on: exClass do: handler => @intrinsic onDo
+
+  /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [File readAll: 'data.txt'] ensure: [Transcript show: 'done']
+  /// ```
+  ensure: cleanupBlock => @intrinsic ensure
+
+  /// Return the number of arguments the block expects.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [:x :y | x + y] arity     // => 2
+  /// [42] arity                 // => 0
+  /// ```
   arity => @primitive 'arity'
+
+  /// Evaluate the block with arguments from a list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
+  /// ```
   valueWithArguments: args => @primitive 'valueWithArguments:'
 
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [42] describe              // => 'a Block'
+  /// ```
   describe => 'a Block'

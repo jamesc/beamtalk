@@ -9,7 +9,7 @@
 
 // Empty list (displays as [] which is also empty charlist in Erlang)
 #()
-// => _
+// => []
 
 #() size
 // => 0

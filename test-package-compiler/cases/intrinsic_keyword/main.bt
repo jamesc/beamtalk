@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test that @intrinsic produces identical codegen to @primitive (BT-484).
+// Both keywords map to Expression::Primitive in the AST.
+
+Object subclass: Foo
+  blockValue => @intrinsic blockValue
+  size => @intrinsic 'size'

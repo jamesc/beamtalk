@@ -115,18 +115,30 @@ fn test_cases_dir() -> PathBuf {
 
 /// Get the daemon socket path.
 ///
-/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation,
-/// falling back to the default `~/.beamtalk/daemon.sock`.
+/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation.
+/// When not set, creates a deterministic session-based path using a fixed
+/// E2E test session name to ensure the test harness and daemon agree on the path.
 fn daemon_socket_path() -> PathBuf {
     if let Ok(socket_path) = env::var("BEAMTALK_DAEMON_SOCKET") {
         if !socket_path.is_empty() {
             return PathBuf::from(socket_path);
         }
     }
+    // Use a fixed session name so the test and daemon child process agree.
+    // The daemon child has a different PPID than the test process, so we
+    // can't rely on PPID-based session resolution matching.
     dirs::home_dir()
-        .map(|h| h.join(".beamtalk/daemon.sock"))
+        .map(|h| {
+            h.join(".beamtalk")
+                .join("sessions")
+                .join("e2e-test")
+                .join("daemon.sock")
+        })
         .unwrap_or_default()
 }
+
+/// Session name used for E2E test daemon isolation.
+const E2E_SESSION_NAME: &str = "e2e-test";
 
 /// A test case parsed from a `.bt` file.
 #[derive(Debug)]
@@ -361,6 +373,7 @@ impl DaemonManager {
 
         let daemon_child = Command::new(&binary)
             .args(["daemon", "start", "--foreground"])
+            .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
@@ -433,6 +446,7 @@ impl DaemonManager {
         let beam_child = Command::new("erl")
             .arg("-noshell")
             .args(&pa_args)
+            .env("BEAMTALK_DAEMON_SOCKET", daemon_socket.to_str().unwrap())
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
@@ -561,6 +575,8 @@ impl Drop for DaemonManager {
 struct ReplClient {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
+    /// Last warnings from evaluation (for WARNING: assertions)
+    last_warnings: Vec<String>,
 }
 
 impl ReplClient {
@@ -572,7 +588,11 @@ impl ReplClient {
 
         let reader = BufReader::new(stream.try_clone()?);
 
-        Ok(Self { stream, reader })
+        Ok(Self {
+            stream,
+            reader,
+            last_warnings: Vec::new(),
+        })
     }
 
     /// Evaluate an expression and return the result.
@@ -602,6 +622,16 @@ impl ReplClient {
         // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse response: {e}"))?;
+
+        // Extract warnings if present (BT-407)
+        self.last_warnings.clear();
+        if let Some(warnings) = response.get("warnings").and_then(|w| w.as_array()) {
+            for warning in warnings {
+                if let Some(warn_str) = warning.as_str() {
+                    self.last_warnings.push(warn_str.to_string());
+                }
+            }
+        }
 
         // New protocol: check status for errors
         if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
@@ -751,6 +781,153 @@ impl ReplClient {
             _ => Err(format!("Unexpected load response: {response_line}")),
         }
     }
+
+    /// Get documentation for a class or method via the docs op.
+    fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<String, String> {
+        let mut request = serde_json::json!({
+            "op": "docs",
+            "id": "e2e-docs",
+            "class": class
+        });
+        if let Some(sel) = selector {
+            request["selector"] = serde_json::Value::String(sel.to_string());
+        }
+
+        writeln!(self.stream, "{request}")
+            .map_err(|e| format!("Failed to send docs request: {e}"))?;
+
+        self.stream
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))?;
+
+        let mut response_line = String::new();
+        self.reader
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Failed to read docs response: {e}"))?;
+
+        let response: serde_json::Value = serde_json::from_str(&response_line)
+            .map_err(|e| format!("Failed to parse docs response: {e}"))?;
+
+        // Check for errors (new protocol)
+        if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
+            let is_error = status.iter().any(|s| s.as_str() == Some("error"));
+            if is_error {
+                let message = response
+                    .get("error")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(message.to_string());
+            }
+        }
+
+        // Check for errors (legacy protocol)
+        if response.get("type").and_then(|t| t.as_str()) == Some("error") {
+            let message = response
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            return Err(message.to_string());
+        }
+
+        // Extract docs text
+        response
+            .get("docs")
+            .and_then(|d| d.as_str())
+            .map(String::from)
+            .ok_or_else(|| format!("No docs field in response: {response_line}"))
+    }
+}
+
+/// Pattern matcher for test assertions (BT-502).
+///
+/// Supports glob-style matching where `_` acts as a wildcard segment:
+/// - Bare `_` → matches any result (full wildcard)
+/// - `_` within a pattern → matches any substring at that position
+/// - `#Actor<Counter,_>` matches `#Actor<Counter,0.173.0>`
+/// - `{\: Set, elements: _}` matches the full Set output
+/// - `Alice` still exact-matches `Alice`
+///
+/// A `_` is only treated as a wildcard if it is NOT flanked on both sides by
+/// alphanumeric characters. This preserves literal underscores in identifiers
+/// like `does_not_understand` or `beamtalk_class`.
+fn matches_pattern(pattern: &str, actual: &str) -> bool {
+    if pattern == "_" {
+        return true;
+    }
+    if !has_wildcard_underscore(pattern) {
+        return actual == pattern;
+    }
+
+    // Split pattern on wildcard `_` characters only
+    let segments = split_on_wildcard_underscores(pattern);
+    let mut pos = 0;
+
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            // Leading, trailing, or consecutive `_` — skip (matches any chars)
+            continue;
+        }
+        if let Some(found) = actual[pos..].find(segment) {
+            // First segment must match at the start
+            if i == 0 && found != 0 {
+                return false;
+            }
+            pos += found + segment.len();
+        } else {
+            return false;
+        }
+    }
+
+    // Last segment must match at the end (unless pattern ends with `_`)
+    if let Some(last) = segments.last() {
+        if !last.is_empty() {
+            return actual.ends_with(last);
+        }
+    }
+
+    true
+}
+
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. Examples:
+/// - `Counter,_>` → wildcard (`,` before, `>` after)
+/// - `does_not` → literal (`s` before, `n` after)
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Split a pattern on wildcard `_` characters only, preserving literal
+/// underscores in identifiers.
+fn split_on_wildcard_underscores(pattern: &str) -> Vec<&str> {
+    let bytes = pattern.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0;
+
+    for i in 0..bytes.len() {
+        if bytes[i] == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                segments.push(&pattern[start..i]);
+                start = i + 1;
+            }
+        }
+    }
+
+    segments.push(&pattern[start..]);
+    segments
 }
 
 /// Run a single test file.
@@ -762,6 +939,10 @@ impl ReplClient {
 ///
 /// If the file contains `// @load <path>` directives, those files are loaded
 /// before any test cases run, making their classes available for spawning.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Test runner handles many assertion types"
+)]
 fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
     let test_file = parse_test_file(&content);
@@ -832,10 +1013,40 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     }
 
     for case in &test_file.cases {
-        match client.eval(&case.expression) {
+        // Route :help commands through the docs op instead of eval
+        let eval_result =
+            if case.expression.starts_with(":help ") || case.expression.starts_with(":h ") {
+                let args = if case.expression.starts_with(":help ") {
+                    case.expression.strip_prefix(":help ").unwrap().trim()
+                } else {
+                    case.expression.strip_prefix(":h ").unwrap().trim()
+                };
+                let (class_name, selector) = match args.split_once(' ') {
+                    Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                    None => (args, None),
+                };
+                client.get_docs(class_name, selector)
+            } else {
+                client.eval(&case.expression)
+            };
+        match eval_result {
             Ok(result) => {
-                // Wildcard "_" means run but don't check result
-                if case.expected == "_" || result == case.expected {
+                // Check if this is a WARNING assertion (BT-407)
+                if case.expected.starts_with("WARNING:") {
+                    let expected_warning = case.expected.strip_prefix("WARNING:").unwrap().trim();
+                    if client
+                        .last_warnings
+                        .iter()
+                        .any(|w| w.contains(expected_warning))
+                    {
+                        pass_count += 1;
+                    } else {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected warning containing `{}`, got warnings: {:?}",
+                            case.line, case.expression, expected_warning, client.last_warnings
+                        ));
+                    }
+                } else if matches_pattern(&case.expected, &result) {
                     pass_count += 1;
                 } else {
                     failures.push(format!(
@@ -856,8 +1067,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_error, e
                         ));
                     }
-                } else if case.expected == "_" {
-                    // Wildcard means "run but don't check result" - errors are still failures
+                } else if case.expected == "_" || has_wildcard_underscore(&case.expected) {
+                    // Wildcard/pattern means "run but don't check result" - errors are still failures
                     // because we want to know if spawn or other side-effect operations fail
                     failures.push(format!(
                         "{file_name}:{}: `{}` (wildcard) failed with error: {}",
@@ -1173,5 +1384,88 @@ Counter spawn
         assert!(parsed.load_error_cases.is_empty());
         assert_eq!(parsed.warnings.len(), 1);
         assert!(parsed.warnings[0].contains("Malformed @load-error"));
+    }
+
+    #[test]
+    fn test_matches_pattern_bare_wildcard() {
+        assert!(matches_pattern("_", "anything"));
+        assert!(matches_pattern("_", ""));
+        assert!(matches_pattern("_", "#Actor<Counter,0.173.0>"));
+    }
+
+    #[test]
+    fn test_matches_pattern_exact_match() {
+        assert!(matches_pattern("Alice", "Alice"));
+        assert!(!matches_pattern("Alice", "Bob"));
+        assert!(matches_pattern("42", "42"));
+        assert!(!matches_pattern("42", "43"));
+    }
+
+    #[test]
+    fn test_matches_pattern_literal_underscores() {
+        // Underscores between alphanumeric chars are literal, not wildcards
+        assert!(matches_pattern(
+            "does_not_understand",
+            "does_not_understand"
+        ));
+        assert!(!matches_pattern(
+            "does_not_understand",
+            "does_XXX_understand"
+        ));
+        assert!(matches_pattern("runtime_error", "runtime_error"));
+        assert!(!matches_pattern("runtime_error", "runtimeXerror"));
+        assert!(matches_pattern("a-b_c", "a-b_c"));
+        // $beamtalk_class has literal underscore (both sides alphanumeric)
+        assert!(matches_pattern(
+            r#"{"$beamtalk_class":"Point"}"#,
+            r#"{"$beamtalk_class":"Point"}"#
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_actor_pid() {
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.173.0>"
+        ));
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.999.0>"
+        ));
+        assert!(!matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<ChatRoom,0.173.0>"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_collection() {
+        assert!(matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: Set, elements: [<0.173.0>, <0.174.0>]}"
+        ));
+        assert!(!matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: List, elements: [1, 2]}"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_multiple_wildcards() {
+        assert!(matches_pattern("#Actor<_,_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("#Actor<_,_>", "something else"));
+    }
+
+    #[test]
+    fn test_matches_pattern_leading_wildcard() {
+        assert!(matches_pattern("_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("_>", "no closing bracket"));
+    }
+
+    #[test]
+    fn test_matches_pattern_no_false_positives() {
+        // Pattern without underscore is exact match
+        assert!(!matches_pattern("hello", "hello world"));
+        assert!(!matches_pattern("hello world", "hello"));
     }
 }

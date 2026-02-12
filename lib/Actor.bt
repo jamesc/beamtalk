@@ -1,18 +1,57 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Actor - Base class for process-based objects in Beamtalk
-//
-// Actor inherits from Object and adds process-based concurrency. Every actor
-// runs in its own BEAM process and communicates via asynchronous messages.
+/// Actor — Base class for process-based objects.
+///
+/// Actor inherits from Object and adds process-based concurrency.
+/// Every actor runs in its own BEAM process and communicates via
+/// asynchronous messages. Use `spawn` instead of `new` to create actors.
+///
+/// ## Examples
+/// ```beamtalk
+/// Actor subclass: Counter
+///   state: count = 0
+///   increment => self.count := self.count + 1
+///   count => self.count
+/// ```
 
 Object subclass: Actor
-  // Spawn — structural intrinsics, compiler generates gen_server wrapping
-  sealed spawn => @primitive actorSpawn
-  sealed spawnWith: initArgs => @primitive actorSpawnWith
+  /// Spawn a new actor process with default state.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := Counter spawn
+  /// ```
+  sealed spawn => @intrinsic actorSpawn
 
-  // Override new with error — pure Beamtalk
+  /// Spawn a new actor process with initialization arguments.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := Counter spawnWith: #{#count => 10}
+  /// ```
+  sealed spawnWith: initArgs => @intrinsic actorSpawnWith
+
+  /// Raises an error — actors must use `spawn`, not `new`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter new   // => ERROR: instantiation_error
+  /// ```
   sealed new => self error: 'Actors must use spawn, not new'
+
+  /// Raises an error — actors must use `spawnWith:`, not `new:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter new: #{}   // => ERROR: instantiation_error
+  /// ```
   sealed new: initArgs => self error: 'Actors must use spawnWith:, not new:'
 
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor describe   // => 'an Actor'
+  /// ```
   describe => 'an Actor'

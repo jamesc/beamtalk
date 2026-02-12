@@ -263,3 +263,85 @@ tuple_format_clear_test() ->
     Result = gen_server:call(Pid, recent),
     ?assertEqual([], Result),
     gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Unicode / encoding edge-case tests
+%%% ============================================================================
+
+%% --- to_string: invalid charlist (non-Unicode codepoints) ---
+
+show_invalid_charlist_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% A list with values > 0x10FFFF is not a valid Unicode charlist
+    gen_server:cast(Pid, {'show:', [16#110000, 16#FFFFFF]}),
+    [Result] = gen_server:call(Pid, recent),
+    %% Should fall back to io_lib:format ~p representation, not crash
+    ?assert(is_binary(Result)),
+    gen_server:stop(Pid).
+
+show_incomplete_charlist_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% A list ending with a high surrogate (incomplete sequence)
+    gen_server:cast(Pid, {'show:', [65, 66, 16#D800]}),
+    [Result] = gen_server:call(Pid, recent),
+    ?assert(is_binary(Result)),
+    gen_server:stop(Pid).
+
+show_mixed_list_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% A list with mixed types (not a charlist at all)
+    gen_server:cast(Pid, {'show:', [1, two, <<"three">>]}),
+    [Result] = gen_server:call(Pid, recent),
+    ?assert(is_binary(Result)),
+    gen_server:stop(Pid).
+
+%% --- to_string: non-UTF8 binaries ---
+
+show_non_utf8_binary_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% 0xFF 0xFE is not valid UTF-8
+    gen_server:cast(Pid, {'show:', <<255, 254, 0, 1>>}),
+    [Result] = gen_server:call(Pid, recent),
+    ?assert(is_binary(Result)),
+    %% Must not be the raw invalid binary
+    ?assertNotEqual(<<255, 254, 0, 1>>, Result),
+    gen_server:stop(Pid).
+
+show_truncated_utf8_binary_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% Start of a 3-byte UTF-8 sequence but truncated
+    gen_server:cast(Pid, {'show:', <<16#E0, 16#A0>>}),
+    [Result] = gen_server:call(Pid, recent),
+    ?assert(is_binary(Result)),
+    gen_server:stop(Pid).
+
+show_valid_utf8_binary_unchanged_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    ValidUtf8 = <<"Hello, 世界!"/utf8>>,
+    gen_server:cast(Pid, {'show:', ValidUtf8}),
+    [Result] = gen_server:call(Pid, recent),
+    ?assertEqual(ValidUtf8, Result),
+    gen_server:stop(Pid).
+
+%% --- ensure_utf8/1 directly ---
+
+ensure_utf8_valid_test() ->
+    ?assertEqual(<<"hello">>, beamtalk_transcript_stream:ensure_utf8(<<"hello">>)).
+
+ensure_utf8_valid_multibyte_test() ->
+    Bin = <<"café"/utf8>>,
+    ?assertEqual(Bin, beamtalk_transcript_stream:ensure_utf8(Bin)).
+
+ensure_utf8_invalid_bytes_test() ->
+    Result = beamtalk_transcript_stream:ensure_utf8(<<255, 254>>),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(<<255, 254>>, Result).
+
+ensure_utf8_incomplete_sequence_test() ->
+    %% 2-byte sequence start but no continuation
+    Result = beamtalk_transcript_stream:ensure_utf8(<<16#C0>>),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(<<16#C0>>, Result).
+
+ensure_utf8_empty_binary_test() ->
+    ?assertEqual(<<>>, beamtalk_transcript_stream:ensure_utf8(<<>>)).

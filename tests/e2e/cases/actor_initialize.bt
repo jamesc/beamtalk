@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 c := InitCounter spawn
-// => _
+// => #Actor<InitCounter,_>
 
 c getValue
 // => 100
@@ -33,7 +33,7 @@ c getValue
 // @load tests/e2e/fixtures/counter.bt
 
 c2 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 c2 increment
 // => 1
