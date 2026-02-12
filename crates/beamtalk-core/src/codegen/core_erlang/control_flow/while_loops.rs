@@ -131,10 +131,11 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        // False case: return final state
+        // BT-483: Return {Result, State} tuple
+        // False case: loop terminated, return {nil, StateAcc}
         self.write_document(&docvec![
             format!(" apply 'while'/1 ({final_state_var}) "),
-            "<'false'> when 'true' -> StateAcc ",
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
             "end ",
         ]);
 
@@ -179,14 +180,19 @@ impl CoreErlangGenerator {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
             } else if is_last && !has_direct_field_assignments {
-                // BT-478: Last expression with no direct field assignments in body.
+                // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
-                // Bind the nested construct's returned state to the next StateAcc.
+                // Nested constructs return {Result, State} — extract State via element(2).
                 let next_version = self.state_version() + 1;
                 let next_var = format!("StateAcc{next_version}");
+                let tuple_var = format!("_NestTuple{next_version}");
                 let expr_code = self.capture_expression(expr)?;
                 self.set_state_version(next_version);
-                self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in",]);
+                self.write_document(&docvec![
+                    format!("let {tuple_var} = "),
+                    expr_code,
+                    format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                ]);
             } else {
                 let expr_code = self.capture_expression(expr)?;
                 self.write_document(&docvec!["let _ = ", expr_code, " in"]);
@@ -302,10 +308,11 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        // TRUE case: return final state
+        // BT-483: Return {Result, State} tuple
+        // TRUE case: loop terminated, return {nil, StateAcc}
         self.write_document(&docvec![
             format!(" apply 'while'/1 ({final_state_var}) "),
-            "<'true'> when 'true' -> StateAcc ",
+            "<'true'> when 'true' -> {'nil', StateAcc} ",
             "end ",
         ]);
 

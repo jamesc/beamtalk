@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-483: Mutation-threaded control flow returns {Result, State} tuples
+// Verifies that methods with mutation-threaded control flow as the last
+// expression return meaningful values instead of nil.
+
+// @load tests/e2e/fixtures/mutation_return_values.bt
+
+actor := MutationReturnValues spawn
+// => _
+
+// === inject:into: returns accumulator result ===
+
+(actor setValue: 0) await
+// => _
+
+// inject:into: as last expression should return accumulator (6), not nil
+// foldl calls fun(Elem, Acc): first param is list element, second is accumulator
+(actor sumViaInject: #(1, 2, 3)) await
+// => 6
+
+// State should also be updated (side effect of mutations)
+// self.value += elem (list element): 0 + 1 + 2 + 3 = 6
+actor getValue await
+// => 6
+
+// === on:do: returns try body result on success ===
+
+(actor setValue: 0) await
+// => _
+
+// safeAdd: succeeds, should return self.value after mutation (10)
+(actor safeAdd: 10) await
+// => 10
+
+actor getValue await
+// => 10
+
+// === on:do: returns handler result on exception ===
+
+(actor setValue: 0) await
+// => _
+
+// failingAdd triggers exception, handler returns -999
+(actor failingAdd) await
+// => -999
+
+// Handler's mutation should be applied (0 + 100 = 100)
+actor getValue await
+// => 100
+
+// === ensure: returns try body result ===
+
+(actor setValue: 0) await
+// => _
+
+// addWithCleanup: 5 — body returns self.value (5), cleanup adds 1000
+(actor addWithCleanup: 5) await
+// => 5
+
+// State: body set value to 5, cleanup added 1000 → 1005
+actor getValue await
+// => 1005

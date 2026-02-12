@@ -457,6 +457,7 @@ TranscriptStream does not understand 'show:'
 | 4 | BT-491 | Remove persistent_term singleton infrastructure from runtime | S |
 | 5 | BT-492 | Rename workspace_actor to workspace_environment + docs | S |
 
+
 ## References
 
 - Supersedes: ADR 0010 (Global Objects and Singleton Dispatch)

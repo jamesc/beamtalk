@@ -46,6 +46,7 @@ pub fn generate_primitive_bif(
         "Association" => generate_association_bif(selector, params),
         "Set" => generate_set_bif(selector, params),
         "CompiledMethod" => generate_compiled_method_bif(selector, params),
+        "Character" => generate_character_bif(selector, params),
         _ => None,
     }
 }
@@ -83,6 +84,12 @@ fn generate_integer_bif(selector: &str, params: &[String]) -> Option<String> {
             ))
         }
         "bitNot" => Some("call 'erlang':'bnot'(Self)".to_string()),
+        // Character predicates — integers are Unicode codepoints (BT-339)
+        "isLetter" => Some("call 'beamtalk_character':'is_letter'(Self)".to_string()),
+        "isDigit" => Some("call 'beamtalk_character':'is_digit'(Self)".to_string()),
+        "isUppercase" => Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string()),
+        "isLowercase" => Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string()),
+        "isWhitespace" => Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string()),
         _ => None,
     }
 }
@@ -312,6 +319,41 @@ fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<String> {
         "printString" => Some("call 'beamtalk_primitive':'print_string'(Self)".to_string()),
         // Identity
         "hash" => Some("call 'erlang':'phash2'(Self)".to_string()),
+        _ => None,
+    }
+}
+
+/// Character primitive implementations (BT-339).
+///
+/// Characters are integers (Unicode codepoints) at the BEAM level.
+/// Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
+fn generate_character_bif(selector: &str, params: &[String]) -> Option<String> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        // Comparison — direct integer comparison
+        "=" => binary_bif("=:=", params),
+        "<" => binary_bif("<", params),
+        ">" => binary_bif(">", params),
+        "<=" => binary_bif("=<", params),
+        ">=" => binary_bif(">=", params),
+        // Conversion
+        "asInteger" => Some("Self".to_string()),
+        "asString" => Some("call 'beamtalk_character':'as_string'(Self)".to_string()),
+        // Display
+        "printString" => Some("call 'beamtalk_character':'print_string'(Self)".to_string()),
+        // Identity
+        "hash" => Some("call 'erlang':'phash2'(Self)".to_string()),
+        // Predicates — delegate to runtime module
+        "isLetter" => Some("call 'beamtalk_character':'is_letter'(Self)".to_string()),
+        "isDigit" => Some("call 'beamtalk_character':'is_digit'(Self)".to_string()),
+        "isUppercase" => Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string()),
+        "isLowercase" => Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string()),
+        "isWhitespace" => Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string()),
+        // Case conversion
+        "uppercase" => Some("call 'beamtalk_character':'to_uppercase'(Self)".to_string()),
+        "lowercase" => Some("call 'beamtalk_character':'to_lowercase'(Self)".to_string()),
+        // Factory class method
+        "value:" => Some(format!("call 'beamtalk_character':'value'({p0})")),
         _ => None,
     }
 }
@@ -926,6 +968,142 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_list_ops':'each_with_index'(Self, Block)".to_string())
+        );
+    }
+
+    // Character primitive tests (BT-339)
+
+    #[test]
+    fn test_character_as_integer() {
+        let result = generate_primitive_bif("Character", "asInteger", &[]);
+        assert_eq!(result, Some("Self".to_string()));
+    }
+
+    #[test]
+    fn test_character_as_string() {
+        let result = generate_primitive_bif("Character", "asString", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'as_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_print_string() {
+        let result = generate_primitive_bif("Character", "printString", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'print_string'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_equality() {
+        let result = generate_primitive_bif("Character", "=", &["Other".to_string()]);
+        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
+    }
+
+    #[test]
+    fn test_character_is_letter() {
+        let result = generate_primitive_bif("Character", "isLetter", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_is_digit() {
+        let result = generate_primitive_bif("Character", "isDigit", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_value_factory() {
+        let result = generate_primitive_bif("Character", "value:", &["CP".to_string()]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'value'(CP)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_hash() {
+        let result = generate_primitive_bif("Character", "hash", &[]);
+        assert_eq!(result, Some("call 'erlang':'phash2'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_character_is_uppercase() {
+        let result = generate_primitive_bif("Character", "isUppercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_is_lowercase() {
+        let result = generate_primitive_bif("Character", "isLowercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_is_whitespace() {
+        let result = generate_primitive_bif("Character", "isWhitespace", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_uppercase() {
+        let result = generate_primitive_bif("Character", "uppercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'to_uppercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_lowercase() {
+        let result = generate_primitive_bif("Character", "lowercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'to_lowercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_comparison() {
+        let result = generate_primitive_bif("Character", "<", &["Other".to_string()]);
+        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
+    }
+
+    // Integer character predicate tests (BT-339)
+
+    #[test]
+    fn test_integer_is_letter() {
+        let result = generate_primitive_bif("Integer", "isLetter", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_is_digit() {
+        let result = generate_primitive_bif("Integer", "isDigit", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
         );
     }
 }
