@@ -37,21 +37,8 @@ impl CoreErlangGenerator {
             Literal::Integer(n) => self.write_document(&docvec![format!("{n}")]),
             Literal::Float(f) => self.write_document(&docvec![format!("{f}")]),
             Literal::String(s) => {
-                // Core Erlang binary syntax: #{segment, segment, ...}#
-                // Each segment is #<value>(size, units, type, flags)
-                let mut result = String::from("#{");
-                for (i, ch) in s.chars().enumerate() {
-                    if i > 0 {
-                        result.push(',');
-                    }
-                    write!(
-                        result,
-                        "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                        ch as u32
-                    )
-                    .unwrap();
-                }
-                result.push_str("}#");
+                // Reuse the shared UTF-8 binary literal helper (encodes via .bytes())
+                let result = Self::binary_string_literal(s);
                 self.write_document(&docvec![result]);
             }
             Literal::Symbol(s) => self.write_document(&docvec![format!("'{s}'")]),
