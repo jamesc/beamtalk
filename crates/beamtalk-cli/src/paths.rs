@@ -44,7 +44,7 @@ pub fn beamtalk_dir() -> Result<PathBuf> {
     
     // 2. Auto session based on shell PPID
     let ppid = get_parent_pid();
-    Ok(base.join("sessions").join(format!("shell-{}", ppid)))
+    Ok(base.join("sessions").join(format!("shell-{ppid}")))
 }
 
 /// Get the parent process ID (PPID).
@@ -52,6 +52,10 @@ pub fn beamtalk_dir() -> Result<PathBuf> {
 /// Returns the PPID of the current process, which typically represents
 /// the shell that launched this process.
 #[cfg(unix)]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "PPID is always positive; libc returns signed but semantically unsigned"
+)]
 fn get_parent_pid() -> u32 {
     // SAFETY: getppid is always safe to call and returns a valid pid_t
     unsafe { libc::getppid() as u32 }

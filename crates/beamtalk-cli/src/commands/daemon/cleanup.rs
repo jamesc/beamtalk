@@ -97,6 +97,10 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
 
 /// Check if a process with the given PID is alive.
 #[cfg(unix)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "PID values are always positive and fit in i32"
+)]
 fn is_process_alive(pid: u32) -> bool {
     // SAFETY: kill with signal 0 only checks if process exists
     unsafe { libc::kill(pid as i32, 0) == 0 }
@@ -222,11 +226,15 @@ pub fn cleanup_old_sessions(max_age_days: u64) -> Result<usize> {
 ///
 /// Returns an error if the signal cannot be sent.
 #[cfg(unix)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "PID values are always positive and fit in i32"
+)]
 pub fn stop_daemon_by_pid(pid: u32) -> Result<()> {
     // SAFETY: kill is safe to call with any pid and signal number
     unsafe {
         if libc::kill(pid as i32, libc::SIGTERM) != 0 {
-            return Err(miette!("Failed to send SIGTERM to process {}", pid));
+            return Err(miette!("Failed to send SIGTERM to process {pid}"));
         }
     }
     Ok(())

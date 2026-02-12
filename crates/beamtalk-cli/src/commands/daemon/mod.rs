@@ -89,13 +89,13 @@ pub enum DaemonAction {
 }
 
 /// Run the daemon command.
-pub fn run(action: DaemonAction) -> Result<()> {
+pub fn run(action: &DaemonAction) -> Result<()> {
     match action {
-        DaemonAction::Start { foreground } => lifecycle::start_daemon(foreground),
+        DaemonAction::Start { foreground } => lifecycle::start_daemon(*foreground),
         DaemonAction::Stop => lifecycle::stop_daemon(),
         DaemonAction::Status => lifecycle::show_status(),
         DaemonAction::List => list_sessions(),
-        DaemonAction::Clean { all } => clean_sessions(all),
+        DaemonAction::Clean { all } => clean_sessions(*all),
     }
 }
 
@@ -114,9 +114,10 @@ fn list_sessions() -> Result<()> {
     for session in sessions {
         let status = if session.is_alive { "ALIVE" } else { "DEAD " };
         let pid_str = session.pid.map_or("???".to_string(), |p| p.to_string());
+        let name = session.name;
+        let age_days = session.age_days;
         println!(
-            "  {} {} (PID: {}, age: {}d)",
-            status, session.name, pid_str, session.age_days
+            "  {status} {name} (PID: {pid_str}, age: {age_days}d)"
         );
     }
     
@@ -128,13 +129,13 @@ fn clean_sessions(all: bool) -> Result<()> {
     if all {
         println!("Stopping all daemons and cleaning all sessions...");
         let cleaned = cleanup::cleanup_all_sessions()?;
-        println!("✓ Cleaned {} session(s)", cleaned);
+        println!("✓ Cleaned {cleaned} session(s)");
     } else {
         println!("Cleaning orphaned sessions...");
         let cleaned = cleanup::cleanup_orphaned_sessions()?;
         let sessions = cleanup::list_sessions()?;
         let kept = sessions.len();
-        println!("✓ Cleaned {} session(s), kept {} active", cleaned, kept);
+        println!("✓ Cleaned {cleaned} session(s), kept {kept} active");
     }
     Ok(())
 }
