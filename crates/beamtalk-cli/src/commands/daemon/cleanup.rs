@@ -41,24 +41,24 @@ pub struct SessionInfo {
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
     let sessions_dir = home.join(".beamtalk").join("sessions");
-    
+
     if !sessions_dir.exists() {
         return Ok(Vec::new());
     }
-    
+
     let entries = fs::read_dir(&sessions_dir).into_diagnostic()?;
     let mut sessions = Vec::new();
-    
+
     for entry in entries {
         let entry = entry.into_diagnostic()?;
         let path = entry.path();
-        
+
         if !path.is_dir() {
             continue;
         }
-        
+
         let name = entry.file_name().to_string_lossy().to_string();
-        
+
         // Check if daemon is running for this session
         let lockfile = path.join("daemon.lock");
         let (is_alive, pid) = if lockfile.exists() {
@@ -76,10 +76,10 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
         } else {
             (false, None)
         };
-        
+
         // Calculate age
         let age_days = get_session_age_days(&path)?;
-        
+
         sessions.push(SessionInfo {
             name,
             path,
@@ -88,10 +88,10 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
             age_days,
         });
     }
-    
+
     // Sort by name for consistent output
     sessions.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
     Ok(sessions)
 }
 
@@ -102,8 +102,24 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     reason = "PID values are always positive and fit in i32"
 )]
 fn is_process_alive(pid: u32) -> bool {
-    // SAFETY: kill with signal 0 only checks if process exists
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    // PID 0 has special "process group" semantics for kill(2); treat as invalid.
+    if pid == 0 {
+        return false;
+    }
+
+    // SAFETY: kill with signal 0 only checks if the process exists or if we
+    // have permission to signal it; it does not actually send a signal.
+    unsafe {
+        let res = libc::kill(pid as i32, 0);
+        if res == 0 {
+            return true;
+        }
+
+        // EPERM: process exists but we lack permission -> treat as alive
+        // ESRCH: no such process -> treat as dead
+        let errno = *libc::__errno_location();
+        errno == libc::EPERM
+    }
 }
 
 /// Check if a process with the given PID is alive (Windows stub).
@@ -118,10 +134,10 @@ fn get_session_age_days(path: &Path) -> Result<u64> {
     let metadata = fs::metadata(path).into_diagnostic()?;
     let modified = metadata.modified().into_diagnostic()?;
     let now = SystemTime::now();
-    
+
     match now.duration_since(modified) {
         Ok(duration) => Ok(duration.as_secs() / 86400), // Convert seconds to days
-        Err(_) => Ok(0), // Future timestamp, treat as 0 days old
+        Err(_) => Ok(0),                                // Future timestamp, treat as 0 days old
     }
 }
 
@@ -135,12 +151,12 @@ pub fn is_session_orphaned(session: &SessionInfo) -> bool {
     if !session.name.starts_with("shell-") {
         return !session.is_alive;
     }
-    
+
     // Shell sessions: cleanup if shell OR daemon is dead
     if !session.is_alive {
         return true; // Daemon is dead
     }
-    
+
     // Check if shell process is still alive
     if let Some(ppid) = parse_shell_ppid(&session.name) {
         !is_process_alive(ppid)
@@ -153,9 +169,9 @@ pub fn is_session_orphaned(session: &SessionInfo) -> bool {
 ///
 /// # Example
 ///
-/// ```
-/// assert_eq!(parse_shell_ppid("shell-1234"), Some(1234));
-/// assert_eq!(parse_shell_ppid("my-test"), None);
+/// ```text
+/// parse_shell_ppid("shell-1234") => Some(1234)
+/// parse_shell_ppid("my-test")    => None
 /// ```
 fn parse_shell_ppid(session_name: &str) -> Option<u32> {
     session_name
@@ -188,14 +204,14 @@ pub fn cleanup_session(session: &SessionInfo) -> Result<()> {
 pub fn cleanup_orphaned_sessions() -> Result<usize> {
     let sessions = list_sessions()?;
     let mut cleaned = 0;
-    
+
     for session in sessions {
         if is_session_orphaned(&session) {
             cleanup_session(&session)?;
             cleaned += 1;
         }
     }
-    
+
     Ok(cleaned)
 }
 
@@ -209,14 +225,14 @@ pub fn cleanup_orphaned_sessions() -> Result<usize> {
 pub fn cleanup_old_sessions(max_age_days: u64) -> Result<usize> {
     let sessions = list_sessions()?;
     let mut cleaned = 0;
-    
+
     for session in sessions {
         if is_session_old(&session, max_age_days) {
             cleanup_session(&session)?;
             cleaned += 1;
         }
     }
-    
+
     Ok(cleaned)
 }
 
@@ -231,7 +247,10 @@ pub fn cleanup_old_sessions(max_age_days: u64) -> Result<usize> {
     reason = "PID values are always positive and fit in i32"
 )]
 pub fn stop_daemon_by_pid(pid: u32) -> Result<()> {
-    // SAFETY: kill is safe to call with any pid and signal number
+    if pid == 0 {
+        return Err(miette!("Invalid PID 0: refusing to signal process group"));
+    }
+    // SAFETY: kill is safe to call with any valid pid and signal number
     unsafe {
         if libc::kill(pid as i32, libc::SIGTERM) != 0 {
             return Err(miette!("Failed to send SIGTERM to process {pid}"));
@@ -243,7 +262,9 @@ pub fn stop_daemon_by_pid(pid: u32) -> Result<()> {
 /// Stop a daemon by sending SIGTERM to its process (Windows stub).
 #[cfg(not(unix))]
 pub fn stop_daemon_by_pid(_pid: u32) -> Result<()> {
-    Err(miette!("Stopping daemons is not supported on this platform"))
+    Err(miette!(
+        "Stopping daemons is not supported on this platform"
+    ))
 }
 
 /// Stop all daemons and clean up all sessions.
@@ -256,20 +277,29 @@ pub fn stop_daemon_by_pid(_pid: u32) -> Result<()> {
 pub fn cleanup_all_sessions() -> Result<usize> {
     let sessions = list_sessions()?;
     let mut cleaned = 0;
-    
+
     for session in sessions {
         // Try to stop the daemon if it's running
         if let Some(pid) = session.pid {
             let _ = stop_daemon_by_pid(pid); // Ignore errors
             // Wait briefly for daemon to exit
             std::thread::sleep(std::time::Duration::from_millis(500));
+
+            // Verify the process is actually dead before removing files
+            if is_process_alive(pid) {
+                eprintln!(
+                    "Warning: daemon in session '{}' (PID {}) still alive after SIGTERM, skipping",
+                    session.name, pid
+                );
+                continue;
+            }
         }
-        
+
         // Clean up the session directory
         cleanup_session(&session)?;
         cleaned += 1;
     }
-    
+
     Ok(cleaned)
 }
 
@@ -307,7 +337,7 @@ mod tests {
             pid: None,
             age_days: 10,
         };
-        
+
         assert!(is_session_old(&session, 7));
         assert!(!is_session_old(&session, 10));
         assert!(!is_session_old(&session, 15));
@@ -322,7 +352,7 @@ mod tests {
             pid: None,
             age_days: 0,
         };
-        
+
         assert!(is_session_orphaned(&session));
     }
 
@@ -335,7 +365,7 @@ mod tests {
             pid: Some(12345),
             age_days: 0,
         };
-        
+
         assert!(!is_session_orphaned(&session));
     }
 
@@ -348,7 +378,7 @@ mod tests {
             pid: None,
             age_days: 0,
         };
-        
+
         assert!(is_session_orphaned(&session));
     }
 
@@ -365,7 +395,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let session_dir = temp_dir.path().join("test-session");
         fs::create_dir(&session_dir).expect("Failed to create session dir");
-        
+
         let session = SessionInfo {
             name: "test-session".to_string(),
             path: session_dir.clone(),
@@ -373,7 +403,7 @@ mod tests {
             pid: None,
             age_days: 0,
         };
-        
+
         cleanup_session(&session).expect("Failed to cleanup session");
         assert!(!session_dir.exists());
     }

@@ -76,10 +76,10 @@ pub enum DaemonAction {
 
     /// Check if the daemon is running
     Status,
-    
+
     /// List all daemon sessions
     List,
-    
+
     /// Clean up orphaned sessions
     Clean {
         /// Clean all sessions (stop all daemons)
@@ -102,25 +102,23 @@ pub fn run(action: &DaemonAction) -> Result<()> {
 /// List all daemon sessions with their status.
 fn list_sessions() -> Result<()> {
     let sessions = cleanup::list_sessions()?;
-    
+
     if sessions.is_empty() {
         println!("No daemon sessions found");
         return Ok(());
     }
-    
+
     println!("Active daemon sessions:");
     println!();
-    
+
     for session in sessions {
         let status = if session.is_alive { "ALIVE" } else { "DEAD " };
         let pid_str = session.pid.map_or("???".to_string(), |p| p.to_string());
         let name = session.name;
         let age_days = session.age_days;
-        println!(
-            "  {status} {name} (PID: {pid_str}, age: {age_days}d)"
-        );
+        println!("  {status} {name} (PID: {pid_str}, age: {age_days}d)");
     }
-    
+
     Ok(())
 }
 

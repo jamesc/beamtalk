@@ -70,7 +70,7 @@ pub fn start_daemon(foreground: bool) -> Result<()> {
     if let Some(pid) = is_daemon_running()? {
         return Err(miette!("Daemon already running (PID {pid})"));
     }
-    
+
     // Clean up old sessions (>7 days) before starting
     // Ignore errors - cleanup is best-effort
     let _ = super::cleanup::cleanup_old_sessions(7);
@@ -126,11 +126,11 @@ pub fn stop_daemon() -> Result<()> {
     } else {
         println!("Daemon is not running");
     }
-    
+
     // Clean up orphaned sessions after stopping
     // Ignore errors - cleanup is best-effort
     let _ = super::cleanup::cleanup_orphaned_sessions();
-    
+
     Ok(())
 }
 
