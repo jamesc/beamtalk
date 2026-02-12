@@ -68,7 +68,7 @@ Actor
 
 **Design rationale:** ReadStream, WriteStream, and LazyStream all respond to the same read protocol (`next`, `atEnd`, `do:`, `collect:`, `take:`), so they share an abstract `Stream` superclass — just as `Integer` and `Float` share `Number`. This means code that works with any `Stream` works with all three.
 
-FileStream is an Actor (gen_server) because it wraps an OS resource with process-linked lifecycle. It implements the same stream protocol (`next`, `nextLine`, `atEnd`, `do:`, `close`) via **duck typing** — it responds to the same messages as Stream but cannot inherit from it since it extends Actor. This is idiomatic Beamtalk: shared behavior through protocol conformance, not inheritance. Code that sends `next` and `atEnd` works with both a `ReadStream` and a `FileStream`.
+FileStream is an Actor (gen_server) because it wraps an OS resource with process-linked lifecycle. It implements the same stream protocol (`next`, `nextLine`, `atEnd`, `do:`, `close`) via **duck typing** — it responds to the same messages as Stream but cannot inherit from it since it extends Actor. This is idiomatic Beamtalk: shared behavior through protocol conformance, not inheritance. Code that sends `next` and `atEnd` works with both a `ReadStream` and a `FileStream`. A future Behaviours mechanism (similar to Elixir's `@behaviour` or Rust traits) could formalize this protocol conformance with compile-time verification — that would be a separate ADR affecting the whole language.
 
 ### Layer 1: ReadStream / WriteStream (Collection Streams)
 
