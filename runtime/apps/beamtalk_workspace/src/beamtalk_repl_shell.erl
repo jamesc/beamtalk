@@ -78,10 +78,10 @@ init(SessionId) ->
 %% @private
 handle_call({eval, Expression}, _From, {SessionId, State}) ->
     case beamtalk_repl_eval:do_eval(Expression, State) of
-        {ok, Result, Output, NewState} ->
-            {reply, {ok, Result, Output}, {SessionId, NewState}};
-        {error, Reason, Output, NewState} ->
-            {reply, {error, Reason, Output}, {SessionId, NewState}}
+        {ok, Result, Output, Warnings, NewState} ->
+            {reply, {ok, Result, Output, Warnings}, {SessionId, NewState}};
+        {error, Reason, Output, Warnings, NewState} ->
+            {reply, {error, Reason, Output, Warnings}, {SessionId, NewState}}
     end;
 
 handle_call(get_bindings, _From, {SessionId, State}) ->

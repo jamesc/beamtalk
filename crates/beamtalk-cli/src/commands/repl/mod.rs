@@ -109,6 +109,8 @@ struct ReplResponse {
     info: Option<serde_json::Value>,
     /// Actor state (new protocol: inspect op)
     state: Option<serde_json::Value>,
+    /// Compilation warnings (BT-407)
+    warnings: Option<Vec<String>>,
 }
 
 impl ReplResponse {
