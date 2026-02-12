@@ -12,8 +12,8 @@ ProtoObject subclass: Object
   class => @primitive 'class'
 
   // Instantiation — structural intrinsics
-  new => @primitive basicNew
-  new: initArgs => @primitive basicNewWith
+  new => @intrinsic basicNew
+  new: initArgs => @intrinsic basicNewWith
 
   // Nil testing — pure Beamtalk
   isNil => false
@@ -30,17 +30,17 @@ ProtoObject subclass: Object
 
   // Identity and hashing — structural intrinsics
   sealed yourself => self
-  hash => @primitive hash
+  hash => @intrinsic hash
 
   // Reflection — structural intrinsics
-  sealed respondsTo: selector => @primitive respondsTo
-  sealed instVarNames => @primitive instVarNames
-  sealed instVarAt: name => @primitive instVarAt
-  sealed instVarAt: name put: value => @primitive instVarAtPut
+  sealed respondsTo: selector => @intrinsic respondsTo
+  sealed instVarNames => @intrinsic instVarNames
+  sealed instVarAt: name => @intrinsic instVarAt
+  sealed instVarAt: name put: value => @intrinsic instVarAtPut
 
   // Dynamic dispatch — structural intrinsic
-  sealed perform: selector => @primitive dynamicSend
-  sealed perform: selector withArguments: args => @primitive dynamicSendWithArgs
+  sealed perform: selector => @intrinsic dynamicSend
+  sealed perform: selector withArguments: args => @intrinsic dynamicSendWithArgs
 
   // Association creation — key-value pair
   -> value => @primitive '->'
@@ -49,4 +49,4 @@ ProtoObject subclass: Object
   subclassResponsibility => self error: 'This method is abstract and must be overridden by a subclass'
 
   // Error signaling — Smalltalk-style error from any object
-  error: message => @primitive error
+  error: message => @intrinsic error
