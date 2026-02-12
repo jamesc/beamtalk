@@ -142,53 +142,29 @@ impl CoreErlangGenerator {
 
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
-        // Bridge: try_generate_protoobject_message still writes to buffer
+        if let Some(doc) =
+            self.try_generate_protoobject_message(receiver, selector, arguments)?
         {
-            let start = self.output.len();
-            if let Some(()) =
-                self.try_generate_protoobject_message(receiver, selector, arguments)?
-            {
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Document::String(result));
-            }
+            return Ok(doc);
         }
 
         // Special case: Object methods - reflection and introspection
         // respondsTo:, instVarNames, instVarAt: enable runtime introspection
-        // Bridge: try_generate_object_message still writes to buffer
-        {
-            let start = self.output.len();
-            if let Some(()) = self.try_generate_object_message(receiver, selector, arguments)? {
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Document::String(result));
-            }
+        if let Some(doc) = self.try_generate_object_message(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
         // These are synchronous function calls, not async actor messages
-        // Bridge: try_generate_block_message still writes to buffer
-        {
-            let start = self.output.len();
-            if let Some(()) = self.try_generate_block_message(receiver, selector, arguments)? {
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Document::String(result));
-            }
+        if let Some(doc) = self.try_generate_block_message(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // Special case: List iteration messages (do:, collect:, select:, reject:, inject:into:)
         // These are structural intrinsics that require inline code generation for proper
         // state threading when used inside actor methods with field mutations.
-        // Bridge: try_generate_list_message still writes to buffer
-        {
-            let start = self.output.len();
-            if let Some(()) = self.try_generate_list_message(receiver, selector, arguments)? {
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Document::String(result));
-            }
+        if let Some(doc) = self.try_generate_list_message(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // Special case: spawn, spawnWith:, await, awaitForever, await:
