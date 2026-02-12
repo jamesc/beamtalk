@@ -63,7 +63,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_init_function(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Find the current class to check for superclass
         // NOTE: This requires the .bt file to have an explicit class definition
         // like "Counter subclass: LoggingCounter" (see tests/fixtures/logging_counter.bt).
@@ -167,7 +167,7 @@ impl CoreErlangGenerator {
                 "\n",
                 "\n",
             ];
-            self.write_document(&doc);
+            Ok(doc)
         } else {
             // No parent, or parent is Actor base class - generate normal init
             let initial_state_fields = self.generate_initial_state_fields(module)?;
@@ -203,10 +203,8 @@ impl CoreErlangGenerator {
                 "\n",
                 "\n",
             ];
-            self.write_document(&doc);
+            Ok(doc)
         }
-
-        Ok(())
     }
 
     /// Generates the `handle_cast/2` callback for async message sends.
@@ -214,7 +212,9 @@ impl CoreErlangGenerator {
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// sends `{resolve, Result}` or `{reject, Error}` to the `FuturePid`.
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_handle_cast(&mut self) -> Result<()> {
+    pub(in crate::codegen::core_erlang) fn generate_handle_cast(
+        &mut self,
+    ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
         let doc = docvec![
             "'handle_cast'/2 = fun (Msg, State) ->",
@@ -280,8 +280,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `handle_call/3` callback for sync message sends.
@@ -289,7 +288,9 @@ impl CoreErlangGenerator {
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_handle_call(&mut self) -> Result<()> {
+    pub(in crate::codegen::core_erlang) fn generate_handle_call(
+        &mut self,
+    ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
         let doc = docvec![
             "'handle_call'/3 = fun (Msg, _From, State) ->",
@@ -349,13 +350,14 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_code_change(&mut self) -> Result<()> {
+    pub(in crate::codegen::core_erlang) fn generate_code_change(
+        &mut self,
+    ) -> Result<Document<'static>> {
         let doc = docvec![
             "'code_change'/3 = fun (_OldVsn, State, _Extra) ->",
             nest(
@@ -370,8 +372,7 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `terminate/2` callback for `gen_server` shutdown.
@@ -394,7 +395,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_terminate(
         &mut self,
         _module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
         let doc = docvec![
             "'terminate'/2 = fun (Reason, State) ->",
@@ -429,7 +430,6 @@ impl CoreErlangGenerator {
             "\n",
             "\n",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 }

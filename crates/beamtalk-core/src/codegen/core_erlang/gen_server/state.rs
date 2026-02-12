@@ -36,9 +36,9 @@ impl CoreErlangGenerator {
         if let Some(class) = current_class {
             for state in &class.state {
                 let value_code = if let Some(ref default_value) = state.default_value {
-                    self.capture_expression(default_value)?
+                    self.expression_doc(default_value)?
                 } else {
-                    "'nil'".to_string()
+                    Document::String("'nil'".to_string())
                 };
                 fields.push(docvec![
                     line(),
@@ -71,7 +71,7 @@ impl CoreErlangGenerator {
             if let Expression::Assignment { target, value, .. } = expr {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if matches!(value.as_ref(), Expression::Literal(..)) {
-                        let value_code = self.capture_expression(value)?;
+                        let value_code = self.expression_doc(value)?;
                         fields.push(docvec![line(), format!(", '{}' => ", id.name), value_code,]);
                     }
                 }
@@ -90,16 +90,16 @@ impl CoreErlangGenerator {
 
             // Emit inherited fields first
             for (field_name, default_value) in inherited_fields {
-                let value_code = self.capture_expression(&default_value)?;
+                let value_code = self.expression_doc(&default_value)?;
                 fields.push(docvec![line(), format!(", '{field_name}' => "), value_code,]);
             }
 
             // Then emit this class's own fields (can override parent defaults)
             for state in &class.state {
                 let value_code = if let Some(ref default_value) = state.default_value {
-                    self.capture_expression(default_value)?
+                    self.expression_doc(default_value)?
                 } else {
-                    "'nil'".to_string()
+                    Document::String("'nil'".to_string())
                 };
                 fields.push(docvec![
                     line(),
@@ -112,9 +112,9 @@ impl CoreErlangGenerator {
             for class in &module.classes {
                 for state in &class.state {
                     let value_code = if let Some(ref default_value) = state.default_value {
-                        self.capture_expression(default_value)?
+                        self.expression_doc(default_value)?
                     } else {
-                        "'nil'".to_string()
+                        Document::String("'nil'".to_string())
                     };
                     fields.push(docvec![
                         line(),

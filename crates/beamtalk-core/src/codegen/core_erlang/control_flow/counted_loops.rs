@@ -176,7 +176,8 @@ impl CoreErlangGenerator {
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
-                self.generate_local_var_assignment_in_loop(expr)?;
+                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                self.write_document(&_assign_doc);
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
@@ -372,7 +373,8 @@ impl CoreErlangGenerator {
                 // No "in" prefix needed — prior expressions already end with "in "
                 // (field_assignment_open, local_var_assignment_in_loop, and non-assignment
                 // branches all emit trailing "in" or "in ").
-                self.generate_local_var_assignment_in_loop(expr)?;
+                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                self.write_document(&_assign_doc);
                 self.write_document(&docvec![" "]);
             } else {
                 // Non-assignment expression (could be a nested control flow construct)

@@ -436,7 +436,8 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                self.generate_local_var_assignment_in_loop(expr)?;
+                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                self.write_document(&_assign_doc);
             } else if is_last {
                 if has_direct_field_assignments {
                     // Has direct field assignments — last non-assignment expr result is captured

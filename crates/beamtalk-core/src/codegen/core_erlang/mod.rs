@@ -355,7 +355,8 @@ pub fn generate_with_bindings(
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
-    generator.generate_repl_module(expression)?;
+    let doc = generator.generate_repl_module(expression)?;
+    generator.write_document(&doc);
     Ok(generator.output)
 }
 
@@ -370,7 +371,8 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
-    generator.generate_test_module(expression)?;
+    let doc = generator.generate_test_module(expression)?;
+    generator.write_document(&doc);
     Ok(generator.output)
 }
 

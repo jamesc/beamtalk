@@ -98,6 +98,20 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// Transition helper (ADR 0018 Phase 3): captures expression output as a
+    /// `Document::String`, bridging between old `generate_expression` (writes to
+    /// buffer) and new functions that compose `Document` trees.
+    ///
+    /// Replaces `capture_expression` in migrated code — same semantics but
+    /// returns `Document` instead of `String` for direct composition via `docvec!`.
+    pub(super) fn expression_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<super::document::Document<'static>> {
+        let s = self.capture_expression(expr)?;
+        Ok(super::document::Document::String(s))
+    }
+
     /// Generates a fresh variable name and binds it in the current scope.
     ///
     /// Use this for user-visible bindings (block parameters, assignments, etc.)

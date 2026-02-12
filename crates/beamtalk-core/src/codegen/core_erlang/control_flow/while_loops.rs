@@ -178,7 +178,8 @@ impl CoreErlangGenerator {
                 self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
-                self.generate_local_var_assignment_in_loop(expr)?;
+                let _assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                self.write_document(&_assign_doc);
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).

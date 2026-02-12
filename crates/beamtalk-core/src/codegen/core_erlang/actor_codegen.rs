@@ -113,7 +113,8 @@ impl CoreErlangGenerator {
         self.output.push('\n');
 
         // Generate init/1 function
-        self.generate_init_function(module)?;
+        let doc = self.generate_init_function(module)?;
+        self.write_document(&doc);
         self.output.push('\n');
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
@@ -125,19 +126,23 @@ impl CoreErlangGenerator {
             self.output.push('\n');
         } else {
             // Generate handle_cast/2 function with error handling
-            self.generate_handle_cast()?;
+            let doc = self.generate_handle_cast()?;
+            self.write_document(&doc);
             self.output.push('\n');
 
             // Generate handle_call/3 function with error handling
-            self.generate_handle_call()?;
+            let doc = self.generate_handle_call()?;
+            self.write_document(&doc);
             self.output.push('\n');
 
             // Generate code_change/3 function
-            self.generate_code_change()?;
+            let doc = self.generate_code_change()?;
+            self.write_document(&doc);
             self.output.push('\n');
 
             // Generate terminate/2 function (per BT-29)
-            self.generate_terminate(module)?;
+            let doc = self.generate_terminate(module)?;
+            self.write_document(&doc);
             self.output.push('\n');
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
