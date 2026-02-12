@@ -473,7 +473,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ```
 
 ## References
-- Related ADRs: ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0019 (singleton access)
+- Related ADRs: ADR 0005 (sealed classes — Stream follows this pattern), ADR 0006 (unified dispatch), ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0014 (test framework — Stream tests use terminal ops in `// =>` assertions), ADR 0016 (module naming — Stream becomes `bt@stdlib@stream`), ADR 0019 (singleton access)
 - Related issues: BT-506 (pipeline chaining syntax research), BT-507 (Future class ADR)
 - Existing I/O: `lib/File.bt`, `lib/TranscriptStream.bt`
 - Elixir Stream module: https://hexdocs.pm/elixir/Stream.html (primary inspiration)
