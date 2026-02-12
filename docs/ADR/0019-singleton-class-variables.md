@@ -49,6 +49,18 @@ Actor subclass: SystemDictionary
 
 **Replace workspace binding magic with class variable singletons.** Remove the special codegen path for `Transcript`, `Beamtalk`, and `Workspace`. Instead, access singletons through class-side methods backed by class variables.
 
+### Naming
+
+The three singleton classes use their full descriptive names. The workspace bootstrap sets short convenience bindings:
+
+| Class (explicit) | Convenience binding | Rationale |
+|---|---|---|
+| `TranscriptStream` | `Transcript` | Familiar Smalltalk name |
+| `SystemDictionary` | `Beamtalk` | System introspection entry point |
+| `WorkspaceEnvironment` | `Workspace` | Follows Squeak 5.2+ `Environment` pattern — scoped binding container |
+
+`WorkspaceEnvironment` models Squeak's `Environment` class: a scoped dictionary of name→object bindings with parent fallback. It holds actor introspection, user variables, and convenience bindings. The name `Workspace` as a binding mirrors how Pharo uses `Smalltalk` as the convenience name for `SystemDictionary`.
+
 ### Class Definitions
 
 All three workspace singletons get the same pattern:
@@ -78,7 +90,7 @@ Actor subclass: SystemDictionary
 ```
 
 ```beamtalk
-Actor subclass: Workspace
+Actor subclass: WorkspaceEnvironment
   classVar: current = nil
 
   class current => self.current
@@ -92,28 +104,48 @@ Actor subclass: Workspace
 ### Usage — Everywhere
 
 ```beamtalk
-// In compiled code, in the REPL, anywhere:
+// Explicit form — works everywhere, including outside a workspace:
 TranscriptStream current show: 'Hello, world!'
-TranscriptStream current cr
-
 SystemDictionary current allClasses
-SystemDictionary current classNamed: #Counter
-SystemDictionary current version
+WorkspaceEnvironment current actors
 
-Workspace current actors
-Workspace current actorsOf: #Counter
+// Short form — workspace bootstrap binds these convenience names:
+Transcript show: 'Hello, world!'
+Beamtalk allClasses
+Workspace actors
 ```
+
+### Workspace Convenience Bindings
+
+The workspace bootstrap sets convenience variables after wiring class variables:
+
+```beamtalk
+// workspace_bootstrap.bt — run after singleton class variables are set
+Transcript := TranscriptStream current
+Beamtalk := SystemDictionary current
+Workspace := WorkspaceEnvironment current
+```
+
+These are ordinary workspace-scoped variable assignments — no compiler magic. Any code running inside a workspace (REPL sessions, compiled code loaded into the workspace, scripts) sees them. Code running without a workspace (pure batch compilation) uses the explicit `TranscriptStream current` form.
+
+This preserves the familiar short names from ADR 0010 while eliminating codegen magic. The short names are sugar, not language features.
 
 ### REPL Session
 
 ```
-> TranscriptStream current show: 'Hello from the REPL'
+> Transcript show: 'Hello from the REPL'
 nil
-> SystemDictionary current version
+> Beamtalk version
 '0.1.0'
-> SystemDictionary current allClasses
+> Beamtalk allClasses
 [Integer, Float, String, ...]
-> Workspace current actors
+> Workspace actors
+[#Actor<Counter,0.132.0>]
+
+// Explicit form also works:
+> TranscriptStream current show: 'Explicit path'
+nil
+> WorkspaceEnvironment current actors
 [#Actor<Counter,0.132.0>]
 ```
 
@@ -150,7 +182,7 @@ The bootstrap step is Beamtalk code — similar to Pharo's package `postload` in
 // class variables so Beamtalk code can find them.
 TranscriptStream current: TranscriptStream spawn
 SystemDictionary current: SystemDictionary spawn
-Workspace current: Workspace spawn
+WorkspaceEnvironment current: WorkspaceEnvironment spawn
 ```
 
 **Note on supervision:** The `spawn` calls here go through the class gen_server which calls `start_link`, linking the new process to the class. The workspace supervisor's role is to ensure the *bootstrap runs* and to restart singletons if they crash. The exact supervision strategy (supervisor starts processes directly vs. bootstrap starts them) is an implementation detail to be resolved in Phase 2. Options include:
@@ -162,13 +194,20 @@ Option 1 is recommended. The bootstrap then becomes:
 
 ```erlang
 %% In workspace supervisor, after children start:
+%% Phase 1: Wire class variables to singleton instances
 TranscriptPid = whereis('Transcript'),
 TranscriptObj = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, TranscriptPid},
-beamtalk_object_class:set_class_var('TranscriptStream', current, TranscriptObj)
-%% ... same for SystemDictionary and Workspace
+beamtalk_object_class:set_class_var('TranscriptStream', current, TranscriptObj),
+%% ... same for SystemDictionary and WorkspaceEnvironment
+
+%% Phase 2: Set workspace convenience bindings
+%% These are workspace-scoped variables — no compiler magic
+beamtalk_workspace:set_binding('Transcript', TranscriptObj),
+beamtalk_workspace:set_binding('Beamtalk', SystemDictionaryObj),
+beamtalk_workspace:set_binding('Workspace', WorkspaceObj)
 ```
 
-This is Erlang code in the supervisor initially. Moving to Beamtalk bootstrap code is a future enhancement once the language has better OTP integration primitives.
+This is Erlang code in the supervisor initially. Moving to Beamtalk bootstrap code is a future enhancement once the language has better OTP integration primitives. The convenience bindings (`Transcript`, `Beamtalk`) are set alongside the class variables so both the short and explicit forms are available immediately.
 
 This parallels Pharo's approach where:
 - `ManifestMyPackage >> postload` runs initialization code when a package loads
@@ -183,9 +222,13 @@ This parallels Pharo's approach where:
 
 In practice, most code just uses `Transcript` as a bare name because the compiler resolves globals from the system dictionary. This is *more* magic than our approach — we're making the indirection explicit.
 
-### Newspeak
+### Squeak 5.2+ Environments
 
-Newspeak has no globals at all. Everything is accessed through module parameters (dependency injection). `Transcript` would be passed as a parameter to any module that needs it. This is the purist extreme — we're closer to this by requiring `TranscriptStream current` (explicit access through the class), but without the full module parameterization overhead.
+Squeak 5.2 introduced `Environment` — scoped dictionaries of name→object bindings. Multiple environments can coexist, each with different bindings, and lookup walks parent environments as fallback. This models exactly what Beamtalk's `WorkspaceEnvironment` needs: a scoped container for workspace-level bindings (`Transcript`, `Beamtalk`, user variables) with isolation between workspaces on the same node (future work, see ADR 0004).
+
+### Newspeak Platform Object
+
+Newspeak has no globals at all. System services are accessed through a `Platform` object passed explicitly to the top-level module: `platform console show: 'Hello'`. This is the purist extreme — capability-based DI. Our `TranscriptStream current` is a middle ground: explicit access through the class, but without full module parameterization.
 
 ### Erlang/OTP
 
@@ -235,6 +278,7 @@ Ruby's singleton pattern uses `MyClass.instance` (via the `Singleton` mixin) or 
 - BEAM veterans and language designers prefer explicit-only (B)
 - Operators prefer fewer code paths (B)
 - The deciding factor: **compiled code access** (the metaprogramming use case) works in all three options, but only B eliminates the dual-path confusion entirely
+- **Resolution:** Adopted a variant of C — workspace bootstrap sets convenience bindings (`Transcript`, `Beamtalk`) as workspace-scoped variables. This gives short names everywhere a workspace runs (REPL and compiled code) without compiler magic. The explicit `TranscriptStream current` form remains canonical and works outside workspaces.
 
 ## Alternatives Considered
 
@@ -271,18 +315,21 @@ SystemDictionary current allClasses
 
 **Rejected because:** Two ways to do the same thing creates confusion about which is canonical. The codegen magic (`WORKSPACE_BINDING_NAMES`) is the exact thing we want to eliminate. Having aliases that "look like class names but aren't" is a learnability trap.
 
-### Alternative C: Class Variables + REPL Auto-Binds Variables
+### Alternative C: Class Variables + Workspace Binds Short Names (Adopted)
 
-The REPL injects `Beamtalk := SystemDictionary current` at session startup. No codegen magic — just a normal variable binding.
+The workspace bootstrap sets `Transcript := TranscriptStream current` and `Beamtalk := SystemDictionary current` as workspace-scoped variable bindings after wiring class variables. No codegen magic — just ordinary variable assignments performed during workspace startup.
 
 ```beamtalk
-// REPL (auto-bound variable):
-Beamtalk allClasses
-// Compiled code:
+// In workspace (REPL or compiled code loaded into workspace):
+Transcript show: 'hello'          // convenience binding
+Beamtalk allClasses               // convenience binding
+
+// Explicit form (works everywhere, including without a workspace):
+TranscriptStream current show: 'hello'
 SystemDictionary current allClasses
 ```
 
-**Rejected because:** While less magic than A, it still creates two vocabularies. Documentation and examples would need to explain both forms. New users would see `Beamtalk` in REPL tutorials and `SystemDictionary current` in library code and wonder why they differ. One way to do it is simpler.
+**Adopted because:** Provides the short names users expect without any compiler magic. The bindings are workspace-scoped variables — the same mechanism users employ for their own variables. Compiled code running in a workspace sees them; code running without a workspace uses the explicit form. One mechanism (workspace variable binding), two levels of verbosity.
 
 ## Consequences
 
@@ -294,11 +341,11 @@ SystemDictionary current allClasses
 - Follows standard Smalltalk `current` singleton pattern
 - Fewer codegen paths = fewer bugs, easier to maintain
 - Class variable lifecycle is managed by the class gen_server (already supervised)
+- Workspace convenience bindings (`Transcript`, `Beamtalk`) preserve short names without compiler magic — just variable assignments during bootstrap
 
 ### Negative
 
-- More verbose: `TranscriptStream current show: 'hello'` vs `Transcript show: 'hello'`
-- Breaking change for existing REPL usage and E2E tests
+- Breaking change for codegen internals (removing workspace binding dispatch path)
 - Class variable access goes through `gen_server:call` (~microseconds) vs `persistent_term:get` (~13ns) — slightly slower singleton lookup. However, the singleton *method call* itself is already a `gen_server:call`, so this adds one extra hop, not a new bottleneck category. In practice, `TranscriptStream current` will be called infrequently (not in tight loops).
 - Workspace isolation is lost — class variables are VM-global. This conflicts with ADR 0004's vision of multiple workspaces on the same node (e.g., `dev` and `prod` would share the same `Transcript`). Mitigation: workspace-scoped class variables are a future extension. For now, Pharo also has one global `Transcript`.
 - Class variable state is volatile — if the class gen_server crashes or hot-reloads, `current` resets to `nil`. Mitigation: the workspace supervisor's `post_init` step must re-set class variables after any restart. `persistent_term` survives process crashes but has its own GC issues.
@@ -309,20 +356,24 @@ SystemDictionary current allClasses
 - The singleton processes themselves are unchanged — same gen_server, same methods
 - `TranscriptStream` and `SystemDictionary` remain Actor subclasses
 - OTP supervision and restart behavior is preserved
+- **LSP implication:** Today the LSP compiles in batch mode and flags `Transcript` as an error. After this ADR, `Transcript` is just a workspace variable and `TranscriptStream current` works in both modes. This unblocks making the LSP workspace-aware — it only needs to check variable bindings, not switch codegen paths.
+- **Batch mode sunset:** The current `beamtalk build` batch compilation will eventually be replaced by a module/package system. Once that exists, all compilation happens in a workspace context, and the batch vs workspace distinction disappears. This ADR accelerates that transition by removing codegen that depends on the distinction.
 
 ## Implementation
 
 ### Phase 1: Add class variables and setters to stdlib classes
 
 - Add `classVar: current = nil`, `class current`, and `class current:` to `lib/SystemDictionary.bt` and `lib/TranscriptStream.bt`
-- Create `lib/Workspace.bt` with actor introspection methods (`actors`, `actorAt:`, `actorsOf:`)
+- Create `lib/WorkspaceEnvironment.bt` with actor introspection methods (`actors`, `actorAt:`, `actorsOf:`)
 - Verify class variable access works via `SystemDictionary current` (returns nil before bootstrap)
 
 ### Phase 2: Supervisor bootstrap wires class variables
 
 - Workspace supervisor spawns children as today (OTP supervision unchanged)
 - After children start, supervisor sets class variables via `beamtalk_object_class:set_class_var/3`
+- Set workspace convenience bindings via `beamtalk_workspace:set_binding/2` (new function — does not exist yet)
 - Add restart hook: on child restart, re-set the class variable with new PID
+- **Race condition mitigation:** Bootstrap must complete *before* the REPL TCP server accepts connections. Currently `beamtalk_repl_server` starts as a supervisor child alongside singletons — it could accept connections before class variables are wired. Either: (a) move bootstrap to `post_init` callback that runs before TCP accept, or (b) start the REPL server only after bootstrap completes (reorder supervisor children). Option (b) is simpler.
 - Future enhancement: move bootstrap logic to Beamtalk code once OTP integration primitives exist
 
 ### Phase 3: Remove codegen magic
@@ -337,12 +388,12 @@ SystemDictionary current allClasses
 - Remove `persistent_term:put/get` for `{beamtalk_binding, ...}` from singleton init/terminate in all three actors
 - Remove `start_link_singleton` variants (use regular `start_link`)
 - Remove workspace binding tests that test persistent_term behavior
-- Add new tests for `TranscriptStream current`, `SystemDictionary current`, and `Workspace current`
+- Add new tests for `TranscriptStream current`, `SystemDictionary current`, and `WorkspaceEnvironment current`
 
 ### Phase 5: Update all references
 
-- Update E2E tests: `Transcript show:` → `TranscriptStream current show:`, `Workspace actors` → `Workspace current actors`
-- Update `examples/repl-tutorial.md` and documentation
+- E2E tests using `Transcript`, `Beamtalk`, and `Workspace` do NOT need updating — workspace convenience bindings preserve all three names
+- Update `examples/repl-tutorial.md` and documentation to mention both forms
 - Update AGENTS.md workspace commands section
 
 ### Affected Components
@@ -351,34 +402,42 @@ SystemDictionary current allClasses
 |-----------|--------|
 | `lib/SystemDictionary.bt` | Add `classVar: current`, `class current`, `class current:` |
 | `lib/TranscriptStream.bt` | Add `classVar: current`, `class current`, `class current:` |
-| `lib/Workspace.bt` | **New file** — stdlib class for workspace actor introspection |
+| `lib/WorkspaceEnvironment.bt` | **New file** — stdlib class for workspace introspection (modeled on Squeak's `Environment`) |
 | `dispatch_codegen.rs` | Remove workspace binding codegen path |
 | `beamtalk_workspace_sup.erl` | Set class variables after child startup (replace persistent_term) |
 | `beamtalk_system_dictionary.erl` | Remove persistent_term singleton logic |
 | `beamtalk_transcript_stream.erl` | Remove persistent_term singleton logic |
-| `beamtalk_workspace_actor.erl` | Remove persistent_term singleton logic |
+| `beamtalk_workspace_actor.erl` | Remove persistent_term singleton logic; rename to `beamtalk_workspace_environment.erl` |
 | `beamtalk_workspace_binding_tests.erl` | Rewrite for class variable pattern |
-| E2E tests, examples, docs | Update `Transcript` → `TranscriptStream current`, etc. |
+| E2E tests, examples, docs | Minimal changes — `Transcript` and `Beamtalk` still work via workspace bindings |
 
 ## Migration Path
 
 ### Code Changes
 
+**No user-facing breaking changes in workspace contexts.** The workspace bootstrap sets convenience bindings, so existing code continues to work:
+
+| Syntax | Status |
+|---|---|
+| `Transcript show: 'hello'` | ✅ Still works (workspace convenience binding) |
+| `Beamtalk allClasses` | ✅ Still works (workspace convenience binding) |
+| `Workspace actors` | ✅ Still works (workspace convenience binding) |
+| `TranscriptStream current show: 'hello'` | ✅ New explicit form (works everywhere) |
+| `SystemDictionary current allClasses` | ✅ New explicit form (works everywhere) |
+| `WorkspaceEnvironment current actors` | ✅ New explicit form (works everywhere) |
+
+**Internal changes** (codegen, runtime):
+
 | Before (ADR 0010) | After (ADR 0019) |
 |---|---|
-| `Transcript show: 'hello'` | `TranscriptStream current show: 'hello'` |
-| `Transcript cr` | `TranscriptStream current cr` |
-| `Beamtalk allClasses` | `SystemDictionary current allClasses` |
-| `Beamtalk classNamed: #Counter` | `SystemDictionary current classNamed: #Counter` |
-| `Beamtalk version` | `SystemDictionary current version` |
-| `Workspace actors` | `Workspace current actors` |
-| `Workspace actorsOf: #Counter` | `Workspace current actorsOf: #Counter` |
+| `WORKSPACE_BINDING_NAMES` codegen magic | Removed — normal dispatch |
+| `persistent_term:get({beamtalk_binding, ...})` | `beamtalk_object_class:get_class_var(...)` |
+| `WorkspaceBindingInBatchMode` error | Removed — class variables work in all modes |
 
 ### Diagnostic
 
-Using the old names will produce a `does_not_understand` error since `Transcript` is no longer a recognized binding — it would be interpreted as the class `TranscriptStream` itself (via class reference lookup), which doesn't have instance methods like `show:`.
+Outside a workspace (pure batch mode), `Transcript` resolves as the class `TranscriptStream` itself, which doesn't have instance methods:
 
-The error message should guide users:
 ```
 TranscriptStream does not understand 'show:'
   Hint: 'show:' is an instance method. Did you mean: TranscriptStream current show: 'hello'
@@ -389,7 +448,7 @@ TranscriptStream does not understand 'show:'
 - Supersedes: ADR 0010 (Global Objects and Singleton Dispatch)
 - Builds on: ADR 0013 (Class Variables, Class-Side Methods, and Instantiation Protocol)
 - Tension with: ADR 0004 (Persistent Workspace Management) — multi-workspace isolation deferred
-- Related: ADR 0009 (OTP Application Structure) — Workspace actor lives in `beamtalk_workspace` app
+- Related: ADR 0009 (OTP Application Structure) — WorkspaceEnvironment actor lives in `beamtalk_workspace` app
 - Related epic: BT-319 (Metaclass & First-Class Classes) — now complete
 - Related epic: BT-320 (Object Protocol & Live Development)
 - Beamtalk principles: `docs/beamtalk-principles.md` (Interactive-first, BEAM-native) 
