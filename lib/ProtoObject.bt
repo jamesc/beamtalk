@@ -1,30 +1,58 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// ProtoObject - Root of the Beamtalk class hierarchy
-//
-// ProtoObject is the ultimate superclass of all objects. It defines the
-// minimal protocol that every object supports: identity, equality, class
-// introspection, dynamic dispatch, and error signaling.
-//
-// ProtoObject is abstract — direct instantiation is meaningless.
-// All useful objects inherit from Object (or Actor) which adds
-// instantiation, nil testing, and display protocols.
-//
-// All methods are compiler intrinsics — dispatched at the call site,
-// never through the method body. The @primitive and @intrinsic declarations
-// serve as the canonical specification of the ProtoObject protocol.
+/// ProtoObject — Root of the Beamtalk class hierarchy.
+///
+/// ProtoObject is the ultimate superclass of all objects. It defines the
+/// minimal protocol that every object supports: identity, equality, class
+/// introspection, dynamic dispatch, and error signaling.
+///
+/// ProtoObject is abstract — it cannot be instantiated directly.
+/// All useful objects inherit from Object (or Actor) which adds
+/// instantiation, nil testing, and display protocols.
+///
+/// All methods are compiler intrinsics dispatched at the call site.
 
 abstract nil subclass: ProtoObject
-  // Identity & equality
+  /// Test value equality (Erlang `==`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 == 42           // => true
+  /// 'abc' == 'abc'     // => true
+  /// ```
   == other => @primitive '=='
+
+  /// Test value inequality (negation of `==`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 ~= 2             // => true
+  /// 42 ~= 42           // => false
+  /// ```
   ~= other => @primitive '~='
 
-  // Type introspection
+  /// Return the class of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class            // => Integer
+  /// 'hello' class       // => String
+  /// ```
   class => @primitive 'class'
 
-  // Error handling
+  /// Handle messages the receiver does not understand. Override for custom dispatch.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 unknownMessage   // => ERROR: does_not_understand
+  /// ```
   doesNotUnderstand: selector args: arguments => @primitive 'doesNotUnderstand:args:'
 
-  // Dynamic dispatch
+  /// Send a message dynamically with an arguments list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 perform: #abs withArguments: #()   // => 42
+  /// ```
   perform: selector withArguments: arguments => @primitive 'perform:withArguments:'

@@ -1,27 +1,86 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Exception - Base class for all exceptions
-//
-// Wraps #beamtalk_error{} records as first-class Beamtalk objects.
-// Exception objects are value types (tagged maps), not actors.
-//
-// Usage:
-//   [1 / 0] on: Exception do: [:e | e message]
-//   Exception signal: 'something went wrong'
+/// Exception — Base class for all exceptions.
+///
+/// Wraps `#beamtalk_error{}` records as first-class Beamtalk objects.
+/// Exception objects are value types (tagged maps), not actors.
+///
+/// ## Examples
+/// ```beamtalk
+/// [1 / 0] on: Exception do: [:e | e message]
+/// Exception signal: 'something went wrong'
+/// ```
 
 Object subclass: Exception
-  // Field access — expose #beamtalk_error{} fields
+  /// Return the error message string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1 / 0] on: Exception do: [:e | e message]
+  /// ```
   message => @primitive 'message'
+
+  /// Return the actionable hint string, or nil if none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1 / 0] on: Exception do: [:e | e hint]
+  /// ```
   hint => @primitive 'hint'
+
+  /// Return the error kind as a symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1 / 0] on: Exception do: [:e | e kind]
+  /// ```
   kind => @primitive 'kind'
+
+  /// Return the message selector that triggered the error, or nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [42 unknownMsg] on: Exception do: [:e | e selector]
+  /// ```
   selector => @primitive 'selector'
+
+  /// Return the class name where the error occurred.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [42 unknownMsg] on: Exception do: [:e | e errorClass]
+  /// ```
   errorClass => @primitive 'errorClass'
 
-  // Display
+  /// Return a developer-readable string representation of the error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [42 unknownMsg] on: Exception do: [:e | e printString]
+  /// ```
   printString => @primitive 'printString'
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [42 unknownMsg] on: Exception do: [:e | e describe]
+  /// ```
   describe => self printString
 
-  // Raising
+  /// Raise this exception.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Exception new) signal
+  /// ```
   signal => @primitive 'signal'
+
+  /// Create and raise a new exception with the given message.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Exception signal: 'something went wrong'
+  /// ```
   signal: msg => @primitive 'signal:'

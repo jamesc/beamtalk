@@ -132,6 +132,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 349,
                         end: 394,
@@ -169,6 +170,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 398,
                         end: 420,
@@ -275,6 +277,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 222,
                         end: 301,
@@ -312,6 +315,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 305,
                         end: 345,
@@ -345,6 +349,7 @@ Module {
                     },
                 },
             ],
+            doc_comment: None,
             span: Span {
                 start: 138,
                 end: 420,

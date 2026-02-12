@@ -75,6 +75,7 @@ Object subclass: Integer
 /// 17 % 5             // => 2
 /// 1 to: 5 do: [:n | Transcript show: n]
 /// ```
+
 Object subclass: Integer
   // ... methods
 ```
@@ -253,7 +254,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 ## Implementation
 
 ### Phase 1: Write Stdlib `///` Docs (S)
-- Add `///` doc comments to all 26 classes and their methods in `lib/*.bt`
+- Add `///` doc comments to all 27 classes and their methods in `lib/*.bt`
 - Add `README.md` for package-level overview documentation
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 - **Zero infrastructure needed** — `///` is currently a regular comment. Docs are immediately readable in source, on GitHub, and in code review.

@@ -325,6 +325,41 @@ impl Parser {
     // Error Handling & Recovery
     // ========================================================================
 
+    /// Extracts a doc comment from the current token's leading trivia.
+    ///
+    /// Collects consecutive `///` lines immediately preceding the token,
+    /// strips the `/// ` or `///` prefix, and joins them with newlines.
+    /// A regular comment (`//`) or blank line between doc lines resets
+    /// the collection, so only the last consecutive block of `///` lines
+    /// is returned.
+    pub(super) fn collect_doc_comment(&self) -> Option<String> {
+        let mut lines = Vec::new();
+        for trivia in self.current_token().leading_trivia() {
+            match trivia {
+                super::Trivia::DocComment(text) => {
+                    let text = text.as_str();
+                    // Strip `/// ` (with space) or `///` prefix
+                    let stripped = text
+                        .strip_prefix("/// ")
+                        .unwrap_or_else(|| text.strip_prefix("///").unwrap_or(text));
+                    lines.push(stripped.to_string());
+                }
+                super::Trivia::Whitespace(ws) => {
+                    // A blank line (>1 newline) breaks consecutive doc comments
+                    if ws.chars().filter(|&c| c == '\n').count() > 1 {
+                        lines.clear();
+                    }
+                }
+                _ => lines.clear(), // non-doc comment resets collection
+            }
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
     /// Reports an error at the current token.
     pub(super) fn error(&mut self, message: impl Into<EcoString>) {
         let span = self.current_token().span();
@@ -404,7 +439,9 @@ impl Parser {
                     content: trivia.as_str().into(),
                     span: start, // TODO: track trivia spans
                     kind: match trivia {
-                        super::Trivia::LineComment(_) => CommentKind::Line,
+                        super::Trivia::LineComment(_) | super::Trivia::DocComment(_) => {
+                            CommentKind::Line
+                        }
                         super::Trivia::BlockComment(_) => CommentKind::Block,
                         super::Trivia::Whitespace(_) => continue,
                     },
@@ -487,6 +524,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::MethodKind;
     use crate::source_analysis::lex_with_eof;
 
     /// Helper to parse a string and check for errors.
@@ -2369,6 +2407,316 @@ Actor subclass: Rectangle
         assert!(
             !diagnostics.is_empty(),
             "Expected error for unterminated list"
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_class() {
+        let module = parse_ok(
+            "/// A simple counter actor.
+/// Maintains a count that can be incremented.
+Actor subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.name.name, "Counter");
+        assert_eq!(
+            class.doc_comment.as_deref(),
+            Some("A simple counter actor.\nMaintains a count that can be incremented.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Increments the counter by one.
+  increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.methods.len(), 1);
+        assert_eq!(
+            class.methods[0].doc_comment.as_deref(),
+            Some("Increments the counter by one.")
+        );
+    }
+
+    #[test]
+    fn parse_no_doc_comment_with_regular_comment() {
+        let module = parse_ok(
+            "// This is a regular comment
+Actor subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.classes[0].doc_comment.is_none());
+    }
+
+    #[test]
+    fn parse_four_slashes_not_doc_comment() {
+        let module = parse_ok(
+            "//// This is NOT a doc comment
+Actor subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.classes[0].doc_comment.is_none());
+    }
+
+    #[test]
+    fn parse_doc_comment_strips_prefix() {
+        let module = parse_ok(
+            "///No space after slashes
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("No space after slashes")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_class_and_method() {
+        let module = parse_ok(
+            "/// Class doc.
+Actor subclass: Counter
+  state: value = 0
+
+  /// Method doc.
+  increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(class.doc_comment.as_deref(), Some("Class doc."));
+        assert_eq!(class.methods.len(), 1);
+        assert_eq!(class.methods[0].doc_comment.as_deref(), Some("Method doc."));
+    }
+
+    #[test]
+    fn parse_doc_comment_resets_on_regular_comment() {
+        let module = parse_ok(
+            "/// Orphaned doc comment.
+// Regular comment interrupts.
+/// Actual class doc.
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        // Only the last consecutive block should be collected
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("Actual class doc.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_with_abstract_modifier() {
+        let module = parse_ok(
+            "/// An abstract collection.
+abstract Actor subclass: Collection
+  size => self subclassResponsibility",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.classes[0].is_abstract);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("An abstract collection.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_blank_line_resets() {
+        let module = parse_ok(
+            "/// Orphaned doc comment.
+
+/// Actual class doc.
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        // Blank line separates the two doc blocks; only the last is attached
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("Actual class doc.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_with_sealed_modifier() {
+        let module = parse_ok(
+            "/// A sealed value type.
+sealed Object subclass: Point
+  state: x = 0
+  state: y = 0
+  x => self.x",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.classes[0].is_sealed);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("A sealed value type.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_before_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Logging before increment.
+  before increment => Transcript show: 'incrementing'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::Before);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Logging before increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_after_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Logging after increment.
+  after increment => Transcript show: 'done'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::After);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Logging after increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_around_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Wrapping around increment.
+  around increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::Around);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Wrapping around increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_sealed_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Cannot be overridden.
+  sealed getValue => self.value",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert!(method.is_sealed);
+        assert_eq!(method.doc_comment.as_deref(), Some("Cannot be overridden."));
+    }
+
+    #[test]
+    fn parse_doc_comment_on_keyword_method() {
+        let module = parse_ok(
+            "Actor subclass: MyCollection
+  state: items = #()
+
+  /// Stores a value at the given index.
+  at: index put: value => self.items",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "at:put:");
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Stores a value at the given index.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_binary_method() {
+        let module = parse_ok(
+            "Object subclass: Vector
+  state: x = 0
+
+  /// Adds two vectors.
+  + other => self.x + other x",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.doc_comment.as_deref(), Some("Adds two vectors."));
+    }
+
+    #[test]
+    fn parse_empty_doc_comment_line() {
+        let module = parse_ok(
+            "/// First line.
+///
+/// After empty line.
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("First line.\n\nAfter empty line.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_class_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Creates a counter starting at the given value.
+  class withValue: v => self new initialize: v",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].class_methods[0];
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Creates a counter starting at the given value.")
         );
     }
 }

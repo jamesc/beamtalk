@@ -1,16 +1,66 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// TranscriptStream - Shared workspace log with pub/sub semantics
-//
-// TranscriptStream is a real actor (gen_server) that acts as a shared log.
-// Subscribers receive output in real-time; unsubscribed output goes to buffer only.
-// Analogous to Smalltalk's Transcript global.
+/// TranscriptStream — Per-workspace shared log with pub/sub semantics.
+///
+/// TranscriptStream is a real actor (gen_server) that acts as a shared
+/// log within a workspace. Each workspace has its own Transcript instance.
+/// Subscribers receive output in real-time; unsubscribed output goes to
+/// buffer only. Analogous to Smalltalk's `Transcript` global.
+///
+/// ## Examples
+/// ```beamtalk
+/// Transcript show: 'hello'
+/// Transcript cr
+/// Transcript recent
+/// ```
 
 Actor subclass: TranscriptStream
+  /// Write a value to the transcript.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript show: 'hello'
+  /// Transcript show: 42
+  /// ```
   show: value => @primitive 'show:'
+
+  /// Write a newline to the transcript.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript cr
+  /// ```
   cr => @primitive 'cr'
+
+  /// Subscribe the calling process to receive transcript output.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript subscribe
+  /// ```
   subscribe => @primitive 'subscribe'
+
+  /// Unsubscribe the calling process from transcript output.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript unsubscribe
+  /// ```
   unsubscribe => @primitive 'unsubscribe'
+
+  /// Return recent transcript entries as a list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript recent
+  /// ```
   recent => @primitive 'recent'
+
+  /// Clear the transcript buffer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Transcript clear
+  /// ```
   clear => @primitive 'clear'

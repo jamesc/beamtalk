@@ -3220,6 +3220,7 @@ end
                     return_type: None,
                     is_sealed: false,
                     kind: MethodKind::Primary,
+                    doc_comment: None,
                     span: Span::new(0, 10),
                 },
                 MethodDefinition {
@@ -3229,11 +3230,13 @@ end
                     return_type: None,
                     is_sealed: false,
                     kind: MethodKind::Primary,
+                    doc_comment: None,
                     span: Span::new(0, 10),
                 },
             ],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 50),
         };
 
@@ -3381,6 +3384,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 20),
         };
 
@@ -3398,6 +3402,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 30),
         };
 
@@ -3695,6 +3700,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3718,6 +3724,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3743,6 +3750,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let logging_counter = ClassDefinition {
@@ -3754,6 +3762,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         // Module with both classes; first class is LoggingCounter
@@ -3796,6 +3805,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3820,6 +3830,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3848,6 +3859,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3875,6 +3887,7 @@ end
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
