@@ -5,7 +5,7 @@ Proposed (2026-02-06)
 
 ## Context
 
-Beamtalk's standard library lives in 16 `lib/*.bt` files that were recently converted from documentation-only stubs to compilable source with `@primitive` pragmas (BT-293, ADR 0007 Phase 2). During conversion, verbose API documentation headers were removed, leaving concise class comments and method signatures as the only documentation.
+Beamtalk's standard library lives in 26 `lib/*.bt` files that were recently converted from documentation-only stubs to compilable source with `@primitive` pragmas (BT-293, ADR 0007 Phase 2). During conversion, verbose API documentation headers were removed, leaving concise class comments and method signatures as the only documentation.
 
 **The problem:** There is no structured way to document methods, classes, or modules in Beamtalk source code. The language has `//` line comments and `/* */` block comments, but no **doc-comment syntax** that tooling can extract for:
 
@@ -228,12 +228,23 @@ Rejected because there's no way to distinguish documentation comments from imple
 ### Negative
 - **New syntax to learn:** Developers must know `///` vs `//` distinction
 - **Not runtime-accessible:** Unlike Elixir's `@doc`, docs aren't available via reflection at runtime (until/unless `@doc` is added later)
-- **Stdlib rewrite:** All 16 `lib/*.bt` files need doc comments added
+- **Stdlib rewrite:** All 26 `lib/*.bt` files need doc comments added
+- **Doc delivery for REPL:** The `:help` command needs access to doc strings at runtime, but the stdlib is precompiled to `.beam` files (ADR 0007). This requires either shipping source alongside binaries, a separate doc index, or embedding docs in BEAM modules — each with trade-offs (see Phase 3)
 
 ### Neutral
 - The existing `//` comment syntax is unaffected — regular comments remain for implementation notes
 - The `/* */` block comment syntax is unaffected
 - Generated documentation format (HTML vs terminal) is an implementation detail, not part of this ADR
+
+## Resolved Questions
+
+1. **`////` vs `///` for class docs:** **Keep `////` for module/class docs.** The explicit distinction follows Gleam convention and makes intent clear, even though each file currently contains one class. If multi-class files are supported later, the distinction becomes essential.
+
+2. **Doc inheritance:** **Yes — walk the hierarchy.** `:help Counter increment` should show docs inherited from `Actor >> increment` if Counter doesn't override the documentation, following Pharo's approach. This matches the existing `respondsTo:` hierarchy walking (ADR 0006) and provides better UX for users exploring unfamiliar classes.
+
+3. **Structured parameter docs:** **Freeform Markdown only**, following Rust and Gleam. Parameter names are inferred from the method signature. Use conventional headings (`## Arguments`, `## Examples`) for structure. No `@param`/`@returns` tags — keeps it simple and avoids JSDoc-style syntax in a Smalltalk-inspired language.
+
+4. **Doctest interaction with ADR 0014:** **Deferred.** The doctest mechanism will be designed when implementing doctests. The `/// ```beamtalk` syntax is reserved for future use but the integration with ADR 0014's test framework is not decided here.
 
 ## Implementation
 
@@ -241,26 +252,34 @@ Rejected because there's no way to distinguish documentation comments from imple
 - Extend lexer to recognize `///` as `Trivia::DocComment` and `////` as `Trivia::ModuleDocComment`
 - Add `doc_comment: Option<String>` to `MethodDefinition` and `ClassDefinition` in AST
 - Parser extracts leading `///` trivia and attaches to the following AST node
+- **Note:** Trivia currently attaches to *tokens*, not AST nodes. The parser must collect doc-comment trivia from the leading trivia of the first token of a method/class definition and "lift" it to the enclosing AST node during parsing. This is similar to how `leading_comments` is already handled for `Module`.
 
 ### Phase 2: LSP Integration (S)
 - Hover provider reads `doc_comment` from Method/Class nodes
 - Completion provider includes first line of doc in completion items
-- Renders Markdown to terminal-friendly format for display
+- **Markdown rendering:** LSP protocol natively supports Markdown in `MarkupContent` — pass raw Markdown to the editor, no rendering needed on our side
 
-### Phase 3: REPL `:help` (S)
+### Phase 3: REPL `:help` (M)
 - `:help ClassName` shows class `////` doc
 - `:help ClassName selector` shows method `///` doc
-- Requires stdlib to be parsed (not compiled) at REPL startup
+- **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `increment`, show `Actor`'s docs for it.
+- **Doc delivery strategy** (choose one during implementation):
+  - **Option A: Parse-at-startup** — Parse `lib/*.bt` source files at REPL startup to extract docs. Simple but requires source files to be present alongside compiled `.beam` files. Adds startup latency (~26 files).
+  - **Option B: Pre-compiled doc index** — `beamtalk build-stdlib` generates a doc index file (JSON/ETF) alongside `.beam` files. REPL loads the index at startup. Faster, no source dependency at runtime.
+  - **Option C: Embedded in BEAM** — Compile `///` docs into module attributes (similar to Elixir's `Code.fetch_docs/1`). Adds codegen complexity but docs travel with compiled code. This overlaps with the future `@doc` pragma and may warrant a separate ADR.
+- Extend existing `:help` command to dispatch `:help ClassName selector` (currently only shows generic command help)
+- **Markdown rendering for terminal:** Requires either a crate like `termimad` for styled terminal output, or a minimal custom pass that strips `#` headings, indents code blocks, and applies basic formatting. No Markdown rendering dependency exists in the project today.
 
 ### Phase 4: Stdlib Documentation (M)
 - Add `///` doc comments to all methods in `lib/*.bt`
-- Add `////` module docs to all 16 stdlib files
+- Add `////` module docs to all 26 stdlib files
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 
 ### Phase 5: `beamtalk doc` Command (M)
 - Generate HTML reference from `///` comments
 - Index by class, method name, category
 - Include cross-references between classes
+- **Markdown rendering for HTML:** Requires a Markdown-to-HTML library (e.g., `pulldown-cmark` or `comrak`)
 
 ### Future: `@doc` for Runtime Access
 - If runtime doc reflection is needed, add `@doc` as a complementary pragma
@@ -272,13 +291,16 @@ Rejected because there's no way to distinguish documentation comments from imple
 **No breaking changes.** The `///` syntax is new — existing `//` comments are unaffected. The stdlib files will need doc comments added incrementally (Phase 4).
 
 Recommended migration order:
-1. Core types first: Integer, String, Array, List, Dictionary, Set
-2. Hierarchy: ProtoObject, Object, Actor, Block
-3. Special: True, False, Nil, Collection, SequenceableCollection, Beamtalk
+1. Core types first: Integer, Float, Number, String, Symbol
+2. Collections: List, Dictionary, Set, Tuple, Association
+3. Hierarchy: ProtoObject, Object, Actor, Block, CompiledMethod
+4. Boolean/Nil: True, False, UndefinedObject
+5. Error hierarchy: Exception, Error, RuntimeError, TypeError, InstantiationError
+6. System: SystemDictionary, TranscriptStream, File
 
 ## References
 - Related issues: BT-293 (stdlib conversion that removed API docs)
-- Related ADRs: ADR 0007 (compilable stdlib with `@primitive` injection)
+- Related ADRs: ADR 0007 (compilable stdlib with `@primitive` injection), ADR 0014 (test framework — doctest interaction)
 - Gleam documentation: https://tour.gleam.run/functions/documentation-comments/
 - Rust rustdoc: https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html
 - Elixir ExDoc: https://hexdocs.pm/elixir/writing-documentation.html
