@@ -170,6 +170,14 @@ pub(super) fn start_daemon() -> Result<()> {
     // and writes its lockfile/socket to a different session folder.
     let socket = socket_path()?;
 
+    // Validate the socket path is UTF-8 so the daemon child can read it
+    // back via std::env::var (which requires UTF-8). Non-UTF-8 home dirs
+    // are extremely rare but we surface a clear error rather than silently
+    // falling back to a PPID-derived path.
+    let socket_str = socket
+        .to_str()
+        .ok_or_else(|| miette!("Daemon socket path is not valid UTF-8: {:?}", socket))?;
+
     // Ensure the session directory exists before the daemon tries to
     // create its lockfile and socket inside it.
     if let Some(dir) = socket.parent() {
@@ -180,7 +188,7 @@ pub(super) fn start_daemon() -> Result<()> {
     // (background mode in daemon itself is not implemented)
     Command::new(exe)
         .args(["daemon", "start", "--foreground"])
-        .env("BEAMTALK_DAEMON_SOCKET", &socket)
+        .env("BEAMTALK_DAEMON_SOCKET", socket_str)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
