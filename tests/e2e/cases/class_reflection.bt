@@ -72,21 +72,16 @@ methods isEmpty
 // => false
 
 // ---------------------------------------------------------------------------
-// Get methods list from Counter class (SKIPPED - Dynamic class issue)
+// Get methods list from Counter class
 // ---------------------------------------------------------------------------
 
-// Counter is a dynamically loaded class and currently returns empty methods
-// This is a known issue with how :load creates class objects
-// See related tests with primitive classes (String, Integer) which work correctly
+counterClass := (Beamtalk classNamed: #Counter) await
+// => Counter
 
-// counterClass := (Beamtalk classNamed: #Counter) await
+counterMethods := counterClass methods
 // => _
 
-// counterMethods := counterClass methods
-// => _
-
-// TODO(BT-XXX): Fix dynamic class method registration
-// counterMethods isEmpty
+counterMethods isEmpty
 // => false
 
 // ---------------------------------------------------------------------------
