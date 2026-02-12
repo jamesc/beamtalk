@@ -86,12 +86,12 @@ Local REPL and daemon connections remain loopback-only. The REPL protocol uses *
 **Why WebSocket only (not TCP + WebSocket):** One transport means one implementation to test and maintain. WebSocket is HTTP-upgrade-compatible, so standard proxies (Caddy, nginx, envoy) can terminate TLS, handle auth headers, and forward without custom bridging code. This follows nREPL's principle of transport-agnostic protocol design — the JSON messages are the protocol; WebSocket is the transport.
 
 **Cookie handshake protocol:**
-```json
+```text
 → {"type": "auth", "cookie": "<workspace cookie>"}
 ← {"type": "auth_ok"}
 ```
 or on failure:
-```json
+```text
 ← {"type": "auth_error", "message": "Invalid cookie"}
 → [connection closed by server]
 ```
@@ -114,7 +114,7 @@ Since the workspace speaks WebSocket natively, the browser can connect directly 
 └────────────┘                            └────────────────────┘
 ```
 
-The browser loads a static xterm.js page (served by `beamtalk web` or from disk) and connects to `ws://localhost:49152`. The cookie handshake authenticates the connection.
+The browser loads a static xterm.js page (served by `beamtalk web` from `http://localhost`) and connects to `ws://localhost:49152`. The cookie handshake authenticates the connection. The page must be served over HTTP (not loaded from `file://`) so that the `Origin` header is present for WebSocket validation.
 
 **Remote/TLS (standard proxy):**
 ```
@@ -151,22 +151,26 @@ my-laptop.tail12345.ts.net:8443 {
 **The workspace always binds to `127.0.0.1` by default.** Network exposure is handled by the reverse proxy, not by changing the workspace bind address. For overlay networks (Tailscale), the workspace can optionally bind to the overlay IP:
 
 ```bash
+# NOTE: The following commands illustrate proposed CLI UX for Phases 1-2.
+#       Some subcommands/flags (e.g. `beamtalk web`, `--bind tailscale`) are not
+#       available in the current CLI yet.
+
 # Default: local only (browser connects directly, no proxy needed)
 beamtalk repl
 # → Workspace listens on ws://127.0.0.1:49152
 
-# Serve xterm.js web terminal
+# Serve xterm.js web terminal (proposed UX — Phase 1, not yet implemented)
 beamtalk web
-# → Opens browser to static page that connects to ws://localhost:49152
+# → Opens browser to http://localhost page that connects to ws://localhost:49152
 
 # Remote via Caddy (workspace stays on loopback)
 caddy reverse-proxy --from :8443 --to localhost:49152
 
-# Remote via Tailscale (workspace binds to overlay IP)
+# Remote via Tailscale (workspace binds to overlay IP) — proposed UX, Phase 2
 beamtalk run server.bt --bind tailscale
 # → ws://100.64.x.x:49152, only reachable by Tailscale peers
 
-# Safety check for non-loopback binding
+# Safety check for non-loopback binding — proposed UX, Phase 2
 beamtalk run server.bt --bind 0.0.0.0
 # ERROR: Binding to all interfaces exposes the workspace to the network.
 #        Use --confirm-network to proceed, or use --bind tailscale for secure remote access.
@@ -185,14 +189,14 @@ The simplest path. The overlay provides encryption and identity. Beamtalk treats
 │  Developer   │ ────────────────────────── │  Production      │
 │  100.64.0.1  │     (encrypted)            │  100.64.0.2      │
 └──────────────┘                            └──────────────────┘
-                                                     │
-                                              beamtalk repl
-                                              (connects to 100.64.0.2:49152)
+        │                                            │
+beamtalk attach prod@100.64.0.2               beamtalk repl
+(connects to 100.64.0.2:49152)                (listens on 100.64.0.2:49152)
 ```
 
 **Changes needed:**
 - Workspace can bind to a Tailscale/WireGuard IP instead of `127.0.0.1`
-- No protocol changes — same TCP, same JSON, same everything
+- No application-level protocol changes — same WebSocket over TCP, same JSON messages, same semantics
 - Authentication relies on the overlay's identity (Tailscale ACLs, WireGuard keys)
 
 ```bash
@@ -472,6 +476,29 @@ This is deferred to a future ADR when Kubernetes deployment becomes a priority. 
 - Feed SPIRE-issued certs to `ssl_dist` configuration
 - Kubernetes deployment manifests with SPIRE sidecar
 - **Components:** New Erlang module, deployment docs
+
+## Migration Path
+
+The WebSocket migration (Phase 0) is a **breaking change** to the REPL transport layer. Since beamtalk is pre-1.0, there is no backward compatibility obligation, but the transition should be handled cleanly:
+
+### Phase 0 migration (WebSocket transport + cookie handshake)
+
+1. **CLI and workspace must be updated together.** A new CLI using `tungstenite` cannot connect to a workspace still using `gen_tcp`, and vice versa. Both sides ship in the same release.
+2. **No version negotiation.** The old TCP protocol has no version handshake, so there is no way to gracefully negotiate transport. If a user runs a new CLI against an old workspace (or vice versa), the connection will fail immediately with a clear error message (e.g., "Connection refused — workspace may be running an older version. Run `beamtalk workspace restart` to upgrade.").
+3. **Running workspaces must be restarted.** Existing workspace processes speak the old TCP protocol and cannot be hot-upgraded to WebSocket. Users must stop and restart workspaces after updating: `beamtalk workspace stop && beamtalk repl`.
+4. **Cookie file creation is automatic.** If a workspace has no cookie file (`~/.beamtalk/workspaces/{id}/cookie`), one is generated on first startup. Existing workspaces get a cookie on next restart.
+
+### User-visible steps
+
+```bash
+# After updating beamtalk CLI:
+beamtalk workspace stop          # Stop old workspace
+beamtalk repl                    # Starts new workspace with WebSocket + cookie
+```
+
+### Later phases (no migration needed)
+
+Phases 1–4 (web terminal, network binding, mTLS, SPIFFE) are additive features. They do not change the core protocol and require no migration from users already on WebSocket transport.
 
 ## Scope Boundaries
 
