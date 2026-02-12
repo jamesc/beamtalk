@@ -56,52 +56,64 @@ is_whitespace(CP) when is_integer(CP), CP >= 0 ->
 is_whitespace(CP) when is_integer(CP) -> false.
 
 %% @private Match a codepoint against a Unicode property regex.
+%% Returns false for values outside the Unicode scalar range.
 -spec unicode_match(integer(), binary()) -> boolean().
-unicode_match(CP, Pattern) ->
+unicode_match(CP, Pattern)
+    when is_integer(CP),
+         CP >= 0,
+         CP =< 16#10FFFF,
+         not (CP >= 16#D800 andalso CP =< 16#DFFF) ->
     Str = unicode:characters_to_binary([CP]),
-    match =:= re:run(Str, Pattern, [unicode, {capture, none}]).
+    match =:= re:run(Str, Pattern, [unicode, {capture, none}]);
+unicode_match(_CP, _Pattern) ->
+    false.
 
 %% @doc Convert codepoint to uppercase.
+%% For multi-codepoint expansions (e.g., ß → SS), returns the first codepoint.
 -spec to_uppercase(integer()) -> integer().
-to_uppercase(CP) when is_integer(CP) ->
+to_uppercase(CP) when is_integer(CP), CP >= 0, CP =< 16#10FFFF ->
     Str = unicode:characters_to_binary([CP]),
     Upper = string:uppercase(Str),
-    [UpperCP | _] = string:to_graphemes(Upper),
-    case UpperCP of
-        I when is_integer(I) -> I;
+    case unicode:characters_to_list(Upper) of
+        [UpperCP | _] -> UpperCP;
         _ -> CP
-    end.
+    end;
+to_uppercase(CP) when is_integer(CP) -> CP.
 
 %% @doc Convert codepoint to lowercase.
+%% For multi-codepoint expansions, returns the first codepoint.
 -spec to_lowercase(integer()) -> integer().
-to_lowercase(CP) when is_integer(CP) ->
+to_lowercase(CP) when is_integer(CP), CP >= 0, CP =< 16#10FFFF ->
     Str = unicode:characters_to_binary([CP]),
     Lower = string:lowercase(Str),
-    [LowerCP | _] = string:to_graphemes(Lower),
-    case LowerCP of
-        I when is_integer(I) -> I;
+    case unicode:characters_to_list(Lower) of
+        [LowerCP | _] -> LowerCP;
         _ -> CP
-    end.
+    end;
+to_lowercase(CP) when is_integer(CP) -> CP.
 
 %% @doc Convert codepoint to a single-character string.
 -spec as_string(integer()) -> binary().
-as_string(CP) when is_integer(CP), CP >= 0 ->
+as_string(CP) when is_integer(CP), CP >= 0, CP =< 16#10FFFF ->
     unicode:characters_to_binary([CP]).
 
 %% @doc Display representation of a character ($a format).
 -spec print_string(integer()) -> binary().
-print_string(CP) when is_integer(CP), CP >= 0 ->
+print_string(CP) when is_integer(CP), CP >= 0, CP =< 16#10FFFF ->
     CharStr = unicode:characters_to_binary([CP]),
     <<"$", CharStr/binary>>.
 
 %% @doc Create a Character from a codepoint integer (factory method).
-%% Validates that the argument is a non-negative integer.
+%% Validates that the argument is a valid Unicode scalar value
+%% (non-negative, <= 16#10FFFF, and not in the surrogate range).
 -spec value(integer()) -> integer().
-value(CP) when is_integer(CP), CP >= 0 -> CP;
+value(CP) when is_integer(CP), CP >= 0, CP =< 16#D7FF -> CP;
+value(CP) when is_integer(CP), CP >= 16#E000, CP =< 16#10FFFF -> CP;
 value(CP) ->
     Error0 = beamtalk_error:new(type_error, 'Character'),
     Error1 = beamtalk_error:with_selector(Error0, 'value:'),
     Error2 = beamtalk_error:with_hint(Error1,
-        <<"Argument must be a non-negative integer (Unicode codepoint)">>),
+        <<"Argument must be a valid Unicode scalar value "
+          "(non-negative, <= 0x10FFFF, and not a surrogate codepoint)">>),
     Error3 = beamtalk_error:with_details(Error2, #{got => CP}),
     beamtalk_error:raise(Error3).

@@ -1035,4 +1035,75 @@ mod tests {
         let result = generate_primitive_bif("Character", "hash", &[]);
         assert_eq!(result, Some("call 'erlang':'phash2'(Self)".to_string()));
     }
+
+    #[test]
+    fn test_character_is_uppercase() {
+        let result = generate_primitive_bif("Character", "isUppercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_is_lowercase() {
+        let result = generate_primitive_bif("Character", "isLowercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_is_whitespace() {
+        let result = generate_primitive_bif("Character", "isWhitespace", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_uppercase() {
+        let result = generate_primitive_bif("Character", "uppercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'to_uppercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_lowercase() {
+        let result = generate_primitive_bif("Character", "lowercase", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'to_lowercase'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_character_comparison() {
+        let result = generate_primitive_bif("Character", "<", &["Other".to_string()]);
+        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
+    }
+
+    // Integer character predicate tests (BT-339)
+
+    #[test]
+    fn test_integer_is_letter() {
+        let result = generate_primitive_bif("Integer", "isLetter", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_integer_is_digit() {
+        let result = generate_primitive_bif("Integer", "isDigit", &[]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
+        );
+    }
 }
