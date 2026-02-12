@@ -1,0 +1,19 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 286, end: 292 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)"), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Tests codegen for:"), Whitespace("\n"), LineComment("// - >> on class literal (compile-time optimized atom path)"), Whitespace("\n"), LineComment("// - >> on variable receiver (runtime resolution path)"), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 293, end: 302 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("MethodLookupTest"), span: Span { start: 303, end: 319 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("lookupLiteral"), span: Span { start: 379, end: 392 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Class literal: generates call with atom class name"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 393, end: 395 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Counter"), span: Span { start: 396, end: 403 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector(">>"), span: Span { start: 404, end: 406 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("increment"), span: Span { start: 407, end: 417 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("lookupVariable:"), span: Span { start: 495, end: 510 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Variable receiver: generates call with evaluated receiver expression"), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("cls"), span: Span { start: 511, end: 514 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 515, end: 517 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("cls"), span: Span { start: 518, end: 521 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector(">>"), span: Span { start: 522, end: 524 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("getValue"), span: Span { start: 525, end: 534 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 535, end: 535 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

@@ -1,0 +1,209 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "MethodLookupTest",
+                span: Span {
+                    start: 303,
+                    end: 319,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 286,
+                        end: 292,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "lookupLiteral",
+                    ),
+                    parameters: [],
+                    body: [
+                        MessageSend {
+                            receiver: ClassReference {
+                                name: Identifier {
+                                    name: "Counter",
+                                    span: Span {
+                                        start: 396,
+                                        end: 403,
+                                    },
+                                },
+                                span: Span {
+                                    start: 396,
+                                    end: 403,
+                                },
+                            },
+                            selector: Binary(
+                                ">>",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Symbol(
+                                        "increment",
+                                    ),
+                                    Span {
+                                        start: 407,
+                                        end: 417,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 396,
+                                end: 417,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 379,
+                        end: 417,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "lookupVariable:",
+                                span: Span {
+                                    start: 495,
+                                    end: 510,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        Identifier {
+                            name: "cls",
+                            span: Span {
+                                start: 511,
+                                end: 514,
+                            },
+                        },
+                    ],
+                    body: [
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "cls",
+                                    span: Span {
+                                        start: 518,
+                                        end: 521,
+                                    },
+                                },
+                            ),
+                            selector: Binary(
+                                ">>",
+                            ),
+                            arguments: [
+                                Literal(
+                                    Symbol(
+                                        "getValue",
+                                    ),
+                                    Span {
+                                        start: 525,
+                                        end: 534,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                start: 518,
+                                end: 534,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    span: Span {
+                        start: 495,
+                        end: 534,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            span: Span {
+                start: 286,
+                end: 534,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 286,
+        end: 534,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Tests codegen for:",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// - >> on class literal (compile-time optimized atom path)",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// - >> on variable receiver (runtime resolution path)",
+            span: Span {
+                start: 286,
+                end: 292,
+            },
+            kind: Line,
+        },
+    ],
+}

@@ -279,6 +279,58 @@ method_test_() ->
          ]
      end}.
 
+%% BT-323: Tests for beamtalk_method_resolver domain service
+method_resolver_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          %% Resolve via class object tuple
+          ?_test(begin
+                     Methods = #{
+                         getValue => #{arity => 0, block => fun() -> ok end}
+                     },
+                     MethodSource = #{
+                         getValue => <<"getValue => ^self.value">>
+                     },
+                     ClassInfo = #{
+                         name => 'ResolverTest',
+                         module => resolver_test,
+                         instance_methods => Methods,
+                         method_source => MethodSource
+                     },
+                     {ok, Pid} = beamtalk_object_class:start_link('ResolverTest', ClassInfo),
+                     ClassObj = {beamtalk_object, 'ResolverTest class', resolver_test, Pid},
+                     MethodObj = beamtalk_method_resolver:resolve(ClassObj, getValue),
+                     ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+                     ?assertEqual(getValue, maps:get('__selector__', MethodObj))
+                 end),
+          %% Resolve via class object tuple returns nil for missing method
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'ResolverNilTest',
+                         module => resolver_nil_test,
+                         instance_methods => #{}
+                     },
+                     {ok, Pid} = beamtalk_object_class:start_link('ResolverNilTest', ClassInfo),
+                     ClassObj = {beamtalk_object, 'ResolverNilTest class', resolver_nil_test, Pid},
+                     ?assertEqual(nil, beamtalk_method_resolver:resolve(ClassObj, nonexistent))
+                 end),
+          %% Type error for non-class receiver (integer)
+          ?_test(begin
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(42, foo))
+                 end),
+          %% Type error for instance object (not a class)
+          ?_test(begin
+                     InstanceObj = {beamtalk_object, 'Counter', counter, self()},
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(InstanceObj, foo))
+                 end)
+         ]
+     end}.
+
 instance_variables_test_() ->
     {setup,
      fun setup/0,

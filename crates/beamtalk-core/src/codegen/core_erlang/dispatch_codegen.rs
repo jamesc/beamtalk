@@ -934,7 +934,7 @@ impl CoreErlangGenerator {
     ///
     /// `Counter >> #increment` compiles to:
     /// ```erlang
-    /// call 'beamtalk_object_class':'method'('Counter', 'increment')
+    /// call 'beamtalk_method_resolver':'resolve'('Counter', 'increment')
     /// ```
     ///
     /// Returns a `CompiledMethod` map with selector, source, and arity metadata.
@@ -947,7 +947,7 @@ impl CoreErlangGenerator {
         }
         let arg_str = self.capture_expression(&arguments[0])?;
         let doc = docvec![
-            format!("call 'beamtalk_object_class':'method'('{class_name}', "),
+            format!("call 'beamtalk_method_resolver':'resolve'('{class_name}', "),
             arg_str,
             ")"
         ];
@@ -955,14 +955,14 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates a runtime method lookup via `>>` for non-class-literal receivers (BT-323).
+    /// Generates a runtime method resolution via `>>` for non-class-literal receivers (BT-323).
     ///
     /// `cls >> #increment` (where cls holds a class object) compiles to:
     /// ```erlang
-    /// call 'beamtalk_object_class':'method'(cls, 'increment')
+    /// call 'beamtalk_method_resolver':'resolve'(cls, 'increment')
     /// ```
     ///
-    /// The runtime `method/2` accepts pids, atoms, and class object tuples.
+    /// The `MethodResolver` domain service accepts pids, atoms, and class object tuples.
     fn generate_runtime_method_lookup(
         &mut self,
         receiver: &Expression,
@@ -977,7 +977,7 @@ impl CoreErlangGenerator {
         let receiver_str = self.capture_expression(receiver)?;
         let arg_str = self.capture_expression(&arguments[0])?;
         let doc = docvec![
-            "call 'beamtalk_object_class':'method'(",
+            "call 'beamtalk_method_resolver':'resolve'(",
             receiver_str,
             ", ",
             arg_str,
