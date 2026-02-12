@@ -1,11 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// SystemDictionary — System-wide reflection and class registry.
+/// SystemDictionary — Workspace-level reflection and class registry.
 ///
 /// Provides access to the class registry, global namespace, and
-/// system-wide introspection. The global binding `Beamtalk` is an
-/// instance of SystemDictionary, analogous to Smalltalk's `Smalltalk` global.
+/// introspection within a workspace. The global binding `Beamtalk` is an
+/// instance of SystemDictionary scoped to the current workspace,
+/// analogous to Smalltalk's `Smalltalk` global.
 ///
 /// ## Examples
 /// ```beamtalk
