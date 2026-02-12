@@ -51,11 +51,28 @@ Without Streams, Beamtalk users cannot:
 
 ## Decision
 
-Implement a three-layer Stream design that aligns with both Smalltalk heritage and BEAM strengths:
+Implement a three-layer Stream design that aligns with both Smalltalk heritage and BEAM strengths, unified under a common abstract `Stream` superclass.
+
+### Class Hierarchy
+
+```
+Object
+└── Stream (abstract)              ← shared protocol: next, atEnd, do:, collect:, select:, take:
+    ├── ReadStream (sealed)        ← Layer 1: sequential read over collection
+    ├── WriteStream (sealed)       ← Layer 1: incremental collection/string building
+    └── LazyStream (sealed)        ← Layer 3: closure-based, potentially infinite
+
+Actor
+└── FileStream                     ← Layer 2: process-based, wraps OS file handle
+```
+
+**Design rationale:** ReadStream, WriteStream, and LazyStream all respond to the same read protocol (`next`, `atEnd`, `do:`, `collect:`, `take:`), so they share an abstract `Stream` superclass — just as `Integer` and `Float` share `Number`. This means code that works with any `Stream` works with all three.
+
+FileStream is an Actor (gen_server) because it wraps an OS resource with process-linked lifecycle. It implements the same stream protocol (`next`, `nextLine`, `atEnd`, `do:`, `close`) via **duck typing** — it responds to the same messages as Stream but cannot inherit from it since it extends Actor. This is idiomatic Beamtalk: shared behavior through protocol conformance, not inheritance. Code that sends `next` and `atEnd` works with both a `ReadStream` and a `FileStream`.
 
 ### Layer 1: ReadStream / WriteStream (Collection Streams)
 
-Sequential access over in-memory collections, following Smalltalk's model closely. These are **value types** (Object subclasses), not actors.
+Sequential access over in-memory collections, following Smalltalk's model closely. These are **value types** (Stream subclasses), not actors.
 
 ```beamtalk
 // ReadStream — sequential read over a collection
@@ -122,18 +139,31 @@ FileStream open: 'data.csv' do: [:file |
 %% On terminate: file:close(Handle)
 ```
 
-### Layer 3: Lazy Streams (Future Work)
+### Layer 3: LazyStream (Future Work)
 
-Lazy, composable pipelines for large/infinite data. Deferred to a future ADR once Layer 1 and 2 prove out the design. The recommended approach follows Elixir's proven closure-based model — each lazy operation wraps the previous in a closure, with nothing computed until a terminal operation (like `take:` or `asList`) pulls elements through.
+Lazy, composable pipelines for large/infinite data. A subclass of `Stream`, so it shares the same read protocol (`next`, `atEnd`, `do:`, `collect:`, `take:`). Deferred to a future ADR once Layer 1 and 2 prove out the design.
+
+The recommended approach follows Elixir's proven closure-based model — each lazy operation wraps the previous in a closure, with nothing computed until a terminal operation (like `take:` or `asList`) pulls elements through.
 
 ```beamtalk
 // Future — not part of this ADR
 // Closure-based lazy streams (Elixir model)
+// LazyStream is a Stream, so all Stream protocol works
+
+// Infinite sequence
 s := LazyStream from: 1
 s := s select: [:n | n isEven]
 s := s collect: [:n | n * n]
 s take: 5
 // => #(4, 16, 36, 64, 100)
+
+// Works with same code as ReadStream
+printFirst5: aStream => 
+  (aStream take: 5) do: [:each | Transcript show: each]
+
+// Pass either — polymorphism via shared Stream protocol
+printFirst5: (ReadStream on: #(10, 20, 30, 40, 50))
+printFirst5: (LazyStream from: 1)
 ```
 
 **Chaining syntax note:** Message-send languages (Smalltalk, Newspeak, Beamtalk) have a known limitation where keyword messages cannot chain without parentheses or temporary variables. No satisfying syntax sugar has been found in the Smalltalk literature — the Pharo [Sequence](https://ceur-ws.org/Vol-3627/paper11.pdf) framework (IWST 2023) addresses this at the library level but not syntactically. Temporary variables are the pragmatic approach and align with Beamtalk's interactive-first philosophy (each step is inspectable in the REPL). Research into novel pipeline syntax is tracked in BT-506.
@@ -142,9 +172,11 @@ s take: 5
 
 | Class | Kind | Superclass | Use Case |
 |-------|------|------------|----------|
-| ReadStream | Value type | Object | Sequential read over collections |
-| WriteStream | Value type | Object | Build collections/strings incrementally |
-| FileStream | Actor | Actor | Line-by-line file I/O with auto-cleanup |
+| Stream | Abstract | Object | Shared protocol: `next`, `atEnd`, `do:`, `collect:`, `take:` |
+| ReadStream | Value type (sealed) | Stream | Sequential read over collections |
+| WriteStream | Value type (sealed) | Stream | Build collections/strings incrementally |
+| LazyStream | Value type (sealed) | Stream | Closure-based lazy/infinite sequences |
+| FileStream | Actor | Actor | Line-by-line file I/O (duck-types Stream protocol) |
 
 ## Prior Art
 
