@@ -24,3 +24,7 @@ Object subclass: TestCase
   deny: condition => @primitive 'deny:'
   should: block raise: errorKind => @primitive 'should:raise:'
   fail: message => @primitive 'fail:'
+
+  // Class-side methods for running tests interactively (BT-440)
+  class runAll => @primitive 'runAll'
+  class run: testName => @primitive 'run:'

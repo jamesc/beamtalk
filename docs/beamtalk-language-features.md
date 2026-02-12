@@ -1,6 +1,6 @@
 # Beamtalk Language Features
 
-Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy, [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions, and [beamtalk-interop.md](beamtalk-interop.md) for Erlang/Elixir integration.
+Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-principles.md) for design philosophy and [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) for syntax design decisions.
 
 **Status:** Design phase - syntax and semantics subject to change.
 

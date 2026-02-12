@@ -2,8 +2,6 @@
 
 How the compiler, tooling, and runtime fit together to deliver live programming.
 
-For the Smalltalk-style IDE experience (browser, inspector, debugger), see [beamtalk-ide.md](beamtalk-ide.md).
-
 For persistent workspaces (actors survive REPL disconnect, multiple sessions), see [ADR 0004: Persistent Workspace Management](ADR/0004-persistent-workspace-management.md).
 
 ---
