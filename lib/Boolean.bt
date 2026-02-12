@@ -4,7 +4,7 @@
 /// Boolean — Abstract superclass for True and False.
 ///
 /// Provides shared boolean protocol. Cannot be instantiated directly.
-/// True and False are the only subclasses.
+/// In the stdlib, True and False are the concrete boolean subclasses.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -31,7 +31,7 @@ abstract Object subclass: Boolean
   /// true and: [false]      // => false
   /// false and: [true]      // => false
   /// ```
-  and: aBlock => self ifTrue: [aBlock value] ifFalse: [false]
+  and: aBlock => self ifTrue: aBlock ifFalse: [false]
 
   /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
   ///
@@ -40,7 +40,7 @@ abstract Object subclass: Boolean
   /// true or: [false]       // => true
   /// false or: [true]       // => true
   /// ```
-  or: aBlock => self ifTrue: [true] ifFalse: [aBlock value]
+  or: aBlock => self ifTrue: [true] ifFalse: aBlock
 
   /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
   ///
