@@ -1,0 +1,16 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 204, end: 210 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test that @intrinsic produces identical codegen to @primitive (BT-484)."), Whitespace("\n"), LineComment("// Both keywords map to Expression::Primitive in the AST."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 211, end: 220 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Foo"), span: Span { start: 221, end: 224 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("blockValue"), span: Span { start: 227, end: 237 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 238, end: 240 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtIntrinsic, span: Span { start: 241, end: 251 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("blockValue"), span: Span { start: 252, end: 262 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("size"), span: Span { start: 265, end: 269 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 270, end: 272 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: AtIntrinsic, span: Span { start: 273, end: 283 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("size"), span: Span { start: 284, end: 290 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 291, end: 291 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
