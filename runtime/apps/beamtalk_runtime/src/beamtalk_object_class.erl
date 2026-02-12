@@ -287,21 +287,12 @@ class_object_tag(ClassName) when is_atom(ClassName) ->
 
 %% @doc Get a compiled method object.
 %%
-%% Accepts either a class process pid or a class name atom.
+%% Delegates to beamtalk_method_resolver for the actual resolution logic.
+%% Accepts a class process pid, a class name atom, or a class object tuple.
 %% Returns a CompiledMethod map or nil if the method is not found.
--spec method(pid() | class_name(), selector()) -> map() | nil.
-method(ClassPid, Selector) when is_pid(ClassPid) ->
-    gen_server:call(ClassPid, {method, Selector});
-method(ClassName, Selector) when is_atom(ClassName) ->
-    case whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, '>>'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
-            beamtalk_error:raise(Error2);
-        Pid ->
-            gen_server:call(Pid, {method, Selector})
-    end.
+-spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | nil.
+method(ClassRef, Selector) ->
+    beamtalk_method_resolver:resolve(ClassRef, Selector).
 
 %% @doc Check if a class has a method (does not walk hierarchy).
 %%

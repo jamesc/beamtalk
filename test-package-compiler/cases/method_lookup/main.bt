@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)
+//
+// Tests codegen for:
+// - >> on class literal (compile-time optimized atom path)
+// - >> on variable receiver (runtime resolution path)
+
+Object subclass: MethodLookupTest
+
+  // Class literal: generates call with atom class name
+  lookupLiteral => Counter >> #increment
+
+  // Variable receiver: generates call with evaluated receiver expression
+  lookupVariable: cls => cls >> #getValue
