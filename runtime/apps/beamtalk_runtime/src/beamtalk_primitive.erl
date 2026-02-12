@@ -259,6 +259,9 @@ send(X, Selector, Args) when is_map(X) ->
         'Set' ->
             %% BT-73: Set value type - dispatch to compiled stdlib
             'bt@stdlib@set':dispatch(Selector, Args, X);
+        'TestCase' ->
+            %% BT-438: TestCase value type - dispatch to compiled stdlib
+            'bt@stdlib@test_case':dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
             'bt@stdlib@dictionary':dispatch(Selector, Args, X);

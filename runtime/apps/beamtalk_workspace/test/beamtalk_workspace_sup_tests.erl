@@ -173,3 +173,61 @@ index_of(Elem, [Elem | _], N) ->
     N;
 index_of(Elem, [_ | Rest], N) ->
     index_of(Elem, Rest, N + 1).
+
+%%% Startup smoke tests
+
+all_children_alive_test() ->
+    %% Ensure runtime is started (workspace depends on it)
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+
+    %% Set trap_exit before start_link
+    OldTrap = process_flag(trap_exit, true),
+
+    %% Use ephemeral port to avoid flakiness from port conflicts
+    Config0 = test_config(),
+    Config = Config0#{tcp_port => 0},
+
+    %% Handle already-started supervisor (registered name)
+    {Sup, WeStarted} = case beamtalk_workspace_sup:start_link(Config) of
+        {ok, Pid} -> {Pid, true};
+        {error, {already_started, Pid}} -> {Pid, false}
+    end,
+
+    try
+        %% Get all children
+        Children = supervisor:which_children(Sup),
+
+        %% Expected: 9 children (workspace_meta, transcript_stream, system_dictionary,
+        %% actor_registry, workspace_actor, repl_server, idle_monitor, actor_sup, session_sup)
+        ?assertEqual(9, length(Children)),
+
+        %% Verify each child has correct ID and is alive
+        ExpectedIds = [
+            beamtalk_workspace_meta,
+            beamtalk_transcript_stream,
+            beamtalk_system_dictionary,
+            beamtalk_actor_registry,
+            beamtalk_workspace_actor,
+            beamtalk_repl_server,
+            beamtalk_idle_monitor,
+            beamtalk_actor_sup,
+            beamtalk_session_sup
+        ],
+        ActualIds = [Id || {Id, _Pid, _Type, _Modules} <- Children],
+        ?assertEqual(lists:sort(ExpectedIds), lists:sort(ActualIds)),
+
+        %% Verify each child process is alive
+        lists:foreach(fun({_Id, ChildPid, _Type, _Modules}) ->
+            ?assert(is_process_alive(ChildPid))
+        end, Children)
+    after
+        %% Only shut down supervisor if we started it
+        case WeStarted of
+            true ->
+                exit(Sup, shutdown),
+                receive {'EXIT', Sup, _} -> ok after 1000 -> ok end;
+            false ->
+                ok
+        end,
+        process_flag(trap_exit, OldTrap)
+    end.
