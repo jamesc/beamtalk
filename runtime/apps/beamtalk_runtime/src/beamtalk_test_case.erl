@@ -3,6 +3,8 @@
 
 %%% @doc TestCase primitive implementations for BUnit test framework.
 %%%
+%%% **DDD Context:** Runtime (Testing subdomain)
+%%%
 %%% This module provides the runtime support for TestCase assertion methods.
 %%% All assertions create structured #beamtalk_error{} records with kind
 %%% `assertion_failed` when they fail.
@@ -46,14 +48,14 @@ assert(Other) ->
 
 %% @doc Assert that two values are equal.
 %%
-%% Uses Erlang's == operator for comparison (value equality).
+%% Uses Erlang's =:= operator for comparison (exact equality, per ADR 0002).
 %% Raises assertion_failed error if values are not equal.
 %%
 %% Example:
 %%   assert_equals(3, 3)   % => passes
 %%   assert_equals(3, 4)   % => fails with assertion_failed
 -spec assert_equals(term(), term()) -> nil.
-assert_equals(Expected, Actual) when Expected == Actual ->
+assert_equals(Expected, Actual) when Expected =:= Actual ->
     nil;
 assert_equals(Expected, Actual) ->
     Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
@@ -101,14 +103,16 @@ deny(Other) ->
 -spec should_raise(fun(() -> term()), atom()) -> nil.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
     try
-        Block(),
-        % Block completed without error
-        Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
-        Error1 = beamtalk_error:with_selector(Error0, 'should:raise:'),
-        Message = iolist_to_binary(io_lib:format("Expected block to raise ~s but it completed normally", [ExpectedKind])),
-        Error2 = beamtalk_error:with_message(Error1, Message),
-        Error3 = beamtalk_error:with_details(Error2, #{expected_kind => ExpectedKind, actual => completed}),
-        beamtalk_error:raise(Error3)
+        Block()
+    of
+        _ ->
+            % Block completed without error
+            NoRaiseErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
+            NoRaiseErr1 = beamtalk_error:with_selector(NoRaiseErr0, 'should:raise:'),
+            NoRaiseMsg = iolist_to_binary(io_lib:format("Expected block to raise ~s but it completed normally", [ExpectedKind])),
+            NoRaiseErr2 = beamtalk_error:with_message(NoRaiseErr1, NoRaiseMsg),
+            NoRaiseErr3 = beamtalk_error:with_details(NoRaiseErr2, #{expected_kind => ExpectedKind, actual => completed}),
+            beamtalk_error:raise(NoRaiseErr3)
     catch
         _:Exception ->
             ActualKind = extract_error_kind(Exception),
