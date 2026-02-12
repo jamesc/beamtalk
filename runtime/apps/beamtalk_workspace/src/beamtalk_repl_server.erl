@@ -750,7 +750,7 @@ term_to_json(Value) when is_integer(Value); is_float(Value); is_boolean(Value) -
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
-    Value;
+    beamtalk_transcript_stream:ensure_utf8(Value);
 term_to_json(Value) when is_list(Value) ->
     %% Empty list should serialize as empty array, not empty string
     case Value of
@@ -758,7 +758,11 @@ term_to_json(Value) when is_list(Value) ->
         _ ->
             case io_lib:printable_list(Value) of
                 true ->
-                    list_to_binary(Value);
+                    case unicode:characters_to_binary(Value) of
+                        Bin when is_binary(Bin) -> Bin;
+                        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
+                        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
+                    end;
                 false ->
                     [term_to_json(E) || E <- Value]
             end
@@ -805,10 +809,15 @@ term_to_json(Value) when is_map(Value) ->
         fun(K, V, Acc) ->
             KeyBin = if
                 is_atom(K) -> atom_to_binary(K, utf8);
-                is_binary(K) -> K;
+                is_binary(K) -> beamtalk_transcript_stream:ensure_utf8(K);
                 is_list(K) ->
                     case io_lib:printable_list(K) of
-                        true -> list_to_binary(K);
+                        true ->
+                            case unicode:characters_to_binary(K) of
+                                Bin when is_binary(Bin) -> Bin;
+                                {error, _, _} -> list_to_binary(io_lib:format("~p", [K]));
+                                {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [K]))
+                            end;
                         false -> list_to_binary(io_lib:format("~p", [K]))
                     end;
                 true -> list_to_binary(io_lib:format("~p", [K]))
@@ -851,7 +860,7 @@ term_to_json(Value) when is_tuple(Value) ->
     end;
 term_to_json(Value) ->
     %% Fallback: format using io_lib
-    iolist_to_binary(io_lib:format("~p", [Value])).
+    beamtalk_transcript_stream:ensure_utf8(iolist_to_binary(io_lib:format("~p", [Value]))).
 
 %% @private
 %% Format a rejection reason for display in #Future<rejected: ...>
