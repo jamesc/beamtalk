@@ -51,6 +51,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use fs2::FileExt;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -274,6 +275,26 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Acquire an exclusive advisory lock for workspace creation.
+///
+/// Returns a locked `File` handle. The lock is released when the file is dropped.
+/// The lockfile is created at `~/.beamtalk/workspaces/{workspace_id}.lock`.
+fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
+    let base = workspaces_base_dir()?;
+    fs::create_dir_all(&base).into_diagnostic()?;
+
+    let lockfile_path = base.join(format!("{workspace_id}.lock"));
+    let lockfile = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lockfile_path)
+        .into_diagnostic()?;
+
+    lockfile.lock_exclusive().into_diagnostic()?;
+    Ok(lockfile)
+}
+
 /// Create a new workspace.
 pub fn create_workspace(
     project_path: &Path,
@@ -281,7 +302,12 @@ pub fn create_workspace(
 ) -> Result<WorkspaceMetadata> {
     let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
-    // Check if workspace already exists
+    // Acquire exclusive lock to prevent TOCTOU race on concurrent creation.
+    // The lock is released when `_lock` is dropped at end of scope.
+    let _lock = acquire_workspace_lock(&workspace_id)?;
+
+    // Re-check under lock — another process may have created the workspace
+    // while we were waiting for the lock.
     if workspace_exists(&workspace_id)? {
         return get_workspace_metadata(&workspace_id);
     }
@@ -814,6 +840,10 @@ mod tests {
     impl Drop for TestWorkspace {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(self.dir());
+            // Clean up lockfile created by acquire_workspace_lock
+            if let Ok(base) = workspaces_base_dir() {
+                let _ = fs::remove_file(base.join(format!("{}.lock", self.id)));
+            }
         }
     }
 
@@ -1267,5 +1297,47 @@ mod tests {
     fn test_find_workspace_by_project_path_returns_none() {
         let result = find_workspace_by_project_path(Path::new("/nonexistent/path/test")).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_concurrent_create_workspace_produces_consistent_cookie() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let ws = TestWorkspace::new("concurrent_create");
+        let project_path = std::env::current_dir().unwrap();
+        let ws_id = ws.id.clone();
+        let barrier = Arc::new(Barrier::new(10));
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                let ws_id = ws_id.clone();
+                let project_path = project_path.clone();
+                thread::spawn(move || {
+                    // All threads wait here, then race to create the workspace
+                    barrier.wait();
+                    create_workspace(&project_path, Some(&ws_id)).unwrap()
+                })
+            })
+            .collect();
+
+        let results: Vec<WorkspaceMetadata> =
+            handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // All threads must get the same workspace_id and created_at
+        for r in &results {
+            assert_eq!(r.workspace_id, ws_id);
+            assert_eq!(r.created_at, results[0].created_at);
+        }
+
+        // Cookie must be a single consistent value (not corrupted by concurrent writes)
+        let cookie = read_workspace_cookie(&ws_id).unwrap();
+        assert!(!cookie.is_empty(), "Cookie should not be empty");
+        assert_eq!(
+            cookie.len(),
+            32,
+            "Cookie should be valid (32 chars = 24 bytes base64)"
+        );
     }
 }
