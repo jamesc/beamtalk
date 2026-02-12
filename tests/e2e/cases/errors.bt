@@ -17,7 +17,7 @@
 // - Cascading errors: 5 tests (includes recovery validation)
 // - Unicode edge cases: 3 tests
 // - REPL edge cases: 4 tests
-// Total: 35 test cases (increased from 9)
+// Total: 35 test cases (increased from 8)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
