@@ -11,17 +11,77 @@ use std::path::PathBuf;
 
 use miette::{IntoDiagnostic, Result, miette};
 
-/// Directory for beamtalk state files.
+/// Directory for beamtalk state files (session-based).
 ///
-/// Returns the `~/.beamtalk` directory where the CLI stores configuration,
-/// history files, and runtime state.
+/// Returns a session-specific directory under `~/.beamtalk/sessions/`.
+/// Each terminal/session gets its own isolated daemon.
+///
+/// Priority order:
+/// 1. `BEAMTALK_WORKSPACE` environment variable (explicit named session)
+/// 2. Auto-session based on shell PPID: `shell-{ppid}`
+///
+/// # Examples
+///
+/// ```text
+/// ~/.beamtalk/sessions/shell-1234/     # Auto session (terminal PPID 1234)
+/// ~/.beamtalk/sessions/my-test/        # Named session (BEAMTALK_WORKSPACE=my-test)
+/// ```
 ///
 /// # Errors
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn beamtalk_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk"))
+    let base = home.join(".beamtalk");
+
+    // 1. Explicit named session (highest priority)
+    if let Ok(session) = std::env::var("BEAMTALK_WORKSPACE") {
+        if !session.is_empty() {
+            let sanitized = sanitize_session_id(&session);
+            return Ok(base.join("sessions").join(sanitized));
+        }
+    }
+
+    // 2. Auto session based on shell PPID
+    let ppid = get_parent_pid();
+    Ok(base.join("sessions").join(format!("shell-{ppid}")))
+}
+
+/// Get the parent process ID (PPID).
+///
+/// Returns the PPID of the current process, which typically represents
+/// the shell that launched this process.
+#[cfg(unix)]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "PPID is always positive; libc returns signed but semantically unsigned"
+)]
+fn get_parent_pid() -> u32 {
+    // SAFETY: getppid is always safe to call and returns a valid pid_t
+    unsafe { libc::getppid() as u32 }
+}
+
+/// Get the parent process ID (PPID) (Windows stub).
+#[cfg(not(unix))]
+fn get_parent_pid() -> u32 {
+    // Windows: use process ID as fallback
+    std::process::id()
+}
+
+/// Sanitize a session ID to be filesystem-safe.
+///
+/// Replaces any characters that aren't alphanumeric, dash, or underscore
+/// with hyphens. Ensures the result is a valid directory name.
+fn sanitize_session_id(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// Path to the lockfile containing the daemon PID.
@@ -38,22 +98,20 @@ pub fn lockfile_path() -> Result<PathBuf> {
     Ok(lockfile)
 }
 
-/// Path to the Unix socket.
+/// Path to the Unix socket for the current session.
 ///
-/// Priority order:
-/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (if set and non-empty)
-/// 2. Default: `~/.beamtalk/daemon.sock`
-///
-/// This allows per-worktree daemon isolation when working on multiple
-/// compiler changes in parallel.
+/// Priority:
+/// 1. `BEAMTALK_DAEMON_SOCKET` environment variable (absolute or relative path)
+/// 2. Default: `{beamtalk_dir()}/daemon.sock` where `beamtalk_dir()` is
+///    session-specific (e.g., `~/.beamtalk/sessions/shell-1234/`).
 ///
 /// # Errors
 ///
 /// Returns an error if the beamtalk directory path cannot be determined.
 pub fn socket_path() -> Result<PathBuf> {
-    if let Ok(socket_path) = std::env::var("BEAMTALK_DAEMON_SOCKET") {
-        if !socket_path.is_empty() {
-            return Ok(PathBuf::from(socket_path));
+    if let Ok(path) = std::env::var("BEAMTALK_DAEMON_SOCKET") {
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
         }
     }
     Ok(beamtalk_dir()?.join("daemon.sock"))
@@ -91,7 +149,16 @@ pub fn is_daemon_running() -> Result<Option<u32>> {
     // Check if process exists using POSIX kill(pid, 0)
     // This is portable across Linux, macOS, and BSD systems
     // SAFETY: kill with signal 0 only checks if process exists, doesn't send a signal
-    let exists = unsafe { libc::kill(pid as i32, 0) == 0 };
+    let exists = unsafe {
+        let res = libc::kill(pid as i32, 0);
+        if res == 0 {
+            true
+        } else {
+            // EPERM means the process exists but we lack permission — treat as alive
+            let errno = *libc::__errno_location();
+            errno == libc::EPERM
+        }
+    };
     if exists {
         Ok(Some(pid))
     } else {
@@ -162,60 +229,114 @@ mod tests {
     }
 
     #[test]
-    fn beamtalk_dir_returns_home_subdirectory() {
+    #[serial(env_var)]
+    fn beamtalk_dir_returns_session_subdirectory() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
         let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
-        assert!(dir.ends_with(".beamtalk"));
-    }
-
-    #[test]
-    #[serial(env_var)]
-    fn lockfile_path_is_in_beamtalk_dir() {
-        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
-        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
-        let lockfile = lockfile_path().expect("Failed to get lockfile_path");
-        assert!(lockfile.ends_with(".beamtalk/daemon.lock"));
-    }
-
-    #[test]
-    #[serial(env_var)]
-    fn socket_path_is_in_beamtalk_dir() {
-        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
-        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
-        let socket = socket_path().expect("Failed to get socket_path");
-        assert!(socket.ends_with(".beamtalk/daemon.sock"));
-    }
-
-    #[test]
-    #[serial(env_var)]
-    fn socket_path_respects_env_var() {
-        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
-        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
-        let socket = socket_path().expect("Failed to get socket_path");
-        assert_eq!(socket, PathBuf::from("/tmp/test-daemon.sock"));
-        // Guard automatically restores previous value on drop
-    }
-
-    #[test]
-    #[serial(env_var)]
-    fn socket_path_ignores_empty_env_var() {
-        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
-        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "") };
-        let socket = socket_path().expect("Failed to get socket_path");
+        // Should be ~/.beamtalk/sessions/shell-{ppid}
+        assert!(dir.starts_with(dirs::home_dir().unwrap().join(".beamtalk")));
+        assert!(dir.parent().unwrap().ends_with("sessions"));
+        let dir_name = dir.file_name().unwrap().to_string_lossy();
         assert!(
-            socket.ends_with(".beamtalk/daemon.sock"),
-            "Empty env var should use default"
+            dir_name.starts_with("shell-"),
+            "Dir name should start with shell-: {dir_name}"
         );
-        // Guard automatically restores previous value on drop
     }
 
     #[test]
     #[serial(env_var)]
-    fn lockfile_path_derives_from_socket_path() {
+    fn beamtalk_dir_respects_session_env_var() {
         // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
-        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "my-test-session") };
+        let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
+        assert!(dir.ends_with(".beamtalk/sessions/my-test-session"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn beamtalk_dir_sanitizes_session_names() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "my/test\\session:name") };
+        let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
+        // Slashes and colons should be replaced with hyphens
+        assert!(dir.ends_with(".beamtalk/sessions/my-test-session-name"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn beamtalk_dir_ignores_empty_session_env() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "") };
+        let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
+        // Should fall back to PPID-based session
+        assert!(dir.parent().unwrap().ends_with("sessions"));
+        let dir_name = dir.file_name().unwrap().to_string_lossy();
+        assert!(
+            dir_name.starts_with("shell-"),
+            "Should fall back to shell-: {dir_name}"
+        );
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn lockfile_path_is_in_session_dir() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
+        // SAFETY: Same serialization guarantees as above
+        let _guard2 = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
         let lockfile = lockfile_path().expect("Failed to get lockfile_path");
-        assert_eq!(lockfile, PathBuf::from("/tmp/test-daemon.lock"));
-        // Guard automatically restores previous value on drop
+        // Should be in sessions/shell-{ppid}/daemon.lock
+        let parent = lockfile.parent().unwrap();
+        let parent_name = parent.file_name().unwrap().to_string_lossy();
+        assert!(
+            parent_name.starts_with("shell-"),
+            "Parent should be shell-*: {parent_name}"
+        );
+        assert!(parent.parent().unwrap().ends_with("sessions"));
+        assert!(lockfile.ends_with("daemon.lock"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn socket_path_is_in_session_dir() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
+        // SAFETY: Same serialization guarantees as above
+        let _guard2 = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
+        let socket = socket_path().expect("Failed to get socket_path");
+        // Should be in sessions/shell-{ppid}/daemon.sock
+        let parent = socket.parent().unwrap();
+        let parent_name = parent.file_name().unwrap().to_string_lossy();
+        assert!(
+            parent_name.starts_with("shell-"),
+            "Parent should be shell-*: {parent_name}"
+        );
+        assert!(parent.parent().unwrap().ends_with("sessions"));
+        assert!(socket.ends_with("daemon.sock"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn named_session_uses_consistent_paths() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_WORKSPACE", "test-session") };
+        // SAFETY: Same serialization guarantees as above
+        let _guard2 = unsafe { EnvVarGuard::clear("BEAMTALK_DAEMON_SOCKET") };
+        let dir = beamtalk_dir().expect("Failed to get beamtalk_dir");
+        let socket = socket_path().expect("Failed to get socket_path");
+        let lockfile = lockfile_path().expect("Failed to get lockfile_path");
+
+        // All paths should use same session directory
+        assert!(dir.ends_with("sessions/test-session"));
+        assert!(
+            socket.starts_with(&dir),
+            "Socket should be under session dir"
+        );
+        assert!(
+            lockfile.starts_with(&dir),
+            "Lockfile should be under session dir"
+        );
     }
 
     #[test]
@@ -225,5 +346,37 @@ mod tests {
         // which we cannot control in unit tests.
         let result = is_daemon_running();
         assert!(result.is_ok(), "is_daemon_running should return Ok");
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn socket_path_respects_daemon_socket_env_var() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert_eq!(socket, PathBuf::from("/tmp/test-daemon.sock"));
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn socket_path_ignores_empty_daemon_socket_env() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "") };
+        // SAFETY: Same serialization guarantees as above
+        let _guard2 = unsafe { EnvVarGuard::clear("BEAMTALK_WORKSPACE") };
+        let socket = socket_path().expect("Failed to get socket_path");
+        assert!(
+            socket.ends_with("daemon.sock"),
+            "Empty env var should use default"
+        );
+    }
+
+    #[test]
+    #[serial(env_var)]
+    fn lockfile_path_derives_from_daemon_socket_env() {
+        // SAFETY: Test is serialized with #[serial(env_var)] and EnvVarGuard restores state
+        let _guard = unsafe { EnvVarGuard::set("BEAMTALK_DAEMON_SOCKET", "/tmp/test-daemon.sock") };
+        let lockfile = lockfile_path().expect("Failed to get lockfile_path");
+        assert_eq!(lockfile, PathBuf::from("/tmp/test-daemon.lock"));
     }
 }
