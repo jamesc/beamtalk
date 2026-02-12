@@ -1661,7 +1661,7 @@ just --list                  # See all available commands
 just build                   # Build Rust + Erlang runtime
 just test                    # Run fast tests (~10s)
 just test-stdlib             # Compiled language feature tests (~14s)
-beamtalk test                # Run BUnit TestCase tests
+beamtalk test                # Run BUnit TestCase tests (not yet in CI)
 just test-e2e                # Run E2E tests (~50s)
 just ci                      # Run all CI checks
 

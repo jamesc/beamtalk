@@ -234,7 +234,7 @@ Language feature tests compiled directly to EUnit — no REPL daemon needed. The
 
 **Location:** `tests/stdlib/*.bt`
 
-**Count:** 32 test files, ~654 assertions
+**Count:** ~57 test files, ~1154 assertions
 
 **Command:** `just test-stdlib`
 
@@ -292,7 +292,7 @@ SUnit-style test classes that subclass `TestCase`. Part of ADR 0014 Phase 2.
 
 **Command:** `beamtalk test`
 
-**How it works:** The `beamtalk test` command discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance.
+**How it works:** The `beamtalk test` command discovers `.bt` files containing `TestCase subclass:` definitions, compiles them through the normal pipeline, generates EUnit wrapper modules, and runs all test methods. Each test method starting with `test` is auto-discovered and run with a fresh instance. **Limitation:** currently only the first `TestCase` subclass in each `.bt` file is compiled (a warning is emitted if more are found), so put each test class in its own file.
 
 **Test file format:**
 ```beamtalk

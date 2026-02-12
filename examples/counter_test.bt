@@ -4,16 +4,15 @@
 // Example: BUnit test for Counter actor (ADR 0014)
 //
 // Demonstrates TestCase subclass with assertion methods.
-// Run with: beamtalk test
-// Or interactively in the REPL:
+// Run interactively in the REPL:
 //   > :load examples/counter.bt
 //   > :load examples/counter_test.bt
-//   > CounterTest runAll
+//   > ExampleCounterTest runAll
 //
-// Note: TestCase is a value type (Object subclass), so each test method
-// creates its own objects rather than sharing state via setUp fields.
+// Note: Each test runs in a fresh TestCase instance, so there is no shared
+// state between tests; use setUp to initialize per-test instance fields.
 
-TestCase subclass: CounterTest
+TestCase subclass: ExampleCounterTest
 
   testInitialValue =>
     self assert: (Counter spawn getValue await) equals: 0

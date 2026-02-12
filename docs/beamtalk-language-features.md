@@ -1093,7 +1093,7 @@ Beamtalk includes a native test framework inspired by Smalltalk's SUnit. Tests a
 The simplest way to test — expressions with expected results:
 
 ```beamtalk
-// test/arithmetic_test.bt
+// tests/stdlib/arithmetic.bt
 
 1 + 2
 // => 3
@@ -1105,7 +1105,7 @@ The simplest way to test — expressions with expected results:
 // => hello world
 ```
 
-Run with `beamtalk test` or `just test-stdlib`.
+Run with `just test-stdlib`.
 
 #### TestCase Classes (✅ Implemented)
 
@@ -1150,7 +1150,7 @@ beamtalk test
 # Run expression tests (stdlib)
 just test-stdlib
 
-# Run all tests (unit + stdlib + E2E)
+# Run all tests (unit + stdlib + E2E + runtime)
 just test-all
 ```
 
