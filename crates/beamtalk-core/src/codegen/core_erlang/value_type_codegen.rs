@@ -178,13 +178,15 @@ impl CoreErlangGenerator {
 
         // BT-411: Generate class-side method functions
         if !class.class_methods.is_empty() {
-            self.generate_class_method_functions(class)?;
+            let doc = self.generate_class_method_functions(class)?;
+            self.write_document(&doc);
             let doc = docvec!["\n"];
             self.write_document(&doc);
         }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
-        self.generate_register_class(module)?;
+        let doc = self.generate_register_class(module)?;
+        self.write_document(&doc);
         let doc = docvec!["\n"];
         self.write_document(&doc);
 

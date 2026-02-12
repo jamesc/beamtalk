@@ -244,11 +244,9 @@ impl CoreErlangGenerator {
                         .map(|p| self.fresh_var(&p.name))
                         .collect();
 
-                    // Capture body output
-                    let start = self.output.len();
-                    self.generate_method_body_with_reply(block)?;
-                    let body_str = self.output[start..].to_string();
-                    self.output.truncate(start);
+                    // Generate body as Document, render to string for embedding
+                    let body_doc = self.generate_method_body_with_reply(block)?;
+                    let body_str = body_doc.to_pretty_string();
 
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {
@@ -298,7 +296,8 @@ impl CoreErlangGenerator {
 
         // Generate case clauses for methods in class definitions
         for class in &module.classes {
-            self.generate_class_method_dispatches(class, case_clause_indent)?;
+            let doc = self.generate_class_method_dispatches(class, case_clause_indent)?;
+            self.write_document(&doc);
         }
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,

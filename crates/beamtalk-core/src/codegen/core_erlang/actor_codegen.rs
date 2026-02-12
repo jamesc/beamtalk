@@ -179,14 +179,16 @@ impl CoreErlangGenerator {
         // BT-411: Generate class-side method standalone functions
         if let Some(class) = module.classes.first() {
             if !class.class_methods.is_empty() {
-                self.generate_class_method_functions(class)?;
+                let doc = self.generate_class_method_functions(class)?;
+                self.write_document(&doc);
             }
         }
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
             self.output.push('\n');
-            self.generate_register_class(module)?;
+            let doc = self.generate_register_class(module)?;
+            self.write_document(&doc);
         }
 
         // Module end
@@ -356,10 +358,8 @@ impl CoreErlangGenerator {
             self.write_document(&header);
 
             // Generate method body with reply tuple (reuse existing codegen)
-            let start = self.output.len();
-            self.generate_method_definition_body_with_reply(method)?;
-            let body_str = self.output[start..].to_string();
-            self.output.truncate(start);
+            let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
+            let body_str = method_body_doc.to_pretty_string();
 
             let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
             self.write_document(&body_doc);
