@@ -620,6 +620,22 @@ format_error_message_fallback_test() ->
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
 
+%%% BT-237: eval_error with #beamtalk_error{} formatting
+
+format_error_message_eval_error_beamtalk_error_test() ->
+    Error = beamtalk_error:with_selector(
+        beamtalk_error:new(does_not_understand, 'Integer'), nonExistentMethod),
+    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Error}),
+    ?assertEqual(<<"Integer does not understand 'nonExistentMethod'">>, Msg).
+
+format_error_message_eval_error_beamtalk_error_with_hint_test() ->
+    Error0 = beamtalk_error:new(instantiation_error, 'Actor'),
+    Error1 = beamtalk_error:with_selector(Error0, new),
+    Error = beamtalk_error:with_hint(Error1, <<"Use spawn instead">>),
+    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Error}),
+    ?assert(binary:match(Msg, <<"Actor">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<"Hint: Use spawn instead">>) =/= nomatch).
+
 %%% BT-342: format_actors tests
 
 format_actors_empty_test() ->
