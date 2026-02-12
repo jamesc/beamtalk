@@ -44,6 +44,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 294,
                         end: 319,
@@ -83,6 +84,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 322,
                         end: 351,
@@ -106,6 +108,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 401,
                         end: 426,
@@ -129,6 +132,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 429,
                         end: 460,
@@ -152,6 +156,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 480,
                         end: 509,
@@ -191,6 +196,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 512,
                         end: 555,
@@ -230,6 +236,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 558,
                         end: 607,
@@ -253,6 +260,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 627,
                         end: 660,
@@ -261,6 +269,7 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 240,
                 end: 660,
