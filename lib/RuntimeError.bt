@@ -1,10 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// RuntimeError - Errors for message dispatch and mutation failures
-//
-// Subclass of Error for runtime dispatch and related runtime errors,
-// e.g. does_not_understand, arity_mismatch, immutable_value, index_out_of_bounds, class_not_found
+/// RuntimeError — Message dispatch and mutation errors.
+///
+/// Raised for runtime failures such as `does_not_understand`,
+/// `arity_mismatch`, `immutable_value`, `index_out_of_bounds`,
+/// and `class_not_found`.
+///
+/// ## Examples
+/// ```beamtalk
+/// [42 unknownMsg] on: RuntimeError do: [:e | e message]
+/// ```
 
 Error subclass: RuntimeError
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// RuntimeError describe   // => 'a RuntimeError'
+  /// ```
   describe => 'a RuntimeError'

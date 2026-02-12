@@ -1,20 +1,105 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// False - The false boolean value
-//
-// Implements control flow messages for the false case. All methods are
-// pure Beamtalk — no primitives needed.
+/// False — The false boolean value.
+///
+/// Implements control flow messages for the false case.
+/// All methods are pure Beamtalk — no primitives needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// false class                  // => False
+/// false ifFalse: ['no']        // => 'no'
+/// false not                    // => true
+/// ```
 
 sealed Object subclass: False
+  /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `falseBlock` result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false ifTrue: ['yes'] ifFalse: ['no']   // => 'no'
+  /// ```
   ifTrue: trueBlock ifFalse: falseBlock => falseBlock value
+
+  /// If true, evaluate `trueBlock`. Returns self (false) since condition is false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false ifTrue: ['yes']      // => false
+  /// ```
   ifTrue: trueBlock => self
+
+  /// If false, evaluate `falseBlock`. Returns block result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false ifFalse: ['no']      // => 'no'
+  /// ```
   ifFalse: falseBlock => falseBlock value
+
+  /// Logical AND with lazy evaluation. Returns self (false) without evaluating `aBlock`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false and: [true]          // => false
+  /// ```
   and: aBlock => self
+
+  /// Logical OR with lazy evaluation. Evaluates `aBlock` since receiver is false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false or: [true]           // => true
+  /// false or: [false]          // => false
+  /// ```
   or: aBlock => aBlock value
+
+  /// Logical NOT. Returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false not                  // => true
+  /// ```
   not => true
+
+  /// Logical XOR. Returns `other` unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false xor: true            // => true
+  /// false xor: false           // => false
+  /// ```
   xor: other => other
+
+  /// Returns false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false isTrue               // => false
+  /// ```
   isTrue => false
+
+  /// Returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false isFalse              // => true
+  /// ```
   isFalse => true
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false describe             // => 'false'
+  /// ```
   describe => 'false'
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false printString          // => 'false'
+  /// ```
   printString => 'false'
