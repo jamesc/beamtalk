@@ -37,7 +37,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Accepted | 2026-02-12 |
 | [0009](0009-otp-application-structure.md) | OTP Application Structure — Split Workspace from Runtime | Implemented | 2026-02-07 |
 | [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Accepted | 2026-02-07 |
-| [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Proposed | 2026-02-07 |
+| [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Accepted | 2026-02-12 |
 | [0012](0012-list-literal-syntax.md) | Collection Literal Syntax and the `#` Data Literal System | Accepted | 2026-02-08 |
 | [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Proposed | 2026-02-09 |
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Accepted | 2026-02-09 |
