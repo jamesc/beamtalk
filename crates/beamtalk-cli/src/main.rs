@@ -185,7 +185,7 @@ fn main() -> Result<()> {
             println!("(Not yet implemented)");
             Ok(())
         }
-        Command::Daemon { action } => commands::daemon::run(action),
+        Command::Daemon { action } => commands::daemon::run(&action),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
     };
