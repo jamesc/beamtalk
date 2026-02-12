@@ -109,9 +109,11 @@ mod variable_context;
 pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::docvec;
+use document::{Document, INDENT, line, nest};
 use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
-use std::fmt::{self, Write};
+use std::fmt;
 use thiserror::Error;
 use variable_context::VariableContext;
 
@@ -474,8 +476,6 @@ pub(super) struct CoreErlangGenerator {
     module_name: String,
     /// The output buffer.
     output: String,
-    /// Current indentation level.
-    indent: usize,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -541,7 +541,6 @@ impl CoreErlangGenerator {
         Self {
             module_name: module_name.to_string(),
             output: String::new(),
-            indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -569,7 +568,6 @@ impl CoreErlangGenerator {
         Self {
             module_name: module_name.to_string(),
             output: String::new(),
-            indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -771,19 +769,22 @@ impl CoreErlangGenerator {
     /// 'start_link'/1 = fun (InitArgs) ->
     ///     call 'gen_server':'start_link'('module_name', InitArgs, [])
     /// ```
-    fn generate_start_link(&mut self) -> Result<()> {
-        writeln!(self.output, "'start_link'/1 = fun (InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'gen_server':'start_link'('{}', InitArgs, [])",
-            self.module_name
-        )?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
-        Ok(())
+    fn generate_start_link(&mut self) {
+        let doc = docvec![
+            "'start_link'/1 = fun (InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!(
+                        "call 'gen_server':'start_link'('{}', InitArgs, [])",
+                        self.module_name
+                    ),
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
     }
 
     ///
@@ -800,11 +801,11 @@ impl CoreErlangGenerator {
                 // stored in persistent_term, not class objects from the registry.
                 if dispatch_codegen::is_workspace_binding(&name.name) {
                     if self.workspace_mode {
-                        write!(
-                            self.output,
+                        let doc = Document::String(format!(
                             "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
                             name.name
-                        )?;
+                        ));
+                        self.write_document(&doc);
                         return Ok(());
                     }
                     return Err(CodeGenError::WorkspaceBindingInBatchMode {
@@ -813,35 +814,26 @@ impl CoreErlangGenerator {
                 }
 
                 // BT-215: Standalone class references resolve to class objects
-                // Wrap the class PID in a beamtalk_object record for uniform dispatch
-                //
-                // Generate a case expression to handle undefined classes gracefully:
-                //   case call 'beamtalk_object_class':'whereis_class'('Point') of
-                //     <'undefined'> when 'true' -> 'nil'
-                //     <ClassPid> when 'true' ->
-                //       let ClassModName = call 'beamtalk_object_class':'module_name'(ClassPid) in
-                //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
-                //   end
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
 
-                write!(
-                    self.output,
-                    "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
-                    name.name
-                )?;
-                write!(self.output, "<'undefined'> when 'true' -> 'nil' ")?;
-                write!(self.output, "<{class_pid_var}> when 'true' -> ")?;
-                write!(
-                    self.output,
-                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                )?;
-                write!(
-                    self.output,
-                    "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
-                    name.name
-                )?;
-                write!(self.output, "end")?;
+                let doc = docvec![
+                    format!(
+                        "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
+                        name.name
+                    ),
+                    "<'undefined'> when 'true' -> 'nil' ",
+                    format!("<{class_pid_var}> when 'true' -> "),
+                    format!(
+                        "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
+                    ),
+                    format!(
+                        "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
+                        name.name
+                    ),
+                    "end",
+                ];
+                self.write_document(&doc);
                 Ok(())
             }
             Expression::Super(_) => {
@@ -1190,7 +1182,7 @@ impl CoreErlangGenerator {
             if let Some(code) =
                 primitive_implementations::generate_primitive_bif(&class_name, name, &params)
             {
-                self.output.push_str(&code);
+                self.write_document(&Document::String(code));
                 return Ok(());
             }
         }
@@ -1201,17 +1193,11 @@ impl CoreErlangGenerator {
         // - Selector-based primitives with no known BIF (unimplemented or complex)
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
-        write!(
-            self.output,
-            "call '{runtime_module}':'dispatch'('{name}', ["
-        )?;
-        for (i, param) in self.current_method_params.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "{param}")?;
-        }
-        write!(self.output, "], Self)")?;
+        let params_str = self.current_method_params.join(", ");
+        let doc = docvec![format!(
+            "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
+        ),];
+        self.write_document(&doc);
 
         Ok(())
     }
