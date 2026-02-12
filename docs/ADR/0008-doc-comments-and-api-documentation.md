@@ -312,6 +312,22 @@ Recommended migration order:
 5. Error hierarchy: Exception, Error, RuntimeError, TypeError, InstantiationError
 6. System: SystemDictionary, TranscriptStream, File
 
+## Implementation Tracking
+
+**Epic:** [BT-496](https://linear.app/beamtalk/issue/BT-496) — Doc Comments and API Documentation
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Status |
+|-------|-------|-------|------|--------|
+| 1 (parallel) | BT-497 | Add `///` doc comments to all 26 stdlib files | M | ⏳ |
+| 1 (parallel) | BT-498 | Parse `///` as doc comments and attach to AST nodes | S | ⏳ |
+| 2 | BT-499 | Generate EEP-48 doc chunks in compiled `.beam` files | M | ⏳ |
+| 2 | BT-500 | Implement REPL `:help` command for class and method docs | M | ⏳ |
+| 3 | BT-501 | Add `beamtalk doc` CLI command for HTML doc generation | M | ⏳ |
+
+**Dependencies:** BT-497 + BT-498 → BT-499 → BT-500, BT-501
+**Related:** BT-441 (doctest extraction)
+
 ## References
 - Related issues: BT-293 (stdlib conversion that removed API docs)
 - Related ADRs: ADR 0007 (compilable stdlib with `@primitive` injection), ADR 0014 (test framework — doctest interaction)
