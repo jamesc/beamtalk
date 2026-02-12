@@ -75,8 +75,9 @@ pub struct NodeInfo {
     pub node_name: String,
     pub port: u16,
     pub pid: u32,
-    /// Process start time (clock ticks since boot from /proc/{pid}/stat field 22).
-    /// `None` for backward compat with old node.info files.
+    /// Process start time, representation is platform-dependent.
+    /// On Linux, this is clock ticks since boot from `/proc/{pid}/stat` field 22.
+    /// `None` for backward compat with old node.info files or non-Linux platforms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_time: Option<u64>,
 }
@@ -239,7 +240,8 @@ pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
 
 /// Read process start time from `/proc/{pid}/stat` (field 22 per proc(5)).
 /// Returns `None` if the process doesn't exist or the file can't be read.
-#[cfg(unix)]
+/// Linux-only: `/proc` filesystem does not exist on macOS/BSD.
+#[cfg(target_os = "linux")]
 fn read_proc_start_time(pid: u32) -> Option<u64> {
     let stat_path = format!("/proc/{pid}/stat");
     let content = fs::read_to_string(stat_path).ok()?;
@@ -270,11 +272,21 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
                 }
                 // PID is a BEAM process — now verify start_time if available
                 if let Some(expected_start_time) = info.start_time {
-                    if let Some(actual_start_time) = read_proc_start_time(info.pid) {
-                        return actual_start_time == expected_start_time;
+                    #[cfg(target_os = "linux")]
+                    {
+                        if let Some(actual_start_time) = read_proc_start_time(info.pid) {
+                            return actual_start_time == expected_start_time;
+                        }
+                        // Can't read /proc on Linux — conservatively treat as not running
+                        return false;
                     }
-                    // Can't read /proc — conservatively treat as not running
-                    return false;
+                    // On non-Linux Unix (macOS/BSD), /proc is unavailable so
+                    // skip the start_time check and trust the PID/BEAM check.
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = expected_start_time;
+                        return true;
+                    }
                 }
                 // No start_time stored (old node.info format) — skip check
                 return true;
@@ -513,9 +525,9 @@ fn find_beam_pid_by_node(node_name: &str) -> Result<(u32, Option<u64>)> {
                 .next()
                 .ok_or_else(|| miette!("Failed to parse PID from ps output"))?;
             let pid: u32 = pid_str.parse().into_diagnostic()?;
-            #[cfg(unix)]
+            #[cfg(target_os = "linux")]
             let start_time = read_proc_start_time(pid);
-            #[cfg(not(unix))]
+            #[cfg(not(target_os = "linux"))]
             let start_time = None;
             return Ok((pid, start_time));
         }
@@ -1195,15 +1207,18 @@ mod tests {
     }
 
     #[test]
-    fn test_is_node_running_false_for_stale_pid_with_wrong_start_time() {
-        // Simulate PID reuse: valid PID (init/PID 1) but wrong start_time
+    fn test_is_node_running_false_for_non_beam_pid_even_with_start_time() {
+        // PID 1 typically belongs to init/systemd and is not a BEAM process.
+        // This test verifies that a non-BEAM PID is treated as "not running"
+        // even if a start_time is present. Comprehensive PID reuse detection,
+        // where a reused PID has a mismatched start_time, requires integration
+        // tests with actual BEAM processes.
         let info = NodeInfo {
             node_name: "stale@localhost".to_string(),
             port: 1,
-            pid: 1, // PID 1 exists but is init, not beam
+            pid: 1, // PID 1 exists but is init, not BEAM
             start_time: Some(999_999_999),
         };
-        // Should return false: PID 1 is not a BEAM process
         assert!(!is_node_running(&info));
     }
 
@@ -1252,7 +1267,7 @@ mod tests {
         assert_eq!(loaded.start_time, Some(1_234_567_890));
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_read_proc_start_time_for_current_process() {
         // Our own PID should have a readable start time
@@ -1262,7 +1277,7 @@ mod tests {
         assert!(start_time.unwrap() > 0, "Start time should be positive");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_read_proc_start_time_none_for_fake_pid() {
         let start_time = read_proc_start_time(u32::MAX);
