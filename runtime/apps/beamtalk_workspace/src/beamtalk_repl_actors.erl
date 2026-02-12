@@ -29,7 +29,7 @@
 -behaviour(gen_server).
 
 %% Public API
--export([start_link/0, start_link/1, register_actor/4, unregister_actor/2, 
+-export([start_link/1, register_actor/4, unregister_actor/2, 
          list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2,
          on_actor_spawned/4]).
 
@@ -53,11 +53,6 @@
 
 %%% Public API
 
-%% @doc Start the actor registry without a registered name (legacy REPL).
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    gen_server:start_link(?MODULE, [], []).
-
 %% @doc Start the actor registry with a registered name (workspace mode).
 -spec start_link(registered) -> {ok, pid()} | {error, term()}.
 start_link(registered) ->
@@ -76,14 +71,6 @@ register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
 on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
     try
         register_actor(RegistryPid, ActorPid, ClassName, ModuleName),
-        %% BT-423 stopgap: also register with the global registry so
-        %% Workspace actors API can find them. Remove when BT-297
-        %% eliminates the legacy per-session registry.
-        case whereis(beamtalk_actor_registry) of
-            GlobalPid when is_pid(GlobalPid), GlobalPid =/= RegistryPid ->
-                register_actor(GlobalPid, ActorPid, ClassName, ModuleName);
-            _ -> ok
-        end,
         beamtalk_workspace_meta:register_actor(ActorPid),
         beamtalk_workspace_meta:update_activity()
     catch

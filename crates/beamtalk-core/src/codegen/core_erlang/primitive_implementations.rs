@@ -832,6 +832,31 @@ fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
             let p0 = params.first().map_or("_Message", String::as_str);
             Some(format!("call 'beamtalk_test_case':'fail'({p0})"))
         }
+        // BT-440: Class-side methods for REPL test execution
+        // These are always called from class method context where self = ClassSelf
+        // Pass class name by extracting from ClassSelf tag ('ClassName class')
+        "runAll" => Some(
+            "let <_RunTag> = call 'erlang':'element'(2, ClassSelf) in \
+                 let <_RunTagStr> = call 'erlang':'atom_to_list'(_RunTag) in \
+                 let <_RunLen> = call 'erlang':'length'(_RunTagStr) in \
+                 let <_RunNameLen> = call 'erlang':'-'(_RunLen, 6) in \
+                 let <_RunNameStr> = call 'lists':'sublist'(_RunTagStr, _RunNameLen) in \
+                 let <_RunClassName> = call 'erlang':'list_to_atom'(_RunNameStr) in \
+                 call 'beamtalk_test_case':'run_all'(_RunClassName)"
+                .to_string(),
+        ),
+        "run:" => {
+            let p0 = params.first().map_or("_TestName", String::as_str);
+            Some(format!(
+                "let <_RunTag2> = call 'erlang':'element'(2, ClassSelf) in \
+                 let <_RunTagStr2> = call 'erlang':'atom_to_list'(_RunTag2) in \
+                 let <_RunLen2> = call 'erlang':'length'(_RunTagStr2) in \
+                 let <_RunNameLen2> = call 'erlang':'-'(_RunLen2, 6) in \
+                 let <_RunNameStr2> = call 'lists':'sublist'(_RunTagStr2, _RunNameLen2) in \
+                 let <_RunClassName2> = call 'erlang':'list_to_atom'(_RunNameStr2) in \
+                 call 'beamtalk_test_case':'run_single'(_RunClassName2, {p0})"
+            ))
+        }
         _ => None,
     }
 }

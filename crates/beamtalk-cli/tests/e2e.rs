@@ -312,7 +312,9 @@ struct DaemonManager {
 /// so the E2E startup matches production exactly.
 fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String {
     if cover {
-        // Cover mode wraps instrumentation around the shared startup prelude
+        // Cover mode wraps instrumentation around the shared startup prelude.
+        // The startup_prelude already starts the workspace supervisor (which
+        // includes the REPL TCP server), so we just add cover instrumentation.
         format!(
             "{}, \
              cover:start(), \
@@ -320,7 +322,6 @@ fn beam_eval_cmd(cover: bool, ebin: &str, signal: &str, export: &str) -> String 
                  {{error, R}} -> io:format(standard_error, \"Cover compile failed: ~p~n\", [R]), halt(1); \
                  _ -> ok \
              end, \
-             {{ok, _}} = beamtalk_repl:start_link({REPL_PORT}), \
              WaitFun = fun Wait() -> \
                  case filelib:is_file(\"{signal}\") of \
                      true -> ok; \
