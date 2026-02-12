@@ -153,13 +153,13 @@ s take: 5
 (Stream from: 1) asList           // ⚠️ Never terminates — use take: first
 
 // Safe: always bound infinite streams
-(Stream from: 1) take: 10 . asList  // => #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+(Stream from: 1) take: 10         // => #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 
 // REPL inspection — Stream describes its pipeline, not its data
 > s := #(1, 2, 3) stream select: [:n | n > 1]
 Stream(select: [...])              // shows structure, not values
 > s asList
-(2, 3)                             // terminal forces evaluation
+#(2, 3)                            // terminal forces evaluation
 ```
 
 ### File Streaming
@@ -168,7 +168,7 @@ Stream(select: [...])              // shows structure, not values
 
 ```beamtalk
 // Read file lazily — no new class, just File + Stream
-File lines: 'data.csv' do: [:line |
+(File lines: 'data.csv') do: [:line |
   Transcript show: line
 ]
 
@@ -178,7 +178,9 @@ data := (File lines: 'data.csv') drop: 1
 
 // Block-scoped for explicit handle management
 File open: 'data.csv' do: [:handle |
-  handle lines select: [:line | line includes: 'ERROR']
+  (handle lines
+    select: [:line | line includes: 'ERROR'])
+    do: [:line | Transcript show: line]
 ]
 // handle closed automatically
 
