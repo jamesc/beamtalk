@@ -236,7 +236,7 @@ You can:
 - In non-REPL code, store the Future in a variable and `await` it later if you need the result:
 
   ```beamtalk
-  future := room broadcast: "hello".
+  future := room say: "hello" from: alice.
   // ... do other work ...
   future await
   ```
