@@ -287,9 +287,9 @@ fn handle_compile(
     let mut core_diagnostics = service.diagnostics(&file_path);
 
     // Get cached module from language service (already parsed by update_file above)
-    let module = service
-        .module(&file_path)
-        .expect("module should be cached after update_file");
+    let Some(module) = service.module(&file_path) else {
+        return JsonRpcResponse::error(id, INTERNAL_ERROR, "module not cached after update_file");
+    };
 
     // Run @primitive validation (ADR 0007)
     let options = beamtalk_core::CompilerOptions {
