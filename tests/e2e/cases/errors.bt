@@ -7,6 +7,17 @@
 // This file tests errors that require REPL features:
 // - Undefined variables (REPL workspace binding resolution)
 // - Syntax errors (REPL incremental parsing)
+//
+// Test Coverage (BT-366, ADR 0011 Phase 3):
+// - Undefined variables: 3 tests
+// - Original syntax errors: 3 tests
+// - Runtime errors: 2 tests
+// - Near-miss syntax: 11 tests
+// - Invalid literals: 4 tests
+// - Cascading errors: 4 tests
+// - Unicode edge cases: 3 tests
+// - REPL edge cases: 4 tests
+// Total: 34 test cases (increased from 9)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -54,3 +65,132 @@ undefinedVar + 5
 // Wrong number of block arguments (too many)
 [:x | x + 1] value: 5 value: 10
 // => ERROR: Wrong number of arguments: block expects 1 but was called with 2
+
+// ===========================================================================
+// NEAR-MISS SYNTAX ERRORS
+// ===========================================================================
+// These test common typos and syntax mistakes that users make
+
+// Missing colon in keyword message (looks like unary/binary messages)
+Counter subclass Foo
+// => ERROR: Undefined variable
+
+// Wrong bracket type - opening with [ but closing with )
+[:x | x + 1)
+// => ERROR: Expected ']' to close block
+
+// Wrong bracket type - opening with ( but closing with ]
+(1 + 2]
+// => ERROR: expected )
+
+// Extra closing bracket with no opening
+Counter spawn]
+// => ERROR: expected expression, found ]
+
+// Missing block bar separator
+[:x x + 1]
+// => ERROR: expected |
+
+// Misplaced caret at start of expression (caret is for return, needs preceding expression)
+^ + 1
+// => ERROR: expected expression, found ^
+
+// Double operators
+1 + + 2
+// => ERROR: expected expression, found +
+
+// Missing receiver (operator as first token)
++ 5
+// => ERROR: expected expression, found +
+
+// Incomplete keyword message (missing argument after colon)
+obj foo:
+// => ERROR: Undefined variable
+
+// Missing closing parenthesis
+(1 + 2
+// => ERROR: expected )
+
+// Mismatched block brackets
+[1 + 2)
+// => ERROR: Expected ']' to close block
+
+// ===========================================================================
+// INVALID LITERAL ERRORS
+// ===========================================================================
+
+// Unclosed string literal - lexer produces error token containing the text
+"hello
+// => ERROR: "hello
+
+// Double decimal point in number - second dot treated as message send
+3.14.15
+// => ERROR: does_not_understand
+
+// Standalone hash (invalid symbol without identifier) - error token
+#
+// => ERROR: #
+
+// Multiple dots in number without spaces - parser sees message sends
+1.2.3.4
+// => ERROR: does_not_understand
+
+// ===========================================================================
+// CASCADING ERROR TESTS
+// ===========================================================================
+// Multiple errors in one expression - parser should recover
+
+// Block with error in parameters AND body
+[:x :y | ] + 1
+// => ERROR: expected expression
+
+// Multiple syntax errors in sequence
+] + [ + )
+// => ERROR: expected expression, found ]
+
+// Error recovery: bad expression followed by valid one (newline separated)
+1 + +
+2 + 3
+// => ERROR: expected expression, found +
+
+// Error in nested structure - parser should recover to continue parsing
+[1 + ] value: [2 * 3]
+// => ERROR: expected expression
+
+// ===========================================================================
+// UNICODE EDGE CASES
+// ===========================================================================
+
+// Emoji in identifier position (not valid Beamtalk identifier) - lexer error token
+counter🚀 := 42
+// => ERROR: 🚀
+
+// Unicode combining characters in identifier (café is valid if lexer accepts)
+// This may pass if Unicode identifiers are supported
+café := 42
+// => 42
+
+// Chinese characters in identifier (may be valid Unicode identifier)
+// This tests if parser accepts non-ASCII identifiers
+计数器 := 0
+// => 0
+
+// ===========================================================================
+// REPL EDGE CASES
+// ===========================================================================
+
+// Very deeply nested valid expression (should work)
+((((((((((1 + 1))))))))))
+// => 2
+
+// Very long identifier (should work up to reasonable limit)
+thisIsAVeryLongIdentifierNameThatGoesOnAndOnAndOnButShouldStillBeValid := 42
+// => 42
+
+// Repeated semicolons (cascade separator) - parser expects message after first ;
+1; 2; 3
+// => ERROR: expected
+
+// Tab characters in expression (should work - whitespace is ignored)
+1	+	2
+// => 3
