@@ -168,35 +168,37 @@ Elixir developers will miss `@doc` and runtime reflection. However, `///` with M
 
 ## Steelman Analysis
 
-### Option B: `@doc` Pragma (Rejected)
+### Strongest Counterarguments Against This Decision
 
-| Cohort | Strongest Argument |
-|--------|-------------------|
-| 🧑‍💻 **Newcomer** | "I can query docs at runtime — `Integer doc: #+` — which makes discovery natural" |
-| 🎩 **Smalltalk purist** | "Documentation as message sends is the most Smalltalk thing possible — everything is an object, including docs" |
-| ⚙️ **BEAM veteran** | "Elixir proved this works brilliantly — `Code.fetch_docs/1` is essential for production introspection" |
-| 🏭 **Operator** | "Runtime docs mean I can inspect a running system's API without source code" |
-| 🎨 **Language designer** | "This is the most composable — docs are data, not syntax, so they compose with metaprogramming" |
+#### 1. "You're building two doc systems" (Architecture)
 
-**Why rejected despite strong steelman:** With EEP-48, `///` comments are compiled into `.beam` doc chunks — so runtime access is achieved without `@doc` syntax. `code:get_doc/1` provides the same introspection that `@doc` would. The `@doc` pragma would add parser complexity for no additional benefit. `///` is the authoring syntax; EEP-48 is the delivery mechanism.
+`///` is parsed by the Rust compiler, but EEP-48 chunks live in BEAM. The doc pipeline touches every layer: lexer → parser → AST attachment → codegen → post-`erlc` chunk injection. If `@doc` were a pragma instead, it could flow through the existing pragma infrastructure (`@primitive`, `@intrinsic`, `@load`) and codegen would be simpler — just another module attribute. We chose the familiar *syntax* (`///`) but it creates a non-trivial *codegen path* that doesn't exist for any other comment type.
 
-### Option C: Convention-based `//` Comments (Rejected)
+**Why we accept this cost:** The pragma path is simpler for codegen but worse for authoring. `@doc 'long markdown string'` is awkward — string escaping, multi-line handling, no IDE support for Markdown-in-strings. `///` gets syntax highlighting, Markdown preview, and familiar ergonomics for free. The codegen complexity is a one-time cost; the authoring experience is paid on every doc comment written.
 
-| Cohort | Strongest Argument |
-|--------|-------------------|
-| 🧑‍💻 **Newcomer** | "No new syntax to learn — I already know `//` comments" |
-| 🎩 **Smalltalk purist** | "Minimal language surface area — don't add syntax when convention suffices" |
-| ⚙️ **BEAM veteran** | "Ship fast, iterate later — we don't need perfect docs for an alpha language" |
-| 🎨 **Language designer** | "YAGNI — add doc syntax when there's real demand, not speculatively" |
+#### 2. "EEP-48 format mismatch — Beamtalk methods aren't Erlang functions" (Interop)
 
-**Why rejected:** Without a syntactic distinction, tooling can't reliably tell documentation from implementation comments. Every `// helper function` would be treated as docs. The YAGNI argument is valid for the doc generation tool, but the syntax decision should be made early because it affects every stdlib file.
+EEP-48's `Docs` list uses `{Kind, Name, Arity}` tuples designed for Erlang's `function/arity` model. Beamtalk has unary messages (`abs`), binary operators (`+`), and keyword messages (`to:do:`) — none map cleanly. A keyword message `to:by:do:` becomes a single function with arity 3, but the "name" in EEP-48 would need to encode the selector. Elixir solved this for its model, but Beamtalk's message dispatch is further from Erlang's.
 
-### Tension Points
+**Why we accept this cost:** EEP-48 is extensible — the `Metadata` map on each doc entry can carry Beamtalk-specific fields (selector, message kind). The `Name` field can use the Beamtalk selector string. This is the same trade-off every non-Erlang BEAM language makes — Elixir, Gleam, LFE all map their models onto EEP-48. The interop benefit (Erlang shell `h/2` works on Beamtalk modules) outweighs the mapping complexity.
 
-- **Smalltalk purists accept `///` + EEP-48** — docs are runtime-accessible (the key concern), just not authored as message sends
-- **BEAM veterans are satisfied** — EEP-48 is the standard; Erlang and Elixir tools read Beamtalk docs natively
-- **Newcomers and tooling developers agree** on `///` — lowest friction, best tooling ROI
-- **Operators get full runtime access** — `code:get_doc/1` works in production without source code
+#### 3. "Docs should be objects, not frozen strings" (Philosophy)
+
+In Smalltalk, you can programmatically modify documentation — `MyClass comment: 'Updated docs'`. Docs are part of the live image. EEP-48 docs are frozen at compile time. For an "interactive-first" language promising hot code reloading and live development, static docs in `.beam` files mean the live environment can't evolve its own documentation. This contradicts Principle #1 (Interactive-first).
+
+**Why we accept this cost:** EEP-48 docs are frozen per-module, but modules are hot-reloadable. When a class is redefined in the REPL, the new `.beam` includes updated docs. Full Smalltalk-style `comment:` mutation (changing docs without recompiling) is deferred to the source retention future work. For now, "recompile to update docs" is acceptable — Elixir works this way and developers find it natural.
+
+#### 4. "`////` vs `///` will confuse everyone" (Usability)
+
+Four slashes vs three is a subtle visual distinction. In a readability-focused language, counting slashes is a UX smell. Mistyping `///` as `////` silently changes whether the doc attaches to the module or the next class/method. Gleam gets away with it because Gleam files are short; Beamtalk stdlib files could grow.
+
+**Why we accept this cost:** Today, each `.bt` file has one class, so `////` only appears at the top of the file — hard to confuse with method-level `///`. If multi-class files are supported later, LSP diagnostics can warn about misplaced `////`. The Gleam community has not reported this as a real problem despite years of use.
+
+### Residual Tension
+
+- **"Docs as objects" remains the strongest unresolved philosophical tension** — EEP-48 is pragmatically correct but philosophically un-Smalltalk. Source retention (future work) would close this gap.
+- **EEP-48 format mapping** needs a concrete design decision during Phase 2 implementation: how selectors map to `{Kind, Name, Arity}` tuples.
+- **The two-system cost** is real but bounded — the doc chunk injection is a well-understood post-processing step, not an ongoing maintenance burden.
 
 ## Alternatives Considered
 
