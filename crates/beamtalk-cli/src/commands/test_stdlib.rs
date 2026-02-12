@@ -149,7 +149,7 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
 /// Compile a single Beamtalk expression to a Core Erlang eval module.
 ///
 /// Returns the Core Erlang source string for a module with `eval/1`.
-fn compile_expression_to_core(
+pub(crate) fn compile_expression_to_core(
     expression: &str,
     module_name: &str,
 ) -> std::result::Result<String, String> {
@@ -185,13 +185,101 @@ fn compile_expression_to_core(
 // EUnit wrapper generation
 // ──────────────────────────────────────────────────────────────────────────
 
+/// Returns the Erlang `format_result/1` and `matches_pattern/2` helper
+/// functions shared by stdlib tests and doc tests.
+pub(crate) fn eunit_helper_functions() -> &'static str {
+    "format_result(V) when is_integer(V) -> integer_to_binary(V);\n\
+     format_result(V) when is_float(V) ->\n\
+     \x20   %% Match Erlang/REPL float formatting\n\
+     \x20   list_to_binary(io_lib:format(\"~p\", [V]));\n\
+     format_result(true) -> <<\"true\">>;\n\
+     format_result(false) -> <<\"false\">>;\n\
+     format_result(nil) -> <<\"nil\">>;\n\
+     format_result(V) when is_atom(V) -> atom_to_binary(V, utf8);\n\
+     format_result(V) when is_binary(V) -> V;\n\
+     format_result(V) when is_function(V) ->\n\
+     \x20   {arity, A} = erlang:fun_info(V, arity),\n\
+     \x20   iolist_to_binary([<<\"a Block/\">>, integer_to_binary(A)]);\n\
+     format_result(V) when is_pid(V) ->\n\
+     \x20   S = pid_to_list(V),\n\
+     \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
+     \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
+     format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
+     \x20   %% BT-412: Match REPL formatting for class objects vs actor instances\n\
+     \x20   Class = element(2, V),\n\
+     \x20   case beamtalk_object_class:is_class_name(Class) of\n\
+     \x20       true -> beamtalk_object_class:class_display_name(Class);\n\
+     \x20       false ->\n\
+     \x20           Pid = element(4, V),\n\
+     \x20           ClassBin = atom_to_binary(Class, utf8),\n\
+     \x20           PidStr = pid_to_list(Pid),\n\
+     \x20           Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),\n\
+     \x20           iolist_to_binary([<<\"#Actor<\">>, ClassBin, <<\",\">>, Inner, <<\">\">>])\n\
+     \x20   end;\n\
+     format_result(V) when is_map(V) ->\n\
+     \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
+     \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
+     \x20   catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end;\n\
+     format_result(V) when is_list(V) ->\n\
+     \x20   case V of\n\
+     \x20       [] -> <<\"[]\">>;\n\
+     \x20       _ ->\n\
+     \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
+     \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
+     \x20   end;\n\
+     format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
+     %% BT-502: Glob-style pattern matching where _ matches any substring,\n\
+     %% but only when _ is NOT flanked by alphanumeric characters on both sides.\n\
+     %% This preserves literal underscores in identifiers like does_not_understand.\n\
+     matches_pattern(Pattern, Actual) ->\n\
+     \x20   Segments = wildcard_segments(Pattern),\n\
+     \x20   matches_segments(Segments, Actual, 0, true).\n\
+     wildcard_segments(Pattern) ->\n\
+     \x20   Chars = binary_to_list(Pattern),\n\
+     \x20   [list_to_binary(S) || S <- wildcard_split(Chars, [], [], none)].\n\
+     wildcard_split([], CurRev, SegsRev, _Prev) ->\n\
+     \x20   lists:reverse([lists:reverse(CurRev) | SegsRev]);\n\
+     wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->\n\
+     \x20   Next = case Rest of [N | _] -> N; [] -> none end,\n\
+     \x20   case is_alnum(Prev) andalso is_alnum(Next) of\n\
+     \x20       true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);\n\
+     \x20       false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)\n\
+     \x20   end;\n\
+     wildcard_split([C | Rest], CurRev, SegsRev, _Prev) ->\n\
+     \x20   wildcard_split(Rest, [C | CurRev], SegsRev, C).\n\
+     is_alnum(C) when is_integer(C), C >= $0, C =< $9 -> true;\n\
+     is_alnum(C) when is_integer(C), C >= $A, C =< $Z -> true;\n\
+     is_alnum(C) when is_integer(C), C >= $a, C =< $z -> true;\n\
+     is_alnum(_) -> false.\n\
+     matches_segments([], _Actual, _Pos, IsFirst) -> not IsFirst;\n\
+     matches_segments([<<>> | Rest], Actual, Pos, _IsFirst) ->\n\
+     \x20   matches_segments(Rest, Actual, Pos, false);\n\
+     matches_segments([Seg | Rest], Actual, Pos, true) ->\n\
+     \x20   %% First segment must match at start\n\
+     \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+     \x20       {0, Len} -> matches_segments(Rest, Actual, Len, false);\n\
+     \x20       _ -> false\n\
+     \x20   end;\n\
+     matches_segments([Seg], Actual, Pos, false) ->\n\
+     \x20   %% Last non-empty segment must match at end\n\
+     \x20   SLen = byte_size(Seg),\n\
+     \x20   ALen = byte_size(Actual),\n\
+     \x20   Start = ALen - SLen,\n\
+     \x20   Start >= Pos andalso binary:part(Actual, Start, SLen) =:= Seg;\n\
+     matches_segments([Seg | Rest], Actual, Pos, false) ->\n\
+     \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+     \x20       {Found, Len} -> matches_segments(Rest, Actual, Found + Len, false);\n\
+     \x20       nomatch -> false\n\
+     \x20   end.\n\n"
+}
+
 /// Convert an expected value string to an Erlang binary literal for
 /// string-based comparison.
 ///
 /// All expected values are represented as binaries (`<<"">>`) since
 /// `format_result/1` always returns a binary. This matches E2E semantics
 /// where the REPL compares string representations.
-fn expected_to_binary_literal(expected: &str) -> String {
+pub(crate) fn expected_to_binary_literal(expected: &str) -> String {
     let escaped = expected.replace('\\', "\\\\").replace('"', "\\\"");
     format!("<<\"{escaped}\">>")
 }
@@ -200,7 +288,7 @@ fn expected_to_binary_literal(expected: &str) -> String {
 ///
 /// Mirrors the REPL's `extract_assignment/1`: matches `name := ...` pattern.
 /// Returns `Some(var_name)` if the expression is an assignment, `None` otherwise.
-fn extract_assignment_var(expression: &str) -> Option<String> {
+pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
     let trimmed = expression.trim();
     // Find `:=` and check that everything before it is a valid identifier
     let assign_pos = trimmed.find(":=")?;
@@ -231,7 +319,7 @@ fn extract_assignment_var(expression: &str) -> Option<String> {
 /// Results are formatted to strings before comparison (matching E2E
 /// semantics where the REPL returns string representations).
 /// Generate the `EUnit` try/catch block for an ERROR: assertion.
-fn write_error_assertion(
+pub(crate) fn write_error_assertion(
     erl: &mut String,
     i: usize,
     eval_mod: &str,
@@ -287,7 +375,7 @@ fn write_error_assertion(
 /// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
 /// characters. This preserves literal underscores in identifiers like
 /// `does_not_understand` or `beamtalk_class`.
-fn has_wildcard_underscore(s: &str) -> bool {
+pub(crate) fn has_wildcard_underscore(s: &str) -> bool {
     let bytes = s.as_bytes();
     for (i, &b) in bytes.iter().enumerate() {
         if b == b'_' {
@@ -301,10 +389,6 @@ fn has_wildcard_underscore(s: &str) -> bool {
     false
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "EUnit wrapper includes format_result + matches_pattern helpers"
-)]
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -323,91 +407,7 @@ fn generate_eunit_wrapper(
 
     // format_result/1 mirrors the REPL's term_to_json formatting so that
     // expected values written as strings (like E2E tests) match correctly.
-    erl.push_str(
-        "format_result(V) when is_integer(V) -> integer_to_binary(V);\n\
-         format_result(V) when is_float(V) ->\n\
-         \x20   %% Match Erlang/REPL float formatting\n\
-         \x20   list_to_binary(io_lib:format(\"~p\", [V]));\n\
-         format_result(true) -> <<\"true\">>;\n\
-         format_result(false) -> <<\"false\">>;\n\
-         format_result(nil) -> <<\"nil\">>;\n\
-         format_result(V) when is_atom(V) -> atom_to_binary(V, utf8);\n\
-         format_result(V) when is_binary(V) -> V;\n\
-         format_result(V) when is_function(V) ->\n\
-         \x20   {arity, A} = erlang:fun_info(V, arity),\n\
-         \x20   iolist_to_binary([<<\"a Block/\">>, integer_to_binary(A)]);\n\
-         format_result(V) when is_pid(V) ->\n\
-         \x20   S = pid_to_list(V),\n\
-         \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
-         \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
-         format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
-         \x20   %% BT-412: Match REPL formatting for class objects vs actor instances\n\
-         \x20   Class = element(2, V),\n\
-         \x20   case beamtalk_object_class:is_class_name(Class) of\n\
-         \x20       true -> beamtalk_object_class:class_display_name(Class);\n\
-         \x20       false ->\n\
-         \x20           Pid = element(4, V),\n\
-         \x20           ClassBin = atom_to_binary(Class, utf8),\n\
-         \x20           PidStr = pid_to_list(Pid),\n\
-         \x20           Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),\n\
-         \x20           iolist_to_binary([<<\"#Actor<\">>, ClassBin, <<\",\">>, Inner, <<\">\">>])\n\
-         \x20   end;\n\
-         format_result(V) when is_map(V) ->\n\
-         \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
-         \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
-         \x20   catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end;\n\
-         format_result(V) when is_list(V) ->\n\
-         \x20   case V of\n\
-         \x20       [] -> <<\"[]\">>;\n\
-         \x20       _ ->\n\
-         \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
-         \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
-         \x20   end;\n\
-         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
-         %% BT-502: Glob-style pattern matching where _ matches any substring,\n\
-         %% but only when _ is NOT flanked by alphanumeric characters on both sides.\n\
-         %% This preserves literal underscores in identifiers like does_not_understand.\n\
-         matches_pattern(Pattern, Actual) ->\n\
-         \x20   Segments = wildcard_segments(Pattern),\n\
-         \x20   matches_segments(Segments, Actual, 0, true).\n\
-         wildcard_segments(Pattern) ->\n\
-         \x20   Chars = binary_to_list(Pattern),\n\
-         \x20   [list_to_binary(S) || S <- wildcard_split(Chars, [], [], none)].\n\
-         wildcard_split([], CurRev, SegsRev, _Prev) ->\n\
-         \x20   lists:reverse([lists:reverse(CurRev) | SegsRev]);\n\
-         wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->\n\
-         \x20   Next = case Rest of [N | _] -> N; [] -> none end,\n\
-         \x20   case is_alnum(Prev) andalso is_alnum(Next) of\n\
-         \x20       true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);\n\
-         \x20       false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)\n\
-         \x20   end;\n\
-         wildcard_split([C | Rest], CurRev, SegsRev, _Prev) ->\n\
-         \x20   wildcard_split(Rest, [C | CurRev], SegsRev, C).\n\
-         is_alnum(C) when is_integer(C), C >= $0, C =< $9 -> true;\n\
-         is_alnum(C) when is_integer(C), C >= $A, C =< $Z -> true;\n\
-         is_alnum(C) when is_integer(C), C >= $a, C =< $z -> true;\n\
-         is_alnum(_) -> false.\n\
-         matches_segments([], _Actual, _Pos, IsFirst) -> not IsFirst;\n\
-         matches_segments([<<>> | Rest], Actual, Pos, _IsFirst) ->\n\
-         \x20   matches_segments(Rest, Actual, Pos, false);\n\
-         matches_segments([Seg | Rest], Actual, Pos, true) ->\n\
-         \x20   %% First segment must match at start\n\
-         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
-         \x20       {0, Len} -> matches_segments(Rest, Actual, Len, false);\n\
-         \x20       _ -> false\n\
-         \x20   end;\n\
-         matches_segments([Seg], Actual, Pos, false) ->\n\
-         \x20   %% Last non-empty segment must match at end\n\
-         \x20   SLen = byte_size(Seg),\n\
-         \x20   ALen = byte_size(Actual),\n\
-         \x20   Start = ALen - SLen,\n\
-         \x20   Start >= Pos andalso binary:part(Actual, Start, SLen) =:= Seg;\n\
-         matches_segments([Seg | Rest], Actual, Pos, false) ->\n\
-         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
-         \x20       {Found, Len} -> matches_segments(Rest, Actual, Found + Len, false);\n\
-         \x20       nomatch -> false\n\
-         \x20   end.\n\n",
-    );
+    erl.push_str(eunit_helper_functions());
 
     // Single test function with all assertions (stateful test)
     let _ = writeln!(erl, "{test_module_name}_test() ->");
