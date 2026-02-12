@@ -264,20 +264,27 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     Module = binary_to_list(maps:get(<<"module">>, Params, <<>>)),
     case maps:get(<<"path">>, Params, undefined) of
         undefined when Module =/= [] ->
-            %% Look up source path from module tracker
-            ModuleAtom = list_to_atom(Module),
-            {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
-            case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
-                {ok, Info} ->
-                    case beamtalk_repl_modules:get_source_file(Info) of
-                        undefined ->
+            %% Use list_to_existing_atom to prevent atom table exhaustion
+            case catch list_to_existing_atom(Module) of
+                ModuleAtom when is_atom(ModuleAtom) ->
+                    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
+                    case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
+                        {ok, Info} ->
+                            case beamtalk_repl_modules:get_source_file(Info) of
+                                undefined ->
+                                    beamtalk_repl_protocol:encode_error(
+                                        {no_source_file, Module}, Msg,
+                                        fun format_error_message/1);
+                                SourcePath ->
+                                    do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
+                            end;
+                        {error, not_found} ->
                             beamtalk_repl_protocol:encode_error(
-                                {no_source_file, Module}, Msg,
-                                fun format_error_message/1);
-                        SourcePath ->
-                            do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
+                                {module_not_loaded, Module}, Msg,
+                                fun format_error_message/1)
                     end;
-                {error, not_found} ->
+                _ ->
+                    %% Atom doesn't exist — module was never loaded
                     beamtalk_repl_protocol:encode_error(
                         {module_not_loaded, Module}, Msg,
                         fun format_error_message/1)
@@ -920,7 +927,11 @@ resolve_module_atoms(undefined, Classes) ->
     lists:filtermap(fun(ClassMap) ->
         case maps:get(name, ClassMap, "") of
             "" -> false;
-            Name -> {true, list_to_atom(Name)}
+            Name ->
+                case catch list_to_existing_atom(Name) of
+                    Atom when is_atom(Atom) -> {true, Atom};
+                    _ -> false
+                end
         end
     end, Classes).
 
