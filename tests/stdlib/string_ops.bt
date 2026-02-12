@@ -78,7 +78,7 @@
 
 // BT-416: collect:/select: on string variables (not just literals)
 s := 'hello'
-// => _
+// => hello
 
 s collect: [:ch | ch uppercase]
 // => ["H","E","L","L","O"]

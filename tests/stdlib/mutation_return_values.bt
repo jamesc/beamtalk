@@ -8,7 +8,7 @@
 // @load tests/e2e/fixtures/mutation_return_values.bt
 
 actor := MutationReturnValues spawn
-// => _
+// => #Actor<MutationReturnValues,_>
 
 // === inject:into: returns accumulator result ===
 

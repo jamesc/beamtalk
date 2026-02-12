@@ -29,7 +29,7 @@
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass class_name
 // => String
@@ -39,7 +39,7 @@ stringClass class_name
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass class_name
 // => Counter
@@ -60,7 +60,7 @@ counterClass class_name
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 methods := stringClass methods
 // => _
@@ -93,7 +93,7 @@ methods isEmpty
 // ---------------------------------------------------------------------------
 
 intClass := (Beamtalk classNamed: #Integer) await
-// => _
+// => Integer
 
 intMethods := intClass methods
 // => _
@@ -111,7 +111,7 @@ intMethods isEmpty
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass superclass
 // => Object
@@ -121,7 +121,7 @@ stringClass superclass
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass superclass
 // => Actor
@@ -131,7 +131,7 @@ counterClass superclass
 // ---------------------------------------------------------------------------
 
 actorClass := (Beamtalk classNamed: #Actor) await
-// => _
+// => Actor
 
 actorClass superclass
 // => Object
@@ -145,7 +145,7 @@ actorClass superclass
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass module_name
 // => bt@stdlib@string
@@ -155,7 +155,7 @@ stringClass module_name
 // ---------------------------------------------------------------------------
 
 counterClass := (Beamtalk classNamed: #Counter) await
-// => _
+// => Counter
 
 counterClass module_name
 // => bt@counter
@@ -169,19 +169,19 @@ counterClass module_name
 // ---------------------------------------------------------------------------
 
 stringClass := (Beamtalk classNamed: #String) await
-// => _
+// => String
 
 stringClass class_name
 // => String
 
 integerClass := (Beamtalk classNamed: #Integer) await
-// => _
+// => Integer
 
 integerClass class_name
 // => Integer
 
 trueClass := (Beamtalk classNamed: #True) await
-// => _
+// => True
 
 trueClass class_name
 // => True
