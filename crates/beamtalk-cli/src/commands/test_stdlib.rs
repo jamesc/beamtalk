@@ -364,10 +364,29 @@ fn generate_eunit_wrapper(
          \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
          \x20   end;\n\
          format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
-         %% BT-502: Glob-style pattern matching where _ matches any substring.\n\
+         %% BT-502: Glob-style pattern matching where _ matches any substring,\n\
+         %% but only when _ is NOT flanked by alphanumeric characters on both sides.\n\
+         %% This preserves literal underscores in identifiers like does_not_understand.\n\
          matches_pattern(Pattern, Actual) ->\n\
-         \x20   Segments = binary:split(Pattern, <<\"_\">>, [global]),\n\
+         \x20   Segments = wildcard_segments(Pattern),\n\
          \x20   matches_segments(Segments, Actual, 0, true).\n\
+         wildcard_segments(Pattern) ->\n\
+         \x20   Chars = binary_to_list(Pattern),\n\
+         \x20   [list_to_binary(S) || S <- wildcard_split(Chars, [], [], none)].\n\
+         wildcard_split([], CurRev, SegsRev, _Prev) ->\n\
+         \x20   lists:reverse([lists:reverse(CurRev) | SegsRev]);\n\
+         wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->\n\
+         \x20   Next = case Rest of [N | _] -> N; [] -> none end,\n\
+         \x20   case is_alnum(Prev) andalso is_alnum(Next) of\n\
+         \x20       true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);\n\
+         \x20       false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)\n\
+         \x20   end;\n\
+         wildcard_split([C | Rest], CurRev, SegsRev, _Prev) ->\n\
+         \x20   wildcard_split(Rest, [C | CurRev], SegsRev, C).\n\
+         is_alnum(C) when is_integer(C), C >= $0, C =< $9 -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $A, C =< $Z -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $a, C =< $z -> true;\n\
+         is_alnum(_) -> false.\n\
          matches_segments([], _Actual, _Pos, IsFirst) -> not IsFirst;\n\
          matches_segments([<<>> | Rest], Actual, Pos, _IsFirst) ->\n\
          \x20   matches_segments(Rest, Actual, Pos, false);\n\
