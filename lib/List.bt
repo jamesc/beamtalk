@@ -1,22 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// List — Ordered collection of elements.
-////
-//// Lists in Beamtalk are Erlang linked lists, created with `#()` syntax.
-//// Fast prepend (O(1)), sequential access. Use for stack-like and
-//// functional patterns.
-////
-//// ## BEAM Mapping
-//// Beamtalk lists map directly to Erlang lists.
-////
-//// ## Examples
-//// ```beamtalk
-//// #(1, 2, 3) class         // => List
-//// #(1, 2, 3) size          // => 3
-//// #(1, 2, 3) first         // => 1
-//// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
-//// ```
+/// List — Ordered collection of elements.
+///
+/// Lists in Beamtalk are Erlang linked lists, created with `#()` syntax.
+/// Fast prepend (O(1)), sequential access. Use for stack-like and
+/// functional patterns.
+///
+/// ## BEAM Mapping
+/// Beamtalk lists map directly to Erlang lists.
+///
+/// ## Examples
+/// ```beamtalk
+/// #(1, 2, 3) class         // => List
+/// #(1, 2, 3) size          // => 3
+/// #(1, 2, 3) first         // => 1
+/// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
+/// ```
 
 sealed Object subclass: List
   /// Number of elements in the list.

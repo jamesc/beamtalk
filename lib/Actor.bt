@@ -1,19 +1,19 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Actor — Base class for process-based objects.
-////
-//// Actor inherits from Object and adds process-based concurrency.
-//// Every actor runs in its own BEAM process and communicates via
-//// asynchronous messages. Use `spawn` instead of `new` to create actors.
-////
-//// ## Examples
-//// ```beamtalk
-//// Actor subclass: Counter
-////   state: count = 0
-////   increment => self.count := self.count + 1
-////   count => self.count
-//// ```
+/// Actor — Base class for process-based objects.
+///
+/// Actor inherits from Object and adds process-based concurrency.
+/// Every actor runs in its own BEAM process and communicates via
+/// asynchronous messages. Use `spawn` instead of `new` to create actors.
+///
+/// ## Examples
+/// ```beamtalk
+/// Actor subclass: Counter
+///   state: count = 0
+///   increment => self.count := self.count + 1
+///   count => self.count
+/// ```
 
 Object subclass: Actor
   /// Spawn a new actor process with default state.

@@ -1,16 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Association — Key-value pair.
-////
-//// Associations are the building blocks of Dictionaries and enable
-//// expressive key-value construction with the `->` binary message.
-////
-//// ## Examples
-//// ```beamtalk
-//// (#name -> 'James') key       // => #name
-//// (#name -> 'James') value     // => 'James'
-//// ```
+/// Association — Key-value pair.
+///
+/// Associations are the building blocks of Dictionaries and enable
+/// expressive key-value construction with the `->` binary message.
+///
+/// ## Examples
+/// ```beamtalk
+/// (#name -> 'James') key       // => #name
+/// (#name -> 'James') value     // => 'James'
+/// ```
 
 sealed Object subclass: Association
   /// Return the key of the association.

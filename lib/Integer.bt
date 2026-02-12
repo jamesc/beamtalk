@@ -1,22 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Integer — Whole number arithmetic and operations.
-////
-//// Integers in Beamtalk are arbitrary precision (Erlang integers).
-//// All arithmetic operations return integers unless explicitly
-//// converted with `asFloat`.
-////
-//// ## BEAM Mapping
-//// Beamtalk integers map directly to Erlang integers.
-////
-//// ## Examples
-//// ```beamtalk
-//// 42 class       // => Integer
-//// 3 + 4          // => 7
-//// 2 ** 100       // => 1267650600228229401496703205376
-//// 17 % 5         // => 2
-//// ```
+/// Integer — Whole number arithmetic and operations.
+///
+/// Integers in Beamtalk are arbitrary precision (Erlang integers).
+/// All arithmetic operations return integers unless explicitly
+/// converted with `asFloat`.
+///
+/// ## BEAM Mapping
+/// Beamtalk integers map directly to Erlang integers.
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 class       // => Integer
+/// 3 + 4          // => 7
+/// 2 ** 100       // => 1267650600228229401496703205376
+/// 17 % 5         // => 2
+/// ```
 
 sealed Number subclass: Integer
   /// Add an integer to the receiver.

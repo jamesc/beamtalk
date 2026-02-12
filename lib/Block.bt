@@ -1,20 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Block — First-class closures (anonymous functions).
-////
-//// Blocks capture their lexical environment and are the foundation
-//// of control flow and functional programming in Beamtalk.
-////
-//// ## BEAM Mapping
-//// Beamtalk blocks compile to Erlang funs.
-////
-//// ## Examples
-//// ```beamtalk
-//// [2 + 3] value                // => 5
-//// [:x | x * 2] value: 3       // => 6
-//// [true] whileTrue: [Transcript show: 'loop']
-//// ```
+/// Block — First-class closures (anonymous functions).
+///
+/// Blocks capture their lexical environment and are the foundation
+/// of control flow and functional programming in Beamtalk.
+///
+/// ## BEAM Mapping
+/// Beamtalk blocks compile to Erlang funs.
+///
+/// ## Examples
+/// ```beamtalk
+/// [2 + 3] value                // => 5
+/// [:x | x * 2] value: 3       // => 6
+/// [true] whileTrue: [Transcript show: 'loop']
+/// ```
 
 sealed Object subclass: Block
   /// Evaluate a zero-argument block.

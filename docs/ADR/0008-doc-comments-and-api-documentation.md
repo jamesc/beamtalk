@@ -29,7 +29,7 @@ Beamtalk's standard library lives in 16 `lib/*.bt` files that were recently conv
 
 ## Decision
 
-Adopt **`///` triple-slash doc comments** for method and class documentation, and **`////` quadruple-slash doc comments** for module-level documentation, following the Gleam/Rust convention.
+Adopt **`///` triple-slash doc comments** for class and method documentation. Package-level documentation (e.g., the stdlib as a whole) lives in `README.md` files. **`////` quadruple-slash doc comments** for package-level documentation are a possible future extension but YAGNI today.
 
 ### Method Documentation
 
@@ -59,22 +59,22 @@ Object subclass: Integer
 ### Class Documentation
 
 ```beamtalk
-//// Integer - Whole number arithmetic and operations
-////
-//// Integers in Beamtalk are arbitrary precision (Erlang integers).
-//// All arithmetic operations return integers unless explicitly
-//// converted with `asFloat`.
-////
-//// ## BEAM Mapping
-//// Beamtalk integers map directly to Erlang integers.
-////
-//// ## Examples
-//// ```beamtalk
-//// 42 class           // => Integer
-//// 2 ** 100           // => 1267650600228229401496703205376
-//// 17 % 5             // => 2
-//// 1 to: 5 do: [:n | Transcript show: n]
-//// ```
+/// Integer - Whole number arithmetic and operations
+///
+/// Integers in Beamtalk are arbitrary precision (Erlang integers).
+/// All arithmetic operations return integers unless explicitly
+/// converted with `asFloat`.
+///
+/// ## BEAM Mapping
+/// Beamtalk integers map directly to Erlang integers.
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 class           // => Integer
+/// 2 ** 100           // => 1267650600228229401496703205376
+/// 17 % 5             // => 2
+/// 1 to: 5 do: [:n | Transcript show: n]
+/// ```
 
 Object subclass: Integer
   // ... methods
@@ -137,7 +137,7 @@ open docs/index.html        # Browse generated reference
 
 **What we adopted:**
 - **Gleam/Rust `///` syntax** — Cleanest integration with existing `//` comment syntax. The lexer already handles `//`; extending to `///` is a minimal change. Markdown support comes free.
-- **Gleam's `////` for modules** — Cleaner than Rust's `//!` which requires being inside the item.
+- **`////` reserved for future package-level docs** — Gleam uses `////` for module docs; we may adopt this later if needed, but package-level docs live in `README.md` for now (YAGNI).
 
 **What we adapted:**
 - **Elixir's doc testing** — `/// ```beamtalk` blocks could be validated by the test runner (future work), similar to Elixir's doctests.
@@ -238,9 +238,10 @@ Rejected because there's no way to distinguish documentation comments from imple
 ## Implementation
 
 ### Phase 1: Lexer + AST (S)
-- Extend lexer to recognize `///` as `Trivia::DocComment` and `////` as `Trivia::ModuleDocComment`
+- Extend lexer to recognize `///` as `Trivia::DocComment`
 - Add `doc_comment: Option<String>` to `MethodDefinition` and `ClassDefinition` in AST
 - Parser extracts leading `///` trivia and attaches to the following AST node
+- `////` (package-level doc) deferred — package docs live in `README.md` for now
 
 ### Phase 2: LSP Integration (S)
 - Hover provider reads `doc_comment` from Method/Class nodes
@@ -248,13 +249,12 @@ Rejected because there's no way to distinguish documentation comments from imple
 - Renders Markdown to terminal-friendly format for display
 
 ### Phase 3: REPL `:help` (S)
-- `:help ClassName` shows class `////` doc
+- `:help ClassName` shows class `///` doc
 - `:help ClassName selector` shows method `///` doc
 - Requires stdlib to be parsed (not compiled) at REPL startup
 
 ### Phase 4: Stdlib Documentation (M)
-- Add `///` doc comments to all methods in `lib/*.bt`
-- Add `////` module docs to all 16 stdlib files
+- Add `///` doc comments to all classes and methods in `lib/*.bt`
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 
 ### Phase 5: `beamtalk doc` Command (M)

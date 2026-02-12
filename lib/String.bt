@@ -1,20 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// String — UTF-8 text operations.
-////
-//// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
-//// All string operations are grapheme-aware.
-////
-//// ## BEAM Mapping
-//// Beamtalk strings map directly to Erlang binaries.
-////
-//// ## Examples
-//// ```beamtalk
-//// 'hello' class         // => String
-//// 'hello' length        // => 5
-//// 'hello' ++ ' world'   // => 'hello world'
-//// ```
+/// String — UTF-8 text operations.
+///
+/// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
+/// All string operations are grapheme-aware.
+///
+/// ## BEAM Mapping
+/// Beamtalk strings map directly to Erlang binaries.
+///
+/// ## Examples
+/// ```beamtalk
+/// 'hello' class         // => String
+/// 'hello' length        // => 5
+/// 'hello' ++ ' world'   // => 'hello world'
+/// ```
 
 sealed Object subclass: String
   /// Test equality with another string.

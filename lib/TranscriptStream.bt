@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// TranscriptStream — Shared workspace log with pub/sub semantics.
-////
-//// TranscriptStream is a real actor (gen_server) that acts as a shared log.
-//// Subscribers receive output in real-time; unsubscribed output goes to
-//// buffer only. Analogous to Smalltalk's `Transcript` global.
-////
-//// ## Examples
-//// ```beamtalk
-//// Transcript show: 'hello'
-//// Transcript cr
-//// Transcript recent
-//// ```
+/// TranscriptStream — Shared workspace log with pub/sub semantics.
+///
+/// TranscriptStream is a real actor (gen_server) that acts as a shared log.
+/// Subscribers receive output in real-time; unsubscribed output goes to
+/// buffer only. Analogous to Smalltalk's `Transcript` global.
+///
+/// ## Examples
+/// ```beamtalk
+/// Transcript show: 'hello'
+/// Transcript cr
+/// Transcript recent
+/// ```
 
 Actor subclass: TranscriptStream
   /// Write a value to the transcript.

@@ -1,20 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Dictionary — Immutable key-value collection.
-////
-//// Dictionaries are backed by Erlang maps. Operations that "modify"
-//// a dictionary return a new dictionary — the original is unchanged.
-////
-//// ## BEAM Mapping
-//// Beamtalk dictionaries map directly to Erlang maps.
-////
-//// ## Examples
-//// ```beamtalk
-//// #{#name => 'Alice'} class                   // => Dictionary
-//// #{#name => 'Alice'} at: #name               // => 'Alice'
-//// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
-//// ```
+/// Dictionary — Immutable key-value collection.
+///
+/// Dictionaries are backed by Erlang maps. Operations that "modify"
+/// a dictionary return a new dictionary — the original is unchanged.
+///
+/// ## BEAM Mapping
+/// Beamtalk dictionaries map directly to Erlang maps.
+///
+/// ## Examples
+/// ```beamtalk
+/// #{#name => 'Alice'} class                   // => Dictionary
+/// #{#name => 'Alice'} at: #name               // => 'Alice'
+/// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
+/// ```
 
 sealed Object subclass: Dictionary
 

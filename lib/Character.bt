@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Character — Unicode character (codepoint) wrapper.
-////
-//// Characters in Beamtalk are integers (Unicode codepoints) at the BEAM
-//// level. The Character class provides OOP methods for working with
-//// individual characters.
-////
-//// ## Examples
-//// ```beamtalk
-//// $A class                 // => Character
-//// $A asInteger             // => 65
-//// $a isLetter              // => true
-//// ```
+/// Character — Unicode character (codepoint) wrapper.
+///
+/// Characters in Beamtalk are integers (Unicode codepoints) at the BEAM
+/// level. The Character class provides OOP methods for working with
+/// individual characters.
+///
+/// ## Examples
+/// ```beamtalk
+/// $A class                 // => Character
+/// $A asInteger             // => 65
+/// $a isLetter              // => true
+/// ```
 
 sealed Object subclass: Character
 

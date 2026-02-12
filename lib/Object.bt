@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Object — Root class for value types in Beamtalk.
-////
-//// Object inherits from ProtoObject and adds the standard protocol that
-//// almost all objects need: instantiation, reflection, nil testing, and
-//// debugging.
-////
-//// ## Examples
-//// ```beamtalk
-//// 42 isNil              // => false
-//// nil notNil            // => false
-//// 42 class              // => Integer
-//// ```
+/// Object — Root class for value types in Beamtalk.
+///
+/// Object inherits from ProtoObject and adds the standard protocol that
+/// almost all objects need: instantiation, reflection, nil testing, and
+/// debugging.
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 isNil              // => false
+/// nil notNil            // => false
+/// 42 class              // => Integer
+/// ```
 
 ProtoObject subclass: Object
   /// Return the class of the receiver.

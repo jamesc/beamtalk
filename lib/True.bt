@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// True — The true boolean value.
-////
-//// Implements control flow messages for the true case.
-//// All methods are pure Beamtalk — no primitives needed.
-////
-//// ## Examples
-//// ```beamtalk
-//// true class                   // => True
-//// true ifTrue: ['yes']         // => 'yes'
-//// true not                     // => false
-//// ```
+/// True — The true boolean value.
+///
+/// Implements control flow messages for the true case.
+/// All methods are pure Beamtalk — no primitives needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// true class                   // => True
+/// true ifTrue: ['yes']         // => 'yes'
+/// true not                     // => false
+/// ```
 
 sealed Object subclass: True
   /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.

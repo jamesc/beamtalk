@@ -1,21 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Symbol — Atomic identifiers.
-////
-//// Symbols are interned strings (Erlang atoms). They are used as method
-//// selectors, class names, and general-purpose identifiers. Symbols are
-//// immutable and unique: two symbols with the same name are always identical.
-////
-//// ## BEAM Mapping
-//// Beamtalk symbols map directly to Erlang atoms.
-////
-//// ## Examples
-//// ```beamtalk
-//// #hello class           // => Symbol
-//// #hello asString        // => 'hello'
-//// #hello = #hello        // => true
-//// ```
+/// Symbol — Atomic identifiers.
+///
+/// Symbols are interned strings (Erlang atoms). They are used as method
+/// selectors, class names, and general-purpose identifiers. Symbols are
+/// immutable and unique: two symbols with the same name are always identical.
+///
+/// ## BEAM Mapping
+/// Beamtalk symbols map directly to Erlang atoms.
+///
+/// ## Examples
+/// ```beamtalk
+/// #hello class           // => Symbol
+/// #hello asString        // => 'hello'
+/// #hello = #hello        // => true
+/// ```
 
 sealed Object subclass: Symbol
 

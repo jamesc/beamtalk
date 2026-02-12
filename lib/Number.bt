@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Number — Abstract superclass for numeric types.
-////
-//// Provides shared numeric protocol for Integer and Float.
-//// Cannot be instantiated directly — use Integer or Float instead.
-////
-//// ## Examples
-//// ```beamtalk
-//// 0 isZero          // => true
-//// 5 isPositive      // => true
-//// -3 isNegative     // => true
-//// ```
+/// Number — Abstract superclass for numeric types.
+///
+/// Provides shared numeric protocol for Integer and Float.
+/// Cannot be instantiated directly — use Integer or Float instead.
+///
+/// ## Examples
+/// ```beamtalk
+/// 0 isZero          // => true
+/// 5 isPositive      // => true
+/// -3 isNegative     // => true
+/// ```
 
 abstract Object subclass: Number
   /// Test if the receiver is zero.

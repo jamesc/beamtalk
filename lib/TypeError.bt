@@ -1,14 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// TypeError — Type mismatch errors.
-////
-//// Raised when an operation receives an argument of the wrong type.
-////
-//// ## Examples
-//// ```beamtalk
-//// [1 + 'a'] on: TypeError do: [:e | e message]
-//// ```
+/// TypeError — Type mismatch errors.
+///
+/// Raised when an operation receives an argument of the wrong type.
+///
+/// ## Examples
+/// ```beamtalk
+/// [1 + 'a'] on: TypeError do: [:e | e message]
+/// ```
 
 Error subclass: TypeError
   /// Human-readable description of the receiver.

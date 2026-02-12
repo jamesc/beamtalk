@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// UndefinedObject — The absence of a value.
-////
-//// `nil` is the singleton instance of UndefinedObject (Smalltalk convention).
-//// All methods are pure Beamtalk — no primitives needed.
-////
-//// ## Examples
-//// ```beamtalk
-//// nil class                    // => UndefinedObject
-//// nil isNil                    // => true
-//// nil ifNil: ['nothing']       // => 'nothing'
-//// ```
+/// UndefinedObject — The absence of a value.
+///
+/// `nil` is the singleton instance of UndefinedObject (Smalltalk convention).
+/// All methods are pure Beamtalk — no primitives needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// nil class                    // => UndefinedObject
+/// nil isNil                    // => true
+/// nil ifNil: ['nothing']       // => 'nothing'
+/// ```
 
 sealed Object subclass: UndefinedObject
   /// Returns true. nil is nil.

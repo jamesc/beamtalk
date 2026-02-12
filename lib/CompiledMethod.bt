@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// CompiledMethod — Method introspection object.
-////
-//// CompiledMethod objects are created by the `>>` operator and enable
-//// method introspection in Beamtalk. CompiledMethod is a value type
-//// (tagged map) — not instantiable via `new`.
-////
-//// ## Examples
-//// ```beamtalk
-//// (Integer >> #+) selector       // => #+
-//// (Integer >> #+) argumentCount  // => 1
-//// ```
+/// CompiledMethod — Method introspection object.
+///
+/// CompiledMethod objects are created by the `>>` operator and enable
+/// method introspection in Beamtalk. CompiledMethod is a value type
+/// (tagged map) — not instantiable via `new`.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Integer >> #+) selector       // => #+
+/// (Integer >> #+) argumentCount  // => 1
+/// ```
 
 sealed Object subclass: CompiledMethod
 

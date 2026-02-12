@@ -1,20 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Float — Floating-point arithmetic and operations.
-////
-//// Floats in Beamtalk are IEEE 754 double-precision (Erlang floats).
-//// Mixed arithmetic with integers auto-promotes to float.
-////
-//// ## BEAM Mapping
-//// Beamtalk floats map directly to Erlang floats.
-////
-//// ## Examples
-//// ```beamtalk
-//// 3.14 class        // => Float
-//// 1.0 + 2.5         // => 3.5
-//// 3.7 rounded       // => 4
-//// ```
+/// Float — Floating-point arithmetic and operations.
+///
+/// Floats in Beamtalk are IEEE 754 double-precision (Erlang floats).
+/// Mixed arithmetic with integers auto-promotes to float.
+///
+/// ## BEAM Mapping
+/// Beamtalk floats map directly to Erlang floats.
+///
+/// ## Examples
+/// ```beamtalk
+/// 3.14 class        // => Float
+/// 1.0 + 2.5         // => 3.5
+/// 3.7 rounded       // => 4
+/// ```
 
 sealed Number subclass: Float
   /// Add a number to the receiver.

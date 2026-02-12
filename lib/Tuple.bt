@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Tuple — Immutable fixed-size collection.
-////
-//// Tuples are backed by Erlang tuples. Particularly useful for
-//// Erlang interop with `{ok, Value}` and `{error, Reason}` patterns.
-////
-//// ## BEAM Mapping
-//// Beamtalk tuples map directly to Erlang tuples.
-////
-//// ## Examples
-//// ```beamtalk
-//// Tuple new: #(1, 2, 3)
-//// ```
+/// Tuple — Immutable fixed-size collection.
+///
+/// Tuples are backed by Erlang tuples. Particularly useful for
+/// Erlang interop with `{ok, Value}` and `{error, Reason}` patterns.
+///
+/// ## BEAM Mapping
+/// Beamtalk tuples map directly to Erlang tuples.
+///
+/// ## Examples
+/// ```beamtalk
+/// Tuple new: #(1, 2, 3)
+/// ```
 
 sealed Object subclass: Tuple
 

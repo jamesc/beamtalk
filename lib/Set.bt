@@ -1,17 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// Set — Unordered collection of unique elements.
-////
-//// Sets are immutable collections backed by Erlang's ordsets module.
-//// Operations that "modify" a set return a new set.
-////
-//// ## Examples
-//// ```beamtalk
-//// Set new class                    // => Set
-//// (Set new add: 1) includes: 1    // => true
-//// (Set new add: 1) size           // => 1
-//// ```
+/// Set — Unordered collection of unique elements.
+///
+/// Sets are immutable collections backed by Erlang's ordsets module.
+/// Operations that "modify" a set return a new set.
+///
+/// ## Examples
+/// ```beamtalk
+/// Set new class                    // => Set
+/// (Set new add: 1) includes: 1    // => true
+/// (Set new add: 1) size           // => 1
+/// ```
 
 sealed Object subclass: Set
   state: elements = #()

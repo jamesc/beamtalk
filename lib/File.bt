@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//// File — File system operations.
-////
-//// Provides basic file I/O operations using Erlang's `file` module.
-//// All operations are class methods. Errors use structured
-//// `#beamtalk_error{}` records.
-////
-//// ## Examples
-//// ```beamtalk
-//// File exists: '/tmp/test.txt'
-//// File readAll: '/tmp/test.txt'
-//// File writeAll: '/tmp/test.txt' contents: 'hello'
-//// ```
+/// File — File system operations.
+///
+/// Provides basic file I/O operations using Erlang's `file` module.
+/// All operations are class methods. Errors use structured
+/// `#beamtalk_error{}` records.
+///
+/// ## Examples
+/// ```beamtalk
+/// File exists: '/tmp/test.txt'
+/// File readAll: '/tmp/test.txt'
+/// File writeAll: '/tmp/test.txt' contents: 'hello'
+/// ```
 
 Object subclass: File
   /// Test if a file exists at the given path (class method).
