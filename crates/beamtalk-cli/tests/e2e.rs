@@ -373,7 +373,7 @@ impl DaemonManager {
 
         let daemon_child = Command::new(&binary)
             .args(["daemon", "start", "--foreground"])
-            .env("BEAMTALK_SESSION", E2E_SESSION_NAME)
+            .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
