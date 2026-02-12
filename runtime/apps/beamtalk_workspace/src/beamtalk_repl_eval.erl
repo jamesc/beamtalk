@@ -43,8 +43,10 @@
 %% This is the core of the REPL - compile, load, and execute.
 %% If the result is a Future PID, automatically awaits it before returning.
 %% Returns captured stdout as a binary (empty when no output was produced).
+%% Returns warnings as a list of formatted diagnostic strings.
 -spec do_eval(string(), beamtalk_repl_state:state()) -> 
-    {ok, term(), binary(), beamtalk_repl_state:state()} | {error, term(), binary(), beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()} | 
+    {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval(Expression, State) ->
     %% Generate unique module name for this evaluation
     Counter = beamtalk_repl_state:get_eval_counter(State),
@@ -58,7 +60,7 @@ do_eval(Expression, State) ->
     
     %% Compile expression via daemon
     case compile_expression(Expression, ModuleName, Bindings, State) of
-        {ok, Binary, _ResultExpr} ->
+        {ok, Binary, _ResultExpr, Warnings} ->
             %% Load the compiled module
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
@@ -121,12 +123,12 @@ do_eval(Expression, State) ->
                     end,
                     %% Retrieve captured output (always, even on error)
                     Output = stop_io_capture(CaptureRef),
-                    inject_output(EvalResult, Output);
+                    inject_output(EvalResult, Output, Warnings);
                 {error, Reason} ->
-                    {error, {load_error, Reason}, <<>>, NewState}
+                    {error, {load_error, Reason}, <<>>, [], NewState}
             end;
         {error, Reason} ->
-            {error, {compile_error, Reason}, <<>>, NewState}
+            {error, {compile_error, Reason}, <<>>, [], NewState}
     end.
 
 %% @doc Load a Beamtalk file and register its classes.
@@ -197,11 +199,11 @@ is_stdlib_path(Path) ->
 
 %% Compile a Beamtalk expression to bytecode via compiler daemon.
 -spec compile_expression(string(), atom(), map(), beamtalk_repl_state:state()) ->
-    {ok, binary(), term()} | {error, term()}.
+    {ok, binary(), term(), [binary()]} | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings, State) ->
     case compile_via_daemon(Expression, ModuleName, Bindings, State) of
-        {ok, Binary} ->
-            {ok, Binary, {daemon_compiled}};
+        {ok, Binary, Warnings} ->
+            {ok, Binary, {daemon_compiled}, Warnings};
         {error, daemon_unavailable} ->
             {error, <<"Compiler daemon not running. Start with: beamtalk daemon start --foreground">>};
         {error, {compile_error_formatted, FormattedDiagnostics}} ->
@@ -217,7 +219,7 @@ compile_expression(Expression, ModuleName, Bindings, State) ->
 
 %% Compile expression via compiler daemon using JSON-RPC over Unix socket.
 -spec compile_via_daemon(string(), atom(), map(), beamtalk_repl_state:state()) ->
-    {ok, binary()} | {error, term()}.
+    {ok, binary(), [binary()]} | {error, term()}.
 compile_via_daemon(Expression, ModuleName, Bindings, State) ->
     SocketPath = beamtalk_repl_state:get_daemon_socket_path(State),
     %% Try to connect to daemon
@@ -250,7 +252,7 @@ connect_to_daemon(SocketPath) ->
 
 %% Send compile request to daemon and process response.
 -spec compile_via_daemon_socket(string(), atom(), map(), gen_tcp:socket()) ->
-    {ok, binary()} | {error, term()}.
+    {ok, binary(), [binary()]} | {error, term()}.
 compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket) ->
     %% Extract known variable names from bindings (filter internal keys)
     KnownVariables = [atom_to_binary(K, utf8) 
@@ -292,7 +294,7 @@ is_internal_key(Key) when is_atom(Key) ->
     end.
 
 %% Parse daemon JSON-RPC response using jsx.
--spec parse_daemon_response(binary(), atom()) -> {ok, binary()} | {error, term()}.
+-spec parse_daemon_response(binary(), atom()) -> {ok, binary(), [binary()]} | {error, term()}.
 parse_daemon_response(ResponseLine, ModuleName) ->
     try
         Response = jsx:decode(ResponseLine, [return_maps]),
@@ -322,7 +324,7 @@ parse_daemon_response(ResponseLine, ModuleName) ->
     end.
 
 %% Parse compile result from daemon response.
--spec parse_compile_result(map(), atom()) -> {ok, binary()} | {error, term()}.
+-spec parse_compile_result(map(), atom()) -> {ok, binary(), [binary()]} | {error, term()}.
 parse_compile_result(Result, ModuleName) ->
     case maps:get(<<"success">>, Result, false) of
         true ->
@@ -330,7 +332,14 @@ parse_compile_result(Result, ModuleName) ->
                 undefined ->
                     {error, {daemon_error, <<"No core_erlang in response">>}};
                 CoreErlang ->
-                    compile_core_erlang(CoreErlang, ModuleName)
+                    %% Extract warnings from result
+                    FormattedWarnings = maps:get(<<"formatted_warnings">>, Result, []),
+                    case compile_core_erlang(CoreErlang, ModuleName) of
+                        {ok, Binary} ->
+                            {ok, Binary, FormattedWarnings};
+                        {error, Reason} ->
+                            {error, Reason}
+                    end
             end;
         false ->
             %% Compilation failed - use pre-formatted miette diagnostics
@@ -775,9 +784,9 @@ handle_io_request({put_chars, Encoding, Mod, Func, Args}, Buffer) ->
 handle_io_request(_Other, Buffer) ->
     {{error, enotsup}, Buffer}.
 
-%% @doc Inject captured output into an eval result tuple.
--spec inject_output(tuple(), binary()) -> tuple().
-inject_output({ok, Result, State}, Output) ->
-    {ok, Result, Output, State};
-inject_output({error, Reason, State}, Output) ->
-    {error, Reason, Output, State}.
+%% @doc Inject captured output and warnings into an eval result tuple.
+-spec inject_output(tuple(), binary(), [binary()]) -> tuple().
+inject_output({ok, Result, State}, Output, Warnings) ->
+    {ok, Result, Output, Warnings, State};
+inject_output({error, Reason, State}, Output, Warnings) ->
+    {error, Reason, Output, Warnings, State}.
