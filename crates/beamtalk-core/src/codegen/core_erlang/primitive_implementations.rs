@@ -47,6 +47,7 @@ pub fn generate_primitive_bif(
         "Set" => generate_set_bif(selector, params),
         "CompiledMethod" => generate_compiled_method_bif(selector, params),
         "Character" => generate_character_bif(selector, params),
+        "TestCase" => generate_test_case_bif(selector, params),
         _ => None,
     }
 }
@@ -759,6 +760,39 @@ fn generate_compiled_method_bif(selector: &str, params: &[String]) -> Option<Str
     match selector {
         "selector" | "source" | "argumentCount" | "printString" | "asString" => {
             ops_dispatch("beamtalk_compiled_method_ops", selector, params)
+        }
+        _ => None,
+    }
+}
+
+/// `TestCase` primitive implementations for `BUnit` test framework (ADR 0014).
+fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
+    match selector {
+        "assert:" => {
+            let p0 = params.first().map_or("_Condition", String::as_str);
+            Some(format!("call 'beamtalk_test_case':'assert'({p0})"))
+        }
+        "assert:equals:" => {
+            let p0 = params.first().map_or("_Actual", String::as_str);
+            let p1 = params.get(1).map_or("_Expected", String::as_str);
+            Some(format!(
+                "call 'beamtalk_test_case':'assert_equals'({p1}, {p0})"
+            ))
+        }
+        "deny:" => {
+            let p0 = params.first().map_or("_Condition", String::as_str);
+            Some(format!("call 'beamtalk_test_case':'deny'({p0})"))
+        }
+        "should:raise:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            let p1 = params.get(1).map_or("_ErrorKind", String::as_str);
+            Some(format!(
+                "call 'beamtalk_test_case':'should_raise'({p0}, {p1})"
+            ))
+        }
+        "fail:" => {
+            let p0 = params.first().map_or("_Message", String::as_str);
+            Some(format!("call 'beamtalk_test_case':'fail'({p0})"))
         }
         _ => None,
     }
