@@ -12,8 +12,8 @@
 // instantiation, nil testing, and display protocols.
 //
 // All methods are compiler intrinsics — dispatched at the call site,
-// never through the method body. The @primitive declarations serve as
-// the canonical specification of the ProtoObject protocol.
+// never through the method body. The @primitive and @intrinsic declarations
+// serve as the canonical specification of the ProtoObject protocol.
 
 abstract nil subclass: ProtoObject
   // Identity & equality
