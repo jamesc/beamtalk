@@ -1,7 +1,7 @@
 # ADR 0008: Doc Comments and API Documentation
 
 ## Status
-Proposed (2026-02-06)
+Accepted (2026-02-12)
 
 ## Context
 
@@ -302,7 +302,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ## Migration Path
 
-**No breaking changes.** The `///` syntax is new — existing `//` comments are unaffected. The stdlib files will need doc comments added incrementally (Phase 4).
+**No breaking changes.** The `///` syntax is new — existing `//` comments are unaffected. The stdlib files will need doc comments added incrementally (Phase 1).
 
 Recommended migration order:
 1. Core types first: Integer, Float, Number, String, Symbol
