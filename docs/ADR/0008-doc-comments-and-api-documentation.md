@@ -29,7 +29,7 @@ Beamtalk's standard library lives in 26 `lib/*.bt` files that were recently conv
 
 ## Decision
 
-Adopt **`///` triple-slash doc comments** for method and class documentation, and **`////` quadruple-slash doc comments** for module-level documentation, following the Gleam/Rust convention.
+Adopt **`///` triple-slash doc comments** for class and method documentation, following the Gleam/Rust convention.
 
 ### Method Documentation
 
@@ -56,29 +56,25 @@ Object subclass: Integer
   abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
 ```
 
-### Module Documentation
+### Class Documentation
 
 ```beamtalk
-//// Integer - Whole number arithmetic and operations
-////
-//// Integers in Beamtalk are arbitrary precision (Erlang integers).
-//// All arithmetic operations return integers unless explicitly
-//// converted with `asFloat`.
-////
-//// ## BEAM Mapping
-//// Beamtalk integers map directly to Erlang integers.
-////
-//// ## Examples
-//// ```beamtalk
-//// 42 class           // => Integer
-//// 2 ** 100           // => 1267650600228229401496703205376
-//// 17 % 5             // => 2
-//// 1 to: 5 do: [:n | Transcript show: n]
-//// ```
-
-/// Integer - The class for whole numbers.
+/// Integer - Whole number arithmetic and operations
 ///
-/// Supports arbitrary precision arithmetic.
+/// Integers in Beamtalk are arbitrary precision (Erlang integers).
+/// All arithmetic operations return integers unless explicitly
+/// converted with `asFloat`.
+///
+/// ## BEAM Mapping
+/// Beamtalk integers map directly to Erlang integers.
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 class           // => Integer
+/// 2 ** 100           // => 1267650600228229401496703205376
+/// 17 % 5             // => 2
+/// 1 to: 5 do: [:n | Transcript show: n]
+/// ```
 Object subclass: Integer
   // ... methods
 ```
@@ -141,13 +137,14 @@ open docs/index.html        # Browse generated reference
 
 **What we adopted:**
 - **Gleam/Rust `///` syntax** — Cleanest integration with existing `//` comment syntax. The lexer already handles `//`; extending to `///` is a minimal change. Markdown support comes free.
-- **Gleam's `////` for modules** — Cleaner than Rust's `//!` which requires being inside the item.
 - **EEP-48 doc chunks** — BEAM-standard documentation format. Docs are compiled into `.beam` files and accessible at runtime via `code:get_doc/1`. This aligns with Smalltalk's philosophy (docs are always available) and enables interop with Erlang/Elixir tooling.
+- **`README.md` for package/project docs** — Like Hex/Cargo/Go, prose-level documentation lives in Markdown files, not in source code comments. `beamtalk doc` includes `README.md` as the landing page for generated HTML documentation.
 
 **What we adapted:**
 - **Elixir's doc testing** — `/// ```beamtalk` blocks could be validated by the test runner (future work), similar to Elixir's doctests.
 
 **What we rejected:**
+- **`////` for module docs** — Beamtalk doesn't have modules (one class per file). Counting slashes (`///` vs `////`) is error-prone. Package-level docs belong in `README.md`, not in source comments. If modules are added later, this decision can be revisited.
 - **Elixir `@doc` pragma as syntax** — We use `///` for authoring (familiar, tooling-friendly) but compile to EEP-48 like Elixir does. No `@doc` attribute needed in source.
 - **Pharo `"..."` comments** — Beamtalk deliberately chose `//` over Smalltalk's `"..."` for comments (see `docs/beamtalk-syntax-rationale.md`). Using `"..."` for docs would be inconsistent.
 - **Python docstrings** — Requires string expressions as the first statement in a body, which doesn't fit Beamtalk's `method => body` syntax.
@@ -188,11 +185,11 @@ In Smalltalk, you can programmatically modify documentation — `MyClass comment
 
 **Why we accept this cost:** EEP-48 docs are frozen per-module, but modules are hot-reloadable. When a class is redefined in the REPL, the new `.beam` includes updated docs. Full Smalltalk-style `comment:` mutation (changing docs without recompiling) is deferred to the source retention future work. For now, "recompile to update docs" is acceptable — Elixir works this way and developers find it natural.
 
-#### 4. "`////` vs `///` will confuse everyone" (Usability)
+#### 4. "`README.md` for package docs is un-Smalltalk" (Philosophy)
 
-Four slashes vs three is a subtle visual distinction. In a readability-focused language, counting slashes is a UX smell. Mistyping `///` as `////` silently changes whether the doc attaches to the module or the next class/method. Gleam gets away with it because Gleam files are short; Beamtalk stdlib files could grow.
+In Smalltalk, everything lives in the image — there are no external files. Using `README.md` for package-level docs introduces a file-based concern into a language that aspires to be interactive-first. A Smalltalk purist would say the package overview should be a class comment on the package's root class.
 
-**Why we accept this cost:** Today, each `.bt` file has one class, so `////` only appears at the top of the file — hard to confuse with method-level `///`. If multi-class files are supported later, LSP diagnostics can warn about misplaced `////`. The Gleam community has not reported this as a real problem despite years of use.
+**Why we accept this cost:** Beamtalk is file-based, not image-based. `README.md` is the universal standard for project documentation — GitHub renders it, package managers index it, every developer expects it. Using `///` for class/method docs and `README.md` for project docs matches developer expectations. If Beamtalk gets an image-based workflow later, the README can be imported into the image.
 
 ### Residual Tension
 
@@ -245,7 +242,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ## Resolved Questions
 
-1. **`////` vs `///` for class docs:** **`////` is for module/file docs, `///` is for class and method docs.** The `////` at the top of a file documents the module (file-level overview, usage examples). The `///` before a class definition documents the class, and `///` before a method documents the method. This follows Gleam convention. Today each file has one class, so module ≈ class, but the distinction matters if multi-class files are ever supported.
+1. **`////` for module docs:** **Removed — just use `///`.** Beamtalk doesn't have modules (one class per file). Package-level docs belong in `README.md`. If modules are added later, a module doc syntax can be introduced then.
 
 2. **Doc inheritance:** **Yes — walk the hierarchy.** `:help Counter spawn` should show docs inherited from `Actor >> spawn` if Counter doesn't override the documentation, following Pharo's approach. This matches the existing `respondsTo:` hierarchy walking (ADR 0006) and provides better UX for users exploring unfamiliar classes.
 
@@ -256,10 +253,10 @@ Rejected because there's no way to distinguish documentation comments from imple
 ## Implementation
 
 ### Phase 1: Lexer + AST (S)
-- Extend lexer to recognize `///` as `Trivia::DocComment` and `////` as `Trivia::ModuleDocComment`
-- Add `doc_comment: Option<String>` to `MethodDefinition`, `ClassDefinition`, and `Module` in AST
-- `////` (module doc) attaches to the `Module` AST node — it documents the file, not a specific class
-- `///` (class/method doc) attaches to the next `ClassDefinition` or `MethodDefinition` node
+- Extend lexer to recognize `///` as `Trivia::DocComment`
+- Add `doc_comment: Option<String>` to `MethodDefinition` and `ClassDefinition` in AST
+- `///` before a class definition attaches to the `ClassDefinition` node
+- `///` before a method definition attaches to the `MethodDefinition` node
 - Parser extracts leading doc-comment trivia and attaches to the following AST node
 - **Note:** Trivia currently attaches to *tokens*, not AST nodes. The parser must collect doc-comment trivia from the leading trivia of the first token of a method/class definition and "lift" it to the enclosing AST node during parsing. This is similar to how `leading_comments` is already handled for `Module`.
 
@@ -271,7 +268,7 @@ Rejected because there's no way to distinguish documentation comments from imple
   ```
 - `BeamLanguage` = `beamtalk` (identifies docs as Beamtalk-originated)
 - `Format` = `<<"text/markdown">>` (raw Markdown from `///` comments)
-- `ModuleDoc` = content from `////` comments (or `none` if absent)
+- `ModuleDoc` = class `///` doc (the `///` before the class definition, or `none` if absent)
 - `Docs` = list of `{{function, Name, Arity}, Anno, Signature, Doc, Metadata}` for each documented method
 - Docs become accessible at runtime via `code:get_doc/1` and `shell_docs:render/2`
 - Erlang/Elixir tools can read Beamtalk docs natively (BEAM ecosystem interop)
@@ -283,7 +280,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 - **Markdown rendering:** LSP protocol natively supports Markdown in `MarkupContent` — pass raw Markdown to the editor, no rendering needed on our side
 
 ### Phase 4: REPL `:help` (M)
-- `:help ClassName` shows class `///` doc (and module `////` doc if available)
+- `:help ClassName` shows class `///` doc
 - `:help ClassName selector` shows method `///` doc
 - **Doc delivery:** Use `code:get_doc/1` to fetch docs from compiled `.beam` files at runtime (EEP-48). No source files or separate index needed — docs travel with compiled code.
 - **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `spawn`, show `Actor`'s docs for it.
@@ -291,12 +288,13 @@ Rejected because there's no way to distinguish documentation comments from imple
 - **Markdown rendering for terminal:** Use `shell_docs:render/2` (OTP built-in) for EEP-48 docs, or a crate like `termimad` for styled terminal output from raw Markdown.
 
 ### Phase 5: Stdlib Documentation (M)
-- Add `///` doc comments to all methods in `lib/*.bt`
-- Add `////` module docs to all 26 stdlib files
+- Add `///` doc comments to all classes and methods in `lib/*.bt`
+- Add `README.md` for package-level overview documentation
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 
 ### Phase 6: `beamtalk doc` Command (M)
 - Generate HTML reference from `///` comments (or read from EEP-48 chunks)
+- Use `README.md` as the landing page for generated documentation
 - Index by class, method name, category
 - Include cross-references between classes
 - **Markdown rendering for HTML:** Requires a Markdown-to-HTML library (e.g., `pulldown-cmark` or `comrak`)
