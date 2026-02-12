@@ -14,7 +14,7 @@
 //// All methods are compiler intrinsics dispatched at the call site.
 
 abstract nil subclass: ProtoObject
-  /// Test identity equality. True only if the receiver and `other` are the same object.
+  /// Test value equality (Erlang `==`).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -23,7 +23,7 @@ abstract nil subclass: ProtoObject
   /// ```
   == other => @primitive '=='
 
-  /// Test identity inequality.
+  /// Test value inequality (negation of `==`).
   ///
   /// ## Examples
   /// ```beamtalk

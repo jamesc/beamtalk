@@ -197,12 +197,12 @@ sealed Object subclass: String
   /// ```
   endsWith: suffix => @primitive 'endsWith:'
 
-  /// Return the 1-based index of the first occurrence of a substring, or 0 if not found.
+  /// Return the 1-based index of the first occurrence of a substring, or `nil` if not found.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 'hello' indexOf: 'ell'      // => 2
-  /// 'hello' indexOf: 'xyz'      // => 0
+  /// 'hello' indexOf: 'xyz'      // => nil
   /// ```
   indexOf: substring => @primitive 'indexOf:'
 

@@ -246,12 +246,12 @@ sealed Object subclass: List
   /// ```
   from: start to: end => @primitive 'from:to:'
 
-  /// Return the 1-based index of the first occurrence, or 0 if not found.
+  /// Return the 1-based index of the first occurrence, or `nil` if not found.
   ///
   /// ## Examples
   /// ```beamtalk
   /// #(10, 20, 30) indexOf: 20        // => 2
-  /// #(10, 20, 30) indexOf: 99        // => 0
+  /// #(10, 20, 30) indexOf: 99        // => nil
   /// ```
   indexOf: item => @primitive 'indexOf:'
 
