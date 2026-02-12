@@ -171,15 +171,18 @@ impl CoreErlangGenerator {
         write!(self.output, " in let StateAcc = {current_state} in try ")?;
 
         // Generate try body (receiver block) with state threading
-        let try_final = self.generate_exception_body_with_threading(receiver_block)?;
+        // BT-483: Now returns (result_var, state_version)
+        let (try_result_var, try_final) =
+            self.generate_exception_body_with_threading(receiver_block)?;
         let try_final_var = if try_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{try_final}")
         };
-        write!(self.output, " {try_final_var} ")?;
+        // BT-483: Return {Result, State} from try body
+        write!(self.output, " {{{try_result_var}, {try_final_var}}} ")?;
 
-        // Success: pass state through
+        // Success: pass {Result, State} through
         write!(self.output, "of {state_after_try} -> {state_after_try} ")?;
 
         // Catch clause
@@ -208,13 +211,19 @@ impl CoreErlangGenerator {
         }
 
         // Generate handler body with state threading (from original StateAcc)
-        let handler_final = self.generate_exception_body_with_threading(handler_block)?;
+        // BT-483: Now returns (result_var, state_version)
+        let (handler_result_var, handler_final) =
+            self.generate_exception_body_with_threading(handler_block)?;
         let handler_final_var = if handler_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{handler_final}")
         };
-        write!(self.output, " {handler_final_var} ")?;
+        // BT-483: Return {Result, State} from handler
+        write!(
+            self.output,
+            " {{{handler_result_var}, {handler_final_var}}} "
+        )?;
         self.pop_scope();
 
         // Re-raise non-matching exceptions
@@ -327,26 +336,38 @@ impl CoreErlangGenerator {
         write!(self.output, "let StateAcc = {current_state} in try ")?;
 
         // Generate try body with state threading
-        let try_final = self.generate_exception_body_with_threading(receiver_block)?;
+        // BT-483: Now returns (result_var, state_version)
+        let (try_result_var, try_final) =
+            self.generate_exception_body_with_threading(receiver_block)?;
         let try_final_var = if try_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{try_final}")
         };
-        write!(self.output, " {try_final_var} ")?;
+        // BT-483: Return {Result, State} from try body
+        write!(self.output, " {{{try_result_var}, {try_final_var}}} ")?;
 
         // Success: run cleanup starting from try body's state
+        // BT-483: Extract Result and State from {Result, State} tuple using element/N
+        let result_from_try = self.fresh_temp_var("TryResult");
         write!(
             self.output,
-            "of {state_after_try} -> let StateAcc = {state_after_try} in "
+            "of {state_after_try} -> \
+             let {result_from_try} = call 'erlang':'element'(1, {state_after_try}) in \
+             let StateAcc = call 'erlang':'element'(2, {state_after_try}) in "
         )?;
-        let cleanup_success_final = self.generate_exception_body_with_threading(cleanup_block)?;
+        let (_, cleanup_success_final) =
+            self.generate_exception_body_with_threading(cleanup_block)?;
         let cleanup_success_var = if cleanup_success_final == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{cleanup_success_final}")
         };
-        write!(self.output, " {cleanup_success_var} ")?;
+        // BT-483: Return try body result with cleanup's final state
+        write!(
+            self.output,
+            " {{{result_from_try}, {cleanup_success_var}}} "
+        )?;
 
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
         write!(
@@ -354,7 +375,7 @@ impl CoreErlangGenerator {
             "catch <{type_var}, {error_var}, {stack_var}> -> "
         )?;
         // Cleanup body generates state mutations that are discarded (re-raise follows)
-        let _cleanup_error_final = self.generate_exception_body_with_threading(cleanup_block)?;
+        let _ = self.generate_exception_body_with_threading(cleanup_block)?;
         write!(
             self.output,
             " primop 'raw_raise'({type_var}, {error_var}, {stack_var})"
@@ -363,17 +384,18 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// BT-410: Generates block body expressions with state mutation threading.
+    /// BT-410/BT-483: Generates block body expressions with state mutation threading.
     ///
     /// Follows the same pattern as `generate_while_body_with_threading`:
     /// - Sets `in_loop_body = true` so field reads/writes use `StateAcc`
     /// - Resets `state_version` to 0 (`StateAcc` is version 0)
     /// - Threads field assignments, self-sends, and local var assignments
-    /// - Returns the final state version number
+    /// - Returns `(result_var, final_state_version)` — the variable holding
+    ///   the last expression's result and the final state version number
     ///
     /// The caller must have already bound `StateAcc` to the current state
     /// before calling this function.
-    fn generate_exception_body_with_threading(&mut self, body: &Block) -> Result<usize> {
+    fn generate_exception_body_with_threading(&mut self, body: &Block) -> Result<(String, usize)> {
         let saved_state_version = self.state_version();
         self.set_state_version(0);
 
@@ -381,6 +403,8 @@ impl CoreErlangGenerator {
         self.in_loop_body = true;
 
         let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+
+        let mut result_var = "'nil'".to_string();
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
@@ -390,19 +414,69 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 self.generate_field_assignment_open(expr)?;
+                if is_last {
+                    // BT-483: Field assignment returns the assigned value
+                    // The val was already bound by generate_field_assignment_open
+                    // Use the current state var for the state, and the assigned value as result
+                    // Note: generate_field_assignment_open binds _ValN = <value>
+                    // We need to capture what was assigned - use nil since field assignment
+                    // semantically returns the value but we don't easily have the var name here
+                    result_var = "'nil'".to_string();
+                }
             } else if self.is_actor_self_send(expr) {
                 self.generate_self_dispatch_open(expr)?;
+                if is_last {
+                    // BT-483: Self-dispatch result is in last_dispatch_var
+                    if let Some(dv) = self.last_dispatch_var.clone() {
+                        let rv = self.fresh_temp_var("ExResult");
+                        write!(
+                            self.output,
+                            "let {rv} = call 'erlang':'element'(1, {dv}) in "
+                        )?;
+                        result_var = rv;
+                    }
+                }
             } else if Self::is_local_var_assignment(expr) {
                 self.generate_local_var_assignment_in_loop(expr)?;
-            } else if is_last && !has_direct_field_assignments {
-                // Last expression with no direct field assignments in body.
-                // Mutations come from nested constructs; bind result to StateAcc.
-                let next_version = self.state_version() + 1;
-                let next_var = format!("StateAcc{next_version}");
-                write!(self.output, "let {next_var} = ")?;
-                self.generate_expression(expr)?;
-                self.set_state_version(next_version);
-                write!(self.output, " in")?;
+            } else if is_last {
+                if has_direct_field_assignments {
+                    // Has direct field assignments — last non-assignment expr result is captured
+                    let rv = self.fresh_temp_var("ExResult");
+                    write!(self.output, "let {rv} = ")?;
+                    self.generate_expression(expr)?;
+                    write!(self.output, " in")?;
+                    result_var = rv;
+                } else {
+                    // BT-483: Last expression with no direct field assignments.
+                    // If this is a nested control flow construct returning {Result, State},
+                    // destructure it. Otherwise just capture the result.
+                    if self.control_flow_has_mutations(expr) {
+                        // Nested mutation construct returns {Result, State} tuple
+                        let tuple_var = self.fresh_temp_var("Tuple");
+                        let rv = self.fresh_temp_var("ExResult");
+                        let next_version = self.state_version() + 1;
+                        let next_var = format!("StateAcc{next_version}");
+                        write!(self.output, "let {tuple_var} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(
+                            self.output,
+                            " in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "
+                        )?;
+                        write!(
+                            self.output,
+                            "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
+                        )?;
+                        self.set_state_version(next_version);
+                        result_var = rv;
+                    } else {
+                        // Regular expression — capture result, state unchanged
+                        let rv = self.fresh_temp_var("ExResult");
+                        write!(self.output, "let {rv} = ")?;
+                        self.generate_expression(expr)?;
+                        write!(self.output, " in")?;
+                        result_var = rv;
+                    }
+                }
             } else {
                 write!(self.output, "let _ = ")?;
                 self.generate_expression(expr)?;
@@ -413,6 +487,6 @@ impl CoreErlangGenerator {
         let final_state_version = self.state_version();
         self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
-        Ok(final_state_version)
+        Ok((result_var, final_state_version))
     }
 }

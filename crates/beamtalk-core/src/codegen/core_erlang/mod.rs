@@ -1920,11 +1920,17 @@ end
         eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
         eprintln!("{code}");
 
-        // BT-153: For mutation-threaded loops, return {'nil', Result}
-        // where Result is the updated state (the loop returns the final StateAcc)
+        // BT-483: For mutation-threaded loops, return {Result, State} tuple.
+        // REPL extracts via element/2: let _LoopResult = element(1, Result) ...
         assert!(
-            code.contains("{'nil', Result}"),
-            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+            code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
+            "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
+        );
+
+        // BT-483: Loop termination should return {nil, StateAcc}
+        assert!(
+            code.contains("{'nil', StateAcc}"),
+            "Loop should return {{'nil', StateAcc}} on termination. Got:\n{code}"
         );
 
         // Verify mutation threading details
@@ -1993,10 +1999,10 @@ end
         eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
         eprintln!("{code}");
 
-        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        // BT-483: For mutation-threaded loops, return {Result, State} tuple.
         assert!(
-            code.contains("{'nil', Result}"),
-            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+            code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
+            "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
         );
 
         // Verify to:do: mutation threading
