@@ -217,6 +217,9 @@ pub fn cleanup_orphaned_sessions() -> Result<usize> {
 
 /// Clean up sessions older than the given number of days.
 ///
+/// Skips sessions that still have a running daemon to avoid
+/// removing files out from under a live process.
+///
 /// Returns the number of sessions cleaned up.
 ///
 /// # Errors
@@ -227,7 +230,7 @@ pub fn cleanup_old_sessions(max_age_days: u64) -> Result<usize> {
     let mut cleaned = 0;
 
     for session in sessions {
-        if is_session_old(&session, max_age_days) {
+        if is_session_old(&session, max_age_days) && !session.is_alive {
             cleanup_session(&session)?;
             cleaned += 1;
         }
