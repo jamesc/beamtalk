@@ -151,9 +151,9 @@ init({Port, Options}) ->
 %% @private
 handle_call({eval, Expression}, _From, State) ->
     case beamtalk_repl_eval:do_eval(Expression, State) of
-        {ok, Result, _Output, NewState} ->
+        {ok, Result, _Output, _Warnings, NewState} ->
             {reply, {ok, Result}, NewState};
-        {error, Reason, _Output, NewState} ->
+        {error, Reason, _Output, _Warnings, NewState} ->
             {reply, {error, Reason}, NewState}
     end;
 
@@ -212,11 +212,11 @@ handle_info({client_request, Request, ClientPid}, State) ->
         {eval, Expression} ->
             try
                 case beamtalk_repl_eval:do_eval(Expression, State) of
-                    {ok, Result, _Output, NewState} ->
-                        ClientPid ! {response, beamtalk_repl_server:format_response(Result)},
+                    {ok, Result, _Output, Warnings, NewState} ->
+                        ClientPid ! {response, beamtalk_repl_server:format_response_with_warnings(Result, Warnings)},
                         {noreply, NewState};
-                    {error, ErrorReason, _Output, NewState} ->
-                        ClientPid ! {response, beamtalk_repl_server:format_error(ErrorReason)},
+                    {error, ErrorReason, _Output, Warnings, NewState} ->
+                        ClientPid ! {response, beamtalk_repl_server:format_error_with_warnings(ErrorReason, Warnings)},
                         {noreply, NewState}
                 end
             catch

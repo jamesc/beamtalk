@@ -12,6 +12,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
+         format_response_with_warnings/2, format_error_with_warnings/2,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1,
          term_to_json/1, format_error_message/1]).
 
@@ -271,12 +272,12 @@ handle_op(<<"eval">>, Params, Msg, SessionPid) ->
                 empty_expression, Msg, fun format_error_message/1);
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
-                {ok, Result, Output} ->
+                {ok, Result, Output, Warnings} ->
                     beamtalk_repl_protocol:encode_result(
-                        Result, Msg, fun term_to_json/1, Output);
-                {error, ErrorReason, Output} ->
+                        Result, Msg, fun term_to_json/1, Output, Warnings);
+                {error, ErrorReason, Output, Warnings} ->
                     beamtalk_repl_protocol:encode_error(
-                        ErrorReason, Msg, fun format_error_message/1, Output)
+                        ErrorReason, Msg, fun format_error_message/1, Output, Warnings)
             end
     end;
 
@@ -601,6 +602,48 @@ format_error(Reason) ->
     try
         Message = format_error_message(Reason),
         jsx:encode(#{<<"type">> => <<"error">>, <<"message">> => Message})
+    catch
+        Class:FormatError:Stack ->
+            %% Log formatting failure for debugging
+            logger:debug("Failed to format error", #{
+                class => Class,
+                reason => FormatError,
+                stack => lists:sublist(Stack, 5),
+                original_reason => Reason
+            }),
+            %% Return fallback error response
+            jsx:encode(#{<<"type">> => <<"error">>, 
+                        <<"message">> => iolist_to_binary(io_lib:format("Error: ~p", [Reason]))})
+    end.
+
+%% @doc Format a successful response with warnings as JSON.
+-spec format_response_with_warnings(term(), [binary()]) -> binary().
+format_response_with_warnings(Value, Warnings) ->
+    try
+        JsonValue = term_to_json(Value),
+        Response = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
+        case Warnings of
+            [] -> jsx:encode(Response);
+            _ -> jsx:encode(maps:put(<<"warnings">>, Warnings, Response))
+        end
+    catch
+        Class:Reason:_Stack ->
+            %% Fallback with details about what went wrong
+            ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
+            jsx:encode(#{<<"type">> => <<"error">>, 
+                        <<"message">> => iolist_to_binary(ErrorMsg)})
+    end.
+
+%% @doc Format an error response with warnings as JSON.
+-spec format_error_with_warnings(term(), [binary()]) -> binary().
+format_error_with_warnings(Reason, Warnings) ->
+    try
+        Message = format_error_message(Reason),
+        Response = #{<<"type">> => <<"error">>, <<"message">> => Message},
+        case Warnings of
+            [] -> jsx:encode(Response);
+            _ -> jsx:encode(maps:put(<<"warnings">>, Warnings, Response))
+        end
     catch
         Class:FormatError:Stack ->
             %% Log formatting failure for debugging
