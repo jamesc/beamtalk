@@ -174,6 +174,11 @@ just ci
 # Start the REPL
 just repl
 
+# Run tests
+beamtalk test              # Run BUnit TestCase tests
+just test-stdlib           # Run compiled expression tests
+just test-e2e              # Run REPL integration tests
+
 # Clean build artifacts (works with Docker volumes)
 just clean
 ```
