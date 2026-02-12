@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Character - Unicode character (codepoint) wrapper
+//
+// Characters in Beamtalk are integers (Unicode codepoints) at the BEAM level.
+// The Character class provides OOP methods for working with individual characters.
+//
+// Syntax: $a, $Z, $1, $\n, $\t
+// Character value: 65  → $A (creates Character from codepoint)
+
+sealed Object subclass: Character
+
+  // Comparison
+  = other => @primitive '='
+  ~= other => (self = other) not
+  < other => @primitive '<'
+  > other => @primitive '>'
+  <= other => @primitive '<='
+  >= other => @primitive '>='
+
+  // Conversion
+  asInteger => @primitive 'asInteger'
+  asString => @primitive 'asString'
+
+  // Display
+  printString => @primitive 'printString'
+  describe => self printString
+
+  // Identity
+  hash => @primitive 'hash'
+
+  // Predicates
+  isLetter => @primitive 'isLetter'
+  isDigit => @primitive 'isDigit'
+  isUppercase => @primitive 'isUppercase'
+  isLowercase => @primitive 'isLowercase'
+  isWhitespace => @primitive 'isWhitespace'
+
+  // Case conversion
+  uppercase => @primitive 'uppercase'
+  lowercase => @primitive 'lowercase'
+
+  // Factory (class method)
+  class sealed value: codepoint => @primitive 'value:'

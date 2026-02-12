@@ -1,0 +1,103 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Character class (BT-339)
+// Character values are integers (Unicode codepoints) at the BEAM level.
+// The $a syntax compiles to integer codepoint (e.g., $A → 65).
+// At runtime, character literals are integers dispatched through Integer.
+// Character predicates (isLetter, isDigit, etc.) are added to Integer.
+
+// ===== Character Literals =====
+
+$A
+// => 65
+
+$a
+// => 97
+
+$0
+// => 48
+
+$\n
+// => 10
+
+$\t
+// => 9
+
+// ===== Comparison (uses Integer operators) =====
+
+$A = $A
+// => true
+
+$A = $B
+// => false
+
+$A ~= $B
+// => true
+
+$A < $B
+// => true
+
+$B > $A
+// => true
+
+$A <= $A
+// => true
+
+$B >= $A
+// => true
+
+// ===== Character Predicates (on Integer) =====
+
+$A isLetter
+// => true
+
+$z isLetter
+// => true
+
+$0 isLetter
+// => false
+
+$5 isDigit
+// => true
+
+$A isDigit
+// => false
+
+$A isUppercase
+// => true
+
+$a isUppercase
+// => false
+
+$a isLowercase
+// => true
+
+$A isLowercase
+// => false
+
+$\n isWhitespace
+// => true
+
+$\t isWhitespace
+// => true
+
+$A isWhitespace
+// => false
+
+// ===== Arithmetic works (characters are integers) =====
+
+$A + 1
+// => 66
+
+$z - $a
+// => 25
+
+// ===== Integer conversion still works =====
+
+$A asString
+// => 65
+
+$A asFloat
+// => 65.0
+

@@ -724,6 +724,7 @@ impl CoreErlangGenerator {
                 "RuntimeError",
                 "TypeError",
                 "InstantiationError",
+                "Character",
             ];
             if let Some(last) = chain.last() {
                 if known_value_roots.contains(&last.as_str()) {
