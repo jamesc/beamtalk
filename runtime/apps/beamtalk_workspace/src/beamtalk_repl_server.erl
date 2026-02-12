@@ -11,7 +11,7 @@
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([start_link/1, handle_client/2, handle_client/3, parse_request/1, format_response/1, format_error/1,
+-export([start_link/1, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
          format_bindings/1, format_loaded/1, format_actors/1, format_modules/1, format_docs/1,
          term_to_json/1, format_error_message/1, safe_to_existing_atom/1]).
@@ -104,11 +104,13 @@ acceptor_loop(ListenSocket) ->
                     %% Mark activity - new session connected
                     beamtalk_workspace_meta:update_activity(),
                     
-                    %% Spawn client handler with session pid in session mode
-                    %% Monitor session so handler exits if session crashes
+                    %% Spawn client handler monitoring the session.
+                    %% If the session crashes, handle_client eventually
+                    %% gets a recv error (closed socket) or timeout, and
+                    %% the handler exits cleanly.
                     spawn(fun() ->
                         MonRef = erlang:monitor(process, SessionPid),
-                        handle_client(ClientSocket, SessionPid, session),
+                        handle_client(ClientSocket, SessionPid),
                         %% Client disconnected — terminate the session
                         erlang:demonitor(MonRef, [flush]),
                         beamtalk_repl_shell:stop(SessionPid)
@@ -136,65 +138,19 @@ generate_session_id() ->
 
 %%% Client Handling
 
-%% @doc Handle a client connection (runs in separate process).
-%% 
-%% Supports two modes:
-%% - Legacy mode (default): Pid is a beamtalk_repl process (uses message passing)
-%%   Called by: beamtalk_repl:handle_info(accept, ...)
-%% - Session mode: Pid is a beamtalk_repl_shell process (uses gen_server API)
-%%   Called by: beamtalk_repl_server acceptor_loop
-handle_client(Socket, ReplPid) ->
-    %% Default to legacy mode for backward compatibility
-    handle_client(Socket, ReplPid, legacy).
-
-%% @doc Handle a client connection with explicit mode.
--spec handle_client(gen_tcp:socket(), pid(), legacy | session) -> ok.
-handle_client(Socket, Pid, Mode) ->
+%% @doc Handle a client connection in session mode (runs in separate process).
+%%
+%% The SessionPid is a beamtalk_repl_shell process that handles
+%% protocol-aware request routing via beamtalk_repl_protocol.
+%% Called by: beamtalk_repl_server acceptor_loop
+-spec handle_client(gen_tcp:socket(), pid()) -> ok.
+handle_client(Socket, SessionPid) ->
     inet:setopts(Socket, [{active, false}, {packet, line}]),
-    handle_client_loop(Socket, Pid, Mode).
+    handle_client_loop(Socket, SessionPid).
 
 %% @private
-%% Legacy mode: forward requests to beamtalk_repl via message passing (backward compatible)
-handle_client_loop(Socket, ReplPid, legacy) ->
-    try
-        case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-            {ok, Data} ->
-                %% Send request to REPL server via message passing
-                ReplPid ! {client_request, Data, self()},
-                %% Wait for response
-                receive
-                    {response, Response} ->
-                        case gen_tcp:send(Socket, [Response, "\n"]) of
-                            ok ->
-                                handle_client_loop(Socket, ReplPid, legacy);
-                            {error, SendError} ->
-                                logger:warning("REPL client send error: ~p", [SendError]),
-                                gen_tcp:close(Socket)
-                        end
-                after ?RECV_TIMEOUT ->
-                    gen_tcp:send(Socket, [format_error(timeout), "\n"]),
-                    gen_tcp:close(Socket)
-                end;
-            {error, closed} ->
-                ok;
-            {error, timeout} ->
-                gen_tcp:close(Socket);
-            {error, RecvError} ->
-                logger:warning("REPL client recv error: ~p", [RecvError]),
-                gen_tcp:close(Socket)
-        end
-    catch
-        Class:Reason:Stack ->
-            logger:error("REPL client handler crash", #{
-                class => Class,
-                reason => Reason,
-                stack => lists:sublist(Stack, 10)
-            }),
-            catch gen_tcp:close(Socket)
-    end;
-
-%% Session mode: forward requests to beamtalk_repl_shell via gen_server API
-handle_client_loop(Socket, SessionPid, session) ->
+%% Session mode: forward requests to beamtalk_repl_shell via protocol-aware dispatch
+handle_client_loop(Socket, SessionPid) ->
     try
         case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
             {ok, Data} ->
@@ -207,7 +163,7 @@ handle_client_loop(Socket, SessionPid, session) ->
                         %% Send response
                         case gen_tcp:send(Socket, [Response, "\n"]) of
                             ok ->
-                                handle_client_loop(Socket, SessionPid, session);
+                                handle_client_loop(Socket, SessionPid);
                             {error, SendError} ->
                                 logger:warning("REPL client send error: ~p", [SendError]),
                                 gen_tcp:close(Socket)
@@ -216,7 +172,7 @@ handle_client_loop(Socket, SessionPid, session) ->
                         ErrorJson = format_error(DecodeError),
                         case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
                             ok ->
-                                handle_client_loop(Socket, SessionPid, session);
+                                handle_client_loop(Socket, SessionPid);
                             {error, SendError} ->
                                 logger:warning("REPL client send error: ~p", [SendError]),
                                 gen_tcp:close(Socket)

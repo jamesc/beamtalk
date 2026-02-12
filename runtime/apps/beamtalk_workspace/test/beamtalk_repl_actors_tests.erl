@@ -12,7 +12,7 @@
 
 registry_starts_and_stops_test() ->
     %% Start registry
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     ?assert(is_process_alive(RegistryPid)),
     
     %% Stop registry
@@ -24,7 +24,7 @@ registry_starts_and_stops_test() ->
 %%% ===========================================================================
 
 register_actor_stores_metadata_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     
     %% Spawn a test counter actor
     {ok, ActorPid} = test_counter:start_link(0),
@@ -44,7 +44,7 @@ register_actor_stores_metadata_test() ->
     gen_server:stop(RegistryPid).
 
 unregister_actor_removes_from_registry_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
     
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -61,7 +61,7 @@ unregister_actor_removes_from_registry_test() ->
     gen_server:stop(RegistryPid).
 
 actor_termination_auto_unregisters_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
     
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -83,7 +83,7 @@ actor_termination_auto_unregisters_test() ->
 %%% ===========================================================================
 
 list_actors_returns_empty_initially_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     
     Actors = beamtalk_repl_actors:list_actors(RegistryPid),
     ?assertEqual([], Actors),
@@ -91,7 +91,7 @@ list_actors_returns_empty_initially_test() ->
     gen_server:stop(RegistryPid).
 
 list_actors_returns_all_registered_actors_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     
     %% Register multiple actors
     {ok, Actor1} = test_counter:start_link(0),
@@ -123,7 +123,7 @@ list_actors_returns_all_registered_actors_test() ->
 %%% ===========================================================================
 
 kill_actor_terminates_actor_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     {ok, ActorPid} = test_counter:start_link(0),
     
     ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
@@ -142,7 +142,7 @@ kill_actor_terminates_actor_test() ->
     gen_server:stop(RegistryPid).
 
 kill_nonexistent_actor_returns_error_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     
     %% Try to kill a non-registered PID
     FakePid = spawn(fun() -> receive _ -> ok end end),
@@ -159,7 +159,7 @@ kill_nonexistent_actor_returns_error_test() ->
 registry_termination_kills_all_actors_test() ->
     process_flag(trap_exit, true),
     
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(),
+    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     
     %% Register multiple actors
     {ok, Actor1} = test_counter:start_link(0),

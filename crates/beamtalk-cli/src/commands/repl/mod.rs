@@ -9,14 +9,17 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌─────────────────┐     ┌──────────────────────┐
-//! │  REPL CLI       │     │   BEAM Node          │
-//! │  (this module)  │────▶│  beamtalk_repl.erl   │
-//! │                 │ TCP │                      │
-//! │  rustyline      │     │  Compiler Daemon ◀───┤
-//! └─────────────────┘     └──────────────────────┘
-//!       │                           │
-//!   localhost:9000            Unix socket
+//! ┌─────────────────┐     ┌──────────────────────────────────┐
+//! │  REPL CLI       │     │   BEAM Node                      │
+//! │  (this module)  │────▶│  beamtalk_workspace_sup          │
+//! │                 │ TCP │    ├─ beamtalk_repl_server        │
+//! │  rustyline      │     │    ├─ beamtalk_session_sup        │
+//! └─────────────────┘     │    │   └─ beamtalk_repl_shell     │
+//!       │                 │    ├─ beamtalk_actor_registry      │
+//!   localhost:9000        │    └─ Compiler Daemon ◀───────────┤
+//!                         └──────────────────────────────────┘
+//!                                        │
+//!                                  Unix socket
 //! ```
 //!
 //! # Usage
