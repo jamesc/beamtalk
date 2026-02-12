@@ -169,7 +169,7 @@ format_module_info_with_source_test() ->
     Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path/to/file.bt", Tracker),
     {ok, Info} = beamtalk_repl_modules:get_module_info(my_module, Tracker2),
     Formatted = beamtalk_repl_modules:format_module_info(Info, 5),
-    ?assertEqual("my_module", maps:get(name, Formatted)),
+    ?assertEqual(<<"my_module">>, maps:get(name, Formatted)),
     ?assertEqual("/path/to/file.bt", maps:get(source_file, Formatted)),
     ?assertEqual(5, maps:get(actor_count, Formatted)),
     ?assert(is_integer(maps:get(load_time, Formatted))),
@@ -212,7 +212,7 @@ full_lifecycle_test() ->
     %% Get info and format
     {ok, Info} = beamtalk_repl_modules:get_module_info(counter, Tracker3),
     Formatted = beamtalk_repl_modules:format_module_info(Info, 3),
-    ?assertEqual("counter", maps:get(name, Formatted)),
+    ?assertEqual(<<"counter">>, maps:get(name, Formatted)),
     ?assertEqual(3, maps:get(actor_count, Formatted)),
     
     %% Remove first module
