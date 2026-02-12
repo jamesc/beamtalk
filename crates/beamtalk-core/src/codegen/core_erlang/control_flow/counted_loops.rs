@@ -10,7 +10,7 @@
 
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_repeat(
@@ -24,17 +24,15 @@ impl CoreErlangGenerator {
         // in apply '_LoopN'/0 ()
 
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
-
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let body_code = self.capture_expression(body)?;
+        self.write_document(&docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            format!("in apply '{loop_fn}'/0 ()"),
+        ]);
 
         Ok(())
     }
@@ -71,23 +69,23 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'repeat'/1 (1)
 
-        write!(self.output, "let ")?;
         let n_var = self.fresh_temp_var("temp");
-        write!(self.output, "{n_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, " in letrec 'repeat'/1 = fun (I) -> ")?;
-        write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'repeat'/1 (1)")?;
+        self.write_document(&docvec![
+            format!("let {n_var} = "),
+            receiver_code,
+            format!(" in letrec 'repeat'/1 = fun (I) -> "),
+            format!("case call 'erlang':'=<'(I, {n_var}) of "),
+            "<'true'> when 'true' -> ",
+            "let _ = ",
+            body_code,
+            format!(" in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            "in apply 'repeat'/1 (1)",
+        ]);
 
         Ok(())
     }
@@ -97,68 +95,48 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<()> {
-        // Analyze which variables are mutated
-        // BT-153: Only include field_writes for loop parameters (actor state),
-        // local_writes are handled by updating StateAcc in the body via maps:put
-        let analysis = block_analysis::analyze_block(body);
-        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
-        mutated_vars.sort();
+        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
 
         // Generate: let N = <receiver> in
-        //           letrec 'repeat'/N+1 = fun (I, Var1, Var2, ..., StateAcc) ->
+        //           letrec 'repeat'/2 = fun (I, StateAcc) ->
         //               case I =< N of
         //                 'true' -> <body with threading>
-        //                          apply 'repeat'/N+1 (I+1, Var1', Var2', ..., StateAcc')
+        //                          apply 'repeat'/2 (I+1, StateAcc')
         //                 'false' -> StateAcc
         //               end
-        //           in apply 'repeat'/N+1 (1, InitVar1, InitVar2, ..., State)
+        //           in apply 'repeat'/2 (1, State)
 
-        write!(self.output, "let ")?;
         let n_var = self.fresh_temp_var("temp");
-        write!(self.output, "{n_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        let arity = mutated_vars.len() + 2; // +1 for I, +1 for StateAcc
-        write!(self.output, " in letrec 'repeat'/{arity} = fun (I")?;
+        self.write_document(&docvec![
+            format!("let {n_var} = "),
+            receiver_code,
+            " in letrec 'repeat'/2 = fun (I, StateAcc) -> ",
+            format!("case call 'erlang':'=<'(I, {n_var}) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
-        let mut param_names = Vec::new();
-        for var in &mutated_vars {
-            let param = Self::to_core_erlang_var(var);
-            write!(self.output, ", {param}")?;
-            param_names.push(param);
-        }
-        write!(self.output, ", StateAcc) -> ")?;
-
-        write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        let final_state_version =
-            self.generate_times_repeat_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_times_repeat_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'repeat'/{arity} (call 'erlang':'+'(I, 1)"
-        )?;
-        for param in &param_names {
-            write!(self.output, ", {param}1")?;
-        }
-        write!(self.output, ", {final_state_var}) ")?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
-        // Initial call - the caller will bind the result to a state variable
+        // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'repeat'/{arity} (1")?;
-        for var in &mutated_vars {
-            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
-        }
-        write!(self.output, ", {prev_state})")?;
+        self.write_document(&docvec![
+            format!(" apply 'repeat'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!("in apply 'repeat'/2 (1, {prev_state})"),
+        ]);
 
         Ok(())
     }
@@ -176,10 +154,15 @@ impl CoreErlangGenerator {
         let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
+        // BT-478: Check if body has direct field assignments. If not, mutations
+        // come from nested constructs and the last expression's result must be bound.
+        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
@@ -187,14 +170,25 @@ impl CoreErlangGenerator {
                 // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
                 // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
                 self.generate_local_var_assignment_in_loop(expr)?;
+            } else if is_last && !has_direct_field_assignments {
+                // BT-478: Last expression with no direct field assignments in body.
+                // Mutations come from nested constructs (e.g., inner to:do:).
+                // Bind the nested construct's returned state to the next StateAcc.
+                let next_version = self.state_version() + 1;
+                let next_var = format!("StateAcc{next_version}");
+                let expr_code = self.capture_expression(expr)?;
+                self.set_state_version(next_version);
+                self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in"]);
             } else {
-                write!(self.output, "let _ = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in")?;
+                let expr_code = self.capture_expression(expr)?;
+                self.write_document(&docvec!["let _ = ", expr_code, " in"]);
             }
         }
 
@@ -242,29 +236,31 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/1 (Start)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(body)?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
-        write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = apply {body_var} (I) in ")?;
-        write!(self.output, "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ")?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'loop'/1 ({start_var})")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            " in letrec 'loop'/1 = fun (I) -> ",
+            format!("case call 'erlang':'=<'(I, {end_var}) of "),
+            "<'true'> when 'true' -> ",
+            format!("let _ = apply {body_var} (I) in "),
+            "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ",
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply 'loop'/1 ({start_var})"),
+        ]);
 
         Ok(())
     }
@@ -275,71 +271,55 @@ impl CoreErlangGenerator {
         limit: &Expression,
         body: &Block,
     ) -> Result<()> {
-        // Analyze which variables are mutated
-        // BT-153: Mutated variables are derived from field_writes for REPL context
-        let analysis = block_analysis::analyze_block(body);
-        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
-        mutated_vars.sort();
+        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
+        // Field values are read from StateAcc when needed. This correctly handles nested
+        // control flow constructs that modify state and return the updated StateAcc.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
 
         // Generate: let Start = <receiver> in let End = <limit> in
-        //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->
+        //           letrec 'loop'/2 = fun (I, StateAcc) ->
         //               case I =< End of
-        //                 'true' -> <body with I parameter and state threading>
-        //                          apply 'loop'/N+2 (I+1, Var1', Var2', ..., StateAcc')
+        //                 'true' -> <body with state threading>
+        //                          apply 'loop'/2 (I+1, StateAcc')
         //                 'false' -> StateAcc
         //               end
-        //           in apply 'loop'/N+2 (Start, InitVar1, InitVar2, ..., State)
+        //           in apply 'loop'/2 (Start, State)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        let arity = mutated_vars.len() + 2; // +1 for I, +1 for StateAcc
-        write!(self.output, " in letrec 'loop'/{arity} = fun (I")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+            format!("case call 'erlang':'=<'(I, {end_var}) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
-        let mut param_names = Vec::new();
-        for var in &mutated_vars {
-            let param = Self::to_core_erlang_var(var);
-            write!(self.output, ", {param}")?;
-            param_names.push(param);
-        }
-        write!(self.output, ", StateAcc) -> ")?;
-
-        write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        let final_state_version = self.generate_to_do_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_to_do_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'loop'/{arity} (call 'erlang':'+'(I, 1)"
-        )?;
-        for param in &param_names {
-            write!(self.output, ", {param}1")?;
-        }
-        write!(self.output, ", {final_state_var}) ")?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
-        // Initial call - the caller will bind the result to a state variable
+        // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
-        for var in &mutated_vars {
-            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
-        }
-        write!(self.output, ", {prev_state})")?;
+        self.write_document(&docvec![
+            format!(" apply 'loop'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
+        ]);
 
         Ok(())
     }
@@ -347,7 +327,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_to_do_body_with_threading(
         &mut self,
         body: &Block,
-        mutated_vars: &[String],
+        _mutated_vars: &[String],
     ) -> Result<usize> {
         // Bind the block parameter to I
         self.push_scope();
@@ -363,93 +343,54 @@ impl CoreErlangGenerator {
         let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
-        // Track which variables are assigned in the body
-        let mut assigned_vars = std::collections::HashSet::new();
-        for expr in &body.body {
-            if Self::is_field_assignment(expr) {
-                if let Expression::Assignment { target, .. } = expr {
-                    if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                        assigned_vars.insert(field.name.as_str());
-                    }
-                }
-            }
-        }
-
-        // Generate let bindings for mutated variables from StateAcc
-        let core_vars: Vec<String> = mutated_vars
-            .iter()
-            .map(|v| Self::to_core_erlang_var(v))
-            .collect();
-
-        for (i, (var, core_var)) in mutated_vars.iter().zip(core_vars.iter()).enumerate() {
-            if i > 0 || body.body.is_empty() {
-                // Add spacing
-            }
-            write!(
-                self.output,
-                "let {core_var} = call 'maps':'get'('{var}', StateAcc) in "
-            )?;
-        }
+        // BT-478: Check if body has direct field assignments vs only nested mutations.
+        // Direct field assignments update StateAcc via generate_field_assignment_open.
+        // Nested mutations (e.g., inner to:do: with field writes) return the updated
+        // state as the expression result.
+        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
 
         // Generate body expressions
         for (i, expr) in body.body.iter().enumerate() {
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                // generate_field_assignment_open increments state_version internally
+                // Field assignment - generate_field_assignment_open writes:
+                //   "let _Val = <value> in let StateAccN = maps:put(..., StateAccN-1) in "
                 self.generate_field_assignment_open(expr)?;
 
-                if is_last {
-                    // Last expression: close with the final state variable
-                    write!(self.output, "{}", self.current_state_var())?;
-                }
-                // Otherwise, the trailing " in " from generate_field_assignment_open
-                // allows the next expression to become the body
+                // BT-478: Do NOT write a bare state var for the last expression.
+                // The trailing "in " from generate_field_assignment_open means the
+                // caller's recursive apply will be the body of the let, which is valid
+                // Core Erlang: "let StateAcc1 = ... in apply 'loop'/2 (I+1, StateAcc1)"
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
-                if i > 0 {
-                    write!(self.output, " in ")?;
-                }
+                // No "in" prefix needed — prior expressions already end with "in "
+                // (field_assignment_open, local_var_assignment_in_loop, and non-assignment
+                // branches all emit trailing "in" or "in ").
                 self.generate_local_var_assignment_in_loop(expr)?;
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             } else {
-                // Non-assignment expression
-                if i > 0 {
-                    write!(self.output, "let _ = ")?;
-                }
-                self.generate_expression(expr)?;
-
-                if !is_last {
-                    write!(self.output, " in ")?;
-                }
-
-                // After last expression, rebuild StateAcc with updated values
-                if i == body.body.len() - 1 {
-                    write!(self.output, " in let StateAcc1 = ~{{")?;
-
-                    // Copy all fields from StateAcc
-                    write!(
-                        self.output,
-                        "'$beamtalk_class' => call 'maps':'get'('$beamtalk_class', StateAcc), "
-                    )?;
-                    write!(
-                        self.output,
-                        "'__methods__' => call 'maps':'get'('__methods__', StateAcc)"
-                    )?;
-
-                    // Update mutated fields
-                    for (var, core_var) in mutated_vars.iter().zip(core_vars.iter()) {
-                        write!(self.output, ", ")?;
-                        if assigned_vars.contains(var.as_str()) {
-                            write!(self.output, "'{var}' => {core_var}1")?;
-                        } else {
-                            write!(self.output, "'{var}' => {core_var}")?;
-                        }
-                    }
-                    write!(self.output, "}}~ in StateAcc1")?;
+                // Non-assignment expression (could be a nested control flow construct)
+                if is_last && !has_direct_field_assignments {
+                    // BT-478: Last expression with no direct field assignments in body.
+                    // This means mutations come from nested constructs (e.g., inner to:do:).
+                    // The nested construct returns the updated StateAcc, so bind it.
+                    //
+                    // IMPORTANT: Compute the next var name WITHOUT incrementing state_version
+                    // first, so the inner expression generates code that reads from the
+                    // CURRENT StateAcc, not the binding we're about to create.
+                    let next_version = self.state_version() + 1;
+                    let next_var = format!("StateAcc{next_version}");
+                    let expr_code = self.capture_expression(expr)?;
+                    // NOW increment state version
+                    self.set_state_version(next_version);
+                    // Write " in " — the caller's recursive apply becomes the let body:
+                    // "let StateAcc1 = <inner loop> in apply 'loop'/2 (I+1, StateAcc1)"
+                    self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in ",]);
                 } else {
-                    write!(self.output, " in ")?;
+                    // Not last, or there are direct field assignments that update state
+                    let expr_code = self.capture_expression(expr)?;
+                    self.write_document(&docvec!["let _ = ", expr_code, " in "]);
                 }
             }
         }
@@ -511,57 +452,45 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/1 (Start)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let step_var = self.fresh_temp_var("temp");
-        write!(self.output, "{step_var} = ")?;
-        self.generate_expression(step)?;
+        let step_code = self.capture_expression(step)?;
 
-        write!(self.output, " in let ")?;
         let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(body)?;
-
-        write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
+        let body_code = self.capture_expression(body)?;
 
         // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
         // Use nested case statements since andalso/orelse aren't BIFs
-        write!(
-            self.output,
-            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
-        )?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "end in case Continue of ")?;
-
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = apply {body_var} (I) in ")?;
-        write!(
-            self.output,
-            "apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'loop'/1 ({start_var})")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {step_var} = "),
+            step_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            " in letrec 'loop'/1 = fun (I) -> ",
+            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+            "<'false'> when 'true' -> ",
+            format!("case call 'erlang':'<'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+            "<'false'> when 'true' -> 'false' ",
+            "end ",
+            "end in case Continue of ",
+            "<'true'> when 'true' -> ",
+            format!("let _ = apply {body_var} (I) in "),
+            format!("apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply 'loop'/1 ({start_var})"),
+        ]);
 
         Ok(())
     }
@@ -573,94 +502,66 @@ impl CoreErlangGenerator {
         step: &Expression,
         body: &Block,
     ) -> Result<()> {
-        // Analyze which variables are mutated
-        let analysis = block_analysis::analyze_block(body);
-        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
-        mutated_vars.sort();
+        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
 
         // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
-        //           letrec 'loop'/N+2 = fun (I, Var1, Var2, ..., StateAcc) ->
+        //           letrec 'loop'/2 = fun (I, StateAcc) ->
         //               case (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End) of
-        //                 'true' -> <body with I parameter and state threading>
-        //                          apply 'loop'/N+2 (I+Step, Var1', Var2', ..., StateAcc')
+        //                 'true' -> <body with state threading>
+        //                          apply 'loop'/2 (I+Step, StateAcc')
         //                 'false' -> StateAcc
         //               end
-        //           in apply 'loop'/N+2 (Start, InitVar1, InitVar2, ..., State)
+        //           in apply 'loop'/2 (Start, State)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let step_var = self.fresh_temp_var("temp");
-        write!(self.output, "{step_var} = ")?;
-        self.generate_expression(step)?;
-
-        let arity = mutated_vars.len() + 2; // +1 for I, +1 for StateAcc
-        write!(self.output, " in letrec 'loop'/{arity} = fun (I")?;
-
-        let mut param_names = Vec::new();
-        for var in &mutated_vars {
-            let param = Self::to_core_erlang_var(var);
-            write!(self.output, ", {param}")?;
-            param_names.push(param);
-        }
-        write!(self.output, ", StateAcc) -> ")?;
+        let step_code = self.capture_expression(step)?;
 
         // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
-        // Use nested case statements since andalso/orelse aren't BIFs
-        write!(
-            self.output,
-            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
-        )?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "end in case Continue of ")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {step_var} = "),
+            step_code,
+            " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+            "<'false'> when 'true' -> ",
+            format!("case call 'erlang':'<'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+            "<'false'> when 'true' -> 'false' ",
+            "end ",
+            "end in case Continue of ",
+            "<'true'> when 'true' -> ",
+        ]);
 
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        let final_state_version = self.generate_to_do_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_to_do_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'loop'/{arity} (call 'erlang':'+'(I, {step_var})"
-        )?;
-        for param in &param_names {
-            write!(self.output, ", {param}1")?;
-        }
-        write!(self.output, ", {final_state_var}) ")?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
-        // Initial call - the caller will bind the result to a state variable
+        // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, " in apply 'loop'/{arity} ({start_var}")?;
-        for var in &mutated_vars {
-            write!(self.output, ", call 'maps':'get'('{var}', {prev_state})",)?;
-        }
-        write!(self.output, ", {prev_state})")?;
+        self.write_document(&docvec![
+            format!(" apply 'loop'/2 (call 'erlang':'+'(I, {step_var}), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
+        ]);
 
         Ok(())
     }

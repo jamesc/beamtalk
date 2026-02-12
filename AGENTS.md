@@ -1150,27 +1150,28 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 
 | Epic ID | Name | Child Issues | Progress | Priority |
 |---------|------|--------------|----------|----------|
-| **BT-319** | Metaclass & First-Class Classes (ADR 0013) | 8 issues | ~60% | High |
-| **BT-205** | Standard Library Core Classes | 18 issues | ~39% | High |
-| **BT-206** | REPL and Interactive Development | 13 issues | ~55% | High |
-| **BT-204** | Block Semantics and Control Flow | 15 issues | ~87% | High |
-| **BT-207** | Actor Runtime and Messaging | 8 issues | ~50% | High |
-| **BT-208** | Parser and Language Syntax | 8 issues | ~70% | High |
-| **BT-320** | Object Protocol & Live Development | 10 issues | ~40% | Medium |
-| **BT-209** | Code Quality and Infrastructure | 19 issues | ~75% | High |
+| **BT-205** | Standard Library Core Classes | 18 issues | ~60% | High |
+| **BT-206** | REPL and Interactive Development | 13 issues | ~70% | High |
+| **BT-320** | Object Protocol & Live Development | 10 issues | ~45% | Medium |
 | **BT-185** | Persistent Workspace Management | 11 issues | ~85% | Medium |
-| **BT-210** | Advanced Language Features | 10 issues | ~10% | High |
-| **BT-432** | Stdlib Bootstrap Tests (ADR 0014) | 3 issues | ~0% | Urgent |
+| **BT-210** | Advanced Language Features | 10 issues | ~0% | High |
 | **BT-433** | BUnit Test Framework (ADR 0014) | 5 issues | ~0% | High |
 | **BT-332** | Getting Started with Beamtalk | TBD | ~0% | High |
 | **BT-299** | ADR Creation for Existing Design Documents | TBD | ~0% | High |
-| **BT-325** | Towers of Hanoi Language Showcase | TBD | ~0% | Medium |
+| **BT-325** | Towers of Hanoi Language Showcase | TBD | ~20% | Medium |
 | **BT-450** | Signal-Time Exception Objects (ADR 0015) | 2 issues | ~0% | High |
 
 #### Epic Completed
 
 | Epic ID | Name | Child Issues | Completion Date |
 |---------|------|--------------|-----------------|
+| **BT-319** | Metaclass & First-Class Classes (ADR 0013) | 8 issues | 2026-02-11 |
+| **BT-432** | Stdlib Bootstrap Tests (ADR 0014) | 3 issues | 2026-02-11 |
+| **BT-453** | Universal Module Naming (ADR 0016) | 1 issue | 2026-02-11 |
+| **BT-204** | Block Semantics and Control Flow | 15 issues | 2026-02-11 |
+| **BT-208** | Parser and Language Syntax | 8 issues | 2026-02-11 |
+| **BT-207** | Actor Runtime and Messaging | 8 issues | 2026-02-11 |
+| **BT-209** | Code Quality and Infrastructure | 19 issues | 2026-02-11 |
 | **BT-286** | Compilable Standard Library (ADR 0007) | 12 issues | 2026-02-07 |
 | **BT-278** | Unified Method Dispatch (ADR 0006) | 6 issues | 2026-02-08 |
 | **BT-162** | BEAM Object Model (ADR 0005) | 19 issues | 2026-02-08 |

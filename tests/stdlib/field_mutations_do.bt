@@ -23,3 +23,50 @@ counter getValue await
 
 counter getValue await
 // => 10
+
+// === sumArray: — do: with field mutation (accumulate sum) ===
+
+(counter setValue: 0) await
+// => _
+
+(counter sumArray: #(1, 2, 3)) await
+// => 6
+
+counter getValue await
+// => 6
+
+(counter setValue: 0) await
+// => _
+
+(counter sumArray: #(10, 20, 30)) await
+// => 60
+
+counter getValue await
+// => 60
+
+// === sumWithInject: — functional alternative (no field mutation) ===
+
+(counter sumWithInject: #(1, 2, 3)) await
+// => 6
+
+(counter sumWithInject: #(100, 200, 300)) await
+// => 600
+
+// === FieldMutationAccumulator.processArray: — multiple field mutations in do: ===
+
+// @load tests/e2e/fixtures/field_mutation_accumulator.bt
+
+acc := FieldMutationAccumulator spawn
+// => _
+
+(acc processArray: #(2, 3, 4)) await
+// => _
+
+acc getSum await
+// => 9
+
+acc getProduct await
+// => 24
+
+acc getCount await
+// => 3

@@ -133,6 +133,11 @@ impl SimpleLanguageService {
         self.files.get(file)
     }
 
+    /// Returns the cached parsed Module for a file, if available.
+    pub fn module(&self, file: &Utf8PathBuf) -> Option<&Module> {
+        self.files.get(file).map(|data| &data.module)
+    }
+
     /// Finds the identifier at a given position.
     fn find_identifier_at_position(
         &self,

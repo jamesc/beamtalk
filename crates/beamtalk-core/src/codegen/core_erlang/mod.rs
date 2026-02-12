@@ -512,6 +512,13 @@ pub(super) struct CoreErlangGenerator {
     /// (class var assignment or class method self-send). Used by the class method
     /// body generator to reference the result when closing open scopes.
     last_open_scope_result: Option<String>,
+    /// BT-245: Whether a state-threading loop mutated REPL bindings.
+    /// Set by `_with_mutations` loop codegen when `is_repl_mode` is true.
+    /// Checked by `generate_eval_module_body` to return `{'nil', Result}`.
+    repl_loop_mutated: bool,
+    /// BT-245: Name of the dispatch tuple variable from the last `generate_self_dispatch_open`.
+    /// Contains `{Result, State}` — callers can extract element 1 for the result value.
+    last_dispatch_var: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -538,6 +545,8 @@ impl CoreErlangGenerator {
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
+            repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 
@@ -564,6 +573,8 @@ impl CoreErlangGenerator {
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
+            repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 
@@ -657,9 +668,9 @@ impl CoreErlangGenerator {
         format!("ClassVars{}", self.class_var_version)
     }
 
-    /// BT-153: Check if mutation threading should be used for a block.
+    /// BT-153/BT-245: Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
-    /// In module mode, only field writes trigger threading.
+    /// In module mode, field writes OR self-sends trigger threading.
     pub(super) fn needs_mutation_threading(
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
@@ -668,8 +679,8 @@ impl CoreErlangGenerator {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
         } else {
-            // Module: only field writes need threading
-            !analysis.field_writes.is_empty()
+            // Module: field writes or self-sends (which may mutate state) need threading
+            analysis.has_state_effects()
         }
     }
 
@@ -703,11 +714,26 @@ impl CoreErlangGenerator {
             }
             // If the chain terminated at a known value-type root (Object/ProtoObject),
             // this is definitely a value type.
-            let known_value_roots = ["Object", "ProtoObject"];
+            // BT-480: Include exception hierarchy classes — these inherit from Object
+            // (Exception → Object) and must compile as value types, not actors.
+            let known_value_roots = [
+                "Object",
+                "ProtoObject",
+                "Exception",
+                "Error",
+                "RuntimeError",
+                "TypeError",
+                "InstantiationError",
+            ];
             if let Some(last) = chain.last() {
                 if known_value_roots.contains(&last.as_str()) {
                     return false;
                 }
+            }
+            // Also check direct superclass against known value types for incomplete chains
+            // (e.g., `Error subclass: MyCustomError` compiled without Exception in hierarchy).
+            if known_value_roots.contains(&class.superclass_name()) {
+                return false;
             }
             // Chain is incomplete (superclass not in hierarchy) or empty with
             // non-Object superclass. Default to actor for backward compatibility
@@ -1146,12 +1172,10 @@ impl CoreErlangGenerator {
         // instead of delegating through a hand-written dispatch module.
         if is_quoted {
             let params = self.current_method_params.clone();
-            if let Some(()) = primitive_implementations::generate_primitive_bif(
-                &mut self.output,
-                &class_name,
-                name,
-                &params,
-            ) {
+            if let Some(code) =
+                primitive_implementations::generate_primitive_bif(&class_name, name, &params)
+            {
+                self.output.push_str(&code);
                 return Ok(());
             }
         }
@@ -1854,7 +1878,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_times_repeat_mutation() {
         // BT-153: REPL with mutation should return updated state
         // Expression: 5 timesRepeat: [count := count + 1]
@@ -1916,7 +1939,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_to_do_mutation() {
         use crate::ast::BlockParameter;
 

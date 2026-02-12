@@ -1,7 +1,7 @@
 # ADR 0005: BEAM Object Model - Pragmatic Hybrid Approach
 
 ## Status
-Accepted
+Implemented (2026-02-08) — Epic BT-162
 
 ## Context
 

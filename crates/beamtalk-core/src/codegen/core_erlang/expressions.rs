@@ -19,7 +19,8 @@ use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector,
 };
-use std::fmt::Write;
+use crate::docvec;
+use std::fmt::Write; // For write!() on local String buffers (not self.output)
 
 impl CoreErlangGenerator {
     /// Generates code for a literal value.
@@ -33,35 +34,29 @@ impl CoreErlangGenerator {
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
     pub(super) fn generate_literal(&mut self, lit: &Literal) -> Result<()> {
         match lit {
-            Literal::Integer(n) => write!(self.output, "{n}")?,
-            Literal::Float(f) => write!(self.output, "{f}")?,
+            Literal::Integer(n) => self.write_document(&docvec![format!("{n}")]),
+            Literal::Float(f) => self.write_document(&docvec![format!("{f}")]),
             Literal::String(s) => {
-                // Core Erlang binary syntax: #{segment, segment, ...}#
-                // Each segment is #<value>(size, units, type, flags)
-                write!(self.output, "#{{")?;
-                for (i, ch) in s.chars().enumerate() {
-                    if i > 0 {
-                        write!(self.output, ",")?;
-                    }
-                    write!(
-                        self.output,
-                        "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                        ch as u32
-                    )?;
-                }
-                write!(self.output, "}}#")?;
+                // Reuse the shared UTF-8 binary literal helper (encodes via .bytes())
+                let result = Self::binary_string_literal(s);
+                self.write_document(&docvec![result]);
             }
-            Literal::Symbol(s) => write!(self.output, "'{s}'")?,
-            Literal::Character(c) => write!(self.output, "{}", *c as u32)?,
+            Literal::Symbol(s) => self.write_document(&docvec![format!("'{s}'")]),
+            Literal::Character(c) => self.write_document(&docvec![format!("{}", *c as u32)]),
             Literal::List(elements) => {
-                write!(self.output, "[")?;
+                let mut result = String::from("[");
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        write!(self.output, ", ")?;
+                        result.push_str(", ");
                     }
+                    // Capture recursive literal output
+                    let start = self.output.len();
                     self.generate_literal(elem)?;
+                    result.push_str(&self.output[start..]);
+                    self.output.truncate(start);
                 }
-                write!(self.output, "]")?;
+                result.push(']');
+                self.write_document(&docvec![result]);
             }
         }
         Ok(())
@@ -79,15 +74,15 @@ impl CoreErlangGenerator {
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<()> {
         // Handle special reserved identifiers as atoms
         match id.name.as_str() {
-            "true" => write!(self.output, "'true'")?,
-            "false" => write!(self.output, "'false'")?,
-            "nil" => write!(self.output, "'nil'")?,
+            "true" => self.write_document(&docvec!["'true'"]),
+            "false" => self.write_document(&docvec!["'false'"]),
+            "nil" => self.write_document(&docvec!["'nil'"]),
             "self" => {
                 // BT-411: Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
-                    write!(self.output, "{var_name}")?;
+                    self.write_document(&docvec![var_name]);
                 } else {
-                    write!(self.output, "Self")?; // self → Self parameter (BT-161)
+                    self.write_document(&docvec!["Self"]); // self → Self parameter (BT-161)
                 }
             }
             "super" => {
@@ -101,7 +96,7 @@ impl CoreErlangGenerator {
             _ => {
                 // Check if it's a bound variable in current or outer scopes
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
-                    write!(self.output, "{var_name}")?;
+                    self.write_document(&docvec![var_name]);
                 } else {
                     // Field access from state/self
                     // BT-213: Context determines which variable to use
@@ -137,7 +132,10 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    write!(self.output, "call 'maps':'get'('{}', {state_var})", id.name)?;
+                    self.write_document(&docvec![format!(
+                        "call 'maps':'get'('{}', {state_var})",
+                        id.name
+                    )]);
                 }
             }
         }
@@ -153,26 +151,27 @@ impl CoreErlangGenerator {
     /// ```
     pub(super) fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<()> {
         if pairs.is_empty() {
-            write!(self.output, "~{{}}~")?;
+            self.write_document(&docvec!["~{}~"]);
             return Ok(());
         }
 
-        write!(self.output, "~{{ ")?;
+        let mut result = String::from("~{ ");
 
         for (i, pair) in pairs.iter().enumerate() {
             if i > 0 {
-                write!(self.output, ", ")?;
+                result.push_str(", ");
             }
 
             // Generate the key
-            self.generate_expression(&pair.key)?;
-            write!(self.output, " => ")?;
+            result.push_str(&self.capture_expression(&pair.key)?);
+            result.push_str(" => ");
 
             // Generate the value
-            self.generate_expression(&pair.value)?;
+            result.push_str(&self.capture_expression(&pair.value)?);
         }
 
-        write!(self.output, " }}~")?;
+        result.push_str(" }~");
+        self.write_document(&docvec![result]);
 
         Ok(())
     }
@@ -185,20 +184,21 @@ impl CoreErlangGenerator {
         elements: &[Expression],
         tail: Option<&Expression>,
     ) -> Result<()> {
-        write!(self.output, "[")?;
+        let mut result = String::from("[");
         for (i, elem) in elements.iter().enumerate() {
             if i > 0 {
-                write!(self.output, ", ")?;
+                result.push_str(", ");
             }
-            self.generate_expression(elem)?;
+            result.push_str(&self.capture_expression(elem)?);
         }
         if let Some(t) = tail {
             if !elements.is_empty() {
-                write!(self.output, " | ")?;
+                result.push_str(" | ");
             }
-            self.generate_expression(t)?;
+            result.push_str(&self.capture_expression(t)?);
         }
-        write!(self.output, "]")?;
+        result.push(']');
+        self.write_document(&docvec![result]);
         Ok(())
     }
 
@@ -219,7 +219,10 @@ impl CoreErlangGenerator {
             if let Expression::Identifier(recv_id) = receiver {
                 if recv_id.name == "self" && self.class_var_names.contains(field.name.as_str()) {
                     let cv = self.current_class_var();
-                    write!(self.output, "call 'maps':'get'('{}', {cv})", field.name)?;
+                    self.write_document(&docvec![format!(
+                        "call 'maps':'get'('{}', {cv})",
+                        field.name
+                    )]);
                     return Ok(());
                 }
             }
@@ -240,11 +243,10 @@ impl CoreErlangGenerator {
                     super::CodeGenContext::Actor => self.current_state_var(),
                     super::CodeGenContext::Repl => "State".to_string(),
                 };
-                write!(
-                    self.output,
+                self.write_document(&docvec![format!(
                     "call 'maps':'get'('{}', {state_var})",
                     field.name
-                )?;
+                )]);
                 return Ok(());
             }
         }
@@ -283,13 +285,16 @@ impl CoreErlangGenerator {
             if self.class_var_names.contains(field_name) {
                 let val_var = self.fresh_temp_var("Val");
                 let current_cv = self.current_class_var();
-                write!(self.output, "let {val_var} = ")?;
-                self.generate_expression(value)?;
+                let val_str = self.capture_expression(value)?;
                 let new_cv = self.next_class_var();
-                write!(
-                    self.output,
-                    " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
-                )?;
+                let doc = docvec![
+                    format!("let {val_var} = "),
+                    val_str,
+                    format!(
+                        " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
+                    )
+                ];
+                self.write_document(&doc);
                 // Store result var name for callers that need to reference it
                 self.last_open_scope_result = Some(val_var);
                 return Ok(());
@@ -317,21 +322,21 @@ impl CoreErlangGenerator {
         // because the value expression may reference state (e.g., self.value + 1)
         let current_state = self.current_state_var();
 
-        // let _Val = <value> in
-        write!(self.output, "let {val_var} = ")?;
-        self.generate_expression(value)?;
+        // Capture value expression (preserves side effects on state)
+        let val_str = self.capture_expression(value)?;
 
         // Now increment state version for the new state after assignment
         let new_state = self.next_state_var();
 
-        // let State{n} = call 'maps':'put'('field', _Val, State{n-1}) in
-        write!(
-            self.output,
-            " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
-        )?;
-
-        // _Val (assignment returns the assigned value)
-        write!(self.output, "{val_var}")?;
+        let doc = docvec![
+            format!("let {val_var} = "),
+            val_str,
+            format!(
+                " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
+            ),
+            val_var
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -346,15 +351,16 @@ impl CoreErlangGenerator {
         // Push a new scope for block parameters
         self.push_scope();
 
-        write!(self.output, "fun (")?;
+        let mut params = String::new();
         for (i, param) in block.parameters.iter().enumerate() {
             if i > 0 {
-                write!(self.output, ", ")?;
+                params.push_str(", ");
             }
             let var_name = self.fresh_var(&param.name);
-            write!(self.output, "{var_name}")?;
+            params.push_str(&var_name);
         }
-        write!(self.output, ") -> ")?;
+        let doc = docvec!["fun (", params, ") -> "];
+        self.write_document(&doc);
         self.generate_block_body(block)?;
 
         // Pop the scope when done with the block
@@ -371,9 +377,9 @@ impl CoreErlangGenerator {
     /// ```
     pub(super) fn generate_await(&mut self, future: &Expression) -> Result<()> {
         // Delegate to beamtalk_future:await/1, which uses 30s default timeout
-        write!(self.output, "call 'beamtalk_future':'await'(")?;
-        self.generate_expression(future)?;
-        write!(self.output, ")")?;
+        let future_str = self.capture_expression(future)?;
+        let doc = docvec!["call 'beamtalk_future':'await'(", future_str, ")"];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -388,11 +394,16 @@ impl CoreErlangGenerator {
         future: &Expression,
         timeout: &Expression,
     ) -> Result<()> {
-        write!(self.output, "call 'beamtalk_future':'await'(")?;
-        self.generate_expression(future)?;
-        write!(self.output, ", ")?;
-        self.generate_expression(timeout)?;
-        write!(self.output, ")")?;
+        let future_str = self.capture_expression(future)?;
+        let timeout_str = self.capture_expression(timeout)?;
+        let doc = docvec![
+            "call 'beamtalk_future':'await'(",
+            future_str,
+            ", ",
+            timeout_str,
+            ")"
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -403,9 +414,9 @@ impl CoreErlangGenerator {
     /// call 'beamtalk_future':'await_forever'(Future)
     /// ```
     pub(super) fn generate_await_forever(&mut self, future: &Expression) -> Result<()> {
-        write!(self.output, "call 'beamtalk_future':'await_forever'(")?;
-        self.generate_expression(future)?;
-        write!(self.output, ")")?;
+        let future_str = self.capture_expression(future)?;
+        let doc = docvec!["call 'beamtalk_future':'await_forever'(", future_str, ")"];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -472,6 +483,7 @@ impl CoreErlangGenerator {
                     false
                 };
 
+            let mut result = String::new();
             let receiver_var = if is_binding_cascade {
                 let binding_name =
                     if let Expression::ClassReference { name, .. } = underlying_receiver.as_ref() {
@@ -489,16 +501,18 @@ impl CoreErlangGenerator {
                 // Look up binding object from persistent_term (beamtalk_object tuple)
                 let binding_var = self.fresh_temp_var("BindingObj");
                 write!(
-                    self.output,
+                    result,
                     "let {binding_var} = call 'persistent_term':'get'({{'beamtalk_binding', '{binding_name}'}}) in "
-                )?;
+                )
+                .unwrap();
                 binding_var
             } else {
                 // Bind the underlying receiver once
                 let receiver_var = self.fresh_temp_var("Receiver");
-                write!(self.output, "let {receiver_var} = ")?;
-                self.generate_expression(underlying_receiver)?;
-                write!(self.output, " in ")?;
+                let recv_str = self.capture_expression(underlying_receiver)?;
+                write!(result, "let {receiver_var} = ").unwrap();
+                result.push_str(&recv_str);
+                result.push_str(" in ");
                 receiver_var
             };
 
@@ -510,7 +524,7 @@ impl CoreErlangGenerator {
 
                 if !is_last {
                     // For all but the last message, discard the result
-                    write!(self.output, "let _ = ")?;
+                    result.push_str("let _ = ");
                 }
 
                 // Determine which selector/arguments to use:
@@ -532,34 +546,38 @@ impl CoreErlangGenerator {
                     });
                 }
                 write!(
-                    self.output,
+                    result,
                     "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
-                )?;
+                )
+                .unwrap();
 
                 // Arguments
                 for (j, arg) in arguments.iter().enumerate() {
                     if j > 0 {
-                        write!(self.output, ", ")?;
+                        result.push_str(", ");
                     }
-                    self.generate_expression(arg)?;
+                    result.push_str(&self.capture_expression(arg)?);
                 }
 
-                write!(self.output, "])")?;
+                result.push_str("])");
 
                 if !is_last {
-                    write!(self.output, " in ")?;
+                    result.push_str(" in ");
                 }
             }
 
+            self.write_document(&docvec![result]);
             Ok(())
         } else {
             // Fallback: if the receiver is not a MessageSend (which should not
             // happen for well-formed cascades), preserve the previous behavior:
             // evaluate the receiver once and send all cascade messages to it.
+            let mut result = String::new();
             let receiver_var = self.fresh_temp_var("Receiver");
-            write!(self.output, "let {receiver_var} = ")?;
-            self.generate_expression(receiver)?;
-            write!(self.output, " in ")?;
+            let recv_str = self.capture_expression(receiver)?;
+            write!(result, "let {receiver_var} = ").unwrap();
+            result.push_str(&recv_str);
+            result.push_str(" in ");
 
             // Generate each message send, discarding intermediate results
             for (i, message) in messages.iter().enumerate() {
@@ -567,7 +585,7 @@ impl CoreErlangGenerator {
 
                 if !is_last {
                     // For all but the last message, discard the result
-                    write!(self.output, "let _ = ")?;
+                    result.push_str("let _ = ");
                 }
 
                 // Unified message dispatch to the bound receiver
@@ -579,25 +597,27 @@ impl CoreErlangGenerator {
                     });
                 }
                 write!(
-                    self.output,
+                    result,
                     "call 'beamtalk_message_dispatch':'send'({receiver_var}, '{selector_atom}', ["
-                )?;
+                )
+                .unwrap();
 
                 // Arguments
                 for (j, arg) in message.arguments.iter().enumerate() {
                     if j > 0 {
-                        write!(self.output, ", ")?;
+                        result.push_str(", ");
                     }
-                    self.generate_expression(arg)?;
+                    result.push_str(&self.capture_expression(arg)?);
                 }
 
-                write!(self.output, "])")?;
+                result.push_str("])");
 
                 if !is_last {
-                    write!(self.output, " in ")?;
+                    result.push_str(" in ");
                 }
             }
 
+            self.write_document(&docvec![result]);
             Ok(())
         }
     }
@@ -608,7 +628,7 @@ impl CoreErlangGenerator {
     /// for subsequent expressions. See inline comments for threading details.
     pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<()> {
         if block.body.is_empty() {
-            write!(self.output, "'nil'")?;
+            self.write_document(&docvec!["'nil'"]);
             return Ok(());
         }
 
@@ -658,14 +678,14 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // Generate: let VarName = <value> in ...
-                        // Important: do NOT update the mapping before generating the RHS,
+                        // Capture the value expression (preserves side effects)
+                        // Important: capture BEFORE updating the mapping,
                         // so that any uses of the variable in the RHS see the previous binding.
-                        write!(self.output, "let {core_var} = ")?;
-                        self.generate_expression(value)?;
+                        let val_str = self.capture_expression(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
-                        write!(self.output, " in ")?;
+                        let doc = docvec![format!("let {core_var} = "), val_str, " in "];
+                        self.write_document(&doc);
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
@@ -678,9 +698,9 @@ impl CoreErlangGenerator {
                     let core_var = self
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    write!(self.output, "let {core_var} = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in ")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![format!("let {core_var} = "), expr_str, " in "];
+                    self.write_document(&doc);
                 } else {
                     // Multi-var case not supported yet
                     return Err(CodeGenError::UnsupportedFeature {
@@ -690,22 +710,9 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Not an assignment or loop - generate and discard result
-                // Message send: generate and discard result explicitly
-                if let Expression::MessageSend {
-                    receiver,
-                    selector,
-                    arguments,
-                    ..
-                } = expr
-                {
-                    write!(self.output, "let _Unit = ")?;
-                    self.generate_message_send(receiver, selector, arguments)?;
-                    write!(self.output, " in ")?;
-                } else {
-                    write!(self.output, "let _Unit = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in ")?;
-                }
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec!["let _Unit = ", expr_str, " in "];
+                self.write_document(&doc);
             }
         }
 

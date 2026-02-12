@@ -46,6 +46,9 @@ sealed Object subclass: List
   // Concatenation
   ++ other => @primitive '++'
 
+  // Display
+  printString => @primitive 'printString'
+
   // Subsequence / Search
   from: start to: end => @primitive 'from:to:'
   indexOf: item => @primitive 'indexOf:'
