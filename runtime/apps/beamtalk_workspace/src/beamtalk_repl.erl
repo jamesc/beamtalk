@@ -333,6 +333,33 @@ handle_info({client_request, Request, ClientPid}, State) ->
                             {noreply, State}
                     end
             end;
+        {get_docs, ClassNameBin, Selector} ->
+            case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+                {error, badarg} ->
+                    ClientPid ! {response, beamtalk_repl_server:format_error({class_not_found, ClassNameBin})},
+                    {noreply, State};
+                {ok, ClassName} ->
+                    case Selector of
+                        undefined ->
+                            case beamtalk_repl_docs:format_class_docs(ClassName) of
+                                {ok, DocText} ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_docs(DocText)},
+                                    {noreply, State};
+                                {error, Reason} ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
+                                    {noreply, State}
+                            end;
+                        SelectorBin ->
+                            case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
+                                {ok, DocText} ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_docs(DocText)},
+                                    {noreply, State};
+                                {error, Reason} ->
+                                    ClientPid ! {response, beamtalk_repl_server:format_error(Reason)},
+                                    {noreply, State}
+                            end
+                    end
+            end;
         {error, ParseError} ->
             ClientPid ! {response, beamtalk_repl_server:format_error(ParseError)},
             {noreply, State}

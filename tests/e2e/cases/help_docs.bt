@@ -1,0 +1,22 @@
+// E2E tests for :help command (BT-500)
+// Tests documentation lookup for classes and methods.
+
+// :help with a known class — should show class header with superclass
+:help Integer
+// => == Integer < Number ==_
+
+// :help with a known method — should show method signature and doc
+:help Integer +
+// => Integer >> +_
+
+// :help with an inherited method — should show inheritance info
+:help Integer isPositive
+// => Integer >> isPositive_(inherited from Number)_
+
+// :help with an unknown class — should show helpful error
+:help FakeClassName
+// => ERROR: Unknown class: FakeClassName
+
+// :help with an unknown method — should show helpful error
+:help Integer nonExistentMethod
+// => ERROR: Integer does not understand nonExistentMethod
