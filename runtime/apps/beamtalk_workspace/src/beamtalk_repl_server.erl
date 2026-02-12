@@ -43,7 +43,11 @@ start_link(Port) when is_integer(Port) ->
 
 %% @private
 init(#{port := Port}) ->
-    %% Start listening on TCP port, bound to loopback only for security
+    %% SECURITY: Bind to loopback only (127.0.0.1) so that only local
+    %% processes can connect. No authentication is performed — the loopback
+    %% restriction is the sole access control, matching the security model of
+    %% erl, iex, and other language REPLs. If remote binding is ever added,
+    %% authentication must be required. See docs/beamtalk-security.md (BT-184).
     ListenOpts = [binary, {packet, line}, {active, false}, {reuseaddr, true},
                   {ip, {127, 0, 0, 1}}],
     case gen_tcp:listen(Port, ListenOpts) of
