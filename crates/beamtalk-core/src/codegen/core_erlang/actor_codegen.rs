@@ -83,7 +83,7 @@ impl CoreErlangGenerator {
         self.output.push('\n');
 
         // Generate start_link/1 (standard gen_server entry point)
-        self.generate_start_link()?;
+        self.generate_start_link();
         self.output.push('\n');
 
         if is_abstract {
@@ -175,7 +175,7 @@ impl CoreErlangGenerator {
         }
 
         // Module end
-        self.output.push_str("end\n");
+        self.write_document(&docvec!["end\n"]);
 
         Ok(())
     }
@@ -340,14 +340,15 @@ impl CoreErlangGenerator {
             ];
             self.write_document(&header);
 
-            self.indent += 1;
-            self.write_indent()?;
-
             // Generate method body with reply tuple (reuse existing codegen)
+            let start = self.output.len();
             self.generate_method_definition_body_with_reply(method)?;
-            self.output.push('\n');
+            let body_str = self.output[start..].to_string();
+            self.output.truncate(start);
 
-            self.indent -= 1;
+            let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
+            self.write_document(&body_doc);
+
             self.pop_scope();
         }
 
