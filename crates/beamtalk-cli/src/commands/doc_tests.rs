@@ -142,7 +142,6 @@ fn extract_from_doc_comment(doc: &str, doc_start_line: usize) -> Vec<DocTestGrou
         // Look for opening code fence: ```beamtalk
         if is_beamtalk_code_fence(trimmed) {
             i += 1;
-            let block_start = i;
             let mut block_lines = Vec::new();
 
             // Collect lines until closing ```
@@ -156,7 +155,7 @@ fn extract_from_doc_comment(doc: &str, doc_start_line: usize) -> Vec<DocTestGrou
             }
 
             // Parse assertions from the code block
-            let cases = parse_code_block(&block_lines, doc_start_line + block_start);
+            let cases = parse_code_block(&block_lines, doc_start_line);
             if !cases.is_empty() {
                 groups.push(DocTestGroup { cases });
             }
@@ -200,11 +199,13 @@ fn parse_code_block(lines: &[(usize, &str)], absolute_line_offset: usize) -> Vec
 
         // Check for inline `// =>` on the same line
         if let Some((expr, expected)) = split_inline_assertion(trimmed) {
-            cases.push(DocTestCase {
-                expression: expr,
-                expected: parse_expected(expected),
-                source_line: absolute_line_offset + rel_line,
-            });
+            if let Some(expected) = parse_expected(expected) {
+                cases.push(DocTestCase {
+                    expression: expr,
+                    expected,
+                    source_line: absolute_line_offset + rel_line,
+                });
+            }
             i += 1;
             continue;
         }
@@ -218,11 +219,13 @@ fn parse_code_block(lines: &[(usize, &str)], absolute_line_offset: usize) -> Vec
             let next_trimmed = lines[i].1.trim();
             if let Some(expected_str) = next_trimmed.strip_prefix("// =>") {
                 let expected_str = expected_str.trim();
-                cases.push(DocTestCase {
-                    expression,
-                    expected: parse_expected(expected_str),
-                    source_line: expr_line,
-                });
+                if let Some(expected) = parse_expected(expected_str) {
+                    cases.push(DocTestCase {
+                        expression,
+                        expected,
+                        source_line: expr_line,
+                    });
+                }
                 i += 1;
             } else {
                 // No assertion — treat as setup (wildcard)
@@ -267,18 +270,21 @@ fn split_inline_assertion(line: &str) -> Option<(String, &str)> {
 }
 
 /// Parse an expected value string into an `Expected` enum.
-fn parse_expected(s: &str) -> Expected {
+///
+/// Returns `None` for invalid `ERROR:` assertions with missing kind.
+fn parse_expected(s: &str) -> Option<Expected> {
     if let Some(kind) = s.strip_prefix("ERROR:") {
         let kind = kind.trim();
         if kind.is_empty() {
-            Expected::Value("_".to_string())
+            // Invalid — match test_stdlib behavior: skip
+            None
         } else {
-            Expected::Error {
+            Some(Expected::Error {
                 kind: kind.to_string(),
-            }
+            })
         }
     } else {
-        Expected::Value(s.to_string())
+        Some(Expected::Value(s.to_string()))
     }
 }
 
@@ -309,23 +315,28 @@ mod tests {
 
     #[test]
     fn test_parse_expected_value() {
-        assert_eq!(parse_expected("7"), Expected::Value("7".to_string()));
-        assert_eq!(parse_expected("_"), Expected::Value("_".to_string()));
+        assert_eq!(parse_expected("7"), Some(Expected::Value("7".to_string())));
+        assert_eq!(parse_expected("_"), Some(Expected::Value("_".to_string())));
     }
 
     #[test]
     fn test_parse_expected_error() {
         assert_eq!(
             parse_expected("ERROR:does_not_understand"),
-            Expected::Error {
+            Some(Expected::Error {
                 kind: "does_not_understand".to_string()
-            }
+            })
         );
     }
 
     #[test]
     fn test_parse_expected_wildcard() {
-        assert_eq!(parse_expected("_"), Expected::Value("_".to_string()));
+        assert_eq!(parse_expected("_"), Some(Expected::Value("_".to_string())));
+    }
+
+    #[test]
+    fn test_parse_expected_empty_error_kind() {
+        assert_eq!(parse_expected("ERROR:"), None);
     }
 
     #[test]

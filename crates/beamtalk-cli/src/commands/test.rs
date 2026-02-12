@@ -461,6 +461,10 @@ fn discover_and_compile_doc_tests(
         return Ok(Vec::new());
     }
 
+    // Compile the containing source file so its classes are available to doc tests
+    compile_fixture(source_path, build_dir)
+        .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
+
     let mut results = Vec::new();
 
     for class_doc in doc_tests {
@@ -782,8 +786,7 @@ pub fn run_tests(path: &str) -> Result<()> {
     let total_doc_tests: usize = compiled_doc_tests.iter().map(|d| d.assertion_count).sum();
     let total_tests = total_bunit_tests + total_doc_tests;
 
-    let file_count = compiled_tests.len() + compiled_doc_tests.len();
-    println!("Compiling {} test file(s)...", file_count);
+    println!("Compiling {} test file(s)...", test_files.len());
 
     // Phase 2: Compile EUnit wrappers
     compile_erl_files(&all_erl_files, &build_dir)?;
