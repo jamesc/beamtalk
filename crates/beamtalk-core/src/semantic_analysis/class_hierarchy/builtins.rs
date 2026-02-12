@@ -337,6 +337,31 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
+    // Stream (sealed) — BT-511: lazy closure-based sequences
+    classes.insert(
+        "Stream".into(),
+        ClassInfo {
+            name: "Stream".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            state: vec![],
+            methods: vec![
+                builtin_method("select:", 1, "Stream"),
+                builtin_method("collect:", 1, "Stream"),
+                builtin_method("reject:", 1, "Stream"),
+                builtin_method("drop:", 1, "Stream"),
+                builtin_method("take:", 1, "Stream"),
+                builtin_method("do:", 1, "Stream"),
+                builtin_method("inject:into:", 2, "Stream"),
+                builtin_method("detect:", 1, "Stream"),
+                builtin_method("asList", 0, "Stream"),
+                builtin_method("anySatisfy:", 1, "Stream"),
+                builtin_method("allSatisfy:", 1, "Stream"),
+            ],
+        },
+    );
+
     // Block (sealed)
     classes.insert(
         "Block".into(),

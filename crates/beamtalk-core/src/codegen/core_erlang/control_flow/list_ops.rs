@@ -238,7 +238,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Simple case: no mutations, use standard lists:foldl
+        // Simple case: no mutations, use standard lists:foldl with is_list guard
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.capture_expression(receiver)?;
         let init_var = self.fresh_temp_var("temp");
@@ -253,7 +253,13 @@ impl CoreErlangGenerator {
             init_code,
             format!(" in let {body_var} = "),
             body_code,
-            format!(" in call 'lists':'foldl'({body_var}, {init_var}, {list_var})"),
+            format!(
+                " in case call 'erlang':'is_list'({list_var}) of \
+                 <'true'> when 'true' -> \
+                 call 'lists':'foldl'({body_var}, {init_var}, {list_var}) \
+                 <'false'> when 'true' -> \
+                 call 'beamtalk_primitive':'send'({list_var}, 'inject:into:', [{init_var}, {body_var}]) end"
+            ),
         ];
         self.write_document(&doc);
 
