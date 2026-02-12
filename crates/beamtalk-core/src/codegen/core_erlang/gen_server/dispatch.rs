@@ -217,16 +217,16 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
     ) -> Result<()> {
-        use std::fmt::Write;
+        // Write function header
+        let header_doc = docvec![
+            "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
+            nest(INDENT, docvec![line(), "case Selector of",]),
+            "\n",
+        ];
+        self.write_document(&header_doc);
 
-        writeln!(
-            self.output,
-            "'dispatch'/4 = fun (Selector, Args, Self, State) ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Selector of")?;
-        self.indent += 1;
+        // Case clauses are at indent level 2 (inside function + inside case)
+        let case_clause_indent: isize = 2;
 
         // Generate case clause for each method in the module (legacy expression-based)
         for expr in &module.expressions {
@@ -240,50 +240,59 @@ impl CoreErlangGenerator {
                     // Push a new scope for this method's parameter bindings
                     self.push_scope();
 
-                    self.write_indent()?;
-                    write!(self.output, "<'{}'> when 'true' ->", id.name)?;
-                    writeln!(self.output)?;
-                    self.indent += 1;
+                    // BT-470: Register parameters BEFORE generating body so field
+                    // references resolve to parameter variables (not maps:get)
+                    let param_vars: Vec<String> = block
+                        .parameters
+                        .iter()
+                        .map(|p| self.fresh_var(&p.name))
+                        .collect();
 
-                    // Bind block parameters from Args list
-                    if !block.parameters.is_empty() {
-                        self.write_indent()?;
-                        write!(self.output, "case Args of")?;
-                        writeln!(self.output)?;
-                        self.indent += 1;
-
-                        self.write_indent()?;
-                        write!(self.output, "<[")?;
-                        for (i, param) in block.parameters.iter().enumerate() {
-                            if i > 0 {
-                                write!(self.output, ", ")?;
-                            }
-                            let var_name = self.fresh_var(&param.name);
-                            write!(self.output, "{var_name}")?;
-                        }
-                        write!(self.output, "]> when 'true' ->")?;
-                        writeln!(self.output)?;
-                        self.indent += 1;
-                    }
-
-                    // Generate the method body with state threading
-                    self.write_indent()?;
+                    // Capture body output
+                    let start = self.output.len();
                     self.generate_method_body_with_reply(block)?;
-                    writeln!(self.output)?;
+                    let body_str = self.output[start..].to_string();
+                    self.output.truncate(start);
 
-                    if !block.parameters.is_empty() {
-                        self.indent -= 1;
-                        self.write_indent()?;
-                        writeln!(
-                            self.output,
-                            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-                        )?;
-                        self.indent -= 1;
-                        self.write_indent()?;
-                        writeln!(self.output, "end")?;
-                    }
+                    // Build method clause as Document tree
+                    let clause_doc = if param_vars.is_empty() {
+                        docvec![
+                            format!("<'{}'> when 'true' ->", id.name),
+                            nest(INDENT, docvec![line(), body_str,]),
+                            "\n",
+                        ]
+                    } else {
+                        let params_str = param_vars.join(", ");
 
-                    self.indent -= 1;
+                        docvec![
+                            format!("<'{}'> when 'true' ->", id.name),
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "case Args of",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            format!("<[{params_str}]> when 'true' ->"),
+                                            nest(INDENT, docvec![line(), body_str,]),
+                                            line(),
+                                            "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                            "\n",
+                        ]
+                    };
+
+                    let indent_spaces = case_clause_indent * INDENT;
+                    #[allow(clippy::cast_sign_loss)]
+                    let indent_str = " ".repeat(indent_spaces as usize);
+                    self.write_document(&docvec![indent_str, nest(indent_spaces, clause_doc)]);
 
                     // Pop the scope when done with this method
                     self.pop_scope();
@@ -293,7 +302,7 @@ impl CoreErlangGenerator {
 
         // Generate case clauses for methods in class definitions
         for class in &module.classes {
-            self.generate_class_method_dispatches(class)?;
+            self.generate_class_method_dispatches(class, case_clause_indent)?;
         }
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
@@ -306,143 +315,144 @@ impl CoreErlangGenerator {
         let hint = "Check spelling or use 'respondsTo:' to verify method exists";
         let hint_binary = Self::binary_string_literal(hint);
 
-        self.write_indent()?;
-        write!(self.output, "<OtherSelector> when 'true' ->")?;
-        self.indent += 1;
-
         let default_body = docvec![
-            line(),
-            "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
-            line(),
-            format!(
-                "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
-            ),
+            "<OtherSelector> when 'true' ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    "of ExtLookupResult -> ExtLookupResult",
+                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
                     line(),
-                    "catch <_EType, _EReason, _EStack> -> 'not_found'",
-                ]
-            ),
-            line(),
-            "in",
-            line(),
-            "case ExtLookup of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
+                    format!(
+                        "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
+                    ),
                     nest(
                         INDENT,
                         docvec![
                             line(),
-                            "let ExtResult = apply ExtFun(Args, Self) in",
+                            "of ExtLookupResult -> ExtLookupResult",
                             line(),
-                            "{'reply', ExtResult, State}",
+                            "catch <_EType, _EReason, _EStack> -> 'not_found'",
                         ]
                     ),
                     line(),
-                    "<'not_found'> when 'true' ->",
+                    "in",
+                    line(),
+                    "case ExtLookup of",
                     nest(
                         INDENT,
                         docvec![
                             line(),
-                            "%% ADR 0006: Try hierarchy walk before DNU",
-                            line(),
-                            format!(
-                                "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
-                            ),
+                            "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
                             nest(
                                 INDENT,
                                 docvec![
                                     line(),
-                                    "<{'reply', InheritedResult, InheritedState}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', InheritedResult, InheritedState}",
-                                        ]
-                                    ),
+                                    "let ExtResult = apply ExtFun(Args, Self) in",
                                     line(),
-                                    "<{'error', _DispatchError}> when 'true' ->",
+                                    "{'reply', ExtResult, State}",
+                                ]
+                            ),
+                            line(),
+                            "<'not_found'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "%% ADR 0006: Try hierarchy walk before DNU",
+                                    line(),
+                                    format!(
+                                        "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
+                                    ),
                                     nest(
                                         INDENT,
                                         docvec![
                                             line(),
-                                            "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)",
-                                            line(),
-                                            "let DnuSelector = 'doesNotUnderstand:args:' in",
-                                            line(),
-                                            "let Methods = call 'maps':'get'('__methods__', State) in",
-                                            line(),
-                                            "case call 'maps':'is_key'(DnuSelector, Methods) of",
+                                            "<{'reply', InheritedResult, InheritedState}> when 'true' ->",
                                             nest(
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    "<'true'> when 'true' ->",
+                                                    "{'reply', InheritedResult, InheritedState}",
+                                                ]
+                                            ),
+                                            line(),
+                                            "<{'error', _DispatchError}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)",
+                                                    line(),
+                                                    "let DnuSelector = 'doesNotUnderstand:args:' in",
+                                                    line(),
+                                                    "let Methods = call 'maps':'get'('__methods__', State) in",
+                                                    line(),
+                                                    "case call 'maps':'is_key'(DnuSelector, Methods) of",
                                                     nest(
                                                         INDENT,
                                                         docvec![
                                                             line(),
-                                                            format!(
-                                                                "call '{module_name}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+                                                            "<'true'> when 'true' ->",
+                                                            nest(
+                                                                INDENT,
+                                                                docvec![
+                                                                    line(),
+                                                                    format!(
+                                                                        "call '{module_name}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            line(),
+                                                            "<'false'> when 'true' ->",
+                                                            nest(
+                                                                INDENT,
+                                                                docvec![
+                                                                    line(),
+                                                                    "%% No DNU handler - return #beamtalk_error{} record",
+                                                                    line(),
+                                                                    "let ClassName = call 'maps':'get'('$beamtalk_class', State) in",
+                                                                    line(),
+                                                                    "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
+                                                                    line(),
+                                                                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
+                                                                    line(),
+                                                                    format!(
+                                                                        "let HintMsg = {hint_binary} in"
+                                                                    ),
+                                                                    line(),
+                                                                    "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
+                                                                    line(),
+                                                                    "{'error', Error, State}",
+                                                                ]
                                                             ),
                                                         ]
                                                     ),
                                                     line(),
-                                                    "<'false'> when 'true' ->",
-                                                    nest(
-                                                        INDENT,
-                                                        docvec![
-                                                            line(),
-                                                            "%% No DNU handler - return #beamtalk_error{} record",
-                                                            line(),
-                                                            "let ClassName = call 'maps':'get'('$beamtalk_class', State) in",
-                                                            line(),
-                                                            "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
-                                                            line(),
-                                                            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
-                                                            line(),
-                                                            format!(
-                                                                "let HintMsg = {hint_binary} in"
-                                                            ),
-                                                            line(),
-                                                            "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
-                                                            line(),
-                                                            "{'error', Error, State}",
-                                                        ]
-                                                    ),
+                                                    "end",
                                                 ]
                                             ),
-                                            line(),
-                                            "end",
                                         ]
                                     ),
+                                    line(),
+                                    "end",
                                 ]
                             ),
-                            line(),
-                            "end",
                         ]
                     ),
+                    line(),
+                    "end",
                 ]
             ),
-            line(),
-            "end",
         ];
-        // Render at current indent level
-        let indent_spaces = isize::try_from(self.indent).unwrap_or(0) * INDENT;
-        self.write_document(&nest(indent_spaces, docvec![default_body, "\n"]));
+        let indent_spaces = case_clause_indent * INDENT;
+        #[allow(clippy::cast_sign_loss)]
+        let indent_str = " ".repeat(indent_spaces as usize);
+        self.write_document(&docvec![indent_str, nest(indent_spaces, default_body),]);
 
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        // Close case and function
+        let footer_doc = docvec![nest(INDENT, docvec![line(), "end",]), "\n\n",];
+        self.write_document(&footer_doc);
 
         Ok(())
     }

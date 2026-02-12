@@ -9,7 +9,7 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
-use super::document::{INDENT, line, nest};
+use super::document::{Document, INDENT, line, nest};
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module};
@@ -80,41 +80,41 @@ impl CoreErlangGenerator {
             ]
         };
         self.write_document(&module_header);
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // Generate start_link/1 (standard gen_server entry point)
-        self.generate_start_link()?;
-        self.output.push('\n');
+        self.generate_start_link();
+        self.write_document(&Document::String("\n".into()));
 
         if is_abstract {
             // BT-105: Abstract classes cannot be spawned — generate error methods
             self.generate_abstract_spawn_error_method()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
             self.generate_abstract_spawn_with_args_error_method()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
         } else {
             // Generate spawn/0 function (class method to instantiate actors)
             self.generate_spawn_function(module)?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
 
             // Generate spawn/1 function (class method with init args)
             self.generate_spawn_with_args_function(module)?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
         }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
         self.generate_actor_new_error_method()?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
         self.generate_actor_new_with_args_error_method()?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // Generate superclass/0 class method for reflection
         self.generate_superclass_function(module)?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // Generate init/1 function
         self.generate_init_function(module)?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
         // These callbacks are only needed for instantiable actors that receive messages.
@@ -122,36 +122,36 @@ impl CoreErlangGenerator {
             // BT-403: Abstract classes need minimal gen_server callbacks
             // (required by gen_server behaviour but will never be called)
             self.generate_abstract_callbacks()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
         } else {
             // Generate handle_cast/2 function with error handling
             self.generate_handle_cast()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
 
             // Generate handle_call/3 function with error handling
             self.generate_handle_call()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
 
             // Generate code_change/3 function
             self.generate_code_change()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
 
             // Generate terminate/2 function (per BT-29)
             self.generate_terminate(module)?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
             self.generate_safe_dispatch()?;
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
         }
 
         // Generate dispatch function with DNU fallback
         self.generate_dispatch(module)?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // Generate method table
         self.generate_method_table(module)?;
-        self.output.push('\n');
+        self.write_document(&Document::String("\n".into()));
 
         // Generate has_method/1 for reflection (BT-242)
         self.generate_has_method(module)?;
@@ -170,12 +170,12 @@ impl CoreErlangGenerator {
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
-            self.output.push('\n');
+            self.write_document(&Document::String("\n".into()));
             self.generate_register_class(module)?;
         }
 
         // Module end
-        self.output.push_str("end\n");
+        self.write_document(&docvec!["end\n"]);
 
         Ok(())
     }
@@ -340,14 +340,15 @@ impl CoreErlangGenerator {
             ];
             self.write_document(&header);
 
-            self.indent += 1;
-            self.write_indent()?;
-
             // Generate method body with reply tuple (reuse existing codegen)
+            let start = self.output.len();
             self.generate_method_definition_body_with_reply(method)?;
-            self.output.push('\n');
+            let body_str = self.output[start..].to_string();
+            self.output.truncate(start);
 
-            self.indent -= 1;
+            let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
+            self.write_document(&body_doc);
+
             self.pop_scope();
         }
 
