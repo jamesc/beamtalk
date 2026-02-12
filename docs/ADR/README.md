@@ -47,7 +47,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Proposed | 2026-02-11 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Accepted | 2026-02-12 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
-| [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Proposed | 2026-02-12 |
+| [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Accepted | 2026-02-12 |
 
 ## Creating New ADRs
 
