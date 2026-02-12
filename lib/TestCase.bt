@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TestCase - Base class for BUnit test cases (ADR 0014 Phase 2)
+//
+// TestCase provides the foundation for SUnit-style testing in Beamtalk.
+// Users subclass TestCase and write test methods (prefixed with 'test').
+// Each test method creates a fresh instance, calls setUp, runs the test,
+// and calls tearDown.
+//
+// Example:
+//   TestCase subclass: CounterTest
+//     setUp => self.counter := Counter spawn
+//     testIncrement => self assert: (self.counter getValue await) equals: 1
+
+Object subclass: TestCase
+  // Lifecycle methods — override in subclasses for test fixtures
+  setUp => nil
+  tearDown => nil
+
+  // Core assertions — @primitive methods implemented in beamtalk_test_case.erl
+  assert: condition => @primitive 'assert:'
+  assert: actual equals: expected => @primitive 'assert:equals:'
+  deny: condition => @primitive 'deny:'
+  should: block raise: errorKind => @primitive 'should:raise:'
+  fail: message => @primitive 'fail:'

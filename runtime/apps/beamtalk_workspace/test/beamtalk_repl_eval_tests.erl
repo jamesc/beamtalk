@@ -74,7 +74,7 @@ do_eval_increments_counter_test() ->
     
     %% Since we don't have a daemon running, this will fail compilation
     %% But it should still increment the counter
-    {error, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     NewCounter = beamtalk_repl_state:get_eval_counter(NewState),
     
     ?assertEqual(InitialCounter + 1, NewCounter).
@@ -83,10 +83,10 @@ do_eval_no_daemon_error_test() ->
     %% Without a running daemon, should get daemon_unavailable error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
-    ?assertMatch({error, {compile_error, _}, _, _}, Result),
+    ?assertMatch({error, {compile_error, _}, _, _, _}, Result),
     
     %% Error message should mention daemon (case-insensitive)
-    {error, {compile_error, Msg}, _, _} = Result,
+    {error, {compile_error, Msg}, _, _, _} = Result,
     LowerMsg = string:lowercase(Msg),
     ?assert(binary:match(LowerMsg, <<"daemon">>) =/= nomatch).
 
@@ -171,7 +171,7 @@ do_eval_load_binary_error_test() ->
     %% This is hard to trigger in practice without mocking, but we can
     %% verify the error path exists by testing with daemon unavailable
     State = beamtalk_repl_state:new(undefined, 0),
-    {error, {compile_error, _}, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
@@ -182,7 +182,7 @@ do_eval_preserves_bindings_on_error_test() ->
     StateWithBindings = beamtalk_repl_state:set_bindings(InitialBindings, State),
     
     %% Eval will fail (no daemon), but bindings should be preserved
-    {error, _, _, NewState} = beamtalk_repl_eval:do_eval("z := 999", StateWithBindings),
+    {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval("z := 999", StateWithBindings),
     FinalBindings = beamtalk_repl_state:get_bindings(NewState),
     
     %% Original bindings should still be there

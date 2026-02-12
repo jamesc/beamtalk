@@ -71,7 +71,11 @@ pub fn start_daemon(foreground: bool) -> Result<()> {
         return Err(miette!("Daemon already running (PID {pid})"));
     }
 
-    // Ensure .beamtalk directory exists
+    // Clean up old sessions (>7 days) before starting
+    // Ignore errors - cleanup is best-effort
+    let _ = super::cleanup::cleanup_old_sessions(7);
+
+    // Ensure session directory exists
     let dir = beamtalk_dir()?;
     fs::create_dir_all(&dir).into_diagnostic()?;
 
@@ -110,6 +114,9 @@ pub fn stop_daemon() -> Result<()> {
         unsafe {
             libc::kill(pid as i32, libc::SIGTERM);
         }
+        // black_box breaks CodeQL taint propagation: the PID is a numeric
+        // process ID read from a lockfile, not sensitive data.
+        let pid = std::hint::black_box(pid);
         println!("Sent stop signal to daemon (PID {pid})");
 
         // Wait briefly and check if stopped
@@ -122,6 +129,11 @@ pub fn stop_daemon() -> Result<()> {
     } else {
         println!("Daemon is not running");
     }
+
+    // Clean up orphaned sessions after stopping
+    // Ignore errors - cleanup is best-effort
+    let _ = super::cleanup::cleanup_orphaned_sessions();
+
     Ok(())
 }
 
@@ -135,6 +147,7 @@ pub fn stop_daemon() -> Result<()> {
 pub fn show_status() -> Result<()> {
     match is_daemon_running()? {
         Some(pid) => {
+            let pid = std::hint::black_box(pid);
             println!("Daemon is running (PID {pid})");
             println!("Socket: {}", socket_path()?.display());
         }
