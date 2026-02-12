@@ -423,14 +423,6 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// Helper to generate a binary string literal in Core Erlang format.
-    ///
-    /// Generates: #{#<char1>(...), #<char2>(...), ...}#
-    #[allow(dead_code)]
-    pub(in crate::codegen::core_erlang) fn generate_binary_string(&mut self, s: &str) {
-        self.write_document(&Document::String(Self::binary_string_literal(s)));
-    }
-
     /// Generates the `superclass/0` class method for reflection.
     ///
     /// Returns the superclass name as an atom, or `'nil'` for root classes.

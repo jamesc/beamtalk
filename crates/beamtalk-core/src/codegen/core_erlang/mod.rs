@@ -475,8 +475,6 @@ enum CodeGenContext {
 pub(super) struct CoreErlangGenerator {
     /// The module name being generated.
     module_name: String,
-    /// The output buffer.
-    output: String,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -541,7 +539,6 @@ impl CoreErlangGenerator {
     fn new(module_name: &str) -> Self {
         Self {
             module_name: module_name.to_string(),
-            output: String::new(),
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -568,7 +565,6 @@ impl CoreErlangGenerator {
     fn with_bindings(module_name: &str, bindings: PrimitiveBindingTable) -> Self {
         Self {
             module_name: module_name.to_string(),
-            output: String::new(),
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,

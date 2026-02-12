@@ -62,23 +62,11 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Bridge: renders a `Document` tree and appends it to `self.output`.
-    ///
-    /// This enables incremental migration — functions that return `Document`
-    /// can coexist with functions that write directly to `self.output`.
-    /// The document is rendered starting at indent level 0; callers are
-    /// responsible for embedding indentation in the document tree itself
-    /// (e.g., via `nest()` or literal spaces).
-    pub(super) fn write_document(&mut self, doc: &super::document::Document<'_>) {
-        let rendered = doc.to_pretty_string();
-        self.output.push_str(&rendered);
-    }
-
     /// Captures the output of `generate_expression` as a `String`.
     ///
-    /// ADR 0018 Phase 3: Now that `generate_expression` returns `Document`,
-    /// this renders the document to a string. Retained for backward compatibility
-    /// with code that needs string interpolation or direct string manipulation.
+    /// ADR 0018: Renders the expression Document to a string. Used by code
+    /// that needs string interpolation or direct string manipulation
+    /// (e.g., cascade generation, value type default values).
     pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
         let doc = self.generate_expression(expr)?;
         Ok(doc.to_pretty_string())
@@ -86,7 +74,7 @@ impl CoreErlangGenerator {
 
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
-    /// ADR 0018 Phase 3: Now a simple forwarding to `generate_expression`.
+    /// ADR 0018: Simple forwarding to `generate_expression`.
     pub(super) fn expression_doc(
         &mut self,
         expr: &Expression,
