@@ -122,10 +122,36 @@ worker_loop(Parent, OutDir) ->
         {module, CoreFile} ->
             case compile:file(CoreFile, Options) of
                 {ok, ModuleName} ->
+                    %% BT-499: Inject EEP-48 doc chunk if .docs file exists
+                    inject_docs_chunk(CoreFile, ModuleName, OutDir),
                     erlang:send(Parent, {compiled, ModuleName}),
                     worker_loop(Parent, OutDir);
                 error ->
                     erlang:send(Parent, failed),
                     worker_loop(Parent, OutDir)
             end
+    end.
+
+%% BT-499: Inject EEP-48 doc chunk into compiled .beam file.
+%%
+%% Checks for a .docs file alongside the .core file. If found, reads the
+%% docs_v1 term and injects it as a "Docs" chunk into the .beam file using
+%% beam_lib.
+inject_docs_chunk(CoreFile, ModuleName, OutDir) ->
+    DocsFile = filename:rootname(CoreFile) ++ ".docs",
+    case file:consult(DocsFile) of
+        {ok, [DocsTerm]} ->
+            BeamFile = filename:join(OutDir, atom_to_list(ModuleName) ++ ".beam"),
+            case beam_lib:all_chunks(BeamFile) of
+                {ok, _, AllChunks} ->
+                    %% Filter out any existing Docs chunk to avoid duplicates
+                    Filtered = [{Id, Data} || {Id, Data} <- AllChunks, Id =/= "Docs"],
+                    DocsChunk = {"Docs", term_to_binary(DocsTerm)},
+                    {ok, NewBinary} = beam_lib:build_module(Filtered ++ [DocsChunk]),
+                    ok = file:write_file(BeamFile, NewBinary);
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
     end.

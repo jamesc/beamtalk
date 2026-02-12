@@ -12,7 +12,6 @@
 /// (Integer >> #+) selector       // => #+
 /// (Integer >> #+) argumentCount  // => 1
 /// ```
-
 sealed Object subclass: CompiledMethod
 
   /// Return the method selector as a symbol.

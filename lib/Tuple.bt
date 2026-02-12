@@ -13,7 +13,6 @@
 /// ```beamtalk
 /// Tuple new: #(1, 2, 3)
 /// ```
-
 sealed Object subclass: Tuple
 
   /// Number of elements in the tuple.

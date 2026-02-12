@@ -12,7 +12,6 @@
 /// (Set new add: 1) includes: 1    // => true
 /// (Set new add: 1) size           // => 1
 /// ```
-
 sealed Object subclass: Set
   state: elements = #()
 
