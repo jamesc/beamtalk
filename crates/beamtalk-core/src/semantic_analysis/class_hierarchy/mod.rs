@@ -599,9 +599,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         }
     }
@@ -732,9 +735,12 @@ mod tests {
                 return_type: None,
                 is_sealed: sealed,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         }
     }
@@ -940,9 +946,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
         let derived = ClassDefinition {
@@ -958,9 +967,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
 

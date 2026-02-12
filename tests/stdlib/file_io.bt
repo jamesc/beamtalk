@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File I/O tests
+// Migrated from E2E - sequential file operations that don't need REPL.
+
+// ===========================================================================
+// FILE EXISTENCE CHECKS
+// ===========================================================================
+
+File exists: "_bt_stdlib_nonexistent_xyzzy.txt"
+// => false
+
+// ===========================================================================
+// FILE WRITING AND READING
+// ===========================================================================
+
+File writeAll: "_bt_stdlib_test.txt" contents: "Hello, Beamtalk!"
+// => nil
+
+File readAll: "_bt_stdlib_test.txt"
+// => Hello, Beamtalk!
+
+File exists: "_bt_stdlib_test.txt"
+// => true
+
+// ===========================================================================
+// OVERWRITE EXISTING FILE
+// ===========================================================================
+
+File writeAll: "_bt_stdlib_test.txt" contents: "New content"
+// => nil
+
+File readAll: "_bt_stdlib_test.txt"
+// => New content
+
+// ===========================================================================
+// SPECIAL CHARACTERS
+// ===========================================================================
+
+File writeAll: "_bt_stdlib_special.txt" contents: "Hello, World! @#$%"
+// => nil
+
+File readAll: "_bt_stdlib_special.txt"
+// => Hello, World! @#$%
+
+// ===========================================================================
+// EMPTY FILE
+// ===========================================================================
+
+File writeAll: "_bt_stdlib_empty.txt" contents: ""
+// => nil
+
+File readAll: "_bt_stdlib_empty.txt"
+// =>
+
+File exists: "_bt_stdlib_empty.txt"
+// => true
+
+// ===========================================================================
+// SECURITY: PATH VALIDATION
+// ===========================================================================
+
+File exists: "/etc/passwd"
+// => false
+
+File exists: "../passwords.txt"
+// => false

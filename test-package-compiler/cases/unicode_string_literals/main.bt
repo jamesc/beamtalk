@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test non-ASCII string literals encode correctly as UTF-8 bytes
+
+// ===== Multi-byte UTF-8 Characters =====
+cafe := 'café'
+japanese := '日本語'
+emoji := '🎉'
+
+// ===== Mixed ASCII and Non-ASCII =====
+mixed := 'Hello, 世界!'

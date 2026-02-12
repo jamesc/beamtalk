@@ -19,7 +19,7 @@
 //!   JSON-RPC 2.0      │  └─────────────────────────┘   │
 //!       │             └─────────────────────────────────┘
 //!       ▼
-//!  ~/.beamtalk/daemon.sock
+//!  ~/.beamtalk/sessions/<session>/daemon.sock
 //! ```
 //!
 //! # Usage
@@ -29,6 +29,9 @@
 //! beamtalk daemon start --foreground  # Run in foreground
 //! beamtalk daemon stop            # Stop the daemon
 //! beamtalk daemon status          # Check if running
+//! beamtalk daemon list            # List all daemon sessions
+//! beamtalk daemon clean           # Clean orphaned sessions
+//! beamtalk daemon clean --all     # Stop all daemons and clean
 //! ```
 //!
 //! # JSON-RPC Error Codes
@@ -56,12 +59,13 @@
 use clap::Subcommand;
 use miette::Result;
 
+mod cleanup;
 mod lifecycle;
 mod protocol;
 mod transport;
 
 /// Daemon subcommand actions.
-#[derive(Debug, Clone, Copy, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum DaemonAction {
     /// Start the compiler daemon
     Start {
@@ -75,15 +79,66 @@ pub enum DaemonAction {
 
     /// Check if the daemon is running
     Status,
+
+    /// List all daemon sessions
+    List,
+
+    /// Clean up orphaned sessions
+    Clean {
+        /// Clean all sessions (stop all daemons)
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 /// Run the daemon command.
-pub fn run(action: DaemonAction) -> Result<()> {
+pub fn run(action: &DaemonAction) -> Result<()> {
     match action {
-        DaemonAction::Start { foreground } => lifecycle::start_daemon(foreground),
+        DaemonAction::Start { foreground } => lifecycle::start_daemon(*foreground),
         DaemonAction::Stop => lifecycle::stop_daemon(),
         DaemonAction::Status => lifecycle::show_status(),
+        DaemonAction::List => list_sessions(),
+        DaemonAction::Clean { all } => clean_sessions(*all),
     }
+}
+
+/// List all daemon sessions with their status.
+fn list_sessions() -> Result<()> {
+    let sessions = cleanup::list_sessions()?;
+
+    if sessions.is_empty() {
+        println!("No daemon sessions found");
+        return Ok(());
+    }
+
+    println!("Active daemon sessions:");
+    println!();
+
+    for session in sessions {
+        let status = if session.is_alive { "ALIVE" } else { "DEAD " };
+        let pid_str = session.pid.map_or("???".to_string(), |p| p.to_string());
+        let name = session.name;
+        let age_days = session.age_days;
+        println!("  {status} {name} (PID: {pid_str}, age: {age_days}d)");
+    }
+
+    Ok(())
+}
+
+/// Clean up sessions.
+fn clean_sessions(all: bool) -> Result<()> {
+    if all {
+        println!("Stopping all daemons and cleaning all sessions...");
+        let cleaned = cleanup::cleanup_all_sessions()?;
+        println!("✓ Cleaned {cleaned} session(s)");
+    } else {
+        println!("Cleaning orphaned sessions...");
+        let cleaned = cleanup::cleanup_orphaned_sessions()?;
+        let sessions = cleanup::list_sessions()?;
+        let kept = sessions.len();
+        println!("✓ Cleaned {cleaned} session(s), kept {kept} active");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

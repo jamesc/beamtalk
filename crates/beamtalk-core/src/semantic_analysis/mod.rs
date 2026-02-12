@@ -1883,6 +1883,7 @@ mod tests {
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
+            doc_comment: None,
             span: test_span(),
         };
 
@@ -1901,6 +1902,8 @@ mod tests {
             state: vec![state_decl],
             methods: vec![get_value_method],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
 
@@ -2266,9 +2269,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
 
@@ -2302,6 +2308,8 @@ mod tests {
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
 
@@ -2580,9 +2588,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: test_span(),
         };
 

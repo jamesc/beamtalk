@@ -1,0 +1,17 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("cafe"), span: Span { start: 180, end: 184 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test non-ASCII string literals encode correctly as UTF-8 bytes"), Whitespace("\n\n"), LineComment("// ===== Multi-byte UTF-8 Characters ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 185, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("café"), span: Span { start: 188, end: 195 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("japanese"), span: Span { start: 196, end: 204 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 205, end: 207 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("日本語"), span: Span { start: 208, end: 219 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("emoji"), span: Span { start: 220, end: 225 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 226, end: 228 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("🎉"), span: Span { start: 229, end: 235 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("mixed"), span: Span { start: 278, end: 283 }, leading_trivia: [Whitespace("\n\n"), LineComment("// ===== Mixed ASCII and Non-ASCII ====="), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 284, end: 286 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("Hello, 世界!"), span: Span { start: 287, end: 303 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 304, end: 304 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

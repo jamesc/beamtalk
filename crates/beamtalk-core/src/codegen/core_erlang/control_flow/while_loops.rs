@@ -10,7 +10,7 @@
 
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_while_true(
@@ -48,29 +48,26 @@ impl CoreErlangGenerator {
         // in apply '_LoopN'/0 ()
 
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
-        // Bind condition block to a variable
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in ")?;
-
-        write!(self.output, "case apply {cond_var} () of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-
-        // Bind body block to a variable
+        let cond_code = self.capture_expression(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let doc = docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {cond_var} = "),
+            cond_code,
+            " in ",
+            format!("case apply {cond_var} () of "),
+            "<'true'> when 'true' -> ",
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply '{loop_fn}'/0 ()"),
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -80,44 +77,28 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Block,
     ) -> Result<()> {
-        // Analyze which variables are mutated
-        // BT-153: Mutated variables are derived from field_writes for REPL context
-        let analysis = block_analysis::analyze_block(body);
-        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
-        mutated_vars.sort();
+        // BT-478: Simplified loop signature — only (StateAcc), no separate field params.
 
-        // Generate: letrec 'while'/N = fun (Var1, Var2, ..., StateAcc) ->
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
+        // Generate: letrec 'while'/1 = fun (StateAcc) ->
         //     let _CondFun = <condition> in
-        //     case apply _CondFun () of
+        //     case apply _CondFun (StateAcc) of
         //       'true' -> <body with state threading>
-        //                 apply 'while'/N (Var1, Var2, ..., NewState)
+        //                 apply 'while'/1 (StateAcc')
         //       'false' -> StateAcc
         //     end
-        // in apply 'while'/N (InitVar1, InitVar2, ..., State)
+        // in apply 'while'/1 (State)
 
-        let arity = mutated_vars.len() + 1; // +1 for StateAcc
-        write!(self.output, "letrec 'while'/{arity} = fun (")?;
-
-        // Generate parameters for mutated variables
-        let mut param_names = Vec::new();
-        for (i, var) in mutated_vars.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            let param = Self::to_core_erlang_var(var);
-            write!(self.output, "{param}")?;
-            param_names.push(param);
-        }
-        if !mutated_vars.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "StateAcc) -> ")?;
-
-        // Generate condition check - bind block to variable and apply it
-        // BT-181: Condition needs to read from StateAcc, not outer State
-        // Generate: let _CondFun = fun (StateAcc) -> <condition body> in case apply _CondFun (StateAcc) of
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+
+        self.write_document(&docvec![
+            "letrec 'while'/1 = fun (StateAcc) -> ",
+            format!("let {cond_var} = fun (StateAcc) -> "),
+        ]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
@@ -136,45 +117,31 @@ impl CoreErlangGenerator {
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
-        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
+
+        self.write_document(&docvec![
+            format!(" in case apply {cond_var} (StateAcc) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
         // True case: execute body and recurse
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        let final_state_version = self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_while_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
-        write!(self.output, " apply 'while'/{arity} (")?;
-        for (i, param) in param_names.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "{param}1")?; // Updated variables
-        }
-        if !param_names.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "{final_state_var}) ")?;
 
-        // False case: return final state
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
+        // BT-483: Return {Result, State} tuple
+        // False case: loop terminated, return {nil, StateAcc}
+        self.write_document(&docvec![
+            format!(" apply 'while'/1 ({final_state_var}) "),
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
+            "end ",
+        ]);
 
-        // Initial call - the caller will bind the result to a state variable
+        // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'while'/{arity} (")?;
-        for (i, var) in mutated_vars.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "call 'maps':'get'('{var}', {prev_state})",)?;
-        }
-        if !mutated_vars.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "{prev_state})")?;
+        self.write_document(&docvec![format!("in apply 'while'/1 ({prev_state})")]);
 
         Ok(())
     }
@@ -193,24 +160,42 @@ impl CoreErlangGenerator {
         let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
+        // BT-478: Check if body has direct field assignments. If not, mutations
+        // come from nested constructs and the last expression's result must be bound.
+        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             }
+            let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                // Field assignment handles state version internally
-                // (removed - generate_field_assignment_open does this)
                 self.generate_field_assignment_open(expr)?;
-                // Note: generate_field_assignment_open already writes trailing " in "
+            } else if self.is_actor_self_send(expr) {
+                // BT-245: Self-sends may mutate state — thread state through dispatch
+                self.generate_self_dispatch_open(expr)?;
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 self.generate_local_var_assignment_in_loop(expr)?;
+            } else if is_last && !has_direct_field_assignments {
+                // BT-478/BT-483: Last expression with no direct field assignments in body.
+                // Mutations come from nested constructs (e.g., inner to:do:).
+                // Nested constructs return {Result, State} — extract State via element(2).
+                let next_version = self.state_version() + 1;
+                let next_var = format!("StateAcc{next_version}");
+                let tuple_var = format!("_NestTuple{next_version}");
+                let expr_code = self.capture_expression(expr)?;
+                self.set_state_version(next_version);
+                self.write_document(&docvec![
+                    format!("let {tuple_var} = "),
+                    expr_code,
+                    format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                ]);
             } else {
-                write!(self.output, "let _ = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in")?;
+                let expr_code = self.capture_expression(expr)?;
+                self.write_document(&docvec!["let _ = ", expr_code, " in"]);
             }
         }
 
@@ -249,27 +234,26 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         // Generate: whileFalse is whileTrue with negated condition
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = ")?;
-        self.generate_expression(condition)?;
-        write!(self.output, " in ")?;
-
-        write!(self.output, "case apply {cond_var} () of ")?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-
+        let cond_code = self.capture_expression(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, "<'true'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let doc = docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {cond_var} = "),
+            cond_code,
+            " in ",
+            format!("case apply {cond_var} () of "),
+            "<'false'> when 'true' -> ",
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            "<'true'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply '{loop_fn}'/0 ()"),
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -279,33 +263,21 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Block,
     ) -> Result<()> {
+        // BT-478: Simplified loop signature — only (StateAcc), no separate field params.
+
+        // BT-245: Signal to REPL codegen that this loop mutates bindings
+        if self.is_repl_mode {
+            self.repl_loop_mutated = true;
+        }
+
         // Same as while_true but with false/true swapped in the case
-        // BT-153: Mutated variables are derived from field_writes for REPL context
-        let analysis = block_analysis::analyze_block(body);
-        let mut mutated_vars: Vec<_> = analysis.field_writes.into_iter().collect();
-        mutated_vars.sort();
 
-        let arity = mutated_vars.len() + 1;
-        write!(self.output, "letrec 'while'/{arity} = fun (")?;
-
-        let mut param_names = Vec::new();
-        for (i, var) in mutated_vars.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            let param = Self::to_core_erlang_var(var);
-            write!(self.output, "{param}")?;
-            param_names.push(param);
-        }
-        if !mutated_vars.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "StateAcc) -> ")?;
-
-        // Generate condition check - bind block to variable and apply it
-        // BT-181: Condition needs to read from StateAcc, not outer State
         let cond_var = self.fresh_temp_var("CondFun");
-        write!(self.output, "let {cond_var} = fun (StateAcc) -> ")?;
+
+        self.write_document(&docvec![
+            "letrec 'while'/1 = fun (StateAcc) -> ",
+            format!("let {cond_var} = fun (StateAcc) -> "),
+        ]);
 
         // Save and override loop/body context while generating the condition
         let prev_in_loop_body = self.in_loop_body;
@@ -322,45 +294,31 @@ impl CoreErlangGenerator {
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
         self.set_state_version(prev_state_version);
-        write!(self.output, " in case apply {cond_var} (StateAcc) of ")?;
+
+        self.write_document(&docvec![
+            format!(" in case apply {cond_var} (StateAcc) of "),
+            "<'false'> when 'true' -> ",
+        ]);
 
         // FALSE case: execute body and recurse
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        let final_state_version = self.generate_while_body_with_threading(body, &mutated_vars)?;
+        let final_state_version = self.generate_while_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
         } else {
             format!("StateAcc{final_state_version}")
         };
-        write!(self.output, " apply 'while'/{arity} (")?;
-        for (i, param) in param_names.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "{param}1")?;
-        }
-        if !param_names.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "{final_state_var}) ")?;
 
-        // TRUE case: return final state
-        write!(self.output, "<'true'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
+        // BT-483: Return {Result, State} tuple
+        // TRUE case: loop terminated, return {nil, StateAcc}
+        self.write_document(&docvec![
+            format!(" apply 'while'/1 ({final_state_var}) "),
+            "<'true'> when 'true' -> {'nil', StateAcc} ",
+            "end ",
+        ]);
 
-        // Initial call - the caller will bind the result to a state variable
+        // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'while'/{arity} (")?;
-        for (i, var) in mutated_vars.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "call 'maps':'get'('{var}', {prev_state})",)?;
-        }
-        if !mutated_vars.is_empty() {
-            write!(self.output, ", ")?;
-        }
-        write!(self.output, "{prev_state})")?;
+        self.write_document(&docvec![format!("in apply 'while'/1 ({prev_state})")]);
 
         Ok(())
     }

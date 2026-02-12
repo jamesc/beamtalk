@@ -8,59 +8,71 @@
 //! Generates state field initializers for actor `init/1` callbacks,
 //! including inherited fields from parent classes.
 
+use super::super::document::{Document, line};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, Identifier, Module};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates only the current class's own state fields (not inherited).
     ///
+    /// Returns a list of `Document` fragments, each representing one field
+    /// initializer line (with a leading `line()` for indentation).
+    /// The caller wraps these in a `nest()` at the appropriate level.
+    ///
     /// This is used when calling parent init — we only add fields defined in this class,
     /// not fields from parent classes (those come from parent's init).
-    pub(super) fn generate_own_state_fields(&mut self, module: &Module) -> Result<()> {
-        // Find the current class being compiled
+    pub(super) fn generate_own_state_fields(
+        &mut self,
+        module: &Module,
+    ) -> Result<Vec<Document<'static>>> {
+        let mut fields = Vec::new();
+
         let current_class = module.classes.iter().find(|c| {
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         if let Some(class) = current_class {
-            // Only emit this class's own fields
             for state in &class.state {
-                self.write_indent()?;
-                write!(self.output, ", '{}' => ", state.name.name)?;
-                if let Some(ref default_value) = state.default_value {
-                    self.generate_expression(default_value)?;
+                let value_code = if let Some(ref default_value) = state.default_value {
+                    self.capture_expression(default_value)?
                 } else {
-                    // No default value - initialize to nil
-                    write!(self.output, "'nil'")?;
-                }
-                writeln!(self.output)?;
+                    "'nil'".to_string()
+                };
+                fields.push(docvec![
+                    line(),
+                    format!(", '{}' => ", state.name.name),
+                    value_code,
+                ]);
             }
         }
 
-        Ok(())
+        Ok(fields)
     }
 
     /// Generates all state fields including inherited ones (for base classes).
+    ///
+    /// Returns a list of `Document` fragments, each representing one field
+    /// initializer line (with a leading `line()` for indentation).
+    /// The caller wraps these in a `nest()` at the appropriate level.
     ///
     /// This version includes fields from module-level assignments and recursively
     /// collects inherited fields from parent classes when they're in the same module.
     pub(in crate::codegen::core_erlang) fn generate_initial_state_fields(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Vec<Document<'static>>> {
+        let mut fields = Vec::new();
+
         // Initialize fields from module expressions (assignments at top level)
         // Only include literal values - blocks are methods handled by dispatch/3
         for expr in &module.expressions {
             if let Expression::Assignment { target, value, .. } = expr {
                 if let Expression::Identifier(id) = target.as_ref() {
-                    // Only generate field if it's a simple literal (not a block/method)
                     if matches!(value.as_ref(), Expression::Literal(..)) {
-                        self.write_indent()?;
-                        write!(self.output, ", '{}' => ", id.name)?;
-                        self.generate_expression(value)?;
-                        writeln!(self.output)?;
+                        let value_code = self.capture_expression(value)?;
+                        fields.push(docvec![line(), format!(", '{}' => ", id.name), value_code,]);
                     }
                 }
             }
@@ -68,8 +80,8 @@ impl CoreErlangGenerator {
 
         // Find the current class being compiled (matches module name)
         let current_class = module.classes.iter().find(|c| {
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         if let Some(class) = current_class {
@@ -78,42 +90,42 @@ impl CoreErlangGenerator {
 
             // Emit inherited fields first
             for (field_name, default_value) in inherited_fields {
-                self.write_indent()?;
-                write!(self.output, ", '{field_name}' => ")?;
-                self.generate_expression(&default_value)?;
-                writeln!(self.output)?;
+                let value_code = self.capture_expression(&default_value)?;
+                fields.push(docvec![line(), format!(", '{field_name}' => "), value_code,]);
             }
 
             // Then emit this class's own fields (can override parent defaults)
             for state in &class.state {
-                self.write_indent()?;
-                write!(self.output, ", '{}' => ", state.name.name)?;
-                if let Some(ref default_value) = state.default_value {
-                    self.generate_expression(default_value)?;
+                let value_code = if let Some(ref default_value) = state.default_value {
+                    self.capture_expression(default_value)?
                 } else {
-                    // No default value - initialize to nil
-                    write!(self.output, "'nil'")?;
-                }
-                writeln!(self.output)?;
+                    "'nil'".to_string()
+                };
+                fields.push(docvec![
+                    line(),
+                    format!(", '{}' => ", state.name.name),
+                    value_code,
+                ]);
             }
         } else {
             // Fallback: if no matching class found (legacy modules), emit all class fields
             for class in &module.classes {
                 for state in &class.state {
-                    self.write_indent()?;
-                    write!(self.output, ", '{}' => ", state.name.name)?;
-                    if let Some(ref default_value) = state.default_value {
-                        self.generate_expression(default_value)?;
+                    let value_code = if let Some(ref default_value) = state.default_value {
+                        self.capture_expression(default_value)?
                     } else {
-                        // No default value - initialize to nil
-                        write!(self.output, "'nil'")?;
-                    }
-                    writeln!(self.output)?;
+                        "'nil'".to_string()
+                    };
+                    fields.push(docvec![
+                        line(),
+                        format!(", '{}' => ", state.name.name),
+                        value_code,
+                    ]);
                 }
             }
         }
 
-        Ok(())
+        Ok(fields)
     }
 
     /// Recursively collects all inherited state fields from parent classes.

@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for abstract classes and subclassResponsibility
+// Migrated from E2E: cross-expression variable resolution (BT-459)
+
+// ===========================================================================
+// Concrete subclass works normally
+// ===========================================================================
+
+// @load tests/e2e/fixtures/circle.bt
+
+c := Circle spawn
+// => #Actor<Circle,_>
+
+(c setRadius: 5) await
+// => 5
+
+c area await
+// => 25

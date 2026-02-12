@@ -81,6 +81,23 @@ impl<'src> Lexer<'src> {
         iter.next().map(|(_, c)| c)
     }
 
+    /// Peeks at the third character ahead.
+    fn peek_char_third(&self) -> Option<char> {
+        let mut iter = self.chars.clone();
+        iter.next();
+        iter.next();
+        iter.next().map(|(_, c)| c)
+    }
+
+    /// Peeks at the fourth character ahead.
+    fn peek_char_fourth(&self) -> Option<char> {
+        let mut iter = self.chars.clone();
+        iter.next();
+        iter.next();
+        iter.next();
+        iter.next().map(|(_, c)| c)
+    }
+
     /// Consumes the next character and returns it.
     fn advance(&mut self) -> Option<char> {
         let (pos, c) = self.chars.next()?;
@@ -125,6 +142,13 @@ impl<'src> Lexer<'src> {
                     self.pending_trivia
                         .push(Trivia::Whitespace(EcoString::from(text)));
                 }
+                Some('/')
+                    if self.peek_char_second() == Some('/')
+                        && self.peek_char_third() == Some('/')
+                        && self.peek_char_fourth() != Some('/') =>
+                {
+                    self.lex_doc_comment();
+                }
                 Some('/') if self.peek_char_second() == Some('/') => {
                     self.lex_line_comment();
                 }
@@ -145,6 +169,21 @@ impl<'src> Lexer<'src> {
         let text = self.text_for(self.span_from(start));
         self.pending_trivia
             .push(Trivia::LineComment(EcoString::from(text)));
+    }
+
+    /// Lexes a doc comment: `/// ...`
+    ///
+    /// Only exactly three slashes count as a doc comment.
+    /// Four or more slashes (`////...`) are regular line comments.
+    fn lex_doc_comment(&mut self) {
+        let start = self.current_position();
+        self.advance(); // /
+        self.advance(); // /
+        self.advance(); // /
+        self.advance_while(|c| c != '\n');
+        let text = self.text_for(self.span_from(start));
+        self.pending_trivia
+            .push(Trivia::DocComment(EcoString::from(text)));
     }
 
     /// Lexes a block comment: `/* ... */`
@@ -203,6 +242,14 @@ impl<'src> Lexer<'src> {
                     let text = self.text_for(self.span_from(start));
                     self.pending_trivia
                         .push(Trivia::Whitespace(EcoString::from(text)));
+                }
+                Some('/')
+                    if self.peek_char_second() == Some('/')
+                        && self.peek_char_third() == Some('/')
+                        && self.peek_char_fourth() != Some('/') =>
+                {
+                    self.lex_doc_comment();
+                    break; // Doc comment ends trailing trivia
                 }
                 Some('/') if self.peek_char_second() == Some('/') => {
                     self.lex_line_comment();
@@ -583,14 +630,17 @@ impl<'src> Lexer<'src> {
             if ident == "primitive" {
                 return TokenKind::AtPrimitive;
             }
+            if ident == "intrinsic" {
+                return TokenKind::AtIntrinsic;
+            }
             let text = self.text_for(self.span_from(start));
             return TokenKind::Error(EcoString::from(format!(
-                "unknown directive '{text}', only '@primitive' is supported"
+                "unknown directive '{text}', only '@primitive' and '@intrinsic' are supported"
             )));
         }
 
         TokenKind::Error(EcoString::from(
-            "expected directive name after '@', only '@primitive' is supported",
+            "expected directive name after '@', only '@primitive' and '@intrinsic' are supported",
         ))
     }
 
@@ -1036,6 +1086,30 @@ mod tests {
     }
 
     #[test]
+    fn lex_at_intrinsic() {
+        assert_eq!(lex_kinds("@intrinsic"), vec![TokenKind::AtIntrinsic]);
+    }
+
+    #[test]
+    fn lex_at_intrinsic_followed_by_identifier() {
+        assert_eq!(
+            lex_kinds("@intrinsic blockValue"),
+            vec![
+                TokenKind::AtIntrinsic,
+                TokenKind::Identifier("blockValue".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_at_intrinsic_followed_by_string() {
+        assert_eq!(
+            lex_kinds("@intrinsic 'size'"),
+            vec![TokenKind::AtIntrinsic, TokenKind::String("size".into())]
+        );
+    }
+
+    #[test]
     fn lex_at_unknown_directive_is_error() {
         let kinds = lex_kinds("@unknown");
         assert_eq!(kinds.len(), 1);
@@ -1070,5 +1144,102 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].span().start(), 0);
         assert_eq!(tokens[0].span().end(), 10);
+    }
+
+    #[test]
+    fn lex_doc_comment_as_trivia() {
+        let tokens = lex("/// doc comment\nx");
+        assert_eq!(tokens.len(), 1);
+        assert!(tokens[0].has_leading_comment());
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 1);
+        assert_eq!(doc_trivia[0].as_str(), "/// doc comment");
+    }
+
+    #[test]
+    fn lex_triple_slash_is_doc_comment() {
+        let tokens = lex("/// this is a doc comment\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 1);
+        assert_eq!(doc_trivia[0].as_str(), "/// this is a doc comment");
+    }
+
+    #[test]
+    fn lex_four_slashes_is_line_comment() {
+        let tokens = lex("//// not a doc comment\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 0);
+        // Should be a regular line comment instead
+        let line_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| matches!(t, Trivia::LineComment(_)))
+            .collect();
+        assert_eq!(line_trivia.len(), 1);
+    }
+
+    #[test]
+    fn lex_double_slash_is_line_comment_not_doc() {
+        let tokens = lex("// regular comment\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 0);
+    }
+
+    #[test]
+    fn lex_consecutive_doc_comments() {
+        let tokens = lex("/// line one\n/// line two\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 2);
+        assert_eq!(doc_trivia[0].as_str(), "/// line one");
+        assert_eq!(doc_trivia[1].as_str(), "/// line two");
+    }
+
+    #[test]
+    fn lex_empty_doc_comment() {
+        let tokens = lex("///\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 1);
+        assert_eq!(doc_trivia[0].as_str(), "///");
+    }
+
+    #[test]
+    fn lex_five_slashes_is_line_comment() {
+        let tokens = lex("///// five slashes\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 0);
     }
 }

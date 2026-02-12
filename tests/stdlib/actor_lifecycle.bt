@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for actor lifecycle (BT-172, BT-397)
+// Migrated from E2E: cross-expression variable resolution (BT-459)
+//
+// Tests that:
+// - isAlive returns true for running actors
+// - isAlive still works after message processing
+// - stop gracefully shuts down the actor
+// - isAlive returns false after stop
+// - sending to a stopped actor returns actor_dead error
+
+// @load tests/e2e/fixtures/counter.bt
+
+// Spawn a counter actor
+counter := Counter spawn
+// => #Actor<Counter,_>
+
+// isAlive returns true for a running actor
+counter isAlive await
+// => true
+
+// Actor still works after isAlive check
+counter increment await
+// => 1
+
+// isAlive still true after message processing
+counter isAlive await
+// => true
+
+// Stop the actor gracefully
+counter stop await
+// => ok
+
+// Stopping an already-stopped actor is idempotent
+counter stop await
+// => ok
+
+// isAlive returns false after stop
+counter isAlive await
+// => false
+
+// Sending a message to a stopped actor returns actor_dead error
+counter increment await
+// => ERROR: actor_dead
+
+// ===========================================================================
+// NON-MAP ARGUMENT TO spawnWith: (BT-473)
+// ===========================================================================
+// Passing a non-Dictionary argument to spawnWith: should raise type_error,
+// not silently fall back to spawn/0.
+
+Counter spawnWith: 42
+// => ERROR: type_error
+
+Counter spawnWith: "hello"
+// => ERROR: type_error
+
+Counter spawnWith: true
+// => ERROR: type_error
+
+// ===========================================================================
+// printString — actor instance and class object (BT-477)
+// ===========================================================================
+
+// Actor instance printString returns "a ClassName"
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 printString await
+// => a Counter
+
+// Class object printString returns class name
+Counter printString
+// => Counter

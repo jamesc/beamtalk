@@ -1,13 +1,23 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for error handling
-// Each expression tests that specific errors are caught correctly
-
-// Division by zero
-// Note: Erlang returns 'badarith' for division by zero
-1 / 0
-// => ERROR: badarith
+// E2E tests for error handling (REPL-specific)
+// Pure runtime errors (badarith, does_not_understand, immutable_value,
+// instantiation_error, etc.) are tested in tests/stdlib/errors.bt.
+// This file tests errors that require REPL features:
+// - Undefined variables (REPL workspace binding resolution)
+// - Syntax errors (REPL incremental parsing)
+//
+// Test Coverage (BT-366, ADR 0011 Phase 3):
+// - Undefined variables: 3 tests
+// - Original syntax errors: 3 tests
+// - Runtime errors: 2 tests
+// - Near-miss syntax: 11 tests
+// - Invalid literals: 4 tests
+// - Cascading errors: 5 tests (includes recovery validation)
+// - Unicode edge cases: 3 tests
+// - REPL edge cases: 4 tests
+// Total: 35 test cases (increased from 8)
 
 // ===========================================================================
 // UNDEFINED VARIABLES
@@ -45,17 +55,145 @@ undefinedVar + 5
 // => ERROR: expected expression, found +
 
 // ===========================================================================
-// RUNTIME ERRORS
+// RUNTIME ERRORS (need REPL substring matching for non-beamtalk errors)
 // ===========================================================================
-
-// Calling non-existent method on integer
-42 nonExistentMethod
-// => ERROR: does_not_understand
 
 // Wrong number of block arguments (too few)
 [:x :y | x + y] value: 5
-// => ERROR: badarity
+// => ERROR: Wrong number of arguments: block expects 2 but was called with 1
 
 // Wrong number of block arguments (too many)
 [:x | x + 1] value: 5 value: 10
-// => ERROR: badarity
+// => ERROR: Wrong number of arguments: block expects 1 but was called with 2
+
+// ===========================================================================
+// NEAR-MISS SYNTAX ERRORS
+// ===========================================================================
+// These test common typos and syntax mistakes that users make
+
+// Missing colon in keyword message - lowercase counter triggers undefined variable
+counter subclass Foo
+// => ERROR: Undefined variable
+
+// Wrong bracket type - opening with [ but closing with )
+[:x | x + 1)
+// => ERROR: Expected ']' to close block
+
+// Wrong bracket type - opening with ( but closing with ]
+(1 + 2]
+// => ERROR: Expected ')'
+
+// Extra closing bracket with no opening
+Counter spawn]
+// => ERROR: expected expression, found ]
+
+// Missing block bar separator
+[:x x + 1]
+// => ERROR: Expected '|'
+
+// Misplaced caret at start - parser sees return with operator (error on +)
+^ + 1
+// => ERROR: expected expression, found +
+
+// Double operators
+1 + + 2
+// => ERROR: expected expression, found +
+
+// Missing receiver (operator as first token)
++ 5
+// => ERROR: expected expression, found +
+
+// Incomplete keyword message (missing argument after colon)
+obj foo:
+// => ERROR: expected expression, found foo:
+
+// Missing closing parenthesis
+(1 + 2
+// => ERROR: Expected ')'
+
+// Mismatched block brackets
+[1 + 2)
+// => ERROR: Expected ']' to close block
+
+// ===========================================================================
+// INVALID LITERAL ERRORS
+// ===========================================================================
+
+// Unclosed string literal - lexer produces error token containing the text
+"hello
+// => ERROR: "hello
+
+// Standalone hash (invalid symbol without identifier) - error token
+#
+// => ERROR: #
+
+// Invalid number with letter - lexed as integer 123 + unary message abc
+123abc
+// => ERROR: does not understand
+
+// Number followed by invalid character sequence (tests lexer error recovery)
+42$
+// => ERROR: $
+
+// ===========================================================================
+// CASCADING ERROR TESTS
+// ===========================================================================
+// Multiple errors in one expression - parser should recover
+
+// Block with empty body evaluates to nil, then nil + 1 is arithmetic error
+[:x :y | ] + 1
+// => ERROR: badarith
+
+// Multiple syntax errors in sequence
+] + [ + )
+// => ERROR: expected expression, found ]
+
+// Error recovery: bad expression should produce error
+1 + +
+// => ERROR: expected expression, found +
+
+// Valid expression after previous error (separate test case)
+2 + 3
+// => 5
+
+// Error in nested structure - parser should recover to continue parsing
+[1 + ] value: [2 * 3]
+// => ERROR: expected expression
+
+// ===========================================================================
+// UNICODE EDGE CASES
+// ===========================================================================
+
+// Emoji in identifier position (not valid Beamtalk identifier) - lexer error token
+counter🚀 := 42
+// => ERROR: 🚀
+
+// Unicode combining characters in identifier (currently not valid - lexer uses ASCII only)
+// Lexer produces error token for the non-ASCII character
+café := 42
+// => ERROR: é
+
+// Chinese characters in identifier (currently not valid - lexer uses ASCII only)
+// Lexer produces error token for the first non-ASCII character
+计数器 := 0
+// => ERROR: 计
+
+// ===========================================================================
+// REPL EDGE CASES
+// ===========================================================================
+
+// Very deeply nested valid expression (should work)
+((((((((((1 + 1))))))))))
+// => 2
+
+// Very long identifier (should work up to reasonable limit)
+thisIsAVeryLongIdentifierNameThatGoesOnAndOnAndOnButShouldStillBeValid := 42
+// => 42
+
+// Repeated semicolons (cascade separator) - parser expects message selector
+1; 2; 3
+// => ERROR: Expected message selector
+
+// Tab characters in expression (should work - whitespace is ignored)
+1	+	2
+// => 3

@@ -8,7 +8,7 @@
 // ===========================================================================
 
 Set new
-// => _
+// => {"$beamtalk_class":"Set","elements":[]}
 
 (Set new) class
 // => Set
@@ -28,7 +28,7 @@ Set new
 // ===========================================================================
 
 s := (Set new) add: 1
-// => _
+// => {"$beamtalk_class":"Set","elements":[1]}
 
 s includes: 1
 // => true
@@ -44,7 +44,7 @@ s size
 // ===========================================================================
 
 s2 := (s add: 2) add: 1
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2]}
 
 s2 size
 // => 2
@@ -60,7 +60,7 @@ s2 includes: 2
 // ===========================================================================
 
 s3 := s2 remove: 1
-// => _
+// => {"$beamtalk_class":"Set","elements":[2]}
 
 s3 includes: 1
 // => false
@@ -76,7 +76,7 @@ s3 size
 // ===========================================================================
 
 colors := (Set new) fromList: #(#red, #green, #blue)
-// => _
+// => {"$beamtalk_class":"Set","elements":["blue","green","red"]}
 
 colors size
 // => 3
@@ -92,13 +92,13 @@ colors includes: #yellow
 // ===========================================================================
 
 a := (Set new) fromList: #(1, 2, 3)
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2,3]}
 
 b := (Set new) fromList: #(3, 4, 5)
-// => _
+// => {"$beamtalk_class":"Set","elements":[3,4,5]}
 
 u := a union: b
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2,3,4,5]}
 
 u size
 // => 5
@@ -114,7 +114,7 @@ u includes: 5
 // ===========================================================================
 
 i := a intersection: b
-// => _
+// => {"$beamtalk_class":"Set","elements":[3]}
 
 i size
 // => 1
@@ -130,7 +130,7 @@ i includes: 1
 // ===========================================================================
 
 d := a difference: b
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2]}
 
 d size
 // => 2
@@ -146,10 +146,10 @@ d includes: 3
 // ===========================================================================
 
 small := (Set new) fromList: #(1, 2)
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2]}
 
 big := (Set new) fromList: #(1, 2, 3)
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2,3]}
 
 small isSubsetOf: big
 // => true
@@ -162,7 +162,7 @@ big isSubsetOf: small
 // ===========================================================================
 
 (Set new) fromList: #(3, 1, 2)
-// => _
+// => {"$beamtalk_class":"Set","elements":[1,2,3]}
 
 ((Set new) fromList: #(3, 1, 2)) asList
 // => [1,2,3]
@@ -179,7 +179,7 @@ big isSubsetOf: small
 // ===========================================================================
 
 s4 := (Set new) add: 1
-// => _
+// => {"$beamtalk_class":"Set","elements":[1]}
 
 s4 respondsTo: #size
 // => true

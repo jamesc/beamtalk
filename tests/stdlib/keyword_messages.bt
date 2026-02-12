@@ -1,0 +1,125 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Keyword message tests (block value: dispatch)
+// Migrated from E2E - pure block tests that don't need REPL.
+// Actor keyword dispatch (BT-327) and higher-order blocks also migrated (BT-459).
+
+// ===========================================================================
+// SINGLE KEYWORD MESSAGES
+// ===========================================================================
+
+[:x | x] value: 42
+// => 42
+
+[:x | x + 10] value: 5
+// => 15
+
+[:n | n * n] value: 4
+// => 16
+
+// ===========================================================================
+// MULTI-KEYWORD MESSAGES
+// ===========================================================================
+
+[:x :y | x + y] value: 3 value: 4
+// => 7
+
+[:a :b | a - b] value: 10 value: 3
+// => 7
+
+[:x :y | x * y] value: 6 value: 7
+// => 42
+
+// ===========================================================================
+// THREE-KEYWORD MESSAGES
+// ===========================================================================
+
+[:a :b :c | a + b + c] value: 1 value: 2 value: 3
+// => 6
+
+[:x :y :z | x * y + z] value: 2 value: 3 value: 4
+// => 10
+
+// ===========================================================================
+// NESTED KEYWORD MESSAGES
+// ===========================================================================
+
+[:x | [:y | x + y] value: 10] value: 5
+// => 15
+
+[:a | [:b | [:c | a + b + c] value: 3] value: 2] value: 1
+// => 6
+
+// ===========================================================================
+// KEYWORD MESSAGES WITH LITERALS
+// ===========================================================================
+
+[:s | s] value: "test"
+// => test
+
+[:n | n * 10] value: 0
+// => 0
+
+[:x | 0 - x] value: 5
+// => -5
+
+// ===========================================================================
+// COMPLEX EXPRESSIONS AS ARGUMENTS
+// ===========================================================================
+
+[:x | x * 2] value: 3 + 2
+// => 10
+
+[:a :b | a + b] value: 2 * 3 value: 4 + 1
+// => 11
+
+// ===========================================================================
+// HIGHER-ORDER BLOCKS (variable persistence across expressions)
+// ===========================================================================
+
+// Block that returns a block
+makeMultiplier := [:factor | [:n | n * factor]]
+// => a Block/1
+
+times3 := makeMultiplier value: 3
+// => a Block/1
+
+times3 value: 7
+// => 21
+
+// Passing block as argument
+applyBlock := [:block :arg | block value: arg]
+// => a Block/2
+
+applyBlock value: [:x | x + 100] value: 42
+// => 142
+
+// ===========================================================================
+// 4+ KEYWORD MESSAGES ON OBJECTS (BT-327)
+// ===========================================================================
+
+// @load tests/e2e/fixtures/multi_keyword.bt
+
+mk := MultiKeyword spawn
+// => #Actor<MultiKeyword,_>
+
+// 4-keyword method: sum four arguments
+(mk add: 1 and: 2 and: 3 and: 4) await
+// => 10
+
+// 4-keyword method: verify argument order (weighted sum)
+(mk first: 1 second: 2 third: 3 fourth: 4) await
+// => 1234
+
+// Different argument values to confirm ordering
+(mk first: 9 second: 0 third: 5 fourth: 7) await
+// => 9057
+
+// 5-keyword method: sum five arguments
+(mk add: 10 and: 20 and: 30 and: 40 and: 50) await
+// => 150
+
+// Verify state was updated by add:and:and:and:and:
+mk getResult await
+// => 150

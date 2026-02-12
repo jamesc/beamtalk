@@ -77,6 +77,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 174,
                         end: 215,
@@ -84,6 +85,8 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 148,
                 end: 215,

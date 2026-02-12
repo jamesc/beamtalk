@@ -22,13 +22,22 @@ use tracing::{debug, info, instrument};
 // Test file parsing (lifted from e2e.rs)
 // ──────────────────────────────────────────────────────────────────────────
 
+/// What a test assertion expects: a value or an error.
+#[derive(Debug, Clone, PartialEq)]
+enum Expected {
+    /// Match formatted result string (`_` for wildcard).
+    Value(String),
+    /// Match `#beamtalk_error{kind = Kind}` on error.
+    Error { kind: String },
+}
+
 /// A single test assertion: expression + expected result.
 #[derive(Debug)]
 struct TestCase {
     /// The Beamtalk expression to evaluate.
     expression: String,
-    /// Expected result string (`_` for wildcard).
-    expected: String,
+    /// Expected outcome (value or error).
+    expected: Expected,
     /// Line number in the source file (1-based).
     line: usize,
 }
@@ -88,9 +97,27 @@ fn parse_test_file(content: &str) -> ParsedTestFile {
         if i < lines.len() {
             let next_line = lines[i].trim();
             if let Some(expected) = next_line.strip_prefix("// =>") {
+                let expected = expected.trim();
+                let expected = if let Some(kind) = expected.strip_prefix("ERROR:") {
+                    let kind = kind.trim();
+                    if kind.is_empty() {
+                        warnings.push(format!(
+                            "Line {expr_line}: Expression will not be executed \
+                             (invalid // => ERROR: assertion with missing error kind): \
+                             {expression}"
+                        ));
+                        i += 1;
+                        continue;
+                    }
+                    Expected::Error {
+                        kind: kind.to_string(),
+                    }
+                } else {
+                    Expected::Value(expected.to_string())
+                };
                 cases.push(TestCase {
                     expression,
-                    expected: expected.trim().to_string(),
+                    expected,
                     line: expr_line,
                 });
                 i += 1;
@@ -203,6 +230,81 @@ fn extract_assignment_var(expression: &str) -> Option<String> {
 ///
 /// Results are formatted to strings before comparison (matching E2E
 /// semantics where the REPL returns string representations).
+/// Generate the `EUnit` try/catch block for an ERROR: assertion.
+fn write_error_assertion(
+    erl: &mut String,
+    i: usize,
+    eval_mod: &str,
+    kind: &str,
+    bindings_in: &str,
+    bindings_out: &str,
+) {
+    // Error assertion: wrap eval in try/catch, match on #beamtalk_error{kind}
+    // Also handles plain atom errors (e.g., badarith, badarity)
+    // Variables are suffixed with index to avoid Erlang scoping conflicts.
+    // Assertions are outside the try/catch to avoid the catch clause
+    // swallowing EUnit assertion exceptions.
+    // The case uses CaughtKind/CaughtReason (fresh variables) since
+    // Erlang considers variables bound in catch as unsafe outside try.
+    let _ = writeln!(
+        erl,
+        "    {bindings_out} =\n\
+         \x20   begin\n\
+         \x20       TryResult{i} = try '{eval_mod}':eval({bindings_in}) of\n\
+         \x20           {{_V{i}, B{i}}} ->\n\
+         \x20               {{ok, B{i}}}\n\
+         \x20       catch\n\
+         \x20           error:#{{\'$beamtalk_class\' := _, error := {{beamtalk_error, Kind{i}, _, _, _, _, _}}}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           error:{{beamtalk_error, Kind{i}, _, _, _, _, _}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           throw:{{future_rejected, {{beamtalk_error, Kind{i}, _, _, _, _, _}}}} ->\n\
+         \x20               {{beamtalk_error, Kind{i}}};\n\
+         \x20           error:'{kind}' ->\n\
+         \x20               atom_error;\n\
+         \x20           error:Reason{i} ->\n\
+         \x20               {{other_error, Reason{i}}}\n\
+         \x20       end,\n\
+         \x20       case TryResult{i} of\n\
+         \x20           {{ok, _}} ->\n\
+         \x20               ?assert(false, <<\"Expected error '{kind}' but expression succeeded\">>),\n\
+         \x20               {bindings_in};\n\
+         \x20           {{beamtalk_error, CaughtKind{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtKind{i}),\n\
+         \x20               {bindings_in};\n\
+         \x20           atom_error ->\n\
+         \x20               {bindings_in};\n\
+         \x20           {{other_error, CaughtReason{i}}} ->\n\
+         \x20               ?assertEqual('{kind}', CaughtReason{i}),\n\
+         \x20               {bindings_in}\n\
+         \x20       end\n\
+         \x20   end,"
+    );
+}
+
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. This preserves literal underscores in identifiers like
+/// `does_not_understand` or `beamtalk_class`.
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "EUnit wrapper includes format_result + matches_pattern helpers"
+)]
 fn generate_eunit_wrapper(
     test_module_name: &str,
     test_file_path: &str,
@@ -238,6 +340,18 @@ fn generate_eunit_wrapper(
          \x20   S = pid_to_list(V),\n\
          \x20   I = lists:sublist(S, 2, length(S) - 2),\n\
          \x20   iolist_to_binary([<<\"#Actor<\">>, I, <<\">\">>]);\n\
+         format_result(V) when is_tuple(V), tuple_size(V) >= 2, element(1, V) =:= beamtalk_object ->\n\
+         \x20   %% BT-412: Match REPL formatting for class objects vs actor instances\n\
+         \x20   Class = element(2, V),\n\
+         \x20   case beamtalk_object_class:is_class_name(Class) of\n\
+         \x20       true -> beamtalk_object_class:class_display_name(Class);\n\
+         \x20       false ->\n\
+         \x20           Pid = element(4, V),\n\
+         \x20           ClassBin = atom_to_binary(Class, utf8),\n\
+         \x20           PidStr = pid_to_list(Pid),\n\
+         \x20           Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),\n\
+         \x20           iolist_to_binary([<<\"#Actor<\">>, ClassBin, <<\",\">>, Inner, <<\">\">>])\n\
+         \x20   end;\n\
          format_result(V) when is_map(V) ->\n\
          \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
          \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
@@ -249,7 +363,50 @@ fn generate_eunit_wrapper(
          \x20           try jsx:encode([beamtalk_repl_server:term_to_json(E) || E <- V])\n\
          \x20           catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end\n\
          \x20   end;\n\
-         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n",
+         format_result(V) -> iolist_to_binary(io_lib:format(\"~p\", [V])).\n\n\
+         %% BT-502: Glob-style pattern matching where _ matches any substring,\n\
+         %% but only when _ is NOT flanked by alphanumeric characters on both sides.\n\
+         %% This preserves literal underscores in identifiers like does_not_understand.\n\
+         matches_pattern(Pattern, Actual) ->\n\
+         \x20   Segments = wildcard_segments(Pattern),\n\
+         \x20   matches_segments(Segments, Actual, 0, true).\n\
+         wildcard_segments(Pattern) ->\n\
+         \x20   Chars = binary_to_list(Pattern),\n\
+         \x20   [list_to_binary(S) || S <- wildcard_split(Chars, [], [], none)].\n\
+         wildcard_split([], CurRev, SegsRev, _Prev) ->\n\
+         \x20   lists:reverse([lists:reverse(CurRev) | SegsRev]);\n\
+         wildcard_split([$_ | Rest], CurRev, SegsRev, Prev) ->\n\
+         \x20   Next = case Rest of [N | _] -> N; [] -> none end,\n\
+         \x20   case is_alnum(Prev) andalso is_alnum(Next) of\n\
+         \x20       true -> wildcard_split(Rest, [$_ | CurRev], SegsRev, $_);\n\
+         \x20       false -> wildcard_split(Rest, [], [lists:reverse(CurRev) | SegsRev], $_)\n\
+         \x20   end;\n\
+         wildcard_split([C | Rest], CurRev, SegsRev, _Prev) ->\n\
+         \x20   wildcard_split(Rest, [C | CurRev], SegsRev, C).\n\
+         is_alnum(C) when is_integer(C), C >= $0, C =< $9 -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $A, C =< $Z -> true;\n\
+         is_alnum(C) when is_integer(C), C >= $a, C =< $z -> true;\n\
+         is_alnum(_) -> false.\n\
+         matches_segments([], _Actual, _Pos, IsFirst) -> not IsFirst;\n\
+         matches_segments([<<>> | Rest], Actual, Pos, _IsFirst) ->\n\
+         \x20   matches_segments(Rest, Actual, Pos, false);\n\
+         matches_segments([Seg | Rest], Actual, Pos, true) ->\n\
+         \x20   %% First segment must match at start\n\
+         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+         \x20       {0, Len} -> matches_segments(Rest, Actual, Len, false);\n\
+         \x20       _ -> false\n\
+         \x20   end;\n\
+         matches_segments([Seg], Actual, Pos, false) ->\n\
+         \x20   %% Last non-empty segment must match at end\n\
+         \x20   SLen = byte_size(Seg),\n\
+         \x20   ALen = byte_size(Actual),\n\
+         \x20   Start = ALen - SLen,\n\
+         \x20   Start >= Pos andalso binary:part(Actual, Start, SLen) =:= Seg;\n\
+         matches_segments([Seg | Rest], Actual, Pos, false) ->\n\
+         \x20   case binary:match(Actual, Seg, [{scope, {Pos, byte_size(Actual) - Pos}}]) of\n\
+         \x20       {Found, Len} -> matches_segments(Rest, Actual, Found + Len, false);\n\
+         \x20       nomatch -> false\n\
+         \x20   end.\n\n",
     );
 
     // Single test function with all assertions (stateful test)
@@ -260,35 +417,49 @@ fn generate_eunit_wrapper(
 
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
         let bindings_in = format!("Bindings{i}");
-        let result_var = format!("Result{i}");
-
-        // Call the eval module — returns {Result, RawBindings}
-        let raw_bindings = format!("RawBindings{}", i + 1);
-        let _ = writeln!(
-            erl,
-            "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
-        );
-
-        // If this expression is a variable assignment (x := expr), persist
-        // the binding in the bindings map for subsequent expressions.
-        // This mirrors the REPL's extract_assignment + maps:put logic.
         let bindings_out = format!("Bindings{}", i + 1);
-        if let Some(var_name) = extract_assignment_var(&case.expression) {
-            let _ = writeln!(
-                erl,
-                "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
-            );
-        } else {
-            let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
-        }
 
-        // Add assertion (unless wildcard)
-        if case.expected != "_" {
-            let expected_bin = expected_to_binary_literal(&case.expected);
-            let _ = writeln!(
-                erl,
-                "    ?assertEqual({expected_bin}, format_result({result_var})),"
-            );
+        match &case.expected {
+            Expected::Error { kind } => {
+                write_error_assertion(&mut erl, i, eval_mod, kind, &bindings_in, &bindings_out);
+            }
+            Expected::Value(v) => {
+                // Normal eval: call the module and extract result + bindings
+                let result_var = format!("Result{i}");
+                let raw_bindings = format!("RawBindings{}", i + 1);
+                let _ = writeln!(
+                    erl,
+                    "    {{{result_var}, {raw_bindings}}} = '{eval_mod}':eval({bindings_in}),"
+                );
+
+                // Persist assignment bindings
+                if let Some(var_name) = extract_assignment_var(&case.expression) {
+                    let _ = writeln!(
+                        erl,
+                        "    {bindings_out} = maps:put('{var_name}', {result_var}, {raw_bindings}),"
+                    );
+                } else {
+                    let _ = writeln!(erl, "    {bindings_out} = {raw_bindings},");
+                }
+
+                // Add value assertion (unless bare wildcard)
+                if v == "_" {
+                    // Bare wildcard: run but don't check result
+                } else if has_wildcard_underscore(v) {
+                    // Pattern with wildcards: use glob-style matching (BT-502)
+                    let expected_bin = expected_to_binary_literal(v);
+                    let _ = writeln!(
+                        erl,
+                        "    ?assert(matches_pattern({expected_bin}, format_result({result_var}))),"
+                    );
+                } else {
+                    let expected_bin = expected_to_binary_literal(v);
+                    let _ = writeln!(
+                        erl,
+                        "    ?assertEqual({expected_bin}, format_result({result_var})),"
+                    );
+                }
+            }
         }
     }
 
@@ -307,8 +478,11 @@ fn compile_fixture(fixture_path: &Utf8Path, output_dir: &Utf8Path) -> Result<()>
         .file_stem()
         .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
 
-    // Use the same module naming as build command
-    let module_name = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+    // ADR 0016: User code modules use bt@ prefix
+    let module_name = format!(
+        "bt@{}",
+        beamtalk_core::codegen::core_erlang::to_module_name(stem)
+    );
 
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -521,7 +695,10 @@ fn compile_single_test_file(
         compile_fixture(&fixture_path, build_dir)?;
         // Track fixture module name for code:ensure_loaded at runtime
         if let Some(stem) = fixture_path.file_stem() {
-            let module_name = beamtalk_core::codegen::core_erlang::to_module_name(stem);
+            let module_name = format!(
+                "bt@{}",
+                beamtalk_core::codegen::core_erlang::to_module_name(stem)
+            );
             fixture_modules.push(module_name);
         }
     }
@@ -617,7 +794,8 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        miette::bail!("erlc batch compilation failed:\n{}", stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!("erlc batch compilation failed:\n{}{}", stdout, stderr);
     }
 
     Ok(())
@@ -823,7 +1001,7 @@ mod tests {
         let parsed = parse_test_file(content);
         assert_eq!(parsed.cases.len(), 1);
         assert_eq!(parsed.cases[0].expression, "1 + 2");
-        assert_eq!(parsed.cases[0].expected, "3");
+        assert_eq!(parsed.cases[0].expected, Expected::Value("3".to_string()));
         assert_eq!(parsed.cases[0].line, 1);
     }
 
@@ -832,7 +1010,7 @@ mod tests {
         let content = "Counter spawn\n// => _\n";
         let parsed = parse_test_file(content);
         assert_eq!(parsed.cases.len(), 1);
-        assert_eq!(parsed.cases[0].expected, "_");
+        assert_eq!(parsed.cases[0].expected, Expected::Value("_".to_string()));
     }
 
     #[test]
@@ -893,7 +1071,7 @@ mod tests {
     fn test_generate_eunit_wrapper_simple() {
         let cases = vec![TestCase {
             expression: "1 + 2".to_string(),
-            expected: "3".to_string(),
+            expected: Expected::Value("3".to_string()),
             line: 1,
         }];
         let eval_modules = vec!["test_arith_0".to_string()];
@@ -907,12 +1085,27 @@ mod tests {
     fn test_generate_eunit_wrapper_wildcard() {
         let cases = vec![TestCase {
             expression: "Counter spawn".to_string(),
-            expected: "_".to_string(),
+            expected: Expected::Value("_".to_string()),
             line: 1,
         }];
         let eval_modules = vec!["test_spawn_0".to_string()];
         let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
         assert!(wrapper.contains("test_spawn_0"));
+        // Bare wildcard should not generate assertEqual or assert(matches_pattern(...))
+        assert!(!wrapper.contains("assertEqual"));
+        assert!(!wrapper.contains("?assert(matches_pattern"));
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_pattern() {
+        let cases = vec![TestCase {
+            expression: "Counter spawn".to_string(),
+            expected: Expected::Value("#Actor<Counter,_>".to_string()),
+            line: 1,
+        }];
+        let eval_modules = vec!["test_spawn_0".to_string()];
+        let wrapper = generate_eunit_wrapper("spawn_tests", "test/spawn.bt", &cases, &eval_modules);
+        assert!(wrapper.contains("matches_pattern"));
         assert!(!wrapper.contains("assertEqual"));
     }
 
@@ -929,5 +1122,113 @@ mod tests {
     fn test_compile_expression_to_core_invalid() {
         let result = compile_expression_to_core("", "test_invalid_0");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_error_assertion() {
+        let content = "42 foo\n// => ERROR: does_not_understand\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(parsed.cases[0].expression, "42 foo");
+        assert_eq!(
+            parsed.cases[0].expected,
+            Expected::Error {
+                kind: "does_not_understand".to_string()
+            }
+        );
+        assert!(parsed.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_assertion_type_error() {
+        let content = "\"hello\" + 42\n// => ERROR: type_error\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 1);
+        assert_eq!(
+            parsed.cases[0].expected,
+            Expected::Error {
+                kind: "type_error".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_value_and_error_assertions() {
+        let content = "1 + 2\n// => 3\n42 foo\n// => ERROR: does_not_understand\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 2);
+        assert_eq!(parsed.cases[0].expected, Expected::Value("3".to_string()));
+        assert_eq!(
+            parsed.cases[1].expected,
+            Expected::Error {
+                kind: "does_not_understand".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_error() {
+        let cases = vec![TestCase {
+            expression: "42 foo".to_string(),
+            expected: Expected::Error {
+                kind: "does_not_understand".to_string(),
+            },
+            line: 1,
+        }];
+        let eval_modules = vec!["test_err_0".to_string()];
+        let wrapper = generate_eunit_wrapper("err_tests", "test/err.bt", &cases, &eval_modules);
+        assert!(wrapper.contains("try 'test_err_0':eval("));
+        assert!(wrapper.contains("beamtalk_error"));
+        assert!(wrapper.contains("does_not_understand"));
+        // Error assertions should not call format_result in the assertion
+        assert!(!wrapper.contains("format_result(Result"));
+        // Assertions must be outside try/catch (not caught by own catch clause)
+        assert!(wrapper.contains("case TryResult0 of"));
+        assert!(wrapper.contains("{ok, _}"));
+        assert!(wrapper.contains("CaughtKind0"));
+        // Error wrapper catches future_rejected throws (actor errors via await)
+        assert!(wrapper.contains("throw:{future_rejected, {beamtalk_error,"));
+    }
+
+    #[test]
+    fn test_generate_eunit_wrapper_mixed() {
+        let cases = vec![
+            TestCase {
+                expression: "1 + 2".to_string(),
+                expected: Expected::Value("3".to_string()),
+                line: 1,
+            },
+            TestCase {
+                expression: "42 foo".to_string(),
+                expected: Expected::Error {
+                    kind: "does_not_understand".to_string(),
+                },
+                line: 3,
+            },
+        ];
+        let eval_modules = vec!["test_mix_0".to_string(), "test_mix_1".to_string()];
+        let wrapper = generate_eunit_wrapper("mix_tests", "test/mix.bt", &cases, &eval_modules);
+        // First case: normal value assertion
+        assert!(wrapper.contains("format_result(Result0)"));
+        // Second case: error try/catch
+        assert!(wrapper.contains("try 'test_mix_1':eval("));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_empty_kind() {
+        let content = "42 foo\n// => ERROR:\n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
+    }
+
+    #[test]
+    fn test_parse_error_assertion_whitespace_only_kind() {
+        let content = "42 foo\n// => ERROR:   \n";
+        let parsed = parse_test_file(content);
+        assert_eq!(parsed.cases.len(), 0);
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(parsed.warnings[0].contains("missing error kind"));
     }
 }

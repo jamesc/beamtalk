@@ -184,7 +184,7 @@ Target: **<50ms** for single-file change to loaded code.
   LSP Server compiles counter.bt
         │
         ▼
-  Produces counter.beam
+  Produces bt@counter.beam
         │
         ▼
   Sends to BEAM node via:           ┌────────────────────────┐

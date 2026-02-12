@@ -69,9 +69,9 @@ true ~= false
 
 // Actors are compared by pid - different spawns are not equal
 c1 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 c2 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // Different actor instances are not equal (different pids)
 c1 ~= c2

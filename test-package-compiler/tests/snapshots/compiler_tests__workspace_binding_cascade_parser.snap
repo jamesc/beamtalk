@@ -123,6 +123,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 155,
                         end: 205,
@@ -130,6 +131,8 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 130,
                 end: 205,

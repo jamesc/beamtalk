@@ -25,15 +25,15 @@ at_emoji_test() ->
     ?assertEqual(<<"👋"/utf8>>, beamtalk_string_ops:at(<<"hi👋"/utf8>>, 3)).
 
 at_out_of_bounds_test() ->
-    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
                  beamtalk_string_ops:at(<<"hi">>, 10)).
 
 at_zero_index_test() ->
-    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
                  beamtalk_string_ops:at(<<"hi">>, 0)).
 
 at_negative_index_test() ->
-    ?assertError(#beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'},
+    ?assertError(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}},
                  beamtalk_string_ops:at(<<"hi">>, -1)).
 
 %%% ============================================================================

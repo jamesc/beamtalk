@@ -14,9 +14,12 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     ClassDefinition, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
 };
-use std::fmt::Write;
+use crate::docvec;
 
 use super::variable_context;
+
+// Auto-generated from lib/*.bt by build.rs — do not edit manually.
+include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
 
 impl CoreErlangGenerator {
     /// Generates a value type module (BT-213).
@@ -63,16 +66,9 @@ impl CoreErlangGenerator {
             .first()
             .ok_or_else(|| CodeGenError::Internal("Value type module has no class".to_string()))?;
 
-        // Set class identity early — needed by all code paths including the
-        // Beamtalk special case below, so that class_name() returns the AST
+        // Set class identity early so that class_name() returns the AST
         // class name rather than deriving from the module name.
         self.class_identity = Some(ClassIdentity::new(&class.name.name));
-
-        // BT-220: Special case for Beamtalk global class
-        // The Beamtalk class provides system reflection via class methods, not instances
-        if class.name.name.as_str() == "Beamtalk" {
-            return self.generate_beamtalk_module(class);
-        }
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)
@@ -108,6 +104,10 @@ impl CoreErlangGenerator {
         // All value types export dispatch/3 and has_method/1
         // for runtime dispatch via superclass delegation chain
         exports.push("'dispatch'/3".to_string());
+        // BT-446: All value types also export dispatch/4 for actor hierarchy walk.
+        // The dispatch service checks function_exported(Module, dispatch, 4) and
+        // skips modules that only have dispatch/3.
+        exports.push("'dispatch'/4".to_string());
         exports.push("'has_method'/1".to_string());
 
         // All classes export superclass/0 for reflection
@@ -119,123 +119,211 @@ impl CoreErlangGenerator {
         // BT-411: Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
-                let arity = method.parameters.len() + 1; // +1 for ClassSelf
+                let arity = method.parameters.len() + 2; // +2 for ClassSelf + ClassVars
                 exports.push(format!("'class_{}'/{arity}", method.selector.name()));
             }
         }
 
         // Module header
-        writeln!(
-            self.output,
-            "module '{}' [{}]",
-            self.module_name,
-            exports.join(", ")
-        )?;
-        // BT-246: on_load registers the class process
-        writeln!(
-            self.output,
-            "  attributes ['on_load' = [{{'register_class', 0}}]]"
-        )?;
-        writeln!(self.output)?;
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            format!("module '{}' [{}]\n", module_name, exports.join(", ")),
+            "  attributes ['on_load' = [{'register_class', 0}]]\n",
+            "\n",
+        ];
+        self.write_document(&doc);
 
         // Generate new/0 - creates instance with default field values
         if !has_explicit_new {
             self.generate_value_type_new(class)?;
-            writeln!(self.output)?;
+            let doc = docvec!["\n"];
+            self.write_document(&doc);
         }
 
         // Generate new/1 - creates instance with initialization arguments
         if !has_explicit_new_with {
             self.generate_value_type_new_with_args()?;
-            writeln!(self.output)?;
+            let doc = docvec!["\n"];
+            self.write_document(&doc);
         }
 
         // Generate instance methods as pure functions
         for method in &class.methods {
             self.generate_value_type_method(method, class)?;
-            writeln!(self.output)?;
+            let doc = docvec!["\n"];
+            self.write_document(&doc);
         }
 
         // Generate dispatch/3 and has_method/1 for all value types
         // (superclass delegation chain — same pattern as actors)
         self.generate_primitive_dispatch(class)?;
-        writeln!(self.output)?;
+        let doc = docvec!["\n"];
+        self.write_document(&doc);
+        // BT-446: Generate dispatch/4 for actor hierarchy walk.
+        // The dispatch service only calls modules that export dispatch/4.
+        self.generate_dispatch_4(class)?;
+        let doc = docvec!["\n"];
+        self.write_document(&doc);
         self.generate_primitive_has_method(class)?;
-        writeln!(self.output)?;
+        let doc = docvec!["\n"];
+        self.write_document(&doc);
 
         // Generate superclass/0 for reflection
         let superclass_atom = class.superclass.as_ref().map_or("nil", |s| s.name.as_str());
-        writeln!(
-            self.output,
-            "'superclass'/0 = fun () -> '{superclass_atom}'"
-        )?;
-        writeln!(self.output)?;
+        let doc = docvec![
+            format!("'superclass'/0 = fun () -> '{superclass_atom}'\n"),
+            "\n",
+        ];
+        self.write_document(&doc);
 
         // BT-411: Generate class-side method functions
         if !class.class_methods.is_empty() {
             self.generate_class_method_functions(class)?;
-            writeln!(self.output)?;
+            let doc = docvec!["\n"];
+            self.write_document(&doc);
         }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
         self.generate_register_class(module)?;
-        writeln!(self.output)?;
+        let doc = docvec!["\n"];
+        self.write_document(&doc);
 
         // Module end
-        writeln!(self.output, "end")?;
+        let doc = docvec!["end\n"];
+        self.write_document(&doc);
 
         Ok(())
     }
 
     /// Generates the `new/0` function for a value type.
     ///
-    /// Creates an instance map with `$beamtalk_class` and default field values.
+    /// - Non-instantiable primitives (Integer, String, etc.): raises `instantiation_error`
+    /// - Collection primitives (Dictionary, List, Tuple): returns empty native value
+    /// - Other value types: creates an instance map with `$beamtalk_class` and defaults
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<()> {
-        writeln!(self.output, "'new'/0 = fun () ->")?;
-        self.indent += 1;
-        self.write_indent()?;
+        let class_name = self.class_name().clone();
+        if Self::is_non_instantiable_primitive(class_name.as_str()) {
+            return self.generate_primitive_new_error(class_name.as_str(), "new", 0);
+        }
+        if let Some(empty_val) = Self::collection_empty_value(class_name.as_str()) {
+            return self.generate_collection_new(empty_val);
+        }
 
-        // Generate map literal with $beamtalk_class and fields
-        write!(
-            self.output,
-            "~{{'$beamtalk_class' => '{}'",
-            self.class_name()
-        )?;
+        // Start building the document
+        let mut field_parts = Vec::new();
 
         // Add each field with its default value
         for field in &class.state {
-            write!(self.output, ", '{}' => ", field.name.name)?;
-            if let Some(default_value) = &field.default_value {
-                self.generate_expression(default_value)?;
+            let default_code = if let Some(default_value) = &field.default_value {
+                self.capture_expression(default_value)?
             } else {
-                write!(self.output, "'nil'")?;
-            }
+                "'nil'".to_string()
+            };
+            field_parts.push(format!(", '{}' => {}", field.name.name, default_code));
         }
 
-        writeln!(self.output, "}}~")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let doc = docvec![
+            "'new'/0 = fun () ->\n",
+            "    ~{'$beamtalk_class' => '",
+            class_name,
+            "'",
+            field_parts.join(""),
+            "}~\n",
+            "\n",
+        ];
 
+        self.write_document(&doc);
         Ok(())
     }
 
     /// Generates the `new/1` function for a value type.
     ///
-    /// Merges initialization arguments with default values.
+    /// - Non-instantiable primitives: raises `instantiation_error`
+    /// - Dictionary: returns `InitArgs` directly (dictionary IS a map)
+    /// - List, Tuple: raises `instantiation_error` (no meaningful init-from-map)
+    /// - Other value types: merges initialization arguments with defaults
     fn generate_value_type_new_with_args(&mut self) -> Result<()> {
-        writeln!(self.output, "'new'/1 = fun (InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let DefaultState = call '{}':'new'() in",
-            self.module_name
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'maps':'merge'(DefaultState, InitArgs)")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let class_name = self.class_name().clone();
+        if Self::is_non_instantiable_primitive(class_name.as_str()) {
+            return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
+        }
+        // Dictionary new: #{key => val} returns the map directly
+        if class_name == "Dictionary" {
+            return self.generate_collection_new_with_args();
+        }
+        // List and Tuple have no meaningful init-from-map pattern
+        if Self::collection_empty_value(class_name.as_str()).is_some() {
+            return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
+        }
 
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            "'new'/1 = fun (InitArgs) ->\n",
+            "    let DefaultState = call '",
+            module_name,
+            "':'new'() in\n",
+            "    call 'maps':'merge'(DefaultState, InitArgs)\n",
+            "\n",
+        ];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates a `new` or `new:` function that raises `instantiation_error`
+    /// for primitive types that cannot be instantiated with `new`.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_primitive_new_error(
+        &mut self,
+        class_name: &str,
+        selector: &str,
+        arity: usize,
+    ) -> Result<()> {
+        let hint =
+            format!("{class_name} is a primitive type and cannot be instantiated with {selector}");
+        let hint_binary = Self::core_erlang_binary(&hint);
+
+        let function_head = if arity == 0 {
+            "'new'/0 = fun () ->"
+        } else {
+            "'new'/1 = fun (_InitArgs) ->"
+        };
+
+        let doc = docvec![
+            function_head,
+            "\n",
+            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
+            class_name,
+            "') in\n",
+            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
+            selector,
+            "') in\n",
+            "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+            hint_binary,
+            ") in\n",
+            "    call 'erlang':'error'(Error2)\n",
+            "\n",
+        ];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates `new/0` for a collection type that returns an empty native value.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_collection_new(&mut self, empty_value: &str) -> Result<()> {
+        let doc = docvec!["'new'/0 = fun () ->\n", "    ", empty_value, "\n", "\n",];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_collection_new_with_args(&mut self) -> Result<()> {
+        let doc = docvec!["'new'/1 = fun (InitArgs) ->\n", "    InitArgs\n", "\n",];
+
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -251,15 +339,12 @@ impl CoreErlangGenerator {
         let mangled = method.selector.to_erlang_atom();
         let arity = method.parameters.len() + 1; // +1 for Self
 
-        // Function signature: 'methodName'/Arity = fun (Self, Param1, Param2, ...) ->
-        write!(self.output, "'{mangled}'/{arity}= fun (Self")?;
+        // Build parameter list
+        let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
             let core_var = variable_context::VariableContext::to_core_var(&param.name);
-            write!(self.output, ", {core_var}")?;
+            params.push(core_var);
         }
-        writeln!(self.output, ") ->")?;
-
-        self.indent += 1;
 
         // Bind parameters in scope
         self.push_scope();
@@ -271,6 +356,9 @@ impl CoreErlangGenerator {
             self.current_method_params.push(core_var);
         }
 
+        // Build method body parts
+        let mut body_parts = Vec::new();
+
         // Generate method body expressions
         // For value types, there's no state threading - they're immutable
         // TODO(BT-213): Consider adding immutable update syntax (e.g., withX: newX) in future
@@ -281,42 +369,49 @@ impl CoreErlangGenerator {
 
             // Early return (^) — emit value and stop generating further expressions
             if let Expression::Return { value, .. } = expr {
+                let expr_code = self.capture_expression(value)?;
                 if i > 0 {
-                    self.write_indent()?;
+                    body_parts.push("    ".to_string());
                 }
-                self.generate_expression(value)?;
+                body_parts.push(expr_code);
                 break;
             }
 
             if is_last {
+                let expr_code = self.capture_expression(expr)?;
                 if i > 0 {
-                    self.write_indent()?;
+                    body_parts.push("    ".to_string());
                 }
-                self.generate_expression(expr)?;
+                body_parts.push(expr_code);
             } else {
                 // Non-last expressions: wrap in let to sequence side effects
                 let tmp_var = self.fresh_temp_var("seq");
-                self.write_indent()?;
-                write!(self.output, "let {tmp_var} = ")?;
-                self.generate_expression(expr)?;
-                writeln!(self.output, " in")?;
+                let expr_code = self.capture_expression(expr)?;
+                body_parts.push(format!("    let {tmp_var} = {expr_code} in\n"));
             }
         }
 
         self.pop_scope();
-        self.indent -= 1;
-        writeln!(self.output)?;
 
+        let doc = docvec![
+            format!("'{}'/{}= fun ({}) ->\n", mangled, arity, params.join(", ")),
+            body_parts.join(""),
+            "\n",
+        ];
+
+        self.write_document(&doc);
         Ok(())
     }
 
-    /// Returns true if the class is a primitive type (native Erlang value).
+    /// Returns true if the class is a non-instantiable primitive type.
     ///
-    /// Primitive types need `dispatch/3` and `has_method/1` for runtime
-    /// dispatch via `beamtalk_primitive:send/3`.
+    /// These types have no sensible default/empty value and cannot be
+    /// instantiated with `new`. For example, `Integer new` makes no sense —
+    /// integers are created via literals (`42`).
     ///
-    /// NOTE: Must stay in sync with `build_stdlib::is_primitive_type()`.
-    fn is_primitive_type(class_name: &str) -> bool {
+    /// Collection types (Dictionary, List, Tuple) are NOT included here
+    /// because they have sensible empty values (e.g., `Dictionary new` → `#{}`).
+    fn is_non_instantiable_primitive(class_name: &str) -> bool {
         matches!(
             class_name,
             "Integer"
@@ -327,70 +422,60 @@ impl CoreErlangGenerator {
                 | "UndefinedObject"
                 | "Block"
                 | "Symbol"
-                | "Tuple"
-                | "List"
-                | "Dictionary"
-                | "Set"
+                | "CompiledMethod"
         )
     }
 
-    /// Returns `true` for known non-primitive stdlib classes that compile to
-    /// `bt_stdlib_{snake}` modules.
+    /// Returns the Core Erlang literal for a collection type's empty value,
+    /// or `None` if the class is not a collection primitive.
+    fn collection_empty_value(class_name: &str) -> Option<&'static str> {
+        match class_name {
+            "Dictionary" => Some("~{}~"),
+            "List" => Some("[]"),
+            "Tuple" => Some("{}"),
+            _ => None,
+        }
+    }
+
+    /// Returns true if the class is a known stdlib type (ADR 0016).
     ///
-    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
-    fn is_stdlib_nonprimitive_type(class_name: &str) -> bool {
-        matches!(
-            class_name,
-            "Object"
-                | "Number"
-                | "Actor"
-                | "File"
-                | "Association"
-                | "SystemDictionary"
-                | "TranscriptStream"
-                | "Exception"
-                | "Error"
-        )
+    /// All stdlib types compile to `bt@stdlib@{snake_case}` modules.
+    /// Derived automatically from `lib/*.bt` via `build.rs` (BT-472).
+    fn is_known_stdlib_type(class_name: &str) -> bool {
+        STDLIB_CLASS_NAMES.contains(&class_name)
+    }
+
+    /// Computes the compiled module name for a class (ADR 0016).
+    ///
+    /// - Stdlib classes → `bt@stdlib@{snake_case}`
+    /// - User-defined classes → `bt@{snake_case}`
+    pub fn compiled_module_name(class_name: &str) -> String {
+        let snake = super::util::to_module_name(class_name);
+        if Self::is_known_stdlib_type(class_name) {
+            format!("bt@stdlib@{snake}")
+        } else {
+            format!("bt@{snake}")
+        }
     }
 
     /// Computes the module name for a superclass in the dispatch chain.
     ///
     /// Returns `None` for `ProtoObject` (root of the hierarchy — no module to
-    /// delegate to). For stdlib classes, applies the naming convention from
-    /// `build_stdlib::module_name_from_path`:
-    /// - Primitive types → `beamtalk_{snake_case}`
-    /// - Non-primitive stdlib types → `bt_stdlib_{snake_case}`
+    /// delegate to). For stdlib classes, applies the ADR 0016 naming convention:
+    /// all stdlib types → `bt@stdlib@{snake_case}`.
     ///
-    /// For user-defined classes, falls back to `to_module_name(superclass)`
-    /// so that dispatch delegates to the actual compiled module.
-    ///
-    /// NOTE: Must stay in sync with `build_stdlib::module_name_from_path()`.
+    /// For user-defined classes, uses `bt@{snake_case}` prefix.
     fn superclass_module_name(superclass: &str) -> Option<String> {
         if superclass == "ProtoObject" {
             return None;
         }
-        let snake = super::util::to_module_name(superclass);
-        if Self::is_primitive_type(superclass) {
-            Some(format!("beamtalk_{snake}"))
-        } else if Self::is_stdlib_nonprimitive_type(superclass) {
-            Some(format!("bt_stdlib_{snake}"))
-        } else {
-            // User-defined superclass: use plain module name without prefix
-            Some(snake)
-        }
+        Some(Self::compiled_module_name(superclass))
     }
 
     /// Encode a string as a Core Erlang binary literal.
-    /// Core Erlang uses `#{#<charcode>(8,1,'integer',['unsigned'|['big']]),..}#`
+    /// Delegates to the shared UTF-8 binary literal helper.
     fn core_erlang_binary(s: &str) -> String {
-        if s.is_empty() {
-            return "#{}#".to_string();
-        }
-        let segments: Vec<String> = s
-            .chars()
-            .map(|ch| format!("#<{}>(8,1,'integer',['unsigned'|['big']])", ch as u32))
-            .collect();
-        format!("#{{{}}}#", segments.join(","))
+        Self::binary_string_literal(s)
     }
 
     /// Generates the `dispatch/3` function for a value type.
@@ -400,53 +485,29 @@ impl CoreErlangGenerator {
     /// perform:, perform:withArguments:), checks the extension registry for unknown
     /// selectors, and delegates to superclass dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
-    #[allow(clippy::too_many_lines)]
+    ///
+    /// BT-447: For classes with zero instance methods (e.g., File), generates a
+    /// minimal stub that handles only `class` and `respondsTo:`, delegating
+    /// everything else to the superclass.
+    #[allow(clippy::too_many_lines, clippy::format_push_string)]
     fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
 
-        writeln!(self.output, "'dispatch'/3 = fun (Selector, Args, Self) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Selector of")?;
-
-        // Reflection methods (inherited from Object for all primitives)
-        self.indent += 1;
-
-        // class
-        self.write_indent()?;
-        writeln!(self.output, "<'class'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "'{class_name}'")?;
-        self.indent -= 1;
-
-        // respondsTo: — validate Args is a non-empty list
-        self.write_indent()?;
-        writeln!(self.output, "<'respondsTo'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Args of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "<_> when 'true' -> 'false'")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
+        // BT-447: Class-methods-only classes skip protocol boilerplate
+        if class.methods.is_empty() && superclass_mod.is_some() {
+            return self.generate_minimal_dispatch(class);
+        }
 
         // asString — generate default for classes that don't define it
         let has_as_string = class
             .methods
             .iter()
             .any(|m| m.selector.name() == "asString");
-        if !has_as_string {
+        let as_string_branch = if has_as_string {
+            String::new()
+        } else {
             let default_str = match class_name.as_str() {
                 "True" => "true",
                 "False" => "false",
@@ -454,102 +515,38 @@ impl CoreErlangGenerator {
                 "Block" => "a Block",
                 _ => "",
             };
-            if !default_str.is_empty() {
-                self.write_indent()?;
-                writeln!(self.output, "<'asString'> when 'true' ->")?;
-                self.indent += 1;
-                self.write_indent()?;
+            if default_str.is_empty() {
+                String::new()
+            } else {
                 let binary = Self::core_erlang_binary(default_str);
-                writeln!(self.output, "{binary}")?;
-                self.indent -= 1;
+                format!(
+                    "        <'asString'> when 'true' ->\n\
+                     {0}            {binary}\n",
+                    ""
+                )
             }
-        }
+        };
 
-        // instVarNames — primitives have no instance variables
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarNames'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "[]")?;
-        self.indent -= 1;
+        // instVarAt: error
+        let iva_hint = Self::core_erlang_binary(&format!(
+            "{class_name}s are immutable and have no instance variables."
+        ));
 
-        // instVarAt: — always returns nil for primitives
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarAt'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "'nil'")?;
-        self.indent -= 1;
-
-        // instVarAt:put: — error: primitives are immutable
-        self.write_indent()?;
-        writeln!(self.output, "<'instVarAt:put:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <ImmErr0> = call 'beamtalk_error':'new'('immutable_primitive', '{class_name}') in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in"
-        )?;
-        self.write_indent()?;
+        // instVarAt:put: error
         let immutable_hint = Self::core_erlang_binary(&format!(
             "{class_name}s are immutable. Use assignment (x := newValue) instead."
         ));
-        writeln!(
-            self.output,
-            "let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, {immutable_hint}) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(ImmErr2)")?;
-        self.indent -= 1;
-
-        // perform: — recursive dispatch
-        self.write_indent()?;
-        writeln!(self.output, "<'perform'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "let <PerfSel> = call 'erlang':'hd'(Args) in")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call '{mod_name}':'dispatch'(PerfSel, [], Self)"
-        )?;
-        self.indent -= 1;
-
-        // perform:withArguments: — recursive dispatch with args
-        self.write_indent()?;
-        writeln!(self.output, "<'perform:withArguments:'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "let <PwaSel> = call 'erlang':'hd'(Args) in")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)"
-        )?;
-        self.indent -= 1;
 
         // Route each class-defined method to its individual function
+        let mut method_branches = String::new();
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
-            let arity = method.parameters.len() + 1; // +1 for Self
-            self.write_indent()?;
-            writeln!(self.output, "<'{mangled}'> when 'true' ->")?;
-            self.indent += 1;
-            self.write_indent()?;
+            method_branches.push_str(&format!("        <'{mangled}'> when 'true' ->\n"));
 
-            // Build argument list: Self, then each arg from Args list
             if method.parameters.is_empty() {
-                writeln!(self.output, "call '{mod_name}':'{mangled}'(Self)")?;
+                method_branches.push_str(&format!(
+                    "            call '{mod_name}':'{mangled}'(Self)\n"
+                ));
             } else {
                 // Extract args from Args list: hd(Args), hd(tl(Args)), ...
                 for (i, _param) in method.parameters.iter().enumerate() {
@@ -558,96 +555,315 @@ impl CoreErlangGenerator {
                     for _ in 0..i {
                         access = format!("call 'erlang':'tl'({access})");
                     }
-                    writeln!(
-                        self.output,
-                        "let <{arg_var}> = call 'erlang':'hd'({access}) in"
-                    )?;
-                    self.write_indent()?;
+                    method_branches.push_str(&format!(
+                        "            let <{arg_var}> = call 'erlang':'hd'({access}) in\n"
+                    ));
                 }
-                write!(self.output, "call '{mod_name}':'{mangled}'(Self")?;
+                method_branches
+                    .push_str(&format!("            call '{mod_name}':'{mangled}'(Self"));
                 for i in 0..method.parameters.len() {
-                    write!(self.output, ", DispArg{i}")?;
+                    method_branches.push_str(&format!(", DispArg{i}"));
                 }
-                writeln!(self.output, ")")?;
+                method_branches.push_str(")\n");
             }
-
-            let _ = arity;
-            self.indent -= 1;
         }
 
         // Default case: extension fallback, then superclass delegation
-        self.write_indent()?;
-        writeln!(self.output, "<_Other> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "apply ExtFun(Args, Self)")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'not_found'> when 'true' ->")?;
-        self.indent += 1;
-
-        if let Some(ref super_mod) = superclass_mod {
-            // Delegate to superclass dispatch/3
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "call '{super_mod}':'dispatch'(Selector, Args, Self)"
-            )?;
+        let not_found_branch = if let Some(ref super_mod) = superclass_mod {
+            format!("                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n")
         } else {
             // Root of hierarchy — raise does_not_understand
-            // Use runtime class_of(Self) to get the *receiver's* actual class,
-            // not the module where the error is raised (which may be a superclass).
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in"
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in"
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in"
-            )?;
-            self.write_indent()?;
             let dnu_hint = Self::core_erlang_binary(
                 "Check spelling or use 'respondsTo:' to verify method exists",
             );
-            writeln!(
-                self.output,
-                "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "call 'erlang':'error'(DnuErr2)")?;
+            format!(
+                "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n\
+                 {0}                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n\
+                 {0}                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n\
+                 {0}                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, {dnu_hint}) in\n\
+                 {0}                    call 'beamtalk_error':'raise'(DnuErr2)\n",
+                ""
+            )
+        };
+
+        let doc = docvec![
+            "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
+            "    case Selector of\n",
+            // class
+            "        <'class'> when 'true' ->\n",
+            "            '",
+            class_name.as_str(),
+            "'\n",
+            // respondsTo:
+            "        <'respondsTo:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[RtSelector | _]> when 'true' -> call '",
+            mod_name.as_str(),
+            "':'has_method'(RtSelector)\n",
+            "                <_> when 'true' -> 'false'\n",
+            "            end\n",
+            // asString (conditional)
+            as_string_branch,
+            // instVarNames
+            "        <'instVarNames'> when 'true' ->\n",
+            "            []\n",
+            // instVarAt:
+            "        <'instVarAt:'> when 'true' ->\n",
+            "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+            class_name.as_str(),
+            "') in\n",
+            "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in\n",
+            "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
+            iva_hint,
+            ") in\n",
+            "            call 'beamtalk_error':'raise'(IvaErr2)\n",
+            // instVarAt:put:
+            "        <'instVarAt:put:'> when 'true' ->\n",
+            "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+            class_name.as_str(),
+            "') in\n",
+            "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in\n",
+            "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
+            immutable_hint,
+            ") in\n",
+            "            call 'beamtalk_error':'raise'(ImmErr2)\n",
+            // perform:
+            "        <'perform:'> when 'true' ->\n",
+            "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
+            "            call '",
+            mod_name.as_str(),
+            "':'dispatch'(PerfSel, [], Self)\n",
+            // perform:withArguments:
+            "        <'perform:withArguments:'> when 'true' ->\n",
+            "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
+            "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
+            "            call '",
+            mod_name.as_str(),
+            "':'dispatch'(PwaSel, PwaArgs, Self)\n",
+            // Class-defined method branches
+            method_branches,
+            // Default case
+            "        <_Other> when 'true' ->\n",
+            "            case call 'beamtalk_extensions':'lookup'('",
+            class_name.as_str(),
+            "', Selector) of\n",
+            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
+            "                    apply ExtFun(Args, Self)\n",
+            "                <'not_found'> when 'true' ->\n",
+            not_found_branch,
+            "            end\n",
+            "    end\n",
+            "\n",
+        ];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates the `dispatch/4` function for a value type (BT-446).
+    ///
+    /// The dispatch service (`beamtalk_dispatch:invoke_method/6`) only calls
+    /// modules that export `dispatch/4`. Without this, compiled value type
+    /// modules are skipped during the actor hierarchy walk, preventing actors
+    /// from inheriting Object-level methods.
+    ///
+    /// For Object specifically, this generates state-aware implementations
+    /// for reflection primitives (instVarAt:, printString, etc.) that need
+    /// access to the actor's state map. For all other value types, this is
+    /// a simple wrapper that delegates to dispatch/3.
+    fn generate_dispatch_4(&mut self, _class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let mod_name = self.module_name.clone();
+
+        let header = "'dispatch'/4 = fun (Selector, Args, Self, State) ->\n";
+        self.write_document(&docvec![header]);
+
+        if class_name == "Object" {
+            self.generate_object_dispatch_4(mod_name.as_str())?;
+        } else {
+            // Simple wrapper: delegate to dispatch/3, wrap result in {reply, _, State}
+            self.generate_dispatch_4_wrapper(mod_name.as_str())?;
         }
 
-        self.indent -= 1;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-
-        // Close the outer case (selector dispatch)
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-
-        self.indent -= 1;
-        writeln!(self.output)?;
+        self.write_document(&docvec!["\n"]);
 
         Ok(())
+    }
+
+    /// Generates Object's dispatch/4 with state-aware reflection primitives.
+    ///
+    /// Actor instances inherit Object methods via the hierarchy walk. These
+    /// methods need access to the actor's State map for proper reflection
+    /// (field access, class name, etc.).
+    #[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
+    fn generate_object_dispatch_4(&mut self, mod_name: &str) -> Result<()> {
+        let a_space_binary = Self::core_erlang_binary("a ");
+
+        // instVarAt: arity error
+        let inst_var_at_err = self.arity_error_fragment("'instVarAt:'", 1, "                ");
+        // instVarAt:put: arity error (used twice)
+        let inst_var_at_put_err =
+            self.arity_error_fragment("'instVarAt:put:'", 2, "                    ");
+        let inst_var_at_put_err2 =
+            self.arity_error_fragment("'instVarAt:put:'", 2, "                ");
+        // perform: type error
+        let perf_type_err =
+            self.type_error_fragment("'perform:'", "selector must be an atom", "                ");
+        // perform:withArguments: type errors
+        let pwa_type_err_list = self.type_error_fragment(
+            "'perform:withArguments:'",
+            "arguments must be a list",
+            "                        ",
+        );
+        let pwa_type_err_sel = self.type_error_fragment(
+            "'perform:withArguments:'",
+            "selector must be an atom",
+            "                ",
+        );
+
+        let doc = docvec![
+            "    case Selector of\n",
+            // --- class ---
+            "        <'class'> when 'true' ->\n",
+            "            {'reply', call 'beamtalk_tagged_map':'class_of'(State), State}\n",
+            // --- respondsTo: ---
+            "        <'respondsTo:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[RtSel4|_]> when call 'erlang':'is_atom'(RtSel4) ->\n",
+            "                    let <RtClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
+            "                    {'reply', call 'beamtalk_dispatch':'responds_to'(RtSel4, RtClass4), State}\n",
+            "                <_RtBadArgs> when 'true' -> {'reply', 'false', State}\n",
+            "            end\n",
+            // --- instVarNames ---
+            "        <'instVarNames'> when 'true' ->\n",
+            "            {'reply', call 'beamtalk_reflection':'field_names'(State), State}\n",
+            // --- instVarAt: ---
+            "        <'instVarAt:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[IvaName4|_]> when 'true' ->\n",
+            "                    {'reply', call 'beamtalk_reflection':'read_field'(IvaName4, State), State}\n",
+            "                <_IvaBadArgs> when 'true' ->\n",
+            inst_var_at_err,
+            "\n",
+            "            end\n",
+            // --- instVarAt:put: ---
+            "        <'instVarAt:put:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[IvapName4|IvapRest4]> when 'true' ->\n",
+            "                    case IvapRest4 of\n",
+            "                        <[IvapVal4|_]> when 'true' ->\n",
+            "                            let <IvapTuple4> = call 'beamtalk_reflection':'write_field'(IvapName4, IvapVal4, State) in\n",
+            "                            let <IvapResult4> = call 'erlang':'element'(1, IvapTuple4) in\n",
+            "                            let <IvapNewState4> = call 'erlang':'element'(2, IvapTuple4) in\n",
+            "                            {'reply', IvapResult4, IvapNewState4}\n",
+            "                        <_IvapBad2> when 'true' ->\n",
+            inst_var_at_put_err,
+            "\n",
+            "                    end\n",
+            "                <_IvapBad1> when 'true' ->\n",
+            inst_var_at_put_err2,
+            "\n",
+            "            end\n",
+            // --- printString ---
+            "        <'printString'> when 'true' ->\n",
+            format!(
+                "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n"
+            ),
+            format!(
+                "            let <PsStr4> = call 'erlang':'iolist_to_binary'([{a_space_binary}|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n"
+            ),
+            "            {'reply', PsStr4, State}\n",
+            // --- inspect ---
+            "        <'inspect'> when 'true' ->\n",
+            "            {'reply', call 'beamtalk_reflection':'inspect_string'(State), State}\n",
+            // --- perform: ---
+            "        <'perform:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[PerfSel4|_]> when call 'erlang':'is_atom'(PerfSel4) ->\n",
+            "                    let <PerfClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
+            "                    let <PerfResult4> = call 'beamtalk_dispatch':'lookup'(PerfSel4, [], Self, State, PerfClass4) in\n",
+            "                    case PerfResult4 of\n",
+            "                        <{'error', PerfErr4}> when 'true' -> {'error', PerfErr4, State}\n",
+            "                        <PerfOther4> when 'true' -> PerfOther4\n",
+            "                    end\n",
+            "                <_PerfBadArgs> when 'true' ->\n",
+            perf_type_err,
+            "\n",
+            "            end\n",
+            // --- perform:withArguments: ---
+            "        <'perform:withArguments:'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[PwaSel4|PwaRest4]> when call 'erlang':'is_atom'(PwaSel4) ->\n",
+            "                    case PwaRest4 of\n",
+            "                        <[PwaArgs4|_]> when call 'erlang':'is_list'(PwaArgs4) ->\n",
+            "                            let <PwaClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
+            "                            let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in\n",
+            "                            case PwaResult4 of\n",
+            "                                <{'error', PwaErr4}> when 'true' -> {'error', PwaErr4, State}\n",
+            "                                <PwaOther4> when 'true' -> PwaOther4\n",
+            "                            end\n",
+            "                        <_PwaBadArgList> when 'true' ->\n",
+            pwa_type_err_list,
+            "\n",
+            "                    end\n",
+            "                <_PwaBadSel> when 'true' ->\n",
+            pwa_type_err_sel,
+            "\n",
+            "            end\n",
+            // --- Default: delegate to dispatch/3 ---
+            "        <_OtherSel4> when 'true' ->\n",
+            format!("            try call '{mod_name}':'dispatch'(Selector, Args, Self)\n"),
+            "            of <D4Result> -> {'reply', D4Result, State}\n",
+            "            catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+            "    end\n",
+        ];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
+    ///
+    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., `does_not_understand`
+    /// calling `erlang:error`) into `{error, Error, State}` tuples expected by the
+    /// dispatch service.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_dispatch_4_wrapper(&mut self, mod_name: &str) -> Result<()> {
+        let doc = docvec![
+            "    try call '",
+            mod_name,
+            "':'dispatch'(Selector, Args, Self)\n",
+            "    of <D4Result> -> {'reply', D4Result, State}\n",
+            "    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+        ];
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
+    #[allow(clippy::unused_self)]
+    fn arity_error_fragment(&self, selector: &str, expected_arity: u32, indent: &str) -> String {
+        let hint = Self::core_erlang_binary(&format!(
+            "Expected {expected_arity} argument(s) for {selector}"
+        ));
+        format!(
+            "{indent}let <ArErr0> = call 'beamtalk_error':'new'('arity_mismatch', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n\
+             {indent}let <ArErr1> = call 'beamtalk_error':'with_selector'(ArErr0, {selector}) in\n\
+             {indent}let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, {hint}) in\n\
+             {indent}{{'error', ArErr2, State}}"
+        )
+    }
+
+    /// Generates a structured `type_error` for dispatch/4 argument validation.
+    #[allow(clippy::unused_self)]
+    fn type_error_fragment(&self, selector: &str, hint_msg: &str, indent: &str) -> String {
+        let hint = Self::core_erlang_binary(hint_msg);
+        format!(
+            "{indent}let <TyErr0> = call 'beamtalk_error':'new'('type_error', call 'beamtalk_tagged_map':'class_of'(State, 'Object')) in\n\
+             {indent}let <TyErr1> = call 'beamtalk_error':'with_selector'(TyErr0, {selector}) in\n\
+             {indent}let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, {hint}) in\n\
+             {indent}{{'error', TyErr2, State}}"
+        )
     }
 
     /// Generates the `has_method/1` function for a value type.
@@ -658,19 +874,19 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
 
-        writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
+        // BT-447: Class-methods-only classes delegate directly to superclass
+        if class.methods.is_empty() && superclass_mod.is_some() {
+            return self.generate_minimal_has_method(class);
+        }
 
         // Build list of all known selectors
         let mut selectors: Vec<String> = vec![
-            // Reflection methods
             "'class'".to_string(),
-            "'respondsTo'".to_string(),
+            "'respondsTo:'".to_string(),
             "'instVarNames'".to_string(),
-            "'instVarAt'".to_string(),
+            "'instVarAt:'".to_string(),
             "'instVarAt:put:'".to_string(),
-            "'perform'".to_string(),
+            "'perform:'".to_string(),
             "'perform:withArguments:'".to_string(),
         ];
 
@@ -694,49 +910,122 @@ impl CoreErlangGenerator {
             selectors.push(format!("'{mangled}'"));
         }
 
-        // Check lists:member first, then extensions, then superclass
-        writeln!(
-            self.output,
-            "case call 'lists':'member'(Selector, [{}]) of",
-            selectors.join(", ")
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
-        self.write_indent()?;
-        writeln!(self.output, "<'false'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'beamtalk_extensions':'has'('{class_name}', Selector) of"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'true'> when 'true' -> 'true'")?;
-        self.write_indent()?;
-
-        if let Some(ref super_mod) = superclass_mod {
-            writeln!(
-                self.output,
-                "<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)"
-            )?;
+        let false_branch = if let Some(ref super_mod) = superclass_mod {
+            format!("<'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n")
         } else {
-            writeln!(self.output, "<'false'> when 'true' -> 'false'")?;
-        }
+            "<'false'> when 'true' -> 'false'\n".to_string()
+        };
 
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
+        let selectors_list = selectors.join(", ");
+        let doc = docvec![
+            "'has_method'/1 = fun (Selector) ->\n",
+            format!("    case call 'lists':'member'(Selector, [{selectors_list}]) of\n"),
+            "        <'true'> when 'true' -> 'true'\n",
+            "        <'false'> when 'true' ->\n",
+            format!(
+                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
+            ),
+            "                <'true'> when 'true' -> 'true'\n",
+            "                ",
+            false_branch,
+            "            end\n",
+            "    end\n",
+            "\n",
+        ];
 
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
+        self.write_document(&doc);
+        Ok(())
+    }
 
-        self.indent -= 1;
-        writeln!(self.output)?;
+    /// BT-447: Generates a minimal `dispatch/3` for classes with no instance methods.
+    ///
+    /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
+    /// locally, then checks extensions and delegates everything else to the
+    /// superclass. `perform:` must re-dispatch through this module to preserve
+    /// extension lookup and correct error attribution. Skips instVarNames,
+    /// instVarAt:, instVarAt:put: since the superclass already handles them.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_minimal_dispatch(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let mod_name = self.module_name.clone();
+        let super_mod = Self::superclass_module_name(class.superclass_name())
+            .expect("minimal dispatch requires superclass");
 
+        let doc = docvec![
+            "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
+            "    case Selector of\n",
+            // class
+            "        <'class'> when 'true' ->\n",
+            "            '",
+            class_name.as_str(),
+            "'\n",
+            // respondsTo:
+            "        <'respondsTo'> when 'true' ->\n",
+            "            case Args of\n",
+            "                <[RtSelector | _]> when 'true' -> call '",
+            mod_name.as_str(),
+            "':'has_method'(RtSelector)\n",
+            "                <_> when 'true' -> 'false'\n",
+            "            end\n",
+            // perform:
+            "        <'perform'> when 'true' ->\n",
+            "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
+            "            call '",
+            mod_name.as_str(),
+            "':'dispatch'(PerfSel, [], Self)\n",
+            // perform:withArguments:
+            "        <'perform:withArguments:'> when 'true' ->\n",
+            "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
+            "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
+            "            call '",
+            mod_name.as_str(),
+            "':'dispatch'(PwaSel, PwaArgs, Self)\n",
+            // Default: extension check, then superclass delegation
+            "        <_Other> when 'true' ->\n",
+            "            case call 'beamtalk_extensions':'lookup'('",
+            class_name.as_str(),
+            "', Selector) of\n",
+            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
+            "                    apply ExtFun(Args, Self)\n",
+            "                <'not_found'> when 'true' ->\n",
+            format!("                    call '{super_mod}':'dispatch'(Selector, Args, Self)\n"),
+            "            end\n",
+            "    end\n",
+            "\n",
+        ];
+
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// BT-447: Generates a minimal `has_method/1` for classes with no instance methods.
+    ///
+    /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
+    /// then extensions, then delegates to superclass.
+    #[allow(clippy::unnecessary_wraps)]
+    fn generate_minimal_has_method(&mut self, class: &ClassDefinition) -> Result<()> {
+        let class_name = self.class_name().clone();
+        let super_mod = Self::superclass_module_name(class.superclass_name())
+            .expect("minimal has_method requires superclass");
+
+        let doc = docvec![
+            "'has_method'/1 = fun (Selector) ->\n",
+            "    case call 'lists':'member'(Selector, ['class', 'respondsTo', 'perform', 'perform:withArguments:']) of\n",
+            "        <'true'> when 'true' -> 'true'\n",
+            "        <'false'> when 'true' ->\n",
+            format!(
+                "            case call 'beamtalk_extensions':'has'('{class_name}', Selector) of\n"
+            ),
+            "                <'true'> when 'true' -> 'true'\n",
+            format!(
+                "                <'false'> when 'true' -> call '{super_mod}':'has_method'(Selector)\n"
+            ),
+            "            end\n",
+            "    end\n",
+            "\n",
+        ];
+
+        self.write_document(&doc);
         Ok(())
     }
 }

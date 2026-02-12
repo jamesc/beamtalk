@@ -76,7 +76,7 @@ malformed_call_message_test() ->
     {ok, Counter} = test_counter:start_link(0),
     %% Send a call message that doesn't match the expected {Selector, Args} format
     Result = gen_server:call(Counter, malformed_message),
-    ?assertMatch({error, {unknown_call_format, malformed_message}}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
     gen_server:stop(Counter).
 
 %%% Async message dispatch tests
@@ -290,6 +290,19 @@ method_throws_exception_sync_test() ->
     %% Call method that throws - should return error tuple
     Result = gen_server:call(Actor, {throwError, []}),
     ?assertMatch({error, #beamtalk_error{kind = type_error, selector = throwError}}, Result),
+    
+    %% Verify actor still works after exception
+    NormalResult = gen_server:call(Actor, {normalMethod, []}),
+    ?assertEqual(ok, NormalResult),
+    
+    gen_server:stop(Actor).
+
+method_throws_beamtalk_error_preserves_kind_test() ->
+    {ok, Actor} = test_bt_error_actor:start_link(),
+    
+    %% Call method that throws a #beamtalk_error{} - should preserve original error
+    Result = gen_server:call(Actor, {throwBtError, []}),
+    ?assertMatch({error, #beamtalk_error{kind = instantiation_error, class = 'TestClass'}}, Result),
     
     %% Verify actor still works after exception
     NormalResult = gen_server:call(Actor, {normalMethod, []}),

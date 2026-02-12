@@ -1,0 +1,107 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for ProtoObject with actors - identity and inheritance
+// Migrated from E2E: cross-expression variable resolution (BT-459)
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// ACTOR IDENTITY TESTS
+// ===========================================================================
+
+a := Counter spawn
+// => #Actor<Counter,_>
+
+b := a
+// => #Actor<Counter,_>
+
+c := Counter spawn
+// => #Actor<Counter,_>
+
+// Same reference
+a == b
+// => true
+
+// Different processes
+a == c
+// => false
+
+a ~= c
+// => true
+
+// ===========================================================================
+// INHERITANCE TESTS
+// ===========================================================================
+
+// Actor class has superclass
+Counter superclass
+// => Actor
+
+// Root class has no superclass
+ProtoObject superclass
+// => nil
+
+// ===========================================================================
+// ACTOR BASIC MESSAGING WITH AWAIT
+// ===========================================================================
+
+counter := Counter spawn
+// => #Actor<Counter,_>
+
+// Test initial state
+counter getValue await
+// => 0
+
+// Test increment
+counter increment await
+// => 1
+
+// Verify state persisted
+counter getValue await
+// => 1
+
+// Test multiple increments
+counter increment await
+// => 2
+
+counter increment await
+// => 3
+
+// Test decrement
+counter decrement await
+// => 2
+
+// Final state verification
+counter getValue await
+// => 2
+
+// ===========================================================================
+// BT-427: Object method delegation for actors
+// ===========================================================================
+
+// Actors inherit Object base methods via the class hierarchy walk.
+
+// isNil and notNil — nil-testing protocol from Object (intrinsic, no await)
+counter isNil
+// => false
+
+counter notNil
+// => true
+
+// respondsTo: — checks both user methods and inherited methods
+counter respondsTo: #increment
+// => true
+
+counter respondsTo: #getValue
+// => true
+
+counter respondsTo: #decrement
+// => true
+
+counter respondsTo: #nonExistent
+// => false
+
+// class — returns class name from Object
+counter class
+// => Counter

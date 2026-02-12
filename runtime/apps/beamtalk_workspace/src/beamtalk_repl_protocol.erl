@@ -19,10 +19,12 @@
 
 -module(beamtalk_repl_protocol).
 
--export([decode/1, encode_result/3, encode_result/4, encode_error/3, encode_error/4,
+-export([decode/1, encode_result/3, encode_result/4, encode_result/5,
+         encode_error/3, encode_error/4, encode_error/5,
          encode_status/3,
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/3,
+         encode_docs/2,
          is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1]).
 
 %% Protocol request record
@@ -89,39 +91,49 @@ get_params(#protocol_msg{params = Params}) -> Params.
 %% @doc Encode a successful result response.
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term())) -> binary().
 encode_result(Value, Msg, TermToJson) ->
-    encode_result(Value, Msg, TermToJson, <<>>).
+    encode_result(Value, Msg, TermToJson, <<>>, []).
 
 %% @doc Encode a successful result response with captured stdout.
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary()) -> binary().
 encode_result(Value, Msg, TermToJson, Output) ->
+    encode_result(Value, Msg, TermToJson, Output, []).
+
+%% @doc Encode a successful result response with captured stdout and warnings.
+-spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [binary()]) -> binary().
+encode_result(Value, Msg, TermToJson, Output, Warnings) ->
     JsonValue = TermToJson(Value),
     case Msg#protocol_msg.legacy of
         true ->
             Base = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
-            jsx:encode(maybe_add_output(Base, Output));
+            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]},
-            jsx:encode(maybe_add_output(Full, Output))
+            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     end.
 
 %% @doc Encode an error response.
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary())) -> binary().
 encode_error(Reason, Msg, FormatError) ->
-    encode_error(Reason, Msg, FormatError, <<>>).
+    encode_error(Reason, Msg, FormatError, <<>>, []).
 
 %% @doc Encode an error response with captured stdout.
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary()) -> binary().
 encode_error(Reason, Msg, FormatError, Output) ->
+    encode_error(Reason, Msg, FormatError, Output, []).
+
+%% @doc Encode an error response with captured stdout and warnings.
+-spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) -> binary().
+encode_error(Reason, Msg, FormatError, Output, Warnings) ->
     Message = FormatError(Reason),
     case Msg#protocol_msg.legacy of
         true ->
             Base = #{<<"type">> => <<"error">>, <<"message">> => Message},
-            jsx:encode(maybe_add_output(Base, Output));
+            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
-            jsx:encode(maybe_add_output(Full, Output))
+            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     end.
 
 %% @doc Encode a status-only response (e.g., for clear, close).
@@ -250,6 +262,17 @@ encode_inspect(ActorState, Msg, TermToJson) ->
             jsx:encode(Base#{<<"state">> => JsonState, <<"status">> => [<<"done">>]})
     end.
 
+%% @doc Encode a documentation response.
+-spec encode_docs(binary(), protocol_msg()) -> binary().
+encode_docs(DocText, Msg) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            jsx:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText});
+        false ->
+            Base = base_response(Msg),
+            jsx:encode(Base#{<<"docs">> => DocText, <<"status">> => [<<"done">>]})
+    end.
+
 %%% Internal functions
 
 %% @private Decode a parsed JSON map into a protocol message.
@@ -340,3 +363,9 @@ to_binary(Name) ->
 maybe_add_output(Map, <<>>) -> Map;
 maybe_add_output(Map, Output) when is_binary(Output) ->
     Map#{<<"output">> => Output}.
+
+%% @private Add warnings field to response map only when non-empty.
+-spec maybe_add_warnings(map(), [binary()]) -> map().
+maybe_add_warnings(Map, []) -> Map;
+maybe_add_warnings(Map, Warnings) ->
+    Map#{<<"warnings">> => Warnings}.

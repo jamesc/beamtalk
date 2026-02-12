@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for super sends - Inheritance and Method Dispatch
+// Migrated from E2E: cross-expression variable resolution (BT-459)
+//
+// NOTE: This file currently only exercises basic Counter/LoggingCounter behavior
+// (spawn, class, increment) and does NOT yet include assertions that use `super`
+// for parent dispatch. Super-send tests will be added once BT-211 is resolved.
+// Related: BT-95, BT-203, BT-211
+
+// @load tests/e2e/fixtures/counter.bt
+// @load tests/e2e/fixtures/logging_counter.bt
+
+// Basic test to verify spawn and class work
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c class
+// => Counter
+
+// Counter methods work (no super involved)
+c increment await
+// => 1
+
+c getValue await
+// => 1

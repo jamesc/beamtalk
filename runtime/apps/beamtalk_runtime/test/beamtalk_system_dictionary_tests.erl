@@ -53,7 +53,7 @@ register_test_classes() ->
     %% Register Integer class
     IntegerInfo = #{
         name => 'Integer',
-        module => beamtalk_integer,
+        module => 'bt@stdlib@integer',
         superclass => 'Object',
         instance_methods => #{
             '+' => #{arity => 1},

@@ -37,6 +37,7 @@ Workspace respondsTo: #nonExistentMethod
 // ===========================================================================
 
 // Workspace actors returns a list (may contain actors from prior tests)
+// Actor list depends on prior test state, keep wildcard
 allActors := (Workspace actors) await
 // => _
 
@@ -44,15 +45,15 @@ allActors := (Workspace actors) await
 // WORKSPACE ACTORS — WITH LIVE ACTORS
 // ===========================================================================
 
-// Record count before spawning
+// Record count before spawning (depends on prior tests, keep wildcard)
 beforeCount := allActors size
 // => _
 
 // Spawn a counter actor
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
-// Workspace actors now has more actors
+// Workspace actors now has more actors (depends on prior tests, keep wildcard)
 actors := (Workspace actors) await
 // => _
 
@@ -63,7 +64,7 @@ actors size > beforeCount
 // WORKSPACE ACTORS OF — BY CLASS
 // ===========================================================================
 
-// Record counter count before spawning second
+// Record counter count before spawning second (depends on prior tests, keep wildcard)
 countersBefore := (Workspace actorsOf: Counter) await
 // => _
 
@@ -72,9 +73,9 @@ countersBeforeSize := countersBefore size
 
 // Spawn a second counter
 c2 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
-// actorsOf: Counter now returns one more
+// actorsOf: Counter now returns one more (depends on prior tests, keep wildcard)
 countersAfter := (Workspace actorsOf: Counter) await
 // => _
 
@@ -87,21 +88,21 @@ countersAfter size > countersBeforeSize
 
 // Actors returned by Workspace are fully functional — pick one and message it
 c increment
-// => _
+// => 1
 
 c getValue
 // => 1
 
-// Verify actorsOf: returns functional references too
+// Verify actorsOf: returns functional references too (depends on prior tests, keep wildcard)
 counterRefs := (Workspace actorsOf: Counter) await
 // => _
 
 // Get last element and send it a message
 lastCounter := counterRefs last
-// => _
+// => #Actor<Counter,_>
 
 lastCounter getValue
-// => _
+// => 0
 
 // ===========================================================================
 // WORKSPACE ACTOR AT — NOT FOUND

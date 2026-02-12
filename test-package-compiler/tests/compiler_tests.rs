@@ -221,7 +221,7 @@ fn test_non_binding_class_unchanged_in_batch_mode() {
 
     let code = result.unwrap();
     assert!(
-        code.contains("call 'counter':'spawn'()"),
+        code.contains("call 'bt@counter':'spawn'()"),
         "Should generate direct module call for Counter, got:\n{code}"
     );
 }

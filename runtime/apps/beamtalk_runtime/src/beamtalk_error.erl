@@ -18,7 +18,8 @@
     with_selector/2,
     with_hint/2,
     with_details/2,
-    format/1
+    format/1,
+    raise/1
 ]).
 
 %% Type definition for error record
@@ -112,6 +113,21 @@ format(#beamtalk_error{message = Message, hint = undefined}) ->
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     [Message, <<"\nHint: ">>, Hint].
 
+%% @doc Wrap an error as an Exception object and raise it.
+%%
+%% This is the canonical way to signal errors in the Beamtalk runtime.
+%% It wraps the `#beamtalk_error{}` record as an Exception tagged map
+%% before throwing, ensuring all exceptions are Beamtalk objects at
+%% signal time (ADR 0015).
+%%
+%% Example:
+%%   Error = beamtalk_error:new(does_not_understand, 'Integer'),
+%%   beamtalk_error:raise(Error)
+-spec raise(#beamtalk_error{}) -> no_return().
+raise(#beamtalk_error{} = Error) ->
+    Wrapped = beamtalk_exception_handler:wrap(Error),
+    error(Wrapped).
+
 %% Internal helper to generate error messages
 -spec generate_message(atom(), atom(), atom() | undefined) -> binary().
 generate_message(does_not_understand, Class, undefined) ->
@@ -162,6 +178,30 @@ generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
     iolist_to_binary(io_lib:format("~p", [Selector]));
+generate_message(class_not_found, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Class '~s' not found", [Class]));
+generate_message(class_not_found, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Class '~s' not found (while resolving '~s')", [Class, Selector]));
+generate_message(no_superclass, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s has no superclass", [Class]));
+generate_message(no_superclass, Class, Selector) ->
+    iolist_to_binary(io_lib:format("~s has no superclass (cannot resolve '~s' via super)", [Class, Selector]));
+generate_message(class_already_exists, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Class '~s' already exists", [Class]));
+generate_message(class_already_exists, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Class '~s' already exists (via '~s')", [Class, Selector]));
+generate_message(internal_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Internal error in ~s", [Class]));
+generate_message(internal_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Internal error in '~s' on ~s", [Selector, Class]));
+generate_message(dispatch_error, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Dispatch error for ~s", [Class]));
+generate_message(dispatch_error, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Dispatch error for '~s' on ~s", [Selector, Class]));
+generate_message(callback_failed, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Callback failed for ~s", [Class]));
+generate_message(callback_failed, Class, Selector) ->
+    iolist_to_binary(io_lib:format("Callback '~s' failed for ~s", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->

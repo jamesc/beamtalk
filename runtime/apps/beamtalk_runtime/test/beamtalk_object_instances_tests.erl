@@ -12,12 +12,22 @@
 %%====================================================================
 
 setup() ->
-    %% Start the instances server
-    {ok, Pid} = beamtalk_object_instances:start_link(),
-    Pid.
+    %% Use existing supervised server if running, else start a fresh one
+    case whereis(beamtalk_object_instances) of
+        undefined ->
+            {ok, Pid} = beamtalk_object_instances:start_link(),
+            Pid;
+        Pid ->
+            Pid
+    end.
 
-cleanup(Pid) ->
-    gen_server:stop(Pid).
+cleanup(_Pid) ->
+    %% Don't stop the server — it may be supervised by the application.
+    %% Clear all registrations to prevent leaking between tests.
+    try ets:delete_all_objects(beamtalk_instance_registry)
+    catch _:_ -> ok
+    end,
+    ok.
 
 %%====================================================================
 %% Tests

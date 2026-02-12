@@ -5,7 +5,7 @@
 %%
 %% BT-73: Complex Set operations that cannot be inlined as direct BIF
 %% calls in generated Core Erlang. Called from compiled stdlib module
-%% beamtalk_set.
+%% bt@stdlib@set.
 %%
 %% Sets are represented as tagged maps:
 %%   #{'$beamtalk_class' => 'Set', elements => OrdsetData}
@@ -49,7 +49,7 @@ from_list(List) when is_list(List) ->
 from_list(_NonList) ->
     Error0 = beamtalk_error:new(type_error, 'Set'),
     Error1 = beamtalk_error:with_selector(Error0, 'fromList:'),
-    error(beamtalk_error:with_hint(Error1, <<"Expected a List argument">>)).
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected a List argument">>)).
 
 %%% ============================================================================
 %%% Accessors
@@ -153,7 +153,7 @@ do(#{'$beamtalk_class' := 'Set', elements := Elements}, Block) when is_function(
 do(#{'$beamtalk_class' := 'Set'}, _Block) ->
     Error0 = beamtalk_error:new(type_error, 'Set'),
     Error1 = beamtalk_error:with_selector(Error0, 'do:'),
-    error(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
 
 %%% ============================================================================
 %%% Internal Helpers
@@ -164,4 +164,4 @@ do(#{'$beamtalk_class' := 'Set'}, _Block) ->
 set_type_error(Selector) ->
     Error0 = beamtalk_error:new(type_error, 'Set'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    error(beamtalk_error:with_hint(Error1, <<"Argument must be a Set">>)).
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Argument must be a Set">>)).

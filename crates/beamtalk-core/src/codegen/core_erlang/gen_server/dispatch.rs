@@ -8,9 +8,10 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
+use super::super::document::{INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, MethodKind, Module};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates the method table mapping selector names to arities.
@@ -24,15 +25,11 @@ impl CoreErlangGenerator {
     /// 'method_table'/0 = fun () ->
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_method_table(
         &mut self,
         module: &Module,
     ) -> Result<()> {
-        writeln!(self.output, "'method_table'/0 = fun () ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        write!(self.output, "~{{")?;
-
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<(String, usize)> = module
             .expressions
@@ -63,16 +60,25 @@ impl CoreErlangGenerator {
         // instVarAt:, instVarAt:put:, perform:, perform:withArguments:) are now
         // inherited from Object via hierarchy walking.
 
-        for (i, (name, arity)) in methods.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "'{name}' => {arity}")?;
-        }
+        let entries: Vec<String> = methods
+            .iter()
+            .enumerate()
+            .map(|(i, (name, arity))| {
+                if i > 0 {
+                    format!(", '{name}' => {arity}")
+                } else {
+                    format!("'{name}' => {arity}")
+                }
+            })
+            .collect();
+        let entries_str = entries.join("");
 
-        writeln!(self.output, "}}~")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let doc = docvec![
+            "'method_table'/0 = fun () ->",
+            nest(INDENT, docvec![line(), format!("~{{{entries_str}}}~"),]),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -89,14 +95,11 @@ impl CoreErlangGenerator {
     /// 'has_method'/1 = fun (Selector) ->
     ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_has_method(
         &mut self,
         module: &Module,
     ) -> Result<()> {
-        writeln!(self.output, "'has_method'/1 = fun (Selector) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<String> = module
             .expressions
@@ -125,18 +128,31 @@ impl CoreErlangGenerator {
 
         // ADR 0006 Phase 1b: Reflection methods are inherited from Object.
 
-        // Generate lists:member call with method list
-        write!(self.output, "call 'lists':'member'(Selector, [")?;
-        for (i, name) in methods.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "'{name}'")?;
-        }
-        writeln!(self.output, "])")?;
+        let method_list: Vec<String> = methods
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                if i > 0 {
+                    format!(", '{name}'")
+                } else {
+                    format!("'{name}'")
+                }
+            })
+            .collect();
+        let method_list_str = method_list.join("");
 
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let doc = docvec![
+            "'has_method'/1 = fun (Selector) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!("call 'lists':'member'(Selector, [{method_list_str}])"),
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -160,35 +176,31 @@ impl CoreErlangGenerator {
     ///     catch <Type, Error, _Stacktrace> ->
     ///         {'error', {Type, Error}, State}
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<()> {
-        writeln!(
-            self.output,
-            "'safe_dispatch'/3 = fun (Selector, Args, State) ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Construct Self object reference using beamtalk_actor:make_self/1 (BT-161)
-        writeln!(
-            self.output,
-            "let Self = call 'beamtalk_actor':'make_self'(State) in"
-        )?;
-        self.write_indent()?;
-        // Core Erlang try uses simple variable patterns in of/catch, not case-style <Pattern> when Guard
-        writeln!(
-            self.output,
-            "try call '{}':'dispatch'(Selector, Args, Self, State)",
-            self.module_name
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "of Result -> Result")?;
-        self.write_indent()?;
-        // Capture but don't return stacktrace to prevent information leakage to callers
-        writeln!(
-            self.output,
-            "catch <Type, Error, _Stacktrace> -> {{'error', {{Type, Error}}, State}}"
-        )?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let module_name = &self.module_name;
+
+        let doc = docvec![
+            "'safe_dispatch'/3 = fun (Selector, Args, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    // Construct Self object reference using beamtalk_actor:make_self/1 (BT-161)
+                    "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    line(),
+                    // Core Erlang try uses simple variable patterns in of/catch, not case-style
+                    format!("try call '{module_name}':'dispatch'(Selector, Args, Self, State)"),
+                    line(),
+                    "of Result -> Result",
+                    line(),
+                    // Capture but don't return stacktrace to prevent information leakage
+                    "catch <Type, Error, _Stacktrace> -> {'error', {Type, Error}, State}",
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -205,14 +217,16 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
     ) -> Result<()> {
-        writeln!(
-            self.output,
-            "'dispatch'/4 = fun (Selector, Args, Self, State) ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Selector of")?;
-        self.indent += 1;
+        // Write function header
+        let header_doc = docvec![
+            "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
+            nest(INDENT, docvec![line(), "case Selector of",]),
+            "\n",
+        ];
+        self.write_document(&header_doc);
+
+        // Case clauses are at indent level 2 (inside function + inside case)
+        let case_clause_indent: isize = 2;
 
         // Generate case clause for each method in the module (legacy expression-based)
         for expr in &module.expressions {
@@ -226,54 +240,59 @@ impl CoreErlangGenerator {
                     // Push a new scope for this method's parameter bindings
                     self.push_scope();
 
-                    self.write_indent()?;
-                    write!(self.output, "<'{}'> when 'true' ->", id.name)?;
-                    writeln!(self.output)?;
-                    self.indent += 1;
+                    // BT-470: Register parameters BEFORE generating body so field
+                    // references resolve to parameter variables (not maps:get)
+                    let param_vars: Vec<String> = block
+                        .parameters
+                        .iter()
+                        .map(|p| self.fresh_var(&p.name))
+                        .collect();
 
-                    // Bind block parameters from Args list
-                    if !block.parameters.is_empty() {
-                        self.write_indent()?;
-                        write!(self.output, "case Args of")?;
-                        writeln!(self.output)?;
-                        self.indent += 1;
-
-                        self.write_indent()?;
-                        write!(self.output, "<[")?;
-                        for (i, param) in block.parameters.iter().enumerate() {
-                            if i > 0 {
-                                write!(self.output, ", ")?;
-                            }
-                            let var_name = self.fresh_var(&param.name);
-                            write!(self.output, "{var_name}")?;
-                        }
-                        write!(self.output, "]> when 'true' ->")?;
-                        writeln!(self.output)?;
-                        self.indent += 1;
-                    }
-
-                    // Generate the method body with state threading
-                    // For state threading to work, we can't wrap in "let Result = ... in"
-                    // because that would put State{n} bindings out of scope for the reply.
-                    // Instead, we generate the state threading let bindings directly,
-                    // and then generate the reply tuple inline.
-                    self.write_indent()?;
+                    // Capture body output
+                    let start = self.output.len();
                     self.generate_method_body_with_reply(block)?;
-                    writeln!(self.output)?;
+                    let body_str = self.output[start..].to_string();
+                    self.output.truncate(start);
 
-                    if !block.parameters.is_empty() {
-                        self.indent -= 1;
-                        self.write_indent()?;
-                        writeln!(
-                            self.output,
-                            "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-                        )?;
-                        self.indent -= 1;
-                        self.write_indent()?;
-                        writeln!(self.output, "end")?;
-                    }
+                    // Build method clause as Document tree
+                    let clause_doc = if param_vars.is_empty() {
+                        docvec![
+                            format!("<'{}'> when 'true' ->", id.name),
+                            nest(INDENT, docvec![line(), body_str,]),
+                            "\n",
+                        ]
+                    } else {
+                        let params_str = param_vars.join(", ");
 
-                    self.indent -= 1;
+                        docvec![
+                            format!("<'{}'> when 'true' ->", id.name),
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "case Args of",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            format!("<[{params_str}]> when 'true' ->"),
+                                            nest(INDENT, docvec![line(), body_str,]),
+                                            line(),
+                                            "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                            "\n",
+                        ]
+                    };
+
+                    let indent_spaces = case_clause_indent * INDENT;
+                    #[allow(clippy::cast_sign_loss)]
+                    let indent_str = " ".repeat(indent_spaces as usize);
+                    self.write_document(&docvec![indent_str, nest(indent_spaces, clause_doc)]);
 
                     // Pop the scope when done with this method
                     self.pop_scope();
@@ -283,7 +302,7 @@ impl CoreErlangGenerator {
 
         // Generate case clauses for methods in class definitions
         for class in &module.classes {
-            self.generate_class_method_dispatches(class)?;
+            self.generate_class_method_dispatches(class, case_clause_indent)?;
         }
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
@@ -292,167 +311,148 @@ impl CoreErlangGenerator {
 
         // Default case: extension check, hierarchy walk, then DNU fallback
         let class_name = self.class_name();
-        self.write_indent()?;
-        writeln!(self.output, "<OtherSelector> when 'true' ->")?;
-        self.indent += 1;
-
-        // BT-229: Check extension registry for this class first (ADR 0005)
-        // Use try/catch to handle missing ETS table during early bootstrap
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% BT-229/ADR 0005: Check extension registry before hierarchy walk"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "of ExtLookupResult -> ExtLookupResult")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "catch <_EType, _EReason, _EStack> -> 'not_found'"
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "in")?;
-        self.write_indent()?;
-        writeln!(self.output, "case ExtLookup of")?;
-        self.indent += 1;
-
-        // Extension found - invoke it and wrap as gen_server reply
-        self.write_indent()?;
-        writeln!(self.output, "<{{'ok', ExtFun, _ExtOwner}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "let ExtResult = apply ExtFun(Args, Self) in")?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', ExtResult, State}}")?;
-        self.indent -= 1;
-
-        // Extension not found - try hierarchy walk (ADR 0006)
-        self.write_indent()?;
-        writeln!(self.output, "<'not_found'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "%% ADR 0006: Try hierarchy walk before DNU")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
-        )?;
-        self.indent += 1;
-
-        // Success case - inherited method found
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<{{'reply', InheritedResult, InheritedState}}> when 'true' ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', InheritedResult, InheritedState}}")?;
-        self.indent -= 1;
-
-        // Error case - method not found in hierarchy, try DNU
-        self.write_indent()?;
-        writeln!(self.output, "<{{'error', _DispatchError}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let DnuSelector = 'doesNotUnderstand:args:' in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Methods = call 'maps':'get'('__methods__', State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'maps':'is_key'(DnuSelector, Methods) of"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'true'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call '{}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)",
-            self.module_name
-        )?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<'false'> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% No DNU handler - return #beamtalk_error{{}} record"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let ClassName = call 'maps':'get'('$beamtalk_class', State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in"
-        )?;
-        self.write_indent()?;
-        // Generate hint message as Core Erlang binary
+        let module_name = self.module_name.clone();
         let hint = "Check spelling or use 'respondsTo:' to verify method exists";
-        let mut hint_binary = String::new();
-        for (i, ch) in hint.chars().enumerate() {
-            if i > 0 {
-                hint_binary.push(',');
-            }
-            write!(
-                &mut hint_binary,
-                "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                ch as u32
-            )?;
-        }
-        writeln!(self.output, "let HintMsg = #{{{hint_binary}}}# in",)?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'error', Error, State}}")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        // Close extension not_found branch
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        // Close outer case Selector of
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let hint_binary = Self::binary_string_literal(hint);
+
+        let default_body = docvec![
+            "<OtherSelector> when 'true' ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
+                    line(),
+                    format!(
+                        "let ExtLookup = try call 'beamtalk_extensions':'lookup'('{class_name}', OtherSelector)"
+                    ),
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "of ExtLookupResult -> ExtLookupResult",
+                            line(),
+                            "catch <_EType, _EReason, _EStack> -> 'not_found'",
+                        ]
+                    ),
+                    line(),
+                    "in",
+                    line(),
+                    "case ExtLookup of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<{'ok', ExtFun, _ExtOwner}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "let ExtResult = apply ExtFun(Args, Self) in",
+                                    line(),
+                                    "{'reply', ExtResult, State}",
+                                ]
+                            ),
+                            line(),
+                            "<'not_found'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "%% ADR 0006: Try hierarchy walk before DNU",
+                                    line(),
+                                    format!(
+                                        "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '{class_name}') of"
+                                    ),
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'reply', InheritedResult, InheritedState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "{'reply', InheritedResult, InheritedState}",
+                                                ]
+                                            ),
+                                            line(),
+                                            "<{'error', _DispatchError}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "%% Not in hierarchy - try doesNotUnderstand:args: (BT-29)",
+                                                    line(),
+                                                    "let DnuSelector = 'doesNotUnderstand:args:' in",
+                                                    line(),
+                                                    "let Methods = call 'maps':'get'('__methods__', State) in",
+                                                    line(),
+                                                    "case call 'maps':'is_key'(DnuSelector, Methods) of",
+                                                    nest(
+                                                        INDENT,
+                                                        docvec![
+                                                            line(),
+                                                            "<'true'> when 'true' ->",
+                                                            nest(
+                                                                INDENT,
+                                                                docvec![
+                                                                    line(),
+                                                                    format!(
+                                                                        "call '{module_name}':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            line(),
+                                                            "<'false'> when 'true' ->",
+                                                            nest(
+                                                                INDENT,
+                                                                docvec![
+                                                                    line(),
+                                                                    "%% No DNU handler - return #beamtalk_error{} record",
+                                                                    line(),
+                                                                    "let ClassName = call 'maps':'get'('$beamtalk_class', State) in",
+                                                                    line(),
+                                                                    "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
+                                                                    line(),
+                                                                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
+                                                                    line(),
+                                                                    format!(
+                                                                        "let HintMsg = {hint_binary} in"
+                                                                    ),
+                                                                    line(),
+                                                                    "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
+                                                                    line(),
+                                                                    "{'error', Error, State}",
+                                                                ]
+                                                            ),
+                                                        ]
+                                                    ),
+                                                    line(),
+                                                    "end",
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+        ];
+        let indent_spaces = case_clause_indent * INDENT;
+        #[allow(clippy::cast_sign_loss)]
+        let indent_str = " ".repeat(indent_spaces as usize);
+        self.write_document(&docvec![indent_str, nest(indent_spaces, default_body),]);
+
+        // Close case and function
+        let footer_doc = docvec![nest(INDENT, docvec![line(), "end",]), "\n\n",];
+        self.write_document(&footer_doc);
 
         Ok(())
     }

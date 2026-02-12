@@ -82,7 +82,7 @@ eval_empty_expression_test_() ->
               {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-eval-1">>),
               %% Empty expression should return error
               Result = beamtalk_repl_shell:eval(Pid, ""),
-              ?assertMatch({error, _, _}, Result),
+              ?assertMatch({error, _, _, _}, Result),
               beamtalk_repl_shell:stop(Pid)
           end)]
      end}.

@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test character literal codegen - $a compiles to integer codepoint
+
+// ===== Basic Character Literals =====
+letterA := $A
+letterZ := $z
+digit := $0
+
+// ===== Character Comparison =====
+isEqual := $A = $A
+isLess := $A < $Z
+
+// ===== Character Conversion =====
+asInt := $A asInteger
+asStr := $A asString
+
+// ===== Escape Sequences =====
+newline := $\n
+tab := $\t

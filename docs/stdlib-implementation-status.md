@@ -66,7 +66,7 @@
 | `ifNotNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
 | `ifNil:ifNotNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
 | `ifNotNil:ifNil:` | intrinsic + pure BT | ✅ | 🧪 | Inline pattern match |
-| `printString` | intrinsic | ✅ | 🧪 | `beamtalk_primitive:print_string/1` |
+| `printString` | pure BT | ✅ | 🧪 | `'a ' ++ self class printString` (BT-477) |
 | `inspect` | pure BT | ✅ | | Calls `self describe` |
 | `describe` | pure BT | ✅ | | Returns `'an Object'` |
 | `yourself` | intrinsic + pure BT | ✅ | 🧪 | Returns self |
@@ -357,9 +357,9 @@
 | `readAll:` | @primitive selector | ✅ | 🧪 | `FileReference>>contents` |
 | `writeAll:contents:` | @primitive selector | ✅ | 🧪 | `FileReference>>writeStream` |
 
-### Beamtalk / SystemDictionary (`lib/Beamtalk.bt`)
+### Beamtalk / SystemDictionary (`lib/SystemDictionary.bt`)
 
-**Class:** `Beamtalk` — superclass: `Actor`
+**Class:** `SystemDictionary` — superclass: `Actor`
 **Methods:** 4/4 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
@@ -411,9 +411,10 @@
 | `asList` | ✅ | Returns sorted elements | `Set>>asArray` |
 | `fromList:` | ✅ | `ordsets:from_list` | `Set>>addAll:` |
 | `do:` | ✅ | Iterate elements | `Set>>do:` |
+| `printString` | ✅ | `beamtalk_primitive:print_string/1` | `Set>>printString` (BT-477) |
 | `describe` | ✅ | Returns `'a Set'` | `Set>>printString` |
 
-**E2E coverage:** 13 of 14 methods tested in `tests/e2e/cases/set.bt` (47 assertions). Only `describe` lacks E2E coverage.
+**Test coverage:** 14 of 15 methods tested in `tests/stdlib/set.bt` (47 assertions). Only `describe` lacks test coverage.
 
 ### Tuple (`lib/Tuple.bt`)
 

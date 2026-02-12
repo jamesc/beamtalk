@@ -8,20 +8,22 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, ClassDefinition, Expression, MethodDefinition, MethodKind, Module};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
     pub(in crate::codegen::core_erlang) fn generate_class_method_dispatches(
         &mut self,
         class: &ClassDefinition,
+        indent_level: isize,
     ) -> Result<()> {
         for method in &class.methods {
             // Only generate dispatch for primary methods for now
             if method.kind == MethodKind::Primary {
-                self.generate_method_dispatch(method)?;
+                self.generate_method_dispatch(method, indent_level)?;
             }
         }
         Ok(())
@@ -31,6 +33,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_method_dispatch(
         &mut self,
         method: &MethodDefinition,
+        indent_level: isize,
     ) -> Result<()> {
         // Reset state version at the start of each method
         self.reset_state_version();
@@ -41,52 +44,64 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
 
         let selector_name = method.selector.name();
-        self.write_indent()?;
-        write!(self.output, "<'{selector_name}'> when 'true' ->")?;
-        writeln!(self.output)?;
-        self.indent += 1;
 
-        // Bind method parameters from Args list
-        if !method.parameters.is_empty() {
-            self.write_indent()?;
-            write!(self.output, "case Args of")?;
-            writeln!(self.output)?;
-            self.indent += 1;
+        // BT-295: Collect parameter variable names (mutates scope via fresh_var)
+        let param_vars: Vec<String> = method
+            .parameters
+            .iter()
+            .map(|p| {
+                let var_name = self.fresh_var(&p.name);
+                self.current_method_params.push(var_name.clone());
+                var_name
+            })
+            .collect();
 
-            self.write_indent()?;
-            write!(self.output, "<[")?;
-            // BT-295: Track method params for @primitive codegen
-            for (i, param) in method.parameters.iter().enumerate() {
-                if i > 0 {
-                    write!(self.output, ", ")?;
-                }
-                let var_name = self.fresh_var(&param.name);
-                write!(self.output, "{var_name}")?;
-                self.current_method_params.push(var_name);
-            }
-            write!(self.output, "]> when 'true' ->")?;
-            writeln!(self.output)?;
-            self.indent += 1;
-        }
-
-        // Generate the method body with state threading
-        self.write_indent()?;
+        // Capture body output using truncate (error-safe: no buffer swap)
+        let start = self.output.len();
         self.generate_method_definition_body_with_reply(method)?;
-        writeln!(self.output)?;
+        let body_str = self.output[start..].to_string();
+        self.output.truncate(start);
 
-        if !method.parameters.is_empty() {
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "<_> when 'true' -> {{'reply', {{'error', 'bad_arity'}}, State}}"
-            )?;
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "end")?;
-        }
+        // Build method clause as Document tree
+        let has_params = !param_vars.is_empty();
+        let body_doc: Document = if has_params {
+            let params_pattern = param_vars.join(", ");
+            docvec![
+                format!("<'{selector_name}'> when 'true' ->"),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "case Args of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                format!("<[{params_pattern}]> when 'true' ->"),
+                                nest(INDENT, docvec![line(), body_str,]),
+                                line(),
+                                "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]
+                ),
+                "\n",
+            ]
+        } else {
+            docvec![
+                format!("<'{selector_name}'> when 'true' ->"),
+                nest(INDENT, docvec![line(), body_str,]),
+                "\n",
+            ]
+        };
 
-        self.indent -= 1;
+        // Render at correct indent level
+        let indent_spaces = indent_level * INDENT;
+        #[allow(clippy::cast_sign_loss)]
+        let indent_str = " ".repeat(indent_spaces as usize);
+        self.write_document(&docvec![indent_str, nest(indent_spaces, body_doc)]);
 
         // Pop the scope when done with this method
         self.pop_scope();
@@ -103,11 +118,8 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         if method.body.is_empty() {
             // Empty method body returns nil
-            write!(
-                self.output,
-                "{{'reply', 'nil', {}}}",
-                self.current_state_var()
-            )?;
+            let doc = docvec![format!("{{'reply', 'nil', {}}}", self.current_state_var())];
+            self.write_document(&doc);
             return Ok(());
         }
 
@@ -119,9 +131,13 @@ impl CoreErlangGenerator {
             // Check for early return
             if let Expression::Return { value, .. } = expr {
                 let final_state = self.current_state_var();
-                write!(self.output, "let _ReturnValue = ")?;
-                self.generate_expression(value)?;
-                write!(self.output, " in {{'reply', _ReturnValue, {final_state}}}")?;
+                let value_str = self.capture_expression(value)?;
+                let doc = docvec![
+                    "let _ReturnValue = ",
+                    value_str,
+                    format!(" in {{'reply', _ReturnValue, {final_state}}}"),
+                ];
+                self.write_document(&doc);
                 return Ok(());
             }
 
@@ -137,73 +153,88 @@ impl CoreErlangGenerator {
                             let val_var = self.fresh_temp_var("Val");
                             let current_state = self.current_state_var();
 
-                            write!(self.output, "let {val_var} = ")?;
-                            self.generate_expression(value)?;
+                            let value_str = self.capture_expression(value)?;
 
                             let new_state = self.next_state_var();
-                            write!(
-                                self.output,
-                                " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                                field.name
-                            )?;
-
-                            // Reply tuple using the NEW state (after assignment)
-                            write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
+                            let doc = docvec![
+                                format!("let {val_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                                    field.name
+                                ),
+                                format!("{{'reply', {val_var}, {new_state}}}"),
+                            ];
+                            self.write_document(&doc);
                         }
                     }
                 } else if Self::is_super_message_send(expr) {
                     // Super message send as last expression: unpack {reply, Result, NewState}
-                    write!(self.output, "let _SuperTuple = ")?;
-                    self.generate_expression(expr)?;
-                    write!(
-                        self.output,
-                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)"
-                    )?;
-                    write!(
-                        self.output,
-                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)"
-                    )?;
-                    write!(self.output, " in {{'reply', _Result, _NewState}}")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        "let _SuperTuple = ",
+                        expr_str,
+                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
+                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
+                        " in {'reply', _Result, _NewState}",
+                    ];
+                    self.write_document(&doc);
                 } else if Self::is_error_message_send(expr) {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
-                    self.generate_expression(expr)?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![expr_str];
+                    self.write_document(&doc);
+                } else if self.control_flow_has_mutations(expr) {
+                    // BT-483: Last expression is control flow with field mutations.
+                    // The mutation variant returns {Result, State} tuple.
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        format!("let {tuple_var} = "),
+                        expr_str,
+                        format!(" in let _Result = call 'erlang':'element'(1, {tuple_var})"),
+                        format!(" in let _NewState = call 'erlang':'element'(2, {tuple_var})"),
+                        " in {'reply', _Result, _NewState}",
+                    ];
+                    self.write_document(&doc);
                 } else {
                     // Regular last expression: bind to Result and reply
-                    write!(self.output, "let _Result = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in {{'reply', _Result, {final_state}}}")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        "let _Result = ",
+                        expr_str,
+                        format!(" in {{'reply', _Result, {final_state}}}"),
+                    ];
+                    self.write_document(&doc);
                 }
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
             } else if self.control_flow_has_mutations(expr) {
-                // Control flow that actually threads state: bind result to the next state variable
-                //
-                // We need to:
-                // 1. Write "let State1 = " (using NEXT state name)
-                // 2. Generate expression which uses CURRENT state (State)
-                // 3. Write " in "
-                //
-                // The trick: calculate next state name without incrementing yet,
-                // generate expression (which uses current state), then increment.
+                // BT-483: Control flow that threads state returns {Result, State} tuple.
+                // Extract State for subsequent expressions.
+                let tuple_var = self.fresh_temp_var("Tuple");
                 let next_version = self.state_version() + 1;
                 let new_state = if next_version == 1 {
                     "State1".to_string()
                 } else {
                     format!("State{next_version}")
                 };
-                write!(self.output, "let {new_state} = ")?;
-                self.generate_expression(expr)?;
-                // Now actually increment the version so subsequent code uses State1
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec![
+                    format!("let {tuple_var} = "),
+                    expr_str,
+                    format!(" in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "),
+                ];
+                self.write_document(&doc);
                 let _ = self.next_state_var();
-                write!(self.output, " in ")?;
             } else {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
-                write!(self.output, "let {tmp_var} = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in ")?;
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                self.write_document(&doc);
             }
         }
 
@@ -223,7 +254,8 @@ impl CoreErlangGenerator {
     ) -> Result<()> {
         if block.body.is_empty() {
             let final_state = self.current_state_var();
-            write!(self.output, "{{'reply', 'nil', {final_state}}}")?;
+            let doc = docvec![format!("{{'reply', 'nil', {final_state}}}")];
+            self.write_document(&doc);
             return Ok(());
         }
 
@@ -245,42 +277,60 @@ impl CoreErlangGenerator {
                             let val_var = self.fresh_temp_var("Val");
                             let current_state = self.current_state_var();
 
-                            write!(self.output, "let {val_var} = ")?;
-                            self.generate_expression(value)?;
+                            let value_str = self.capture_expression(value)?;
 
                             let new_state = self.next_state_var();
-                            write!(
-                                self.output,
-                                " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
-                                field.name
-                            )?;
-
-                            // Reply tuple using the NEW state (after assignment)
-                            write!(self.output, "{{'reply', {val_var}, {new_state}}}")?;
+                            let doc = docvec![
+                                format!("let {val_var} = "),
+                                value_str,
+                                format!(
+                                    " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
+                                    field.name
+                                ),
+                                format!("{{'reply', {val_var}, {new_state}}}"),
+                            ];
+                            self.write_document(&doc);
                         }
                     }
                 } else if Self::is_super_message_send(expr) {
                     // Super message send as last expression: unpack {reply, Result, NewState}
-                    write!(self.output, "let _SuperTuple = ")?;
-                    self.generate_expression(expr)?;
-                    write!(
-                        self.output,
-                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)"
-                    )?;
-                    write!(
-                        self.output,
-                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)"
-                    )?;
-                    write!(self.output, " in {{'reply', _Result, _NewState}}")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        "let _SuperTuple = ",
+                        expr_str,
+                        " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
+                        " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
+                        " in {'reply', _Result, _NewState}",
+                    ];
+                    self.write_document(&doc);
                 } else if Self::is_error_message_send(expr) {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
-                    self.generate_expression(expr)?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![expr_str];
+                    self.write_document(&doc);
+                } else if self.control_flow_has_mutations(expr) {
+                    // BT-483: Last expression is control flow with field mutations.
+                    // The mutation variant returns {Result, State} tuple.
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        format!("let {tuple_var} = "),
+                        expr_str,
+                        format!(" in let _Result = call 'erlang':'element'(1, {tuple_var})"),
+                        format!(" in let _NewState = call 'erlang':'element'(2, {tuple_var})"),
+                        " in {'reply', _Result, _NewState}",
+                    ];
+                    self.write_document(&doc);
                 } else {
                     // Regular last expression: bind to Result and reply
-                    write!(self.output, "let _Result = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in {{'reply', _Result, {final_state}}}")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![
+                        "let _Result = ",
+                        expr_str,
+                        format!(" in {{'reply', _Result, {final_state}}}"),
+                    ];
+                    self.write_document(&doc);
                 }
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
@@ -303,11 +353,11 @@ impl CoreErlangGenerator {
                         // Generate: let VarName = <value> in ...
                         // Note: we delay updating the binding until after generating the RHS
                         // so that the RHS sees the prior value (for rebinding cases).
-                        write!(self.output, "let {core_var} = ")?;
-                        self.generate_expression(value)?;
+                        let value_str = self.capture_expression(value)?;
                         // Now update the variable binding to point at the (possibly shadowing) let-bound var.
                         self.bind_var(var_name, &core_var);
-                        write!(self.output, " in ")?;
+                        let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
+                        self.write_document(&doc);
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
@@ -317,15 +367,15 @@ impl CoreErlangGenerator {
                     let core_var = self
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    write!(self.output, "let {core_var} = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in ")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![format!("let {core_var} = "), expr_str, " in ",];
+                    self.write_document(&doc);
                 } else {
                     // Multiple threaded vars - fall back for now
                     let tmp_var = self.fresh_temp_var("seq");
-                    write!(self.output, "let {tmp_var} = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in ")?;
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                    self.write_document(&doc);
                 }
             } else if Self::is_super_message_send(expr) {
                 // Super message send: must thread state from {reply, Result, NewState} tuple
@@ -343,30 +393,50 @@ impl CoreErlangGenerator {
                 {
                     // Use the domain service method for selector-to-atom conversion
                     let selector_atom = selector.to_erlang_atom();
-                    write!(
-                        self.output,
-                        "let {super_result_var} = call 'beamtalk_dispatch':'super'('{selector_atom}', ["
-                    )?;
-                    for (i, arg) in arguments.iter().enumerate() {
-                        if i > 0 {
-                            write!(self.output, ", ")?;
-                        }
-                        self.generate_expression(arg)?;
+                    let mut arg_strs = Vec::new();
+                    for arg in arguments {
+                        arg_strs.push(self.capture_expression(arg)?);
                     }
-                    write!(self.output, "], Self, {current_state}, '{class_name}')")?;
+                    let args_joined = arg_strs.join(", ");
+                    let doc = docvec![
+                        format!(
+                            "let {super_result_var} = call 'beamtalk_dispatch':'super'('{selector_atom}', ["
+                        ),
+                        args_joined,
+                        format!("], Self, {current_state}, '{class_name}')"),
+                    ];
+                    self.write_document(&doc);
                 }
 
                 // Extract state from the {reply, Result, NewState} tuple using element/2
-                write!(
-                    self.output,
+                let doc = docvec![format!(
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
-                )?;
+                )];
+                self.write_document(&doc);
+            } else if self.control_flow_has_mutations(expr) {
+                // BT-483: Control flow with field mutations returns {Result, State} tuple.
+                // Extract State for subsequent expressions.
+                let tuple_var = self.fresh_temp_var("Tuple");
+                let next_version = self.state_version() + 1;
+                let new_state = if next_version == 1 {
+                    "State1".to_string()
+                } else {
+                    format!("State{next_version}")
+                };
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec![
+                    format!("let {tuple_var} = "),
+                    expr_str,
+                    format!(" in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "),
+                ];
+                self.write_document(&doc);
+                let _ = self.next_state_var();
             } else {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
-                write!(self.output, "let {tmp_var} = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in ")?;
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                self.write_document(&doc);
             }
         }
         Ok(())
@@ -407,186 +477,182 @@ impl CoreErlangGenerator {
             return Ok(());
         }
 
-        writeln!(self.output, "'register_class'/0 = fun () ->")?;
-        self.indent += 1;
+        let mut class_docs = Vec::new();
 
-        // Wrap in try-catch for defensive loading
-        self.write_indent()?;
-        writeln!(self.output, "try")?;
-        self.indent += 1;
-
-        // Generate registration for each class in the module
         for (i, class) in module.classes.iter().enumerate() {
-            self.write_indent()?;
-            // Use case expressions for error handling
-            if i > 0 {
-                write!(self.output, "in ")?;
-            }
-            write!(
-                self.output,
-                "let _Reg{} = case call 'beamtalk_object_class':'start'('{}', ~{{",
-                i, class.name.name
-            )?;
-            writeln!(self.output)?;
-            self.indent += 1;
-
-            // Class name
-            self.write_indent()?;
-            writeln!(self.output, "'name' => '{}',", class.name.name)?;
-
-            // Module name
-            self.write_indent()?;
-            writeln!(self.output, "'module' => '{}',", self.module_name)?;
-
-            // Superclass
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'superclass' => '{}',",
-                class.superclass_name()
-            )?;
-
-            // BT-105: Sealing modifiers
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_sealed' => '{}',",
-                if class.is_sealed { "true" } else { "false" }
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'is_abstract' => '{}',",
-                if class.is_abstract { "true" } else { "false" }
-            )?;
-
             // Instance methods
-            self.write_indent()?;
-            write!(self.output, "'instance_methods' => ~{{")?;
             let instance_methods: Vec<_> = class
                 .methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
-            for (method_idx, method) in instance_methods.iter().enumerate() {
-                if method_idx > 0 {
-                    write!(self.output, ", ")?;
-                }
-                // BT-403: Include per-method is_sealed flag
-                let is_sealed = if method.is_sealed || class.is_sealed {
-                    "'true'"
-                } else {
-                    "'false'"
-                };
-                write!(
-                    self.output,
-                    "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
-                    method.selector.name(),
-                    method.selector.arity(),
-                    is_sealed
-                )?;
-            }
-            writeln!(self.output, "}}~,")?;
+            let methods_str: Vec<String> = instance_methods
+                .iter()
+                .map(|method| {
+                    let is_sealed = if method.is_sealed || class.is_sealed {
+                        "'true'"
+                    } else {
+                        "'false'"
+                    };
+                    format!(
+                        "'{}' => ~{{'arity' => {}, 'is_sealed' => {}}}~",
+                        method.selector.name(),
+                        method.selector.arity(),
+                        is_sealed
+                    )
+                })
+                .collect();
+            let instance_methods_str = methods_str.join(", ");
 
             // Instance variables
-            self.write_indent()?;
-            write!(self.output, "'instance_variables' => [")?;
-            for (state_idx, state_decl) in class.state.iter().enumerate() {
-                if state_idx > 0 {
-                    write!(self.output, ", ")?;
-                }
-                write!(self.output, "'{}'", state_decl.name.name)?;
-            }
-            writeln!(self.output, "],")?;
+            let inst_vars_str: Vec<String> = class
+                .state
+                .iter()
+                .map(|s| format!("'{}'", s.name.name))
+                .collect();
+            let inst_vars = inst_vars_str.join(", ");
 
-            // Class methods — depends on whether this is an actor or value type
-            // BT-411: Include both built-in and user-defined class methods
-            self.write_indent()?;
-            writeln!(self.output, "'class_methods' => ~{{")?;
-            self.indent += 1;
+            // Class methods - depends on context
+            let mut class_method_entries = Vec::new();
             if self.context == CodeGenContext::Actor {
-                self.write_indent()?;
-                writeln!(self.output, "'spawn' => ~{{'arity' => 0}}~,")?;
-                self.write_indent()?;
-                writeln!(self.output, "'spawnWith:' => ~{{'arity' => 1}}~,")?;
+                class_method_entries.push("'spawn' => ~{'arity' => 0}~,".to_string());
+                class_method_entries.push("'spawnWith:' => ~{'arity' => 1}~,".to_string());
             } else {
-                self.write_indent()?;
-                writeln!(self.output, "'new' => ~{{'arity' => 0}}~,")?;
-                self.write_indent()?;
-                writeln!(self.output, "'new:' => ~{{'arity' => 1}}~,")?;
+                class_method_entries.push("'new' => ~{'arity' => 0}~,".to_string());
+                class_method_entries.push("'new:' => ~{'arity' => 1}~,".to_string());
             }
-            self.write_indent()?;
-            writeln!(self.output, "'superclass' => ~{{'arity' => 0}}~")?;
+            class_method_entries.push("'superclass' => ~{'arity' => 0}~".to_string());
             // BT-411: User-defined class methods
             for method in &class.class_methods {
                 if method.kind == MethodKind::Primary {
-                    self.write_indent()?;
-                    writeln!(
-                        self.output,
+                    class_method_entries.push(format!(
                         ", '{}' => ~{{'arity' => {}}}~",
                         method.selector.name(),
                         method.selector.arity()
-                    )?;
+                    ));
                 }
             }
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~,")?;
 
-            // BT-101: Method source for CompiledMethod introspection
-            self.write_indent()?;
-            write!(self.output, "'method_source' => ~{{")?;
+            let class_methods_lines: Vec<_> = class_method_entries
+                .into_iter()
+                .map(|entry| docvec![line(), entry])
+                .collect();
+            let class_methods_doc = docvec![
+                "'class_methods' => ~{",
+                nest(INDENT, Document::Vec(class_methods_lines)),
+                line(),
+                "}~,",
+            ];
+
+            // BT-101: Method source
+            let mut method_source_parts = Vec::new();
             for (method_idx, method) in instance_methods.iter().enumerate() {
                 if method_idx > 0 {
-                    write!(self.output, ", ")?;
+                    method_source_parts.push(", ".to_string());
                 }
                 let source_str = self.extract_method_source(method);
-                write!(self.output, "'{}' => ", method.selector.name())?;
-                self.generate_binary_string(&source_str)?;
+                let binary = Self::binary_string_literal(&source_str);
+                method_source_parts.push(format!("'{}' => {binary}", method.selector.name()));
             }
-            writeln!(self.output, "}}~")?;
+            let method_source_str = method_source_parts.join("");
 
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~) of")?;
+            // BT-412: Class variable initial values
+            let mut class_var_parts = Vec::new();
+            for (cv_idx, cv) in class.class_variables.iter().enumerate() {
+                if cv_idx > 0 {
+                    class_var_parts.push(", ".to_string());
+                }
+                let val = if let Some(ref default_value) = cv.default_value {
+                    self.capture_expression(default_value)?
+                } else {
+                    "'nil'".to_string()
+                };
+                class_var_parts.push(format!("'{}' => {val}", cv.name.name));
+            }
+            let class_vars_str = class_var_parts.join("");
 
-            // Handle success case
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "<{{'ok', _Pid{i}}}> when 'true' -> 'ok'")?;
+            let is_sealed = if class.is_sealed { "true" } else { "false" };
+            let is_abstract = if class.is_abstract { "true" } else { "false" };
+            let let_prefix = if i > 0 { "in " } else { "" };
 
-            // Handle error cases - allow module to load anyway
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
-            )?;
-
-            self.write_indent()?;
-            writeln!(self.output, "<{{'error', _Reason{i}}}> when 'true' -> 'ok'")?;
-            self.indent -= 1;
-
-            self.write_indent()?;
-            writeln!(self.output, "end")?;
+            let class_doc = docvec![
+                line(),
+                format!(
+                    "{let_prefix}let _Reg{i} = case call 'beamtalk_object_class':'start'('{}', ~{{",
+                    class.name.name
+                ),
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("'name' => '{}',", class.name.name),
+                        line(),
+                        format!("'module' => '{}',", self.module_name),
+                        line(),
+                        format!("'superclass' => '{}',", class.superclass_name()),
+                        line(),
+                        format!("'is_sealed' => '{is_sealed}',"),
+                        line(),
+                        format!("'is_abstract' => '{is_abstract}',"),
+                        line(),
+                        format!("'instance_methods' => ~{{{instance_methods_str}}}~,"),
+                        line(),
+                        format!("'instance_variables' => [{inst_vars}],"),
+                        line(),
+                        class_methods_doc,
+                        line(),
+                        format!("'method_source' => ~{{{method_source_str}}}~,"),
+                        line(),
+                        format!("'class_variables' => ~{{{class_vars_str}}}~"),
+                    ]
+                ),
+                line(),
+                "}~) of",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        format!("<{{'ok', _Pid{i}}}> when 'true' -> 'ok'"),
+                        line(),
+                        format!(
+                            "<{{'error', {{'already_started', _Existing{i}}}}}> when 'true' -> 'ok'"
+                        ),
+                        line(),
+                        format!("<{{'error', _Reason{i}}}> when 'true' -> 'ok'"),
+                    ]
+                ),
+                line(),
+                "end",
+            ];
+            class_docs.push(class_doc);
         }
 
-        writeln!(self.output)?;
-        self.write_indent()?;
-        writeln!(self.output, "in 'ok'")?;
-
-        // Catch any exceptions during registration
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "of RegResult -> RegResult")?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "catch <CatchType, CatchError, CatchStack> -> 'ok'"
-        )?;
-
-        self.indent -= 1;
-        writeln!(self.output)?;
+        let doc = docvec![
+            "'register_class'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "try",
+                    nest(
+                        INDENT,
+                        docvec![Document::Vec(class_docs), "\n", line(), "in 'ok'",]
+                    ),
+                ]
+            ),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "of RegResult -> RegResult",
+                    line(),
+                    "catch <CatchType, CatchError, CatchStack> -> 'ok'",
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -612,51 +678,85 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<()> {
+        // BT-412: Populate class variable names for field access validation
+        self.class_var_names = class
+            .class_variables
+            .iter()
+            .map(|cv| cv.name.name.to_string())
+            .collect();
+
+        // BT-412: Populate class method selectors for self-send routing
+        self.class_method_selectors = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(|m| m.selector.to_erlang_atom())
+            .collect();
+
         for method in &class.class_methods {
             if method.kind != MethodKind::Primary {
                 continue;
             }
 
             let selector_name = method.selector.name();
-            let arity = method.selector.arity() + 1; // +1 for ClassSelf
-
-            writeln!(self.output)?;
-            write!(
-                self.output,
-                "'class_{selector_name}'/{arity} = fun (ClassSelf"
-            )?;
+            // BT-412: +2 for ClassSelf and ClassVars parameters
+            let arity = method.selector.arity() + 2;
 
             // Push scope for parameter bindings
             self.push_scope();
             self.current_method_params.clear();
             self.reset_state_version();
+            self.class_var_version = 0;
+            self.class_var_mutated = false;
 
             // Bind ClassSelf as 'self' in scope
             self.bind_var("self", "ClassSelf");
             self.in_class_method = true;
 
-            // Generate parameter names
-            for param in &method.parameters {
-                let var_name = self.fresh_var(&param.name);
-                write!(self.output, ", {var_name}")?;
-                self.current_method_params.push(var_name);
-            }
-            writeln!(self.output, ") ->")?;
-            self.indent += 1;
+            // Collect parameter names (mutates scope via fresh_var)
+            let param_vars: Vec<String> = method
+                .parameters
+                .iter()
+                .map(|p| {
+                    let var_name = self.fresh_var(&p.name);
+                    self.current_method_params.push(var_name.clone());
+                    var_name
+                })
+                .collect();
 
-            // Generate method body
-            self.write_indent()?;
-            if method.body.is_empty() {
-                write!(self.output, "'nil'")?;
+            // Capture body output using truncate (error-safe: no buffer swap)
+            let body_str = if method.body.is_empty() {
+                "'nil'".to_string()
             } else {
-                self.generate_class_method_body(method)?;
-            }
-            writeln!(self.output)?;
+                let start = self.output.len();
+                self.generate_class_method_body(method, &class.class_variables)?;
+                let captured = self.output[start..].to_string();
+                self.output.truncate(start);
+                captured
+            };
 
-            self.indent -= 1;
+            // Build function header with params
+            let params_suffix = if param_vars.is_empty() {
+                String::new()
+            } else {
+                format!(", {}", param_vars.join(", "))
+            };
+
+            let doc = docvec![
+                "\n",
+                format!(
+                    "'class_{selector_name}'/{arity} = fun (ClassSelf, ClassVars{params_suffix}) ->"
+                ),
+                nest(INDENT, docvec![line(), body_str,]),
+                "\n",
+            ];
+            self.write_document(&doc);
+
             self.pop_scope();
             self.in_class_method = false;
         }
+        self.class_var_names.clear();
+        self.class_method_selectors.clear();
         Ok(())
     }
 
@@ -664,22 +764,103 @@ impl CoreErlangGenerator {
     ///
     /// Unlike instance methods, class methods have no state threading.
     /// They simply evaluate expressions and return the last value.
-    fn generate_class_method_body(&mut self, method: &MethodDefinition) -> Result<()> {
+    /// BT-412: If class variables were mutated, wraps the final result
+    /// in `{class_var_result, Result, ClassVarsN}`.
+    fn generate_class_method_body(
+        &mut self,
+        method: &MethodDefinition,
+        class_vars: &[crate::ast::StateDeclaration],
+    ) -> Result<()> {
+        let has_class_vars = !class_vars.is_empty();
+
         for (i, expr) in method.body.iter().enumerate() {
             let is_last = i == method.body.len() - 1;
 
             if let Expression::Return { value, .. } = expr {
-                self.generate_expression(value)?;
+                if has_class_vars {
+                    let result_var = self.fresh_temp_var("Ret");
+                    let value_str = self.capture_expression(value)?;
+                    if self.class_var_mutated {
+                        let final_cv = self.current_class_var();
+                        let doc = docvec![
+                            format!("let {result_var} = "),
+                            value_str,
+                            format!(" in {{'class_var_result', {result_var}, {final_cv}}}"),
+                        ];
+                        self.write_document(&doc);
+                    } else {
+                        let doc = docvec![
+                            format!("let {result_var} = "),
+                            value_str,
+                            format!(" in {result_var}"),
+                        ];
+                        self.write_document(&doc);
+                    }
+                } else {
+                    let value_str = self.capture_expression(value)?;
+                    let doc = docvec![value_str];
+                    self.write_document(&doc);
+                }
                 return Ok(());
             }
 
             if is_last {
+                if has_class_vars {
+                    if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+                        // Open-scope expression: generate it and close with class_var_result.
+                        // The result var is stored in last_open_scope_result.
+                        self.last_open_scope_result = None;
+                        let expr_str = self.capture_expression(expr)?;
+                        let final_cv = self.current_class_var();
+                        if let Some(result_var) = &self.last_open_scope_result.clone() {
+                            let doc = docvec![
+                                expr_str,
+                                format!("{{'class_var_result', {result_var}, {final_cv}}}"),
+                            ];
+                            self.write_document(&doc);
+                        } else {
+                            // Fallback: shouldn't happen
+                            let doc = docvec![
+                                expr_str,
+                                format!("{{'class_var_result', 'nil', {final_cv}}}"),
+                            ];
+                            self.write_document(&doc);
+                        }
+                    } else {
+                        let result_var = self.fresh_temp_var("Ret");
+                        let expr_str = self.capture_expression(expr)?;
+                        if self.class_var_mutated {
+                            let final_cv = self.current_class_var();
+                            let doc = docvec![
+                                format!("let {result_var} = "),
+                                expr_str,
+                                format!(" in {{'class_var_result', {result_var}, {final_cv}}}"),
+                            ];
+                            self.write_document(&doc);
+                        } else {
+                            let doc = docvec![
+                                format!("let {result_var} = "),
+                                expr_str,
+                                format!(" in {result_var}"),
+                            ];
+                            self.write_document(&doc);
+                        }
+                    }
+                } else {
+                    let expr_str = self.capture_expression(expr)?;
+                    let doc = docvec![expr_str];
+                    self.write_document(&doc);
+                }
+            } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
+                // Class var assignment or class method self-send: the generated code
+                // ends with `in ` (open scope) so ClassVarsN stays visible for the
+                // remaining body expressions.
                 self.generate_expression(expr)?;
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
-                write!(self.output, "let {tmp_var} = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in ")?;
+                let expr_str = self.capture_expression(expr)?;
+                let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
+                self.write_document(&doc);
             }
         }
         Ok(())
@@ -708,15 +889,35 @@ impl CoreErlangGenerator {
     /// 2. The block argument contains field writes that need threading
     ///
     /// This prevents binding non-state return values (like `ok` or `nil`) to `StateN`.
-    fn control_flow_has_mutations(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn control_flow_has_mutations(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         // First check if it's a potential state-threading construct
         if !Self::is_state_threading_control_flow(expr) {
             return false;
         }
 
-        // Extract the block argument and analyze for mutations
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // The block is typically the last argument for these control flow constructs
+        if let Expression::MessageSend {
+            receiver,
+            arguments,
+            selector: crate::ast::MessageSelector::Keyword(parts),
+            ..
+        } = expr
+        {
+            // BT-410: For on:do: and ensure:, the receiver (try body) is also
+            // a block that may contain field mutations
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if matches!(sel.as_str(), "on:do:" | "ensure:") {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    let analysis = block_analysis::analyze_block(block);
+                    if self.needs_mutation_threading(&analysis) {
+                        return true;
+                    }
+                }
+            }
+
+            // Standard check: analyze the last argument block
             if let Some(Expression::Block(block)) = arguments.last() {
                 let analysis = block_analysis::analyze_block(block);
                 return self.needs_mutation_threading(&analysis);

@@ -11,7 +11,7 @@
 //! - Class identity (DDD Value Object bundling module + class names)
 
 use super::{CoreErlangGenerator, Result};
-use std::fmt::Write;
+use crate::ast::Expression;
 
 /// Value Object: A class's compile-time identity.
 ///
@@ -19,7 +19,7 @@ use std::fmt::Write;
 ///
 /// Holds the user-facing class name (from the AST class definition).
 /// This decouples class identity from the Erlang module name, which may
-/// differ for stdlib classes (e.g., module `bt_stdlib_string` → class `String`).
+/// differ for stdlib classes (e.g., module `bt@stdlib@string` → class `String`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ClassIdentity {
     class_name: String,
@@ -62,14 +62,40 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Writes indentation to the output buffer.
+    /// Bridge: renders a `Document` tree and appends it to `self.output`.
     ///
-    /// Each indentation level is 4 spaces.
-    pub(super) fn write_indent(&mut self) -> Result<()> {
-        for _ in 0..self.indent {
-            write!(self.output, "    ")?;
+    /// This enables incremental migration — functions that return `Document`
+    /// can coexist with functions that write directly to `self.output`.
+    /// The document is rendered starting at indent level 0; callers are
+    /// responsible for embedding indentation in the document tree itself
+    /// (e.g., via `nest()` or literal spaces).
+    pub(super) fn write_document(&mut self, doc: &super::document::Document<'_>) {
+        let rendered = doc.to_pretty_string();
+        self.output.push_str(&rendered);
+    }
+
+    /// Captures the output of `generate_expression` as a `String` without
+    /// modifying the output buffer.
+    ///
+    /// This is the bridge mechanism for Phase 0 migration (ADR 0018): functions
+    /// that are being migrated to return `Document` can capture expression output
+    /// as owned strings and embed them in document trees.
+    ///
+    /// All side effects on `var_context` and `state_threading` are preserved.
+    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
+        let start = self.output.len();
+        match self.generate_expression(expr) {
+            Ok(()) => {
+                let captured = self.output[start..].to_string();
+                self.output.truncate(start);
+                Ok(captured)
+            }
+            Err(err) => {
+                // Roll back any partial output written by generate_expression.
+                self.output.truncate(start);
+                Err(err)
+            }
         }
-        Ok(())
     }
 
     /// Generates a fresh variable name and binds it in the current scope.
@@ -108,7 +134,7 @@ impl CoreErlangGenerator {
     /// # Examples
     ///
     /// - Module `"counter"` (no class identity) → `"Counter"`
-    /// - Module `"bt_stdlib_string"` with class identity `"String"` → `"String"`
+    /// - Module `"bt@stdlib@string"` with class identity `"String"` → `"String"`
     pub(super) fn class_name(&self) -> String {
         if let Some(ref identity) = self.class_identity {
             return identity.class_name().to_string();
@@ -162,4 +188,15 @@ pub fn to_module_name(class_name: &str) -> String {
     }
 
     result
+}
+
+/// Returns true if `module_name` corresponds to the compiled form of `class_name`.
+///
+/// ADR 0016: Module names may be prefixed with `bt@` (user code) or
+/// `bt@stdlib@` (stdlib), or unprefixed (legacy/tests).
+pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
+    let snake = to_module_name(class_name);
+    module_name == snake
+        || module_name == format!("bt@{snake}")
+        || module_name == format!("bt@stdlib@{snake}")
 }

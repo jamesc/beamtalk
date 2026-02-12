@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
+//
+// Tests the >> operator and CompiledMethod protocol:
+// selector, source, argumentCount, class
+
+// @load tests/e2e/fixtures/counter.bt
+
+// ===========================================================================
+// METHOD LOOKUP
+// ===========================================================================
+
+Counter >> #getValue
+// => {"$beamtalk_class":"CompiledMethod",_}
+
+Counter >> #nonExistent
+// => nil
+
+// ===========================================================================
+// METHOD LOOKUP ON VARIABLE RECEIVERS (BT-323)
+// ===========================================================================
+
+cls := Counter
+// => Counter
+
+cls >> #getValue
+// => {"$beamtalk_class":"CompiledMethod",_}
+
+(cls >> #getValue) selector
+// => getValue
+
+cls >> #nonExistent
+// => nil
+
+// >> on non-class value produces type_error
+42 >> #foo
+// => ERROR: type_error
+
+// ===========================================================================
+// CLASS
+// ===========================================================================
+
+(Counter >> #getValue) class
+// => CompiledMethod
+
+// ===========================================================================
+// SELECTOR
+// ===========================================================================
+
+(Counter >> #getValue) selector
+// => getValue
+
+(Counter >> #increment) selector
+// => increment
+
+// ===========================================================================
+// ARGUMENT COUNT
+// ===========================================================================
+
+(Counter >> #getValue) argumentCount
+// => 0
+
+(Counter >> #increment) argumentCount
+// => 0
+
+// ===========================================================================
+// SOURCE
+// ===========================================================================
+
+(Counter >> #getValue) source
+// => getValue => ^self.value
+
+// ===========================================================================
+// PRINT STRING
+// ===========================================================================
+
+(Counter >> #getValue) printString
+// => a CompiledMethod(getValue)
+
+// ===========================================================================
+// AS STRING
+// ===========================================================================
+
+(Counter >> #getValue) asString
+// => a CompiledMethod(getValue)

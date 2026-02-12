@@ -1,20 +1,79 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// True - The true boolean value
-//
-// Implements control flow messages for the true case. All methods are
-// pure Beamtalk — no primitives needed.
+/// True — The true boolean value.
+///
+/// Implements control flow messages for the true case.
+/// All methods are pure Beamtalk — no primitives needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// true class                   // => True
+/// true ifTrue: ['yes']         // => 'yes'
+/// true not                     // => false
+/// ```
 
-sealed Object subclass: True
+sealed Boolean subclass: True
+  /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true ifTrue: ['yes'] ifFalse: ['no']   // => 'yes'
+  /// ```
   ifTrue: trueBlock ifFalse: falseBlock => trueBlock value
+
+  /// If true, evaluate `trueBlock`. Returns block result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true ifTrue: ['yes']       // => 'yes'
+  /// ```
   ifTrue: trueBlock => trueBlock value
+
+  /// If false, evaluate `falseBlock`. Returns self (true) since condition is true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true ifFalse: ['no']       // => true
+  /// ```
   ifFalse: falseBlock => self
-  and: aBlock => aBlock value
-  or: aBlock => self
+
+  /// Logical NOT. Returns false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true not                   // => false
+  /// ```
   not => false
-  xor: other => other not
+
+  /// Returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true isTrue                // => true
+  /// ```
   isTrue => true
+
+  /// Returns false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true isFalse               // => false
+  /// ```
   isFalse => false
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true describe              // => 'true'
+  /// ```
   describe => 'true'
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true printString           // => 'true'
+  /// ```
   printString => 'true'

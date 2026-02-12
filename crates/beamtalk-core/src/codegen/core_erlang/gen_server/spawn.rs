@@ -8,9 +8,10 @@
 //! Generates `spawn/0`, `spawn/1` class methods and `new/0`, `new/1` error
 //! methods that prevent incorrect actor instantiation.
 
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::Module;
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates the `spawn/0` class method for creating actor instances.
@@ -29,9 +30,12 @@ impl CoreErlangGenerator {
     ///         <{'ok', Pid}> when 'true' ->
     ///             {'beamtalk_object', 'Counter', 'counter', Pid};
     ///         <{'error', Reason}> when 'true' ->
-    ///             call 'erlang':'error'({'spawn_failed', Reason})
+    ///             let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'Counter') in
+    ///             let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in
+    ///             call 'beamtalk_error':'raise'(SpawnErr1)
     ///     end
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_spawn_function(
         &mut self,
         module: &Module,
@@ -42,78 +46,84 @@ impl CoreErlangGenerator {
             .first()
             .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
 
-        writeln!(self.output, "'spawn'/0 = fun () ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Pass empty map as InitArgs - init/1 merges this with default state
-        writeln!(
-            self.output,
-            "case call 'gen_server':'start_link'('{}', ~{{}}~, []) of",
-            self.module_name
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
         let class_name = self.class_name();
+        let module_name = self.module_name.clone();
 
-        if has_initialize {
-            self.generate_spawn_initialize_block(&class_name)?;
+        let ok_body = if has_initialize {
+            Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            writeln!(
-                self.output,
-                "{{'beamtalk_object', '{}', '{}', Pid}}",
-                class_name, self.module_name
-            )?;
-        }
+            docvec![format!(
+                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
+            )]
+        };
 
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'erlang':'error'({{'spawn_failed', Reason}})"
-        )?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        let doc = docvec![
+            "'spawn'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!("case call 'gen_server':'start_link'('{module_name}', ~{{}}~, []) of"),
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<{'ok', Pid}> when 'true' ->",
+                            nest(INDENT, docvec![line(), ok_body,]),
+                            line(),
+                            "<{'error', Reason}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    format!(
+                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                                    ),
+                                    line(),
+                                    "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in",
+                                    line(),
+                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
-    /// Generates the initialize-with-cleanup block for spawn functions (BT-425).
+    /// Builds the Document for the initialize-with-cleanup block (BT-425).
     ///
     /// Wraps the `initialize` call in a try-catch. If initialize fails,
     /// stops the spawned process before re-raising the error to prevent leaks.
-    fn generate_spawn_initialize_block(&mut self, class_name: &str) -> Result<()> {
-        let module_name = self.module_name.clone();
-        // Build the object first
-        writeln!(
-            self.output,
-            "let _Obj = {{'beamtalk_object', '{class_name}', '{module_name}', Pid}} in",
-        )?;
-        self.write_indent()?;
-        // Core Erlang try: simple variable patterns in of/catch (no <> or guards)
-        writeln!(
-            self.output,
-            "try call 'gen_server':'call'(Pid, {{'initialize', []}})"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "of _InitOk -> _Obj")?;
-        self.write_indent()?;
-        writeln!(self.output, "catch <_InitClass, _InitErr, _InitStack> ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "let _Stop = call 'gen_server':'stop'(Pid) in")?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(_InitErr)")?;
-        self.indent -= 1;
-        Ok(())
+    fn spawn_initialize_block_doc(
+        class_name: &str,
+        module_name: &str,
+    ) -> crate::codegen::core_erlang::document::Document<'static> {
+        docvec![
+            format!("let _Obj = {{'beamtalk_object', '{class_name}', '{module_name}', Pid}} in"),
+            line(),
+            "try call 'gen_server':'call'(Pid, {'initialize', []})",
+            line(),
+            "of _InitOk -> _Obj",
+            line(),
+            "catch <_InitClass, _InitErr, _InitStack> ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "let _Stop = call 'gen_server':'stop'(Pid) in",
+                    line(),
+                    "call 'erlang':'error'(_InitErr)",
+                ]
+            ),
+        ]
     }
 
     /// Generates the `spawn/1` class method for creating actor instances with init args.
@@ -128,13 +138,19 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'spawn'/1 = fun (InitArgs) ->
-    ///     case call 'gen_server':'start_link'('counter', InitArgs, []) of
-    ///         <{'ok', Pid}> when 'true' ->
-    ///             {'beamtalk_object', 'Counter', 'counter', Pid};
-    ///         <{'error', Reason}> when 'true' ->
-    ///             call 'erlang':'error'({'spawn_failed', Reason})
+    ///     case call 'erlang':'is_map'(InitArgs) of
+    ///       <'false'> when 'true' ->
+    ///         %% BT-473: type_error for non-map arguments
+    ///       <'true'> when 'true' ->
+    ///         case call 'gen_server':'start_link'('counter', InitArgs, []) of
+    ///             <{'ok', Pid}> when 'true' ->
+    ///                 {'beamtalk_object', 'Counter', 'counter', Pid};
+    ///             <{'error', Reason}> when 'true' ->
+    ///                 %% instantiation_error
+    ///         end
     ///     end
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_spawn_with_args_function(
         &mut self,
         module: &Module,
@@ -145,46 +161,97 @@ impl CoreErlangGenerator {
             .first()
             .is_some_and(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"));
 
-        writeln!(self.output, "'spawn'/1 = fun (InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call 'gen_server':'start_link'('{}', InitArgs, []) of",
-            self.module_name
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{'ok', Pid}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
         let class_name = self.class_name();
+        let module_name = self.module_name.clone();
 
-        if has_initialize {
-            self.generate_spawn_initialize_block(&class_name)?;
+        let ok_body = if has_initialize {
+            Self::spawn_initialize_block_doc(&class_name, &module_name)
         } else {
-            writeln!(
-                self.output,
-                "{{'beamtalk_object', '{}', '{}', Pid}}",
-                class_name, self.module_name
-            )?;
-        }
+            docvec![format!(
+                "{{'beamtalk_object', '{class_name}', '{module_name}', Pid}}"
+            )]
+        };
 
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'erlang':'error'({{'spawn_failed', Reason}})"
-        )?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        // BT-473: Validate InitArgs is a map before passing to gen_server
+        // BT-476: This is the single source of truth for spawnWith: argument validation.
+        // The runtime (beamtalk_object_class.erl handle_call({spawn, Args})) delegates
+        // validation to this generated code for both static and dynamic dispatch paths.
+        let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
+        let doc = docvec![
+            "'spawn'/1 = fun (InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "case call 'erlang':'is_map'(InitArgs) of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<'false'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    format!(
+                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', '{class_name}') in"
+                                    ),
+                                    line(),
+                                    "let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in",
+                                    line(),
+                                    format!(
+                                        "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, {hint_binary}) in"
+                                    ),
+                                    line(),
+                                    "call 'beamtalk_error':'raise'(TypeErr2)",
+                                ]
+                            ),
+                            line(),
+                            "<'true'> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    format!(
+                                        "case call 'gen_server':'start_link'('{module_name}', InitArgs, []) of"
+                                    ),
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "<{'ok', Pid}> when 'true' ->",
+                                            nest(INDENT, docvec![line(), ok_body,]),
+                                            line(),
+                                            "<{'error', Reason}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    format!(
+                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                                                    ),
+                                                    line(),
+                                                    "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
+                                                    line(),
+                                                    "call 'beamtalk_error':'raise'(SpawnErr1)",
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -201,34 +268,33 @@ impl CoreErlangGenerator {
     ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
     ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
-    ///     call 'erlang':'error'(Error2)
+    ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &mut self,
     ) -> Result<()> {
-        writeln!(self.output, "'new'/0 = fun () ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in"
-        )?;
-        self.write_indent()?;
-        write!(
-            self.output,
-            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
-        )?;
-        self.generate_binary_string("Use spawn instead")?;
-        writeln!(self.output, ") in")?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
-        self.indent -= 1;
-
+        let hint_binary = Self::binary_string_literal("Use spawn instead");
+        let doc = docvec![
+            "'new'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in",
+                    line(),
+                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in",
+                    line(),
+                    format!(
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
+                    ),
+                    line(),
+                    "call 'beamtalk_error':'raise'(Error2)",
+                ]
+            ),
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -245,34 +311,33 @@ impl CoreErlangGenerator {
     ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
     ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
-    ///     call 'erlang':'error'(Error2)
+    ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &mut self,
     ) -> Result<()> {
-        writeln!(self.output, "'new'/1 = fun (_InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in"
-        )?;
-        self.write_indent()?;
-        write!(
-            self.output,
-            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
-        )?;
-        self.generate_binary_string("Use spawnWith: instead")?;
-        writeln!(self.output, ") in")?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
-        self.indent -= 1;
-
+        let hint_binary = Self::binary_string_literal("Use spawnWith: instead");
+        let doc = docvec![
+            "'new'/1 = fun (_InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in",
+                    line(),
+                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in",
+                    line(),
+                    format!(
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
+                    ),
+                    line(),
+                    "call 'beamtalk_error':'raise'(Error2)",
+                ]
+            ),
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -281,87 +346,95 @@ impl CoreErlangGenerator {
     /// Abstract classes cannot be instantiated — they must be subclassed first.
     /// This function generates a method that throws a structured `#beamtalk_error{}`
     /// record with `kind=instantiation_error`.
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
     ) -> Result<()> {
         let class_name = self.class_name();
-        writeln!(self.output, "'spawn'/0 = fun () ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawn') in"
-        )?;
-        self.write_indent()?;
-        write!(
-            self.output,
-            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
-        )?;
-        self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
-        writeln!(self.output, ") in")?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
-        self.indent -= 1;
-
+        let hint_binary = Self::binary_string_literal(
+            "Abstract classes cannot be instantiated. Subclass it first.",
+        );
+        let doc = docvec![
+            "'spawn'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!(
+                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                    ),
+                    line(),
+                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawn') in",
+                    line(),
+                    format!(
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
+                    ),
+                    line(),
+                    "call 'beamtalk_error':'raise'(Error2)",
+                ]
+            ),
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
     /// Generates the `spawn/1` error method for abstract classes (BT-105).
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_with_args_error_method(
         &mut self,
     ) -> Result<()> {
         let class_name = self.class_name();
-        writeln!(self.output, "'spawn'/1 = fun (_InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in",
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:') in"
-        )?;
-        self.write_indent()?;
-        write!(
-            self.output,
-            "let Error2 = call 'beamtalk_error':'with_hint'(Error1, "
-        )?;
-        self.generate_binary_string("Abstract classes cannot be instantiated. Subclass it first.")?;
-        writeln!(self.output, ") in")?;
-        self.write_indent()?;
-        writeln!(self.output, "call 'erlang':'error'(Error2)")?;
-        self.indent -= 1;
-
+        let hint_binary = Self::binary_string_literal(
+            "Abstract classes cannot be instantiated. Subclass it first.",
+        );
+        let doc = docvec![
+            "'spawn'/1 = fun (_InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!(
+                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in"
+                    ),
+                    line(),
+                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:') in",
+                    line(),
+                    format!(
+                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, {hint_binary}) in"
+                    ),
+                    line(),
+                    "call 'beamtalk_error':'raise'(Error2)",
+                ]
+            ),
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
+    }
+
+    /// Returns a Core Erlang binary string literal for the given string.
+    ///
+    /// Produces: `#{#<byte1>(8,1,'integer',['unsigned'|['big']]), ...}#`
+    pub(in crate::codegen::core_erlang) fn binary_string_literal(s: &str) -> String {
+        use std::fmt::Write;
+        let mut result = String::from("#{");
+        for (i, byte) in s.bytes().enumerate() {
+            if i > 0 {
+                result.push(',');
+            }
+            write!(result, "#<{byte}>(8,1,'integer',['unsigned'|['big']])").unwrap();
+        }
+        result.push_str("}#");
+        result
     }
 
     /// Helper to generate a binary string literal in Core Erlang format.
     ///
     /// Generates: #{#<char1>(...), #<char2>(...), ...}#
-    pub(in crate::codegen::core_erlang) fn generate_binary_string(
-        &mut self,
-        s: &str,
-    ) -> Result<()> {
-        write!(self.output, "#{{")?;
-        for (i, ch) in s.chars().enumerate() {
-            if i > 0 {
-                write!(self.output, ",")?;
-            }
-            write!(
-                self.output,
-                "#<{}>(8,1,'integer',['unsigned'|['big']])",
-                ch as u32
-            )?;
-        }
-        write!(self.output, "}}#")?;
-        Ok(())
+    #[allow(dead_code)]
+    pub(in crate::codegen::core_erlang) fn generate_binary_string(&mut self, s: &str) {
+        self.write_document(&Document::String(Self::binary_string_literal(s)));
     }
 
     /// Generates the `superclass/0` class method for reflection.
@@ -373,6 +446,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'superclass'/0 = fun () -> 'Actor'
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_superclass_function(
         &mut self,
         module: &Module,
@@ -383,12 +457,12 @@ impl CoreErlangGenerator {
             .and_then(|c| c.superclass.as_ref())
             .map_or("nil", |s| s.name.as_str());
 
-        writeln!(
-            self.output,
-            "'superclass'/0 = fun () -> '{superclass_atom}'"
-        )?;
-        writeln!(self.output)?;
-
+        let doc = docvec![
+            format!("'superclass'/0 = fun () -> '{superclass_atom}'"),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 }

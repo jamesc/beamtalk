@@ -118,6 +118,7 @@ test-stdlib: build-stdlib
 # Clean up stale daemon state (internal helper)
 _clean-daemon-state:
     @rm -f ~/.beamtalk/daemon.sock ~/.beamtalk/daemon.lock 2>/dev/null || true
+    @rm -rf ~/.beamtalk/sessions/*/daemon.sock ~/.beamtalk/sessions/*/daemon.lock 2>/dev/null || true
 
 # Run Erlang runtime unit tests
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.

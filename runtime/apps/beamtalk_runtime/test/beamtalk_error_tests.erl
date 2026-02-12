@@ -146,3 +146,64 @@ does_not_understand_with_hint_test() ->
     Formatted = iolist_to_binary(beamtalk_error:format(Error)),
     Expected = <<"Integer does not understand 'foo'\nHint: Check spelling or use 'respondsTo:' to verify method exists">>,
     ?assertEqual(Expected, Formatted).
+
+%%% Tests for new error kinds added in BT-455
+
+class_not_found_message_test() ->
+    Error = beamtalk_error:new(class_not_found, 'Counter'),
+    ?assertEqual(<<"Class 'Counter' not found">>, Error#beamtalk_error.message),
+    ErrorWithSel = beamtalk_error:with_selector(Error, increment),
+    ?assertEqual(<<"Class 'Counter' not found (while resolving 'increment')">>, ErrorWithSel#beamtalk_error.message).
+
+no_superclass_message_test() ->
+    Error = beamtalk_error:new(no_superclass, 'ProtoObject'),
+    ?assertEqual(<<"ProtoObject has no superclass">>, Error#beamtalk_error.message),
+    ErrorWithSel = beamtalk_error:with_selector(Error, someMethod),
+    ?assertEqual(<<"ProtoObject has no superclass (cannot resolve 'someMethod' via super)">>, ErrorWithSel#beamtalk_error.message).
+
+class_already_exists_message_test() ->
+    Error = beamtalk_error:new(class_already_exists, 'Counter'),
+    ?assertEqual(<<"Class 'Counter' already exists">>, Error#beamtalk_error.message).
+
+internal_error_message_test() ->
+    Error = beamtalk_error:new(internal_error, 'Runtime'),
+    ?assertEqual(<<"Internal error in Runtime">>, Error#beamtalk_error.message),
+    ErrorWithSel = beamtalk_error:with_selector(Error, dispatch),
+    ?assertEqual(<<"Internal error in 'dispatch' on Runtime">>, ErrorWithSel#beamtalk_error.message).
+
+dispatch_error_message_test() ->
+    Error = beamtalk_error:new(dispatch_error, 'Counter'),
+    ?assertEqual(<<"Dispatch error for Counter">>, Error#beamtalk_error.message),
+    ErrorWithSel = beamtalk_error:with_selector(Error, increment),
+    ?assertEqual(<<"Dispatch error for 'increment' on Counter">>, ErrorWithSel#beamtalk_error.message).
+
+callback_failed_message_test() ->
+    Error = beamtalk_error:new(callback_failed, 'Actor'),
+    ?assertEqual(<<"Callback failed for Actor">>, Error#beamtalk_error.message),
+    ErrorWithSel = beamtalk_error:with_selector(Error, 'on_actor_spawned'),
+    ?assertEqual(<<"Callback 'on_actor_spawned' failed for Actor">>, ErrorWithSel#beamtalk_error.message).
+
+%%% Test: raise/1 wraps and throws as Exception tagged map (ADR 0015)
+raise_wraps_and_throws_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Integer'),
+    Error1 = beamtalk_error:with_selector(Error, 'foo'),
+    try
+        beamtalk_error:raise(Error1)
+    catch
+        error:Caught ->
+            ?assertMatch(#{'$beamtalk_class' := _, error := _}, Caught),
+            #{'$beamtalk_class' := _, error := Inner} = Caught,
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual('Integer', Inner#beamtalk_error.class),
+            ?assertEqual('foo', Inner#beamtalk_error.selector)
+    end.
+
+%%% Test: raise/1 produces correct exception class based on error kind (BT-452)
+raise_produces_exception_class_test() ->
+    Error = beamtalk_error:new(type_error, 'String'),
+    try
+        beamtalk_error:raise(Error)
+    catch
+        error:#{'$beamtalk_class' := Class} ->
+            ?assertEqual('TypeError', Class)
+    end.

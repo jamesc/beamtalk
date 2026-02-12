@@ -1,0 +1,390 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "ClassVarCounter",
+                span: Span {
+                    start: 154,
+                    end: 169,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 138,
+                        end: 143,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "count",
+                        span: Span {
+                            start: 209,
+                            end: 214,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 217,
+                                end: 218,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 202,
+                        end: 218,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "increment",
+                    ),
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 366,
+                                            end: 370,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "count",
+                                    span: Span {
+                                        start: 371,
+                                        end: 376,
+                                    },
+                                },
+                                span: Span {
+                                    start: 366,
+                                    end: 376,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 380,
+                                                end: 384,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "count",
+                                        span: Span {
+                                            start: 385,
+                                            end: 390,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 380,
+                                        end: 390,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 393,
+                                            end: 394,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 380,
+                                    end: 394,
+                                },
+                            },
+                            span: Span {
+                                start: 366,
+                                end: 394,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 349,
+                        end: 394,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getCount",
+                    ),
+                    parameters: [],
+                    body: [
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 410,
+                                        end: 414,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "count",
+                                span: Span {
+                                    start: 415,
+                                    end: 420,
+                                },
+                            },
+                            span: Span {
+                                start: 410,
+                                end: 420,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 398,
+                        end: 420,
+                    },
+                },
+            ],
+            class_methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "create",
+                    ),
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 242,
+                                            end: 246,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "instanceCount",
+                                    span: Span {
+                                        start: 247,
+                                        end: 260,
+                                    },
+                                },
+                                span: Span {
+                                    start: 242,
+                                    end: 260,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 264,
+                                                end: 268,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "instanceCount",
+                                        span: Span {
+                                            start: 269,
+                                            end: 282,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 264,
+                                        end: 282,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 285,
+                                            end: 286,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 264,
+                                    end: 286,
+                                },
+                            },
+                            span: Span {
+                                start: 242,
+                                end: 286,
+                            },
+                        },
+                        MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 291,
+                                        end: 295,
+                                    },
+                                },
+                            ),
+                            selector: Unary(
+                                "spawn",
+                            ),
+                            arguments: [],
+                            span: Span {
+                                start: 291,
+                                end: 301,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 222,
+                        end: 301,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getCount",
+                    ),
+                    parameters: [],
+                    body: [
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 327,
+                                        end: 331,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "instanceCount",
+                                span: Span {
+                                    start: 332,
+                                    end: 345,
+                                },
+                            },
+                            span: Span {
+                                start: 327,
+                                end: 345,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 305,
+                        end: 345,
+                    },
+                },
+            ],
+            class_variables: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "instanceCount",
+                        span: Span {
+                            start: 182,
+                            end: 195,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 198,
+                                end: 199,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 172,
+                        end: 199,
+                    },
+                },
+            ],
+            doc_comment: None,
+            span: Span {
+                start: 138,
+                end: 420,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 138,
+        end: 420,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 138,
+                end: 143,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 138,
+                end: 143,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test class method codegen (class-side methods, class variables)",
+            span: Span {
+                start: 138,
+                end: 143,
+            },
+            kind: Line,
+        },
+    ],
+}

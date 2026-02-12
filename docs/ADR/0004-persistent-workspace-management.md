@@ -262,7 +262,7 @@ The design distinguishes between two levels:
 
 `Beamtalk` is a global object (like `Smalltalk` in Smalltalk) available in every session.
 
-**Current implementation** (see `lib/Beamtalk.bt`):
+**Current implementation** (see `lib/SystemDictionary.bt`):
 - `Beamtalk allClasses` — List all registered classes
 - `Beamtalk classNamed:` — Get class by name
 - `Beamtalk globals` — Access global namespace
@@ -466,10 +466,10 @@ user_actor_sup:start_child(CounterModule, InitArgs)
 ```erlang
 %% When user modifies counter.bt and saves:
 Compiler Daemon:
-  1. Compile counter.bt → counter.beam
+  1. Compile counter.bt → bt@counter.beam
   2. Push to workspace node via net_kernel
-  3. Workspace node: code:load_binary(counter, Beam)
-  4. Optionally: sys:change_code(Actor, counter, OldVsn, Extra)
+  3. Workspace node: code:load_binary('bt@counter', Beam)
+  4. Optionally: sys:change_code(Actor, 'bt@counter', OldVsn, Extra)
 
 %% Actors can handle code upgrades:
 code_change(OldVsn, State, _Extra) ->
@@ -1261,7 +1261,7 @@ Diagnostics appear in editor
         ↓
 User saves (Ctrl+S)
         ↓
-LSP compiles to counter.beam
+LSP compiles to bt@counter.beam
         ↓
 LSP pushes to workspace node (if connected)
         ↓

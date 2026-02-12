@@ -34,7 +34,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0005](0005-beam-object-model-pragmatic-hybrid.md) | BEAM Object Model - Pragmatic Hybrid Approach | Accepted | 2026-02-05 |
 | [0006](0006-unified-method-dispatch.md) | Unified Method Dispatch with Hierarchy Walking | Accepted | 2026-02-05 |
 | [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Accepted | 2026-02-06 |
-| [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Proposed | 2026-02-06 |
+| [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Accepted | 2026-02-12 |
 | [0009](0009-otp-application-structure.md) | OTP Application Structure — Split Workspace from Runtime | Implemented | 2026-02-07 |
 | [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Accepted | 2026-02-07 |
 | [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Proposed | 2026-02-07 |
@@ -44,6 +44,10 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Proposed | 2026-02-10 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Proposed | 2026-02-10 |
 | [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Proposed | 2026-02-11 |
+| [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Proposed | 2026-02-11 |
+| [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Accepted | 2026-02-12 |
+| [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Proposed | 2026-02-12 |
+| [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Proposed | 2026-02-12 |
 
 ## Creating New ADRs
 

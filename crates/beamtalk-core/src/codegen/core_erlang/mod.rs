@@ -87,10 +87,11 @@
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
 mod actor_codegen;
-mod beamtalk_module;
 mod block_analysis;
 mod control_flow;
 mod dispatch_codegen;
+pub mod doc_chunks;
+pub mod document;
 pub mod erlang_types;
 mod expressions;
 mod gen_server;
@@ -109,9 +110,11 @@ mod variable_context;
 pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::docvec;
+use document::{Document, INDENT, line, nest};
 use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
-use std::fmt::{self, Write};
+use std::fmt;
 use thiserror::Error;
 use variable_context::VariableContext;
 
@@ -190,6 +193,20 @@ pub enum CodeGenError {
         /// The binding name (e.g., "Transcript", "Beamtalk").
         name: String,
     },
+
+    /// Block arity mismatch in nil-testing method.
+    #[error(
+        "{selector} block must take 0 or 1 arguments, got {arity}.\n\n\
+             Fix: Use a zero-arg block or a one-arg block:\n\
+             \x20 obj ifNotNil: [ 'found' ]\n\
+             \x20 obj ifNotNil: [:v | v printString]"
+    )]
+    BlockArityMismatch {
+        /// The selector (e.g., "ifNotNil:").
+        selector: String,
+        /// The actual arity of the block.
+        arity: usize,
+    },
 }
 
 /// Result type for code generation operations.
@@ -220,7 +237,7 @@ pub type Result<T> = std::result::Result<T, CodeGenError>;
 /// # Ok::<(), beamtalk_core::codegen::core_erlang::CodeGenError>(())
 /// ```
 pub fn generate(module: &Module) -> Result<String> {
-    let mut generator = CoreErlangGenerator::new("beamtalk_module");
+    let mut generator = CoreErlangGenerator::new("bt_module");
 
     // Build hierarchy once for the entire generation (ADR 0006)
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
@@ -460,8 +477,6 @@ pub(super) struct CoreErlangGenerator {
     module_name: String,
     /// The output buffer.
     output: String,
-    /// Current indentation level.
-    indent: usize,
     /// Variable binding and scope management.
     var_context: VariableContext,
     /// State threading for field assignments.
@@ -498,6 +513,27 @@ pub(super) struct CoreErlangGenerator {
     /// BT-426: Whether we're currently generating a class-side method body.
     /// When true, field access/assignment should produce a compile error.
     in_class_method: bool,
+    /// BT-412: Names of class variables in the current class.
+    /// Used to distinguish class variable access from instance field access in class methods.
+    class_var_names: std::collections::HashSet<String>,
+    /// BT-412: Selector names of class methods in the current class.
+    /// Used to route self-sends to class method functions vs module exports.
+    class_method_selectors: std::collections::HashSet<String>,
+    /// BT-412: State version counter for class variable threading.
+    class_var_version: usize,
+    /// BT-412: Whether class variables were mutated in the current method.
+    class_var_mutated: bool,
+    /// BT-412: Name of the result variable from the last open-scope expression
+    /// (class var assignment or class method self-send). Used by the class method
+    /// body generator to reference the result when closing open scopes.
+    last_open_scope_result: Option<String>,
+    /// BT-245: Whether a state-threading loop mutated REPL bindings.
+    /// Set by `_with_mutations` loop codegen when `is_repl_mode` is true.
+    /// Checked by `generate_eval_module_body` to return `{'nil', Result}`.
+    repl_loop_mutated: bool,
+    /// BT-245: Name of the dispatch tuple variable from the last `generate_self_dispatch_open`.
+    /// Contains `{Result, State}` — callers can extract element 1 for the result value.
+    last_dispatch_var: Option<String>,
 }
 
 impl CoreErlangGenerator {
@@ -506,7 +542,6 @@ impl CoreErlangGenerator {
         Self {
             module_name: module_name.to_string(),
             output: String::new(),
-            indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -519,6 +554,13 @@ impl CoreErlangGenerator {
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
             in_class_method: false,
+            class_var_names: std::collections::HashSet::new(),
+            class_method_selectors: std::collections::HashSet::new(),
+            class_var_version: 0,
+            class_var_mutated: false,
+            last_open_scope_result: None,
+            repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 
@@ -527,7 +569,6 @@ impl CoreErlangGenerator {
         Self {
             module_name: module_name.to_string(),
             output: String::new(),
-            indent: 0,
             var_context: VariableContext::new(),
             state_threading: StateThreading::new(),
             in_loop_body: false,
@@ -540,6 +581,13 @@ impl CoreErlangGenerator {
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
             in_class_method: false,
+            class_var_names: std::collections::HashSet::new(),
+            class_method_selectors: std::collections::HashSet::new(),
+            class_var_version: 0,
+            class_var_mutated: false,
+            last_open_scope_result: None,
+            repl_loop_mutated: false,
+            last_dispatch_var: None,
         }
     }
 
@@ -617,9 +665,25 @@ impl CoreErlangGenerator {
         self.state_threading.set_version(version);
     }
 
-    /// BT-153: Check if mutation threading should be used for a block.
+    /// BT-412: Returns the current class variable state variable name.
+    fn current_class_var(&self) -> String {
+        if self.class_var_version == 0 {
+            "ClassVars".to_string()
+        } else {
+            format!("ClassVars{}", self.class_var_version)
+        }
+    }
+
+    /// BT-412: Increments class var version and returns the new variable name.
+    fn next_class_var(&mut self) -> String {
+        self.class_var_version += 1;
+        self.class_var_mutated = true;
+        format!("ClassVars{}", self.class_var_version)
+    }
+
+    /// BT-153/BT-245: Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
-    /// In module mode, only field writes trigger threading.
+    /// In module mode, field writes OR self-sends trigger threading.
     pub(super) fn needs_mutation_threading(
         &self,
         analysis: &block_analysis::BlockMutationAnalysis,
@@ -628,8 +692,8 @@ impl CoreErlangGenerator {
             // REPL: both local vars and fields need threading
             analysis.has_mutations()
         } else {
-            // Module: only field writes need threading
-            !analysis.field_writes.is_empty()
+            // Module: field writes or self-sends (which may mutate state) need threading
+            analysis.has_state_effects()
         }
     }
 
@@ -663,11 +727,27 @@ impl CoreErlangGenerator {
             }
             // If the chain terminated at a known value-type root (Object/ProtoObject),
             // this is definitely a value type.
-            let known_value_roots = ["Object", "ProtoObject"];
+            // BT-480: Include exception hierarchy classes — these inherit from Object
+            // (Exception → Object) and must compile as value types, not actors.
+            let known_value_roots = [
+                "Object",
+                "ProtoObject",
+                "Exception",
+                "Error",
+                "RuntimeError",
+                "TypeError",
+                "InstantiationError",
+                "Character",
+            ];
             if let Some(last) = chain.last() {
                 if known_value_roots.contains(&last.as_str()) {
                     return false;
                 }
+            }
+            // Also check direct superclass against known value types for incomplete chains
+            // (e.g., `Error subclass: MyCustomError` compiled without Exception in hierarchy).
+            if known_value_roots.contains(&class.superclass_name()) {
+                return false;
             }
             // Chain is incomplete (superclass not in hierarchy) or empty with
             // non-Object superclass. Default to actor for backward compatibility
@@ -690,19 +770,22 @@ impl CoreErlangGenerator {
     /// 'start_link'/1 = fun (InitArgs) ->
     ///     call 'gen_server':'start_link'('module_name', InitArgs, [])
     /// ```
-    fn generate_start_link(&mut self) -> Result<()> {
-        writeln!(self.output, "'start_link'/1 = fun (InitArgs) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "call 'gen_server':'start_link'('{}', InitArgs, [])",
-            self.module_name
-        )?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
-        Ok(())
+    fn generate_start_link(&mut self) {
+        let doc = docvec![
+            "'start_link'/1 = fun (InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    format!(
+                        "call 'gen_server':'start_link'('{}', InitArgs, [])",
+                        self.module_name
+                    ),
+                ]
+            ),
+            "\n\n",
+        ];
+        self.write_document(&doc);
     }
 
     ///
@@ -719,11 +802,11 @@ impl CoreErlangGenerator {
                 // stored in persistent_term, not class objects from the registry.
                 if dispatch_codegen::is_workspace_binding(&name.name) {
                     if self.workspace_mode {
-                        write!(
-                            self.output,
+                        let doc = Document::String(format!(
                             "call 'persistent_term':'get'({{'beamtalk_binding', '{}'}})",
                             name.name
-                        )?;
+                        ));
+                        self.write_document(&doc);
                         return Ok(());
                     }
                     return Err(CodeGenError::WorkspaceBindingInBatchMode {
@@ -732,35 +815,26 @@ impl CoreErlangGenerator {
                 }
 
                 // BT-215: Standalone class references resolve to class objects
-                // Wrap the class PID in a beamtalk_object record for uniform dispatch
-                //
-                // Generate a case expression to handle undefined classes gracefully:
-                //   case call 'beamtalk_object_class':'whereis_class'('Point') of
-                //     <'undefined'> when 'true' -> 'nil'
-                //     <ClassPid> when 'true' ->
-                //       let ClassModName = call 'beamtalk_object_class':'module_name'(ClassPid) in
-                //       {'beamtalk_object', 'Point class', ClassModName, ClassPid}
-                //   end
                 let class_pid_var = self.fresh_var("ClassPid");
                 let class_mod_var = self.fresh_var("ClassModName");
 
-                write!(
-                    self.output,
-                    "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
-                    name.name
-                )?;
-                write!(self.output, "<'undefined'> when 'true' -> 'nil' ")?;
-                write!(self.output, "<{class_pid_var}> when 'true' -> ")?;
-                write!(
-                    self.output,
-                    "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
-                )?;
-                write!(
-                    self.output,
-                    "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
-                    name.name
-                )?;
-                write!(self.output, "end")?;
+                let doc = docvec![
+                    format!(
+                        "case call 'beamtalk_object_class':'whereis_class'('{}') of ",
+                        name.name
+                    ),
+                    "<'undefined'> when 'true' -> 'nil' ",
+                    format!("<{class_pid_var}> when 'true' -> "),
+                    format!(
+                        "let {class_mod_var} = call 'beamtalk_object_class':'module_name'({class_pid_var}) in "
+                    ),
+                    format!(
+                        "{{'beamtalk_object', '{} class', {class_mod_var}, {class_pid_var}}} ",
+                        name.name
+                    ),
+                    "end",
+                ];
+                self.write_document(&doc);
                 Ok(())
             }
             Expression::Super(_) => {
@@ -1106,12 +1180,10 @@ impl CoreErlangGenerator {
         // instead of delegating through a hand-written dispatch module.
         if is_quoted {
             let params = self.current_method_params.clone();
-            if let Some(()) = primitive_implementations::generate_primitive_bif(
-                &mut self.output,
-                &class_name,
-                name,
-                &params,
-            ) {
+            if let Some(code) =
+                primitive_implementations::generate_primitive_bif(&class_name, name, &params)
+            {
+                self.write_document(&Document::String(code));
                 return Ok(());
             }
         }
@@ -1122,17 +1194,11 @@ impl CoreErlangGenerator {
         // - Selector-based primitives with no known BIF (unimplemented or complex)
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
-        write!(
-            self.output,
-            "call '{runtime_module}':'dispatch'('{name}', ["
-        )?;
-        for (i, param) in self.current_method_params.iter().enumerate() {
-            if i > 0 {
-                write!(self.output, ", ")?;
-            }
-            write!(self.output, "{param}")?;
-        }
-        write!(self.output, "], Self)")?;
+        let params_str = self.current_method_params.join(", ");
+        let doc = docvec![format!(
+            "call '{runtime_module}':'dispatch'('{name}', [{params_str}], Self)"
+        ),];
+        self.write_document(&doc);
 
         Ok(())
     }
@@ -1150,7 +1216,7 @@ mod tests {
         let result = generate(&module);
         assert!(result.is_ok());
         let code = result.unwrap();
-        assert!(code.contains("module 'beamtalk_module'"));
+        assert!(code.contains("module 'bt_module'"));
         assert!(code.contains("attributes ['behaviour' = ['gen_server']]"));
     }
 
@@ -1297,7 +1363,7 @@ mod tests {
 
     #[test]
     fn test_class_name_from_identity_overrides_module() {
-        let mut generator = CoreErlangGenerator::new("bt_stdlib_string");
+        let mut generator = CoreErlangGenerator::new("bt@stdlib@string");
         generator.class_identity = Some(util::ClassIdentity::new("String"));
         assert_eq!(generator.class_name(), "String");
     }
@@ -1624,7 +1690,7 @@ end
 
         let result = generator.generate_message_send(&receiver, &selector, &arguments);
         assert!(result.is_ok());
-        assert!(generator.output.contains("call 'counter':'spawn'()"));
+        assert!(generator.output.contains("call 'bt@counter':'spawn'()"));
     }
 
     #[test]
@@ -1646,7 +1712,7 @@ end
         assert!(result.is_ok());
         // Should call spawn/1 with the argument
         assert!(
-            generator.output.contains("call 'counter':'spawn'(42)"),
+            generator.output.contains("call 'bt@counter':'spawn'(42)"),
             "spawnWith: should generate spawn/1 call. Got: {}",
             generator.output
         );
@@ -1699,7 +1765,7 @@ end
 
         // Check that it handles errors
         assert!(code.contains("<{'error', Reason}> when 'true' ->"));
-        assert!(code.contains("call 'erlang':'error'({'spawn_failed', Reason})"));
+        assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr1)"));
 
         // Check that init/1 creates the default state with fields and merges with InitArgs
         assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
@@ -1730,7 +1796,7 @@ end
         assert!(code.contains("call 'beamtalk_error':'new'('instantiation_error', 'Actor')"));
         assert!(code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new')"));
         assert!(code.contains("call 'beamtalk_error':'with_hint'(Error1,"));
-        assert!(code.contains("call 'erlang':'error'(Error2)"));
+        assert!(code.contains("call 'beamtalk_error':'raise'(Error2)"));
 
         // Check that new/1 function exists and uses beamtalk_error
         assert!(code.contains("'new'/1 = fun (_InitArgs) ->"));
@@ -1814,7 +1880,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_times_repeat_mutation() {
         // BT-153: REPL with mutation should return updated state
         // Expression: 5 timesRepeat: [count := count + 1]
@@ -1857,11 +1922,17 @@ end
         eprintln!("Generated code for 5 timesRepeat: [count := count + 1]:");
         eprintln!("{code}");
 
-        // BT-153: For mutation-threaded loops, return {'nil', Result}
-        // where Result is the updated state (the loop returns the final StateAcc)
+        // BT-483: For mutation-threaded loops, return {Result, State} tuple.
+        // REPL extracts via element/2: let _LoopResult = element(1, Result) ...
         assert!(
-            code.contains("{'nil', Result}"),
-            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+            code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
+            "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
+        );
+
+        // BT-483: Loop termination should return {nil, StateAcc}
+        assert!(
+            code.contains("{'nil', StateAcc}"),
+            "Loop should return {{'nil', StateAcc}} on termination. Got:\n{code}"
         );
 
         // Verify mutation threading details
@@ -1876,7 +1947,6 @@ end
     }
 
     #[test]
-    #[ignore = "BT-245: REPL control flow mutations need two-phase IR refactor"]
     fn test_generate_repl_module_with_to_do_mutation() {
         use crate::ast::BlockParameter;
 
@@ -1931,10 +2001,10 @@ end
         eprintln!("Generated code for 1 to: 5 do: [:n | total := total + n]:");
         eprintln!("{code}");
 
-        // BT-153: For mutation-threaded loops, return {'nil', Result}
+        // BT-483: For mutation-threaded loops, return {Result, State} tuple.
         assert!(
-            code.contains("{'nil', Result}"),
-            "Should return tuple {{'nil', Result}} for mutation loop. Got:\n{code}"
+            code.contains("'element'(1, Result)") && code.contains("'element'(2, Result)"),
+            "Should extract Result tuple elements via element/2 for mutation loop. Got:\n{code}"
         );
 
         // Verify to:do: mutation threading
@@ -3151,6 +3221,7 @@ end
                     return_type: None,
                     is_sealed: false,
                     kind: MethodKind::Primary,
+                    doc_comment: None,
                     span: Span::new(0, 10),
                 },
                 MethodDefinition {
@@ -3160,10 +3231,13 @@ end
                     return_type: None,
                     is_sealed: false,
                     kind: MethodKind::Primary,
+                    doc_comment: None,
                     span: Span::new(0, 10),
                 },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 50),
         };
 
@@ -3310,6 +3384,8 @@ end
             }],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 20),
         };
 
@@ -3326,6 +3402,8 @@ end
             }],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 30),
         };
 
@@ -3386,91 +3464,6 @@ end
         assert!(
             code.contains("in 'ok'"),
             "Should return ok after all registrations. Got:\n{code}"
-        );
-    }
-
-    #[test]
-    fn test_beamtalk_module_generation() {
-        // BT-220: Test that Beamtalk class generates special module with class methods
-        use crate::ast::{ClassDefinition, Identifier};
-        use crate::source_analysis::Span;
-
-        let class = ClassDefinition {
-            name: Identifier::new("Beamtalk", Span::new(0, 8)),
-            superclass: Some(Identifier::new("Object", Span::new(0, 6))),
-            is_abstract: false,
-            is_sealed: false,
-            state: vec![],
-            methods: vec![],
-            class_methods: vec![],
-            span: Span::new(0, 50),
-        };
-
-        let module = Module {
-            expressions: vec![],
-            classes: vec![class],
-            span: Span::new(0, 50),
-            leading_comments: vec![],
-        };
-
-        let code = generate_with_name(&module, "Beamtalk").expect("codegen should succeed");
-
-        // Should export class methods
-        assert!(
-            code.contains("'allClasses'/0"),
-            "Should export allClasses. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'classNamed:'/1"),
-            "Should export classNamed:. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'globals'/0"),
-            "Should export globals. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'register_class'/0"),
-            "Should export register_class. Got:\n{code}"
-        );
-
-        // Should have on_load attribute
-        assert!(
-            code.contains("'on_load' = [{'register_class', 0}]"),
-            "Should have on_load attribute. Got:\n{code}"
-        );
-
-        // Should register with class_methods map
-        assert!(
-            code.contains("'class_methods' => ~{"),
-            "Should include class_methods map. Got:\n{code}"
-        );
-        assert!(
-            code.contains("'allClasses' => ~{'arity' => 0}"),
-            "Should include allClasses in class_methods. Got:\n{code}"
-        );
-
-        // Should implement allClasses to call beamtalk_class:all_classes
-        assert!(
-            code.contains("call 'beamtalk_object_class':'all_classes'()"),
-            "Should call beamtalk_class:all_classes. Got:\n{code}"
-        );
-
-        // Should wrap results in #beamtalk_object{} records with class_object_tag
-        assert!(
-            code.contains("{'beamtalk_object', ClassTag, ClassModName, Pid}"),
-            "Should wrap in beamtalk_object records with ClassTag. Got:\n{code}"
-        );
-
-        // Should implement classNamed: to call whereis_class
-        assert!(
-            code.contains("call 'beamtalk_object_class':'whereis_class'(ClassName)"),
-            "Should call whereis_class. Got:\n{code}"
-        );
-
-        // Should return nil for undefined classes
-        assert!(
-            code.contains("'undefined'> when 'true' ->\n            'nil'"),
-            "Should return nil for undefined classes. Got:\n{code}"
         );
     }
 
@@ -3707,6 +3700,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3729,6 +3724,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3753,6 +3750,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let logging_counter = ClassDefinition {
@@ -3763,6 +3762,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         // Module with both classes; first class is LoggingCounter
@@ -3804,6 +3805,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3827,6 +3830,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3854,6 +3859,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3880,6 +3887,8 @@ end
             state: vec![],
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
             span: Span::new(0, 0),
         };
         let module = Module {
@@ -3917,7 +3926,7 @@ end
         assert!(result.is_ok());
         assert_eq!(
             generator.output,
-            "call 'beamtalk_block':'dispatch'('blockValue', [], Self)"
+            "call 'bt@stdlib@block':'dispatch'('blockValue', [], Self)"
         );
     }
 
@@ -3931,7 +3940,7 @@ end
         assert!(result.is_ok());
         assert_eq!(
             generator.output,
-            "call 'beamtalk_integer':'dispatch'('toDo', [End, Block], Self)"
+            "call 'bt@stdlib@integer':'dispatch'('toDo', [End, Block], Self)"
         );
     }
 

@@ -279,6 +279,64 @@ method_test_() ->
          ]
      end}.
 
+%% BT-323: Tests for beamtalk_method_resolver domain service
+method_resolver_test_() ->
+    {setup,
+     fun setup/0,
+     fun teardown/1,
+     fun(_) ->
+         [
+          %% Resolve via class object tuple
+          ?_test(begin
+                     Methods = #{
+                         getValue => #{arity => 0, block => fun() -> ok end}
+                     },
+                     MethodSource = #{
+                         getValue => <<"getValue => ^self.value">>
+                     },
+                     ClassInfo = #{
+                         name => 'ResolverTest',
+                         module => resolver_test,
+                         instance_methods => Methods,
+                         method_source => MethodSource
+                     },
+                     {ok, Pid} = beamtalk_object_class:start_link('ResolverTest', ClassInfo),
+                     ClassObj = {beamtalk_object, 'ResolverTest class', resolver_test, Pid},
+                     MethodObj = beamtalk_method_resolver:resolve(ClassObj, getValue),
+                     ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+                     ?assertEqual(getValue, maps:get('__selector__', MethodObj))
+                 end),
+          %% Resolve via class object tuple returns nil for missing method
+          ?_test(begin
+                     ClassInfo = #{
+                         name => 'ResolverNilTest',
+                         module => resolver_nil_test,
+                         instance_methods => #{}
+                     },
+                     {ok, Pid} = beamtalk_object_class:start_link('ResolverNilTest', ClassInfo),
+                     ClassObj = {beamtalk_object, 'ResolverNilTest class', resolver_nil_test, Pid},
+                     ?assertEqual(nil, beamtalk_method_resolver:resolve(ClassObj, nonexistent))
+                 end),
+          %% Type error for non-class receiver (integer)
+          ?_test(begin
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(42, foo))
+                 end),
+          %% Type error for instance object (not a class)
+          ?_test(begin
+                     InstanceObj = {beamtalk_object, 'Counter', counter, self()},
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(InstanceObj, foo))
+                 end),
+          %% Malformed tuple with non-atom ClassTag falls through to catch-all
+          ?_test(begin
+                     BadTuple = {beamtalk_object, 123, counter, self()},
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(BadTuple, foo))
+                 end)
+         ]
+     end}.
+
 instance_variables_test_() ->
     {setup,
      fun setup/0,
@@ -475,7 +533,7 @@ super_dispatch_missing_class_field_test_() ->
               %% State without $beamtalk_class field
               State = #{value => 0},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, missing_class_field_in_state}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = internal_error}}, Result)
           end)]
      end}.
 
@@ -488,7 +546,7 @@ super_dispatch_class_not_found_test_() ->
               %% State with class that doesn't exist
               State = #{'$beamtalk_class' => 'NonexistentClass999'},
               Result = beamtalk_object_class:super_dispatch(State, increment, []),
-              ?assertMatch({error, {class_not_found, 'NonexistentClass999'}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NonexistentClass999'}}, Result)
           end)]
      end}.
 
@@ -507,7 +565,7 @@ super_dispatch_no_superclass_test_() ->
               {ok, _Pid} = beamtalk_object_class:start_link('RootTestClass', ClassInfo),
               State = #{'$beamtalk_class' => 'RootTestClass'},
               Result = beamtalk_object_class:super_dispatch(State, someMethod, []),
-              ?assertMatch({error, {no_superclass, 'RootTestClass', someMethod}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = no_superclass, class = 'RootTestClass', selector = someMethod}}, Result)
           end)]
      end}.
 
@@ -523,7 +581,7 @@ create_subclass_nonexistent_superclass_test_() ->
          [?_test(begin
               Result = beamtalk_object_class:create_subclass(
                   'NoSuchSuperclass', 'TestChild', #{instance_variables => []}),
-              ?assertMatch({error, {superclass_not_found, 'NoSuchSuperclass'}}, Result)
+              ?assertMatch({error, #beamtalk_error{kind = class_not_found, class = 'NoSuchSuperclass'}}, Result)
           end)]
      end}.
 

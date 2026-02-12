@@ -27,16 +27,18 @@ use crate::source_analysis::Span;
 /// assert!(is_control_flow_selector("to:do:", 1));
 /// assert!(is_control_flow_selector("ifTrue:ifFalse:", 0));
 /// assert!(is_control_flow_selector("ifTrue:ifFalse:", 1));
+/// assert!(is_control_flow_selector("on:do:", 1));
+/// assert!(is_control_flow_selector("ensure:", 0));
 /// assert!(!is_control_flow_selector("at:put:", 0));
 /// ```
 pub fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
     match selector {
         // Loop constructs - block at index 0
         "whileTrue:" | "whileFalse:" | "timesRepeat:" | "do:" | "collect:" | "select:"
-        | "reject:" => arg_index == 0,
+        | "reject:" | "ensure:" => arg_index == 0,
 
-        // Range iteration or fold/reduce - block at index 1 or 2
-        "to:do:" | "inject:into:" => arg_index == 1,
+        // Range iteration, fold/reduce, or exception handling - block at index 1 or 2
+        "to:do:" | "inject:into:" | "on:do:" => arg_index == 1,
         "to:by:do:" => arg_index == 2,
 
         // Conditionals - all arguments are control flow blocks
@@ -159,6 +161,14 @@ pub fn classify_block(
 
         // Special case: whileTrue:/whileFalse: receiver must be literal block
         if matches!(selector_str.as_str(), "whileTrue:" | "whileFalse:")
+            && receiver.span() == block_span
+            && is_literal_block(receiver)
+        {
+            return BlockContext::ControlFlow;
+        }
+
+        // BT-410: on:do: and ensure: receiver (try body) is a control flow block
+        if matches!(selector_str.as_str(), "on:do:" | "ensure:")
             && receiver.span() == block_span
             && is_literal_block(receiver)
         {

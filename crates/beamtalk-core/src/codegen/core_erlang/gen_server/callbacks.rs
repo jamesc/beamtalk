@@ -8,9 +8,10 @@
 //! Generates the standard OTP callbacks: `init/1`, `handle_cast/2`,
 //! `handle_call/3`, `code_change/3`, and `terminate/2`.
 
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::Module;
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     /// Generates the `init/1` callback for `gen_server`.
@@ -41,6 +42,7 @@ impl CoreErlangGenerator {
     ///             in let FinalState = call 'maps':'merge'(MergedState, InitArgs)
     ///             in {'ok', FinalState}
     ///         <{'error', Reason}> when 'true' ->
+    ///             %% Propagate parent init error
     ///             {'error', Reason}
     ///     end
     /// ```
@@ -62,17 +64,13 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
     ) -> Result<()> {
-        writeln!(self.output, "'init'/1 = fun (InitArgs) ->")?;
-        self.indent += 1;
-
         // Find the current class to check for superclass
         // NOTE: This requires the .bt file to have an explicit class definition
         // like "Counter subclass: LoggingCounter" (see tests/fixtures/logging_counter.bt).
         // Module-level expressions without a class definition take the base class path below.
         let current_class = module.classes.iter().find(|c| {
-            // Compare module names using the same conversion (PascalCase -> snake_case)
-            use super::super::util::to_module_name;
-            to_module_name(&c.name.name) == self.module_name
+            use super::super::util::module_matches_class;
+            module_matches_class(&self.module_name, &c.name.name)
         });
 
         // Check if we have a superclass that's not Actor (base class)
@@ -85,114 +83,128 @@ impl CoreErlangGenerator {
             false
         };
 
+        let class_name = self.class_name();
+        let module_name = self.module_name.clone();
+
         if has_parent_init {
             // Call parent's init to get inherited state, then merge with our state
             // SAFETY: has_parent_init is true only when current_class.is_some(),
             // so this expect cannot fail unless there's a logic error
             let class = current_class.expect("has_parent_init implies current_class is Some");
             let parent_module = {
-                use super::super::util::to_module_name;
-                to_module_name(class.superclass_name())
+                // ADR 0016: Use the same module naming logic as superclass_module_name()
+                // which handles both stdlib (bt@stdlib@*) and user (bt@*) modules
+                Self::compiled_module_name(class.superclass_name())
             };
 
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "%% Call parent init to get inherited state fields"
-            )?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "case call '{parent_module}':'init'(InitArgs) of"
-            )?;
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "<{{'ok', ParentState}}> when 'true' ->")?;
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "%% Merge parent state with this class's fields"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "let ChildFields = ~{{")?;
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "'$beamtalk_class' => '{}',", self.class_name())?;
-            self.write_indent()?;
-            writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'__methods__' => call '{}':'method_table'()",
-                self.module_name
-            )?;
+            // Get this class's own state fields
+            let own_state_fields = self.generate_own_state_fields(module)?;
 
-            // Add this class's own fields
-            self.generate_own_state_fields(module)?;
-
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~")?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "in let MergedState = call 'maps':'merge'(ParentState, ChildFields)"
-            )?;
-            self.write_indent()?;
-            // Merge InitArgs last so user-provided values override defaults
-            // Order: parent defaults → child defaults → user overrides
-            writeln!(
-                self.output,
-                "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "in {{'ok', FinalState}}")?;
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "<{{'error', Reason}}> when 'true' ->")?;
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "%% Propagate parent init error")?;
-            self.write_indent()?;
-            writeln!(self.output, "{{'error', Reason}}")?;
-            self.indent -= 2;
-            self.write_indent()?;
-            writeln!(self.output, "end")?;
+            let doc = docvec![
+                "'init'/1 = fun (InitArgs) ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "%% Call parent init to get inherited state fields",
+                        line(),
+                        format!("case call '{parent_module}':'init'(InitArgs) of"),
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "<{'ok', ParentState}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "%% Merge parent state with this class's fields",
+                                        line(),
+                                        "let ChildFields = ~{",
+                                        nest(
+                                            INDENT,
+                                            docvec![
+                                                line(),
+                                                format!("'$beamtalk_class' => '{class_name}',"),
+                                                line(),
+                                                format!("'__class_mod__' => '{module_name}',"),
+                                                line(),
+                                                format!(
+                                                    "'__methods__' => call '{module_name}':'method_table'()"
+                                                ),
+                                                Document::Vec(own_state_fields),
+                                            ]
+                                        ),
+                                        line(),
+                                        "}~",
+                                        line(),
+                                        "in let MergedState = call 'maps':'merge'(ParentState, ChildFields)",
+                                        line(),
+                                        // Merge InitArgs last so user-provided values override defaults
+                                        // Order: parent defaults → child defaults → user overrides
+                                        "in let FinalState = call 'maps':'merge'(MergedState, InitArgs)",
+                                        line(),
+                                        "in {'ok', FinalState}",
+                                    ]
+                                ),
+                                line(),
+                                "<{'error', Reason}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "%% Propagate parent init error",
+                                        line(),
+                                        "{'error', Reason}",
+                                    ]
+                                ),
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]
+                ),
+                "\n",
+                "\n",
+            ];
+            self.write_document(&doc);
         } else {
             // No parent, or parent is Actor base class - generate normal init
-            self.write_indent()?;
-            writeln!(self.output, "let DefaultState = ~{{")?;
-            self.indent += 1;
-            self.write_indent()?;
-            writeln!(self.output, "'$beamtalk_class' => '{}',", self.class_name())?;
-            self.write_indent()?;
-            writeln!(self.output, "'__class_mod__' => '{}',", self.module_name)?;
-            self.write_indent()?;
-            writeln!(
-                self.output,
-                "'__methods__' => call '{}':'method_table'()",
-                self.module_name
-            )?;
+            let initial_state_fields = self.generate_initial_state_fields(module)?;
 
-            // Initialize fields from module expressions
-            self.generate_initial_state_fields(module)?;
-
-            self.indent -= 1;
-            self.write_indent()?;
-            writeln!(self.output, "}}~")?;
-            self.write_indent()?;
-            // Merge InitArgs into DefaultState - InitArgs values override defaults
-            writeln!(
-                self.output,
-                "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)"
-            )?;
-            self.write_indent()?;
-            writeln!(self.output, "in {{'ok', FinalState}}")?;
+            let doc = docvec![
+                "'init'/1 = fun (InitArgs) ->",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "let DefaultState = ~{",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                format!("'$beamtalk_class' => '{class_name}',"),
+                                line(),
+                                format!("'__class_mod__' => '{module_name}',"),
+                                line(),
+                                format!("'__methods__' => call '{module_name}':'method_table'()"),
+                                Document::Vec(initial_state_fields),
+                            ]
+                        ),
+                        line(),
+                        "}~",
+                        line(),
+                        // Merge InitArgs into DefaultState - InitArgs values override defaults
+                        "in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)",
+                        line(),
+                        "in {'ok', FinalState}",
+                    ]
+                ),
+                "\n",
+                "\n",
+            ];
+            self.write_document(&doc);
         }
-
-        self.indent -= 1;
-        writeln!(self.output)?;
 
         Ok(())
     }
@@ -201,63 +213,74 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// sends `{resolve, Result}` or `{reject, Error}` to the `FuturePid`.
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_handle_cast(&mut self) -> Result<()> {
-        writeln!(self.output, "'handle_cast'/2 = fun (Msg, State) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Msg of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<{{Selector, Args, FuturePid}}> when 'true' ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Use safe_dispatch for error isolation per BT-29
-        writeln!(
-            self.output,
-            "case call '{}':'safe_dispatch'(Selector, Args, State) of",
-            self.module_name
-        )?;
-        self.indent += 1;
-        // Success case: resolve the future
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<{{'reply', Result, NewState}}> when 'true' ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Send {resolve, Result} to match beamtalk_future protocol
-        writeln!(
-            self.output,
-            "let _Ignored = call 'erlang':'!'(FuturePid, {{'resolve', Result}})"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "in {{'noreply', NewState}}")?;
-        self.indent -= 1;
-        // Error case: reject the future (error isolation - don't crash the instance)
-        self.write_indent()?;
-        writeln!(self.output, "<{{'error', Error, NewState}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Send {reject, Error} to match beamtalk_future protocol
-        writeln!(
-            self.output,
-            "let _Ignored = call 'erlang':'!'(FuturePid, {{'reject', Error}})"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "in {{'noreply', NewState}}")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            "'handle_cast'/2 = fun (Msg, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "case Msg of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<{Selector, Args, FuturePid}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    // Use safe_dispatch for error isolation per BT-29
+                                    format!(
+                                        "case call '{module_name}':'safe_dispatch'(Selector, Args, State) of"
+                                    ),
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            // Success case: resolve the future
+                                            line(),
+                                            "<{'reply', Result, NewState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    // Send {resolve, Result} to match beamtalk_future protocol
+                                                    "let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})",
+                                                    line(),
+                                                    "in {'noreply', NewState}",
+                                                ]
+                                            ),
+                                            // Error case: reject the future (error isolation)
+                                            line(),
+                                            "<{'error', Error, NewState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    // Send {reject, Error} to match beamtalk_future protocol
+                                                    "let _Ignored = call 'erlang':'!'(FuturePid, {'reject', Error})",
+                                                    line(),
+                                                    "in {'noreply', NewState}",
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -265,65 +288,89 @@ impl CoreErlangGenerator {
     ///
     /// Per BT-29 design doc, uses `safe_dispatch/3` for error isolation and
     /// returns `{ok, Result}` or `{error, Error}` tuples.
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_handle_call(&mut self) -> Result<()> {
-        writeln!(self.output, "'handle_call'/3 = fun (Msg, _From, State) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "case Msg of")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "<{{Selector, Args}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Use safe_dispatch for error isolation per BT-29
-        writeln!(
-            self.output,
-            "case call '{}':'safe_dispatch'(Selector, Args, State) of",
-            self.module_name
-        )?;
-        self.indent += 1;
-        // Success case: return {ok, Result}
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "<{{'reply', Result, NewState}}> when 'true' ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', {{'ok', Result}}, NewState}}")?;
-        self.indent -= 1;
-        // Error case: return {error, Error}
-        self.write_indent()?;
-        writeln!(self.output, "<{{'error', Error, NewState}}> when 'true' ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "{{'reply', {{'error', Error}}, NewState}}")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 2;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            "'handle_call'/3 = fun (Msg, _From, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "case Msg of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<{Selector, Args}> when 'true' ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    // Use safe_dispatch for error isolation per BT-29
+                                    format!(
+                                        "case call '{module_name}':'safe_dispatch'(Selector, Args, State) of"
+                                    ),
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            // Success case: return {ok, Result}
+                                            line(),
+                                            "<{'reply', Result, NewState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "{'reply', {'ok', Result}, NewState}",
+                                                ]
+                                            ),
+                                            // Error case: return {error, Error}
+                                            line(),
+                                            "<{'error', Error, NewState}> when 'true' ->",
+                                            nest(
+                                                INDENT,
+                                                docvec![
+                                                    line(),
+                                                    "{'reply', {'error', Error}, NewState}",
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    line(),
+                                    "end",
+                                ]
+                            ),
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_code_change(&mut self) -> Result<()> {
-        writeln!(
-            self.output,
-            "'code_change'/3 = fun (_OldVsn, State, _Extra) ->"
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(self.output, "%% TODO: Add state migration logic")?;
-        self.write_indent()?;
-        writeln!(self.output, "{{'ok', State}}")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        let doc = docvec![
+            "'code_change'/3 = fun (_OldVsn, State, _Extra) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "%% TODO: Add state migration logic",
+                    line(),
+                    "{'ok', State}",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 
@@ -343,49 +390,46 @@ impl CoreErlangGenerator {
     ///         <_Other> when 'true' -> 'ok'
     ///     end
     /// ```
+    #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_terminate(
         &mut self,
         _module: &Module,
     ) -> Result<()> {
-        writeln!(self.output, "'terminate'/2 = fun (Reason, State) ->")?;
-        self.indent += 1;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "%% Call terminate method if defined (Flavors pattern)"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "let Self = call 'beamtalk_actor':'make_self'(State) in"
-        )?;
-        self.write_indent()?;
-        writeln!(
-            self.output,
-            "case call '{}':'dispatch'('terminate', [Reason], Self, State) of",
-            self.module_name
-        )?;
-        self.indent += 1;
-        self.write_indent()?;
-        // Core Erlang doesn't allow duplicate _ patterns, use unique ignored vars
-        writeln!(
-            self.output,
-            "<{{'reply', _TermResult, _TermState}}> when 'true' -> 'ok'"
-        )?;
-        self.write_indent()?;
-        // dispatch returns 3-tuple {'error', Error, State}, not 2-tuple
-        writeln!(
-            self.output,
-            "<{{'error', _TermError, _TermState2}}> when 'true' -> 'ok'"
-        )?;
-        self.write_indent()?;
-        writeln!(self.output, "<_TermOther> when 'true' -> 'ok'")?;
-        self.indent -= 1;
-        self.write_indent()?;
-        writeln!(self.output, "end")?;
-        self.indent -= 1;
-        writeln!(self.output)?;
-
+        let module_name = self.module_name.clone();
+        let doc = docvec![
+            "'terminate'/2 = fun (Reason, State) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "%% Call terminate method if defined (Flavors pattern)",
+                    line(),
+                    "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    line(),
+                    format!(
+                        "case call '{module_name}':'dispatch'('terminate', [Reason], Self, State) of"
+                    ),
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            // Core Erlang doesn't allow duplicate _ patterns, use unique ignored vars
+                            "<{'reply', _TermResult, _TermState}> when 'true' -> 'ok'",
+                            line(),
+                            // dispatch returns 3-tuple {'error', Error, State}, not 2-tuple
+                            "<{'error', _TermError, _TermState2}> when 'true' -> 'ok'",
+                            line(),
+                            "<_TermOther> when 'true' -> 'ok'",
+                        ]
+                    ),
+                    line(),
+                    "end",
+                ]
+            ),
+            "\n",
+            "\n",
+        ];
+        self.write_document(&doc);
         Ok(())
     }
 }

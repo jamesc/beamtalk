@@ -1,0 +1,126 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "Foo",
+                span: Span {
+                    start: 221,
+                    end: 224,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 204,
+                        end: 210,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "blockValue",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "blockValue",
+                            is_quoted: false,
+                            span: Span {
+                                start: 241,
+                                end: 262,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 227,
+                        end: 262,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "size",
+                    ),
+                    parameters: [],
+                    body: [
+                        Primitive {
+                            name: "size",
+                            is_quoted: true,
+                            span: Span {
+                                start: 273,
+                                end: 290,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 265,
+                        end: 290,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            doc_comment: None,
+            span: Span {
+                start: 204,
+                end: 290,
+            },
+        },
+    ],
+    expressions: [],
+    span: Span {
+        start: 204,
+        end: 290,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 204,
+                end: 210,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 204,
+                end: 210,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Test that @intrinsic produces identical codegen to @primitive (BT-484).",
+            span: Span {
+                start: 204,
+                end: 210,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Both keywords map to Expression::Primitive in the AST.",
+            span: Span {
+                start: 204,
+                end: 210,
+            },
+            kind: Line,
+        },
+    ],
+}

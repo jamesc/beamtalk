@@ -70,7 +70,11 @@ fn escape_erlang_string(s: &str) -> String {
 /// Module names should only contain ASCII alphanumeric characters and underscores
 /// to prevent path traversal vulnerabilities.
 fn is_valid_module_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+    // ADR 0016: @ is legal in Erlang unquoted atoms and used for namespacing
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c == '_' || c == '@' || c.is_ascii_alphanumeric())
 }
 
 /// BEAM bytecode compiler.
@@ -410,7 +414,7 @@ pub fn write_core_erlang_with_source(
     // Validate module name to prevent path traversal and injection
     if !is_valid_module_name(module_name) {
         miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
             module_name
         );
     }
@@ -425,6 +429,9 @@ pub fn write_core_erlang_with_source(
     std::fs::write(output_path, core_erlang)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
+
+    // BT-499: Write EEP-48 doc chunk file if module has doc comments
+    write_docs_file(module, output_path);
 
     Ok(())
 }
@@ -448,7 +455,7 @@ pub fn write_core_erlang_with_bindings(
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
-            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters and underscores",
+            "Invalid module name '{}': must be non-empty and contain only alphanumeric characters, underscores, and @",
             module_name
         );
     }
@@ -467,7 +474,30 @@ pub fn write_core_erlang_with_bindings(
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write Core Erlang to '{output_path}'"))?;
 
+    // BT-499: Write EEP-48 doc chunk file if module has doc comments
+    write_docs_file(module, output_path);
+
     Ok(())
+}
+
+/// Writes an EEP-48 `.docs` file alongside a `.core` file if the module has doc comments.
+///
+/// BT-499: The `.docs` file contains an Erlang term that will be injected as a "Docs"
+/// chunk into the compiled `.beam` file by `compile.escript`.
+fn write_docs_file(module: &beamtalk_core::ast::Module, core_output_path: &Utf8Path) {
+    let docs_path = core_output_path.with_extension("docs");
+    if let Some(docs_term) =
+        beamtalk_core::codegen::core_erlang::doc_chunks::generate_docs_term(module)
+    {
+        if let Err(e) = std::fs::write(&docs_path, &docs_term) {
+            debug!("Failed to write docs file '{}': {}", docs_path, e);
+            // Clean up on write failure so stale .docs aren't injected
+            let _ = std::fs::remove_file(&docs_path);
+        }
+    } else {
+        // Remove stale .docs file if no docs to generate
+        let _ = std::fs::remove_file(&docs_path);
+    }
 }
 
 /// Compiles a Beamtalk source file (.bt) to Core Erlang (.core).
@@ -856,6 +886,9 @@ end
         assert!(is_valid_module_name("test123"));
         assert!(is_valid_module_name("_private"));
         assert!(is_valid_module_name("a"));
+        // ADR 0016: @ is valid in Erlang atoms and used for namespacing
+        assert!(is_valid_module_name("bt@counter"));
+        assert!(is_valid_module_name("bt@stdlib@integer"));
     }
 
     #[test]
@@ -876,7 +909,6 @@ end
         assert!(!is_valid_module_name("foo-bar"));
         assert!(!is_valid_module_name("foo.bar"));
         assert!(!is_valid_module_name("foo bar"));
-        assert!(!is_valid_module_name("foo@bar"));
     }
 
     #[test]

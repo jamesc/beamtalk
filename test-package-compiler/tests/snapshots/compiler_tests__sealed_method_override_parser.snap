@@ -45,6 +45,7 @@ Module {
                     return_type: None,
                     is_sealed: true,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 229,
                         end: 248,
@@ -52,6 +53,8 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 203,
                 end: 248,
@@ -97,6 +100,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 282,
                         end: 294,
@@ -104,6 +108,8 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 250,
                 end: 294,
@@ -149,6 +155,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    doc_comment: None,
                     span: Span {
                         start: 321,
                         end: 333,
@@ -156,6 +163,8 @@ Module {
                 },
             ],
             class_methods: [],
+            class_variables: [],
+            doc_comment: None,
             span: Span {
                 start: 296,
                 end: 333,

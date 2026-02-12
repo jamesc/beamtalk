@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-413: Value type instance-side class variable access
+// Tests that Object subclass instances can access class variables via `self class`
+// @load tests/e2e/fixtures/class_var_point.bt
+
+// === Object subclass: instance-side class var access ===
+
+// Initial class variable value
+ClassVarPoint instanceCount
+// => 0
+
+// Create a point via class method (increments instanceCount)
+p1 := ClassVarPoint create: #{#x => 3, #y => 4}
+// => {"$beamtalk_class":"ClassVarPoint","x":3,"y":4}
+
+// Verify it's a value type (has x field)
+p1 x
+// => 3
+
+// Class variable was incremented
+ClassVarPoint instanceCount
+// => 1
+
+// Instance reads class variable via self class (the key BT-413 feature)
+p1 totalPoints
+// => 1
+
+// Create another point
+p2 := ClassVarPoint create: #{#x => 1, #y => 2}
+// => {"$beamtalk_class":"ClassVarPoint","x":1,"y":2}
+
+// Both instances see updated class variable
+p1 totalPoints
+// => 2
+
+p2 totalPoints
+// => 2

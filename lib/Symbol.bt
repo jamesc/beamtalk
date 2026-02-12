@@ -1,27 +1,77 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-//
-// Symbol — the class of atomic identifiers.
-//
-// Symbols are interned strings (Erlang atoms). They are used as method selectors,
-// class names, and general-purpose identifiers. Symbols are immutable and unique:
-// two symbols with the same name are always identical.
-//
-// Syntax: #foo, #setValue:, #+, #yourself
 
+/// Symbol — Atomic identifiers.
+///
+/// Symbols are interned strings (Erlang atoms). They are used as method
+/// selectors, class names, and general-purpose identifiers. Symbols are
+/// immutable and unique: two symbols with the same name are always identical.
+///
+/// ## BEAM Mapping
+/// Beamtalk symbols map directly to Erlang atoms.
+///
+/// ## Examples
+/// ```beamtalk
+/// #hello class           // => Symbol
+/// #hello asString        // => 'hello'
+/// #hello = #hello        // => true
+/// ```
 sealed Object subclass: Symbol
 
-  // Conversion
+  /// Convert the symbol to a string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello asString        // => 'hello'
+  /// ```
   asString => @primitive 'asString'
+
+  /// Convert the symbol to an atom (returns self).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello asAtom          // => #hello
+  /// ```
   asAtom => @primitive 'asAtom'
 
-  // Display
+  /// Return a developer-readable string representation (with `#` prefix).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello printString     // => '#hello'
+  /// ```
   printString => @primitive 'printString'
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello describe        // => '#hello'
+  /// ```
   describe => @primitive 'printString'
 
-  // Comparison
+  /// Test equality with another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello = #hello        // => true
+  /// #hello = #world        // => false
+  /// ```
   = other => @primitive '='
+
+  /// Test inequality with another symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello ~= #world       // => true
+  /// #hello ~= #hello       // => false
+  /// ```
   ~= other => @primitive '~='
 
-  // Identity
+  /// Return a hash value for the symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #hello hash
+  /// ```
   hash => @primitive 'hash'

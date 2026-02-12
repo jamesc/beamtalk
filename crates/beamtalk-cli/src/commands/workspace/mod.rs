@@ -1248,7 +1248,9 @@ mod tests {
     #[test]
     fn test_find_workspace_by_project_path() {
         let ws = TestWorkspace::new("find_by_path");
-        let project_path = std::env::current_dir().unwrap();
+        // Use a unique project path so this test doesn't collide with other
+        // tests that also save metadata pointing at current_dir().
+        let project_path = std::env::current_dir().unwrap().join("find_by_path_unique");
         let metadata = WorkspaceMetadata {
             workspace_id: ws.id.clone(),
             project_path: project_path.clone(),

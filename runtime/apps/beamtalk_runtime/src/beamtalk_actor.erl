@@ -196,8 +196,26 @@ register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
             try
                 CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
             catch
+                error:undef ->
+                    %% Callback module doesn't implement on_actor_spawned/4
+                    logger:warning("Actor spawn callback not implemented", #{
+                        callback => CallbackMod,
+                        actor_pid => ActorPid,
+                        class => ClassName
+                    }),
+                    ok;
+                error:#beamtalk_error{} = BtError ->
+                    %% Structured beamtalk error from callback
+                    logger:error("Actor spawn callback failed with beamtalk error", #{
+                        callback => CallbackMod,
+                        error => BtError,
+                        actor_pid => ActorPid,
+                        class => ClassName
+                    }),
+                    ok;
                 Kind:Reason ->
-                    logger:warning("Actor spawn callback failed", #{
+                    %% Unexpected failure in callback
+                    logger:error("Actor spawn callback failed", #{
                         callback => CallbackMod,
                         kind => Kind,
                         reason => Reason,
@@ -409,7 +427,11 @@ handle_call({Selector, Args}, _From, State) ->
     end;
 handle_call(Msg, _From, State) ->
     %% Unknown call message format
-    {reply, {error, {unknown_call_format, Msg}}, State}.
+    ClassName = beamtalk_tagged_map:class_of(State, unknown),
+    Error0 = beamtalk_error:new(does_not_understand, ClassName),
+    Error1 = beamtalk_error:with_details(Error0, #{raw_message => Msg}),
+    Error = beamtalk_error:with_hint(Error1, <<"Expected {Selector, Args} tuple">>),
+    {reply, {error, Error}, State}.
 
 %% @doc Handle out-of-band messages (info).
 %% By default, unknown messages are ignored.
@@ -491,8 +513,8 @@ dispatch(Selector, Args, Self, State) ->
                                  true -> true;
                                  false ->
                                      %% Class may not be registered — check Object directly
-                                     beamtalk_object:has_method(CheckSelector)
-                             catch _:_ -> beamtalk_object:has_method(CheckSelector)
+                                     beamtalk_object_ops:has_method(CheckSelector)
+                             catch _:_ -> beamtalk_object_ops:has_method(CheckSelector)
                              end,
                     {reply, Result, State}
             end;
@@ -537,8 +559,11 @@ dispatch_user_method(Selector, Args, Self, State) ->
             try
                 Fun(Selector, Args, Self, State)
             catch
+                error:#beamtalk_error{} = BtError:_Stacktrace ->
+                    %% Preserve structured beamtalk errors from method implementations
+                    {error, BtError, State};
                 Class:Reason:_Stacktrace ->
-                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
+                    %% Non-beamtalk exception - wrap with context
                     logger:error("Error in method", #{
                         selector => Selector,
                         class => Class,
@@ -546,7 +571,11 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     }),
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error = beamtalk_error:with_details(Error1, #{
+                        original_class => Class,
+                        original_reason => Reason
+                    }),
                     {error, Error, State}
             end;
         {ok, Fun} when is_function(Fun, 2) ->
@@ -554,8 +583,11 @@ dispatch_user_method(Selector, Args, Self, State) ->
             try
                 Fun(Args, State)
             catch
+                error:#beamtalk_error{} = BtError:_Stacktrace ->
+                    %% Preserve structured beamtalk errors from method implementations
+                    {error, BtError, State};
                 Class:Reason:_Stacktrace ->
-                    %% Method threw an exception - log without stack trace to avoid leaking sensitive data
+                    %% Non-beamtalk exception - wrap with context
                     logger:error("Error in method", #{
                         selector => Selector,
                         class => Class,
@@ -563,7 +595,11 @@ dispatch_user_method(Selector, Args, Self, State) ->
                     }),
                     ClassName = beamtalk_tagged_map:class_of(State, unknown),
                     Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error = beamtalk_error:with_details(Error1, #{
+                        original_class => Class,
+                        original_reason => Reason
+                    }),
                     {error, Error, State}
             end;
         {ok, _NotAFunction} ->
@@ -638,9 +674,27 @@ handle_dnu(Selector, Args, Self, State) ->
                     %% Preserve legitimate errors from inherited methods
                     {error, Error, State}
             catch
-                _:_ ->
+                exit:{noproc, _} ->
                     %% Class registry not available (e.g., in unit tests without bootstrap)
                     %% Fall back to Object dispatch directly
+                    object_fallback(Selector, Args, Self, State, ClassName);
+                exit:{normal, _} ->
+                    %% Class process terminated normally
+                    object_fallback(Selector, Args, Self, State, ClassName);
+                exit:{timeout, _} ->
+                    %% Class process lookup timed out
+                    logger:warning("Class dispatch lookup timed out", #{
+                        selector => Selector,
+                        class => ClassName
+                    }),
+                    object_fallback(Selector, Args, Self, State, ClassName);
+                exit:{Reason, _} ->
+                    %% Other exit reasons (shutdown, killed, etc.)
+                    logger:warning("Class dispatch lookup failed", #{
+                        selector => Selector,
+                        class => ClassName,
+                        reason => Reason
+                    }),
                     object_fallback(Selector, Args, Self, State, ClassName)
             end
     end.
@@ -660,7 +714,7 @@ make_dnu_error(Selector, ClassName, State) ->
 -spec object_fallback(atom(), list(), #beamtalk_object{}, map(), atom()) ->
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}.
 object_fallback(Selector, Args, Self, State, ClassName) ->
-    case beamtalk_object:dispatch(Selector, Args, Self, State) of
+    case beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
         {error, _, _} ->
             make_dnu_error(Selector, ClassName, State);
         Result ->

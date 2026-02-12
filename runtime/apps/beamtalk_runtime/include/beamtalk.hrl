@@ -44,7 +44,7 @@
 %%
 %% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
 -record(beamtalk_error, {
-    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited | timeout | instantiation_error | file_not_found | permission_denied | invalid_path | io_error
+    kind    :: atom(),              % does_not_understand | immutable_value | type_error | arity_mismatch | future_not_awaited | timeout | instantiation_error | file_not_found | permission_denied | invalid_path | io_error | class_not_found | no_superclass | class_already_exists | internal_error | dispatch_error | callback_failed | assertion_failed
     class   :: atom(),              % 'Integer', 'Counter', 'String'
     selector:: atom() | undefined,  % method that failed
     message :: binary(),            % human-readable explanation
@@ -63,3 +63,22 @@
     error :: #beamtalk_error{},
     span  :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
+
+%% @doc CompiledMethod value object type.
+%%
+%% DDD Context: Object System
+%%
+%% Represents a method's metadata as returned by the >> operator.
+%% This is a tagged map (value type) with '$beamtalk_class' => 'CompiledMethod'.
+%%
+%% Fields:
+%% - $beamtalk_class: Always 'CompiledMethod' (class tag)
+%% - __selector__: Method name atom (e.g., getValue, increment)
+%% - __source__: Source code binary (or <<"">> if unavailable)
+%% - __method_info__: Map with arity and block function
+-type compiled_method() :: #{
+    '$beamtalk_class' := 'CompiledMethod',
+    '__selector__' := atom(),
+    '__source__' := binary(),
+    '__method_info__' := map()
+}.

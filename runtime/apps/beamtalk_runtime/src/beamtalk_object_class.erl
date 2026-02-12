@@ -75,6 +75,7 @@
     instance_variables/1,
     is_sealed/1,
     is_abstract/1,
+    is_constructible/1,
     add_before/3,
     add_after/3,
     super_dispatch/3,
@@ -82,8 +83,11 @@
     module_name/1,
     create_subclass/3,
     is_class_object/1,
+    is_class_name/1,
+    class_display_name/1,
     class_send/3,
-    class_object_tag/1
+    class_object_tag/1,
+    inherits_from/2
 ]).
 
 %% gen_server callbacks
@@ -110,6 +114,7 @@
     superclass :: class_name() | none,
     is_sealed = false :: boolean(),
     is_abstract = false :: boolean(),
+    is_constructible = undefined :: boolean() | undefined,
     instance_methods = #{} :: #{selector() => method_info()},
     class_methods = #{} :: #{selector() => method_info()},
     instance_variables = [] :: [atom()],
@@ -197,11 +202,31 @@ module_name(ClassPid) ->
 %% This distinguishes class objects from actor instances at runtime.
 -spec is_class_object(term()) -> boolean().
 is_class_object({beamtalk_object, Class, _Mod, _Pid}) when is_atom(Class) ->
-    ClassBin = atom_to_binary(Class, utf8),
-    Size = byte_size(ClassBin) - 6,
-    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
+    is_class_name(Class);
 is_class_object(_) ->
     false.
+
+%% @doc Check if an atom class name represents a class object (ends with " class").
+-spec is_class_name(atom()) -> boolean().
+is_class_name(ClassName) when is_atom(ClassName) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    Size = byte_size(ClassBin) - 6,
+    Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">>;
+is_class_name(_) ->
+    false.
+
+%% @doc Strip " class" suffix from a class object name to get the display name.
+%%
+%% Returns the base class name (e.g., `'Integer class'` → `<<"Integer">>`).
+%% Returns the full name as binary if not a class name.
+-spec class_display_name(atom()) -> binary().
+class_display_name(ClassName) when is_atom(ClassName) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    Size = byte_size(ClassBin) - 6,
+    case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
+        true -> binary:part(ClassBin, 0, Size);
+        false -> ClassBin
+    end.
 
 %% @doc Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 %%
@@ -228,6 +253,16 @@ class_send(ClassPid, class_name, []) ->
     gen_server:call(ClassPid, class_name);
 class_send(ClassPid, module_name, []) ->
     gen_server:call(ClassPid, module_name);
+class_send(ClassPid, 'printString', []) ->
+    %% BT-477: Class objects return their display name as a string.
+    %% e.g., Integer printString → <<"Integer">>, Counter printString → <<"Counter">>
+    %% Enables Object >> printString => 'a ' ++ self class printString
+    ClassName = gen_server:call(ClassPid, class_name),
+    atom_to_binary(ClassName, utf8);
+class_send(_ClassPid, class, []) ->
+    %% BT-412: Metaclass terminal — returns 'Metaclass' sentinel atom.
+    %% The metaclass tower terminates here (no infinite regression).
+    'Metaclass';
 class_send(ClassPid, Selector, Args) ->
     %% BT-411: Try user-defined class methods before raising does_not_understand
     case gen_server:call(ClassPid, {class_method_call, Selector, Args}) of
@@ -237,7 +272,7 @@ class_send(ClassPid, Selector, Args) ->
             Error0 = beamtalk_error:new(does_not_understand, ClassName),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error2 = beamtalk_error:with_hint(Error1, <<"Class does not understand this message">>),
-            error(Error2);
+            beamtalk_error:raise(Error2);
         Other -> unwrap_class_call(Other)
     end.
 
@@ -252,21 +287,12 @@ class_object_tag(ClassName) when is_atom(ClassName) ->
 
 %% @doc Get a compiled method object.
 %%
-%% Accepts either a class process pid or a class name atom.
+%% Delegates to beamtalk_method_resolver for the actual resolution logic.
+%% Accepts a class process pid, a class name atom, or a class object tuple.
 %% Returns a CompiledMethod map or nil if the method is not found.
--spec method(pid() | class_name(), selector()) -> map() | nil.
-method(ClassPid, Selector) when is_pid(ClassPid) ->
-    gen_server:call(ClassPid, {method, Selector});
-method(ClassName, Selector) when is_atom(ClassName) ->
-    case whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, '>>'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
-            error(Error2);
-        Pid ->
-            gen_server:call(Pid, {method, Selector})
-    end.
+-spec method(pid() | class_name() | tuple(), selector()) -> compiled_method() | nil.
+method(ClassRef, Selector) ->
+    beamtalk_method_resolver:resolve(ClassRef, Selector).
 
 %% @doc Check if a class has a method (does not walk hierarchy).
 %%
@@ -330,6 +356,14 @@ is_sealed(ClassPid) ->
 is_abstract(ClassPid) ->
     gen_server:call(ClassPid, is_abstract).
 
+%% @doc Check if a class can be instantiated via new/new:.
+%%
+%% BT-474: Domain query replacing the try-new/0 probe. Returns false for
+%% actors (use spawn) and non-instantiable primitives (Integer, String, etc.).
+-spec is_constructible(pid()) -> boolean().
+is_constructible(ClassPid) ->
+    gen_server:call(ClassPid, is_constructible).
+
 %% @doc Add a before daemon (Flavors pattern).
 -spec add_before(pid(), selector(), fun()) -> ok.
 add_before(ClassPid, Selector, Fun) ->
@@ -352,17 +386,26 @@ super_dispatch(State, Selector, Args) ->
     %% Extract the current class from state
     case beamtalk_tagged_map:class_of(State) of
         undefined ->
-            {error, missing_class_field_in_state};
+            Error0 = beamtalk_error:new(internal_error, unknown),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            ClassKey = beamtalk_tagged_map:class_key(),
+            Hint = iolist_to_binary(io_lib:format("State map missing '~p' field", [ClassKey])),
+            Error = beamtalk_error:with_hint(Error1, Hint),
+            {error, Error};
         CurrentClass ->
             %% Look up the current class process
             case whereis_class(CurrentClass) of
                 undefined ->
-                    {error, {class_not_found, CurrentClass}};
+                    Error0 = beamtalk_error:new(class_not_found, CurrentClass),
+                    Error = beamtalk_error:with_selector(Error0, Selector),
+                    {error, Error};
                 ClassPid ->
                     %% Get the superclass
                     case superclass(ClassPid) of
                         none ->
-                            {error, {no_superclass, CurrentClass, Selector}};
+                            Error0 = beamtalk_error:new(no_superclass, CurrentClass),
+                            Error = beamtalk_error:with_selector(Error0, Selector),
+                            {error, Error};
                         Superclass ->
                             %% Find and invoke in superclass chain
                             find_and_invoke_super_method(Superclass, Selector, Args, State)
@@ -402,7 +445,9 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
     %% Verify superclass exists
     case whereis_class(SuperclassName) of
         undefined ->
-            {error, {superclass_not_found, SuperclassName}};
+            Error0 = beamtalk_error:new(class_not_found, SuperclassName),
+            Error = beamtalk_error:with_hint(Error0, <<"Superclass must be registered before creating subclass">>),
+            {error, Error};
         _SuperclassPid ->
             %% Extract fields from ClassSpec
             InstanceVars = maps:get(instance_variables, ClassSpec, []),
@@ -429,7 +474,8 @@ create_subclass(SuperclassName, ClassName, ClassSpec) ->
                             {ok, ClassPid};
                         {error, {already_started, _Pid}} ->
                             %% Class already exists - return error for consistency
-                            {error, {class_already_exists, ClassName}};
+                            Error0 = beamtalk_error:new(class_already_exists, ClassName),
+                            {error, Error0};
                         Error ->
                             Error
                     end
@@ -453,6 +499,8 @@ init({ClassName, ClassInfo}) ->
     
     %% Extract class info
     Superclass = maps:get(superclass, ClassInfo, none),
+    Module = maps:get(module, ClassInfo, ClassName),
+    IsAbstract = maps:get(is_abstract, ClassInfo, false),
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
     
@@ -461,12 +509,15 @@ init({ClassName, ClassInfo}) ->
     FlattenedClassMethods = build_flattened_methods(ClassName, Superclass, ClassMethods, get_flattened_class_methods),
     
     %% Build state
+    %% BT-474: is_constructible starts as undefined — computed lazily on first
+    %% {new, Args} call. Can't probe Module:new() during on_load init because
+    %% the module isn't fully available yet.
     State = #class_state{
         name = ClassName,
-        module = maps:get(module, ClassInfo, ClassName),
+        module = Module,
         superclass = Superclass,
         is_sealed = maps:get(is_sealed, ClassInfo, false),
-        is_abstract = maps:get(is_abstract, ClassInfo, false),
+        is_abstract = IsAbstract,
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         instance_variables = maps:get(instance_variables, ClassInfo, []),
@@ -501,26 +552,41 @@ handle_call({spawn, Args}, _From, #class_state{
     name = ClassName,
     module = Module
 } = State) ->
-    SpawnResult = case Args of
-        [] ->
-            erlang:apply(Module, spawn, []);
-        [InitMap] when is_map(InitMap) ->
-            erlang:apply(Module, spawn, [InitMap]);
-        _ ->
-            erlang:apply(Module, spawn, [])
-    end,
-    case SpawnResult of
-        {beamtalk_object, _, _, _} = Obj ->
-            {reply, {ok, Obj}, State};
-        {ok, Pid} ->
-            Obj = #beamtalk_object{
-                class = ClassName,
-                class_mod = Module,
-                pid = Pid
-            },
-            {reply, {ok, Obj}, State};
-        Error ->
-            {reply, Error, State}
+    try
+        SpawnResult = case Args of
+            [] ->
+                erlang:apply(Module, spawn, []);
+            [InitArgs] ->
+                %% BT-476: Delegate is_map validation to generated Module:spawn/1.
+                %% The generated spawn/1 validates argument type and raises type_error
+                %% for non-map args (single source of truth for spawnWith: validation).
+                %% See: crates/beamtalk-core/src/codegen/core_erlang/gen_server/spawn.rs
+                %%      generate_spawn_with_args_function()
+                erlang:apply(Module, spawn, [InitArgs]);
+            _ ->
+                %% Defensive: class_send always provides [] or [Arg], but guard
+                %% against unexpected multi-arg calls with a structured error.
+                Error0 = beamtalk_error:new(type_error, ClassName),
+                Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
+                Error2 = beamtalk_error:with_hint(Error1, <<"spawnWith: expects a Dictionary argument">>),
+                error(Error2)
+        end,
+        case SpawnResult of
+            {beamtalk_object, _, _, _} = Obj ->
+                {reply, {ok, Obj}, State};
+            {ok, Pid} ->
+                Obj = #beamtalk_object{
+                    class = ClassName,
+                    class_mod = Module,
+                    pid = Pid
+                },
+                {reply, {ok, Obj}, State};
+            SpawnError ->
+                {reply, SpawnError, State}
+        end
+    catch
+        error:CaughtError ->
+            {reply, {error, CaughtError}, State}
     end;
 
 handle_call({new, Args}, _From, #class_state{
@@ -539,61 +605,100 @@ handle_call({new, Args}, _From, #class_state{
     module = Module,
     dynamic_methods = DynamicMethods,
     instance_variables = InstanceVars
-} = State) ->
+} = State0) ->
+    %% BT-474: Lazily compute is_constructible on first {new, Args} call.
+    %% Can't compute during init because module isn't available during on_load.
+    State = ensure_is_constructible(State0),
+    #class_state{is_constructible = IsConstructible} = State,
     %% Check if this is a dynamic class
     case Module of
         beamtalk_dynamic_object ->
             %% Dynamic class - spawn beamtalk_dynamic_object instance
             %% Build initial state with methods and fields
-            InitState = #{
-                '$beamtalk_class' => ClassName,
-                '__class_pid__' => self(),
-                '__methods__' => DynamicMethods
-            },
-            %% Initialize instance variables from Args (expected to be a map or proplist)
-            InitStateWithFields = case Args of
-                [FieldMap] when is_map(FieldMap) ->
-                    maps:merge(InitState, FieldMap);
-                _ ->
-                    %% Initialize all instance variables to nil
-                    InitFields = lists:foldl(fun(Var, Acc) ->
-                        maps:put(Var, nil, Acc)
-                    end, InitState, InstanceVars),
-                    InitFields
-            end,
-            
-            %% Spawn the dynamic object
-            case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
-                {ok, Pid} ->
-                    %% Wrap in beamtalk_object record
-                    Obj = #beamtalk_object{
-                        class = ClassName,
-                        class_mod = beamtalk_dynamic_object,
-                        pid = Pid
-                    },
-                    {reply, {ok, Obj}, State};
-                Error ->
-                    {reply, Error, State}
+            try
+                InitState = #{
+                    '$beamtalk_class' => ClassName,
+                    '__class_pid__' => self(),
+                    '__methods__' => DynamicMethods
+                },
+                %% Initialize instance variables from Args (expected to be a map or proplist)
+                InitStateWithFields = case Args of
+                    [FieldMap] when is_map(FieldMap) ->
+                        maps:merge(InitState, FieldMap);
+                    [] ->
+                        %% new with no args: initialize all instance variables to nil
+                        lists:foldl(fun(Var, Acc) ->
+                            maps:put(Var, nil, Acc)
+                        end, InitState, InstanceVars);
+                    _ ->
+                        %% BT-473: Reject non-map arguments with type_error
+                        DynErr0 = beamtalk_error:new(type_error, ClassName),
+                        DynErr1 = beamtalk_error:with_selector(DynErr0, 'new:'),
+                        DynErr2 = beamtalk_error:with_hint(DynErr1, <<"new: expects a Dictionary argument">>),
+                        error(DynErr2)
+                end,
+                
+                %% Spawn the dynamic object
+                case beamtalk_dynamic_object:start_link(ClassName, InitStateWithFields) of
+                    {ok, Pid} ->
+                        %% Wrap in beamtalk_object record
+                        Obj = #beamtalk_object{
+                            class = ClassName,
+                            class_mod = beamtalk_dynamic_object,
+                            pid = Pid
+                        },
+                        {reply, {ok, Obj}, State};
+                    DynError ->
+                        {reply, DynError, State}
+                end
+            catch
+                error:DynCaughtError ->
+                    {reply, {error, DynCaughtError}, State}
             end;
         _ ->
             %% Compiled class — value type instantiation via new (BT-246 / ADR 0013)
             %% Value types support new/new:. Actor classes should use {spawn, Args}
             %% protocol via class_send. If 'new' is called on an actor, the
             %% generated new/0 returns an appropriate error.
-            Result = case Args of
-                [] ->
-                    erlang:apply(Module, new, []);
-                [InitMap] when is_map(InitMap) ->
-                    case erlang:function_exported(Module, new, 1) of
-                        true ->
-                            erlang:apply(Module, new, [InitMap]);
-                        false ->
-                            erlang:apply(Module, new, [])
-                    end;
-                _ ->
-                    erlang:apply(Module, new, [])
-            end,
-            {reply, {ok, Result}, State}
+            %% BT-422: Wrap in try/catch to prevent class gen_server crash
+            %% when new/0 or new/1 raises (e.g., instantiation_error for primitives).
+            %% BT-476: Unlike spawnWith: (where validation lives in generated code),
+            %% new: validation stays here because generated new/1 may not exist
+            %% for all classes. See also: spawn.rs for spawnWith: validation.
+            try
+                Result = case Args of
+                    [] ->
+                        erlang:apply(Module, new, []);
+                    [InitMap] when is_map(InitMap) ->
+                        case erlang:function_exported(Module, new, 1) of
+                            true ->
+                                erlang:apply(Module, new, [InitMap]);
+                            false ->
+                                erlang:apply(Module, new, [])
+                        end;
+                    _ ->
+                        %% BT-474: Use cached is_constructible query instead of
+                        %% probing via try new/0. No throwaway object creation.
+                        %% Priority: instantiation_error (can't construct) before
+                        %% type_error (wrong argument type).
+                        case IsConstructible of
+                            false ->
+                                %% Class can't be instantiated — delegate to new/0
+                                %% for its native instantiation_error.
+                                erlang:apply(Module, new, []);
+                            true ->
+                                %% Class IS constructible but got wrong arg type.
+                                Error0 = beamtalk_error:new(type_error, ClassName),
+                                Error1 = beamtalk_error:with_selector(Error0, 'new:'),
+                                Error2 = beamtalk_error:with_hint(Error1, <<"new: expects a Dictionary argument">>),
+                                error(Error2)
+                        end
+                end,
+                {reply, {ok, Result}, State}
+            catch
+                error:Error ->
+                    {reply, {error, Error}, State}
+            end
     end;
 
 handle_call(methods, _From, #class_state{flattened_methods = Flattened} = State) ->
@@ -663,6 +768,10 @@ handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
     {reply, Abstract, State};
 
+handle_call(is_constructible, _From, State0) ->
+    State = ensure_is_constructible(State0),
+    {reply, State#class_state.is_constructible, State};
+
 handle_call({add_before, Selector, Fun}, _From, State) ->
     Befores = maps:get(Selector, State#class_state.before_methods, []),
     NewBefores = maps:put(Selector, [Fun | Befores], State#class_state.before_methods),
@@ -687,10 +796,12 @@ handle_call({lookup_flattened, Selector}, _From, #class_state{flattened_methods 
     {reply, Result, State};
 
 %% BT-411: User-defined class method dispatch.
+%% BT-412: Passes class variables to method and handles updates.
 %% Looks up selector in flattened_class_methods and calls the module function.
 handle_call({class_method_call, Selector, Args}, _From,
             #class_state{flattened_class_methods = FlatClassMethods,
-                         name = ClassName, module = Module} = State) ->
+                         name = ClassName, module = Module,
+                         class_variables = ClassVars} = State) ->
     case maps:find(Selector, FlatClassMethods) of
         {ok, {DefiningClass, _MethodInfo}} ->
             %% Resolve the module for the defining class (may differ for inherited methods)
@@ -706,8 +817,13 @@ handle_call({class_method_call, Selector, Args}, _From,
             ClassSelf = {beamtalk_object, class_object_tag(ClassName), DefiningModule, self()},
             %% Class method function name: class_<selector>
             FunName = class_method_fun_name(Selector),
-            try erlang:apply(DefiningModule, FunName, [ClassSelf | Args]) of
-                Result -> {reply, {ok, Result}, State}
+            %% BT-412: Pass class variables; handle {Result, NewClassVars} returns
+            try erlang:apply(DefiningModule, FunName, [ClassSelf, ClassVars | Args]) of
+                {class_var_result, Result, NewClassVars} ->
+                    NewState = State#class_state{class_variables = NewClassVars},
+                    {reply, {ok, Result}, NewState};
+                Result ->
+                    {reply, {ok, Result}, State}
             catch
                 Class:Error ->
                     logger:error("Class method ~p:~p failed: ~p:~p",
@@ -732,7 +848,20 @@ handle_call(get_flattened_class_methods, _From, #class_state{flattened_class_met
 
 %% Internal query for super_dispatch - get the class's behavior module
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
-    {reply, Module, State}.
+    {reply, Module, State};
+
+%% BT-412: Get a class variable value
+handle_call({get_class_var, Name}, _From,
+            #class_state{class_variables = ClassVars} = State) ->
+    Value = maps:get(Name, ClassVars, nil),
+    {reply, Value, State};
+
+%% BT-412: Set a class variable value
+handle_call({set_class_var, Name, Value}, _From,
+            #class_state{class_variables = ClassVars} = State) ->
+    NewClassVars = maps:put(Name, Value, ClassVars),
+    NewState = State#class_state{class_variables = NewClassVars},
+    {reply, Value, NewState}.
 
 handle_cast(Msg, #class_state{flattened_methods = Flattened} = State) ->
     %% Handle async message dispatch (Future protocol)
@@ -798,9 +927,11 @@ code_change(OldVsn, State, Extra) ->
     {ok, NewState} = beamtalk_hot_reload:code_change(OldVsn, State, Extra),
     %% ADR 0006 Phase 2: Rebuild flattened methods after hot reload
     FinalState = rebuild_all_flattened_tables(NewState),
+    %% BT-474: Reset is_constructible cache — module exports may have changed
+    FinalState2 = FinalState#class_state{is_constructible = undefined},
     %% Invalidate subclass tables in case hot_reload modified our methods
-    invalidate_subclass_flattened_tables(FinalState#class_state.name),
-    {ok, FinalState}.
+    invalidate_subclass_flattened_tables(FinalState2#class_state.name),
+    {ok, FinalState2}.
 
 %%====================================================================
 %% Internal functions
@@ -809,11 +940,11 @@ code_change(OldVsn, State, Extra) ->
 %% @private
 %% @doc Unwrap a class gen_server call result for use in class_send.
 %%
-%% Translates {ok, Value} → Value, {error, Error} → error(Error).
+%% Translates {ok, Value} → Value, {error, Error} → raise(Error).
 %% This DRYs the repeated unwrap pattern in class_send/3 clauses.
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) -> Value;
-unwrap_class_call({error, Error}) -> error(Error).
+unwrap_class_call({error, Error}) -> beamtalk_error:raise(Error).
 
 %% @private
 %% @doc Build a structured instantiation_error for abstract classes.
@@ -825,6 +956,53 @@ abstract_class_error(ClassName, Selector) ->
     Error0 = beamtalk_error:new(instantiation_error, ClassName),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     beamtalk_error:with_hint(Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>).
+
+%% @private
+%% @doc Ensure is_constructible is computed and cached in state (BT-474).
+%%
+%% Lazily computes whether a class can be instantiated via new/new: on first
+%% access. Cannot be computed during init because the module isn't fully
+%% available during on_load. After first computation, the result is cached
+%% in class_state for all subsequent calls.
+%%
+%% Returns false for:
+%% - Abstract classes (cannot be instantiated at all)
+%% - Actors (have spawn/0 — must use spawn/spawnWith:)
+%% - Non-instantiable primitives (Integer, String, etc. — new/0 raises)
+-spec ensure_is_constructible(#class_state{}) -> #class_state{}.
+ensure_is_constructible(#class_state{is_constructible = C} = State) when C =/= undefined ->
+    State;
+ensure_is_constructible(#class_state{
+    module = Module,
+    is_abstract = IsAbstract
+} = State) ->
+    Result = compute_is_constructible(Module, IsAbstract),
+    State#class_state{is_constructible = Result}.
+
+%% @private
+-spec compute_is_constructible(atom(), boolean()) -> boolean().
+compute_is_constructible(_Module, true) ->
+    false;
+compute_is_constructible(beamtalk_dynamic_object, false) ->
+    true;
+compute_is_constructible(Module, false) ->
+    %% Actors export spawn/0; their new/0 raises instantiation_error
+    case erlang:function_exported(Module, spawn, 0) of
+        true -> false;
+        false ->
+            %% Value type: check if new/0 succeeds or raises.
+            %% Non-instantiable primitives (Integer, String, etc.) generate
+            %% error stubs. We probe once here, not on every error path.
+            case erlang:function_exported(Module, new, 0) of
+                false -> false;
+                true ->
+                    try erlang:apply(Module, new, []) of
+                        _ -> true
+                    catch
+                        error:_ -> false
+                    end
+            end
+    end.
 
 %% @private
 %% @doc Rebuild both instance and class flattened method tables from State.
@@ -886,8 +1064,11 @@ invalidate_subclass_flattened_tables(ChangedClass) ->
     end, AllClasses),
     ok.
 
-%% @private
 %% @doc Check if a class inherits from a given ancestor (walks superclass chain).
+%%
+%% Returns true if ClassName is equal to or a subclass of Ancestor.
+%% Returns false if the class is not registered (safe during bootstrap).
+%% Used by beamtalk_exception_handler for hierarchy-aware matching (BT-475).
 -spec inherits_from(class_name() | none, class_name()) -> boolean().
 inherits_from(none, _Ancestor) ->
     false;
@@ -919,7 +1100,7 @@ convert_methods_to_info(Methods) ->
                 Error1 = beamtalk_error:with_selector(Error0, Selector),
                 Error2 = beamtalk_error:with_hint(Error1, <<"Dynamic methods must be arity 3 (Self, Args, State)">>),
                 Error3 = beamtalk_error:with_details(Error2, #{actual_arity => Arity, expected_arity => 3}),
-                error(Error3)
+                beamtalk_error:raise(Error3)
         end,
         #{
             arity => Arity,
@@ -936,7 +1117,9 @@ convert_methods_to_info(Methods) ->
 find_and_invoke_super_method(ClassName, Selector, Args, State) ->
     case whereis_class(ClassName) of
         undefined ->
-            {error, {class_not_found, ClassName}};
+            Error0 = beamtalk_error:new(class_not_found, ClassName),
+            Error = beamtalk_error:with_selector(Error0, Selector),
+            {error, Error};
         ClassPid ->
             %% Get class info via API calls
             case get_class_method_info(ClassPid, Selector) of
@@ -948,7 +1131,10 @@ find_and_invoke_super_method(ClassName, Selector, Args, State) ->
                     case superclass(ClassPid) of
                         none ->
                             %% Reached root, method not found
-                            {error, {method_not_found_in_superclass, Selector}};
+                            StateClassName = beamtalk_tagged_map:class_of(State, ClassName),
+                            Error0 = beamtalk_error:new(does_not_understand, StateClassName),
+                            Error = beamtalk_error:with_selector(Error0, Selector),
+                            {error, Error};
                         Superclass ->
                             %% Recursively search in superclass
                             find_and_invoke_super_method(Superclass, Selector, Args, State)

@@ -42,11 +42,11 @@
 %%% See: docs/internal/design-self-as-object.md Section 3.3
 
 -module(beamtalk_primitive).
--export([class_of/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
+-export([class_of/1, class_of_object/1, class_of_object_by_name/1, send/3, responds_to/2, class_name_to_module/1, print_string/1]).
 
 -include("beamtalk.hrl").
 
-%% Compiled stdlib modules (beamtalk_integer, beamtalk_string, etc.) are
+%% Compiled stdlib modules (bt@stdlib@integer, bt@stdlib@string, etc.) are
 %% generated from Core Erlang, not .erl source. Dialyzer can't resolve them
 %% if stdlib hasn't been built yet.
 -dialyzer({nowarn_function, [send/3, responds_to/2]}).
@@ -94,6 +94,56 @@ class_of(X) when is_port(X) -> 'Port';
 class_of(X) when is_reference(X) -> 'Reference';
 class_of(_) -> 'Object'.
 
+%% @doc Return the class of any value as a first-class class object (BT-412).
+%%
+%% Unlike class_of/1 which returns an atom, this returns a #beamtalk_object{}
+%% tuple representing the class as a first-class object that can receive messages.
+%% Uses whereis_class to look up the class process pid.
+%%
+%% Examples:
+%% ```
+%% class_of_object(42)           % => {beamtalk_object, 'Integer class', ..., Pid}
+%% class_of_object(<<"hello">>)  % => {beamtalk_object, 'String class', ..., Pid}
+%% ```
+-spec class_of_object(term()) -> tuple() | atom().
+class_of_object('Metaclass') ->
+    %% BT-412: Metaclass tower is terminal
+    'Metaclass';
+class_of_object(#beamtalk_object{class = ClassName}) ->
+    %% BT-412: class of a class object → 'Metaclass' sentinel (terminal)
+    case beamtalk_object_class:is_class_name(ClassName) of
+        true -> 'Metaclass';
+        false -> class_of_object_inner(ClassName)
+    end;
+class_of_object(X) ->
+    ClassName = class_of(X),
+    class_of_object_inner(ClassName).
+
+%% @private Helper to construct class object from class name.
+class_of_object_inner(ClassName) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined ->
+            %% Fallback for classes without a registered process
+            ClassName;
+        Pid when is_pid(Pid) ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
+    end.
+
+%% @doc Return a class object given a class name atom (BT-412).
+%%
+%% Used by dispatch when the class name is already known (e.g., from state tag).
+-spec class_of_object_by_name(atom()) -> tuple() | atom().
+class_of_object_by_name(ClassName) ->
+    case beamtalk_object_class:whereis_class(ClassName) of
+        undefined -> ClassName;
+        Pid when is_pid(Pid) ->
+            ModuleName = beamtalk_object_class:module_name(Pid),
+            ClassTag = beamtalk_object_class:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
+    end.
+
 %% @doc Return the printString representation of any value.
 %%
 %% Handles all BEAM types uniformly — used by the printString intrinsic.
@@ -110,17 +160,22 @@ print_string(false) ->
     <<"false">>;
 print_string(nil) ->
     <<"nil">>;
+print_string('Metaclass') ->
+    <<"Metaclass">>;
 print_string(X) when is_atom(X) ->
     iolist_to_binary([<<"#">>, erlang:atom_to_binary(X, utf8)]);
 print_string(X) when is_list(X) ->
     iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [print_string(E) || E <- X]), <<")">>]);
 print_string(#beamtalk_object{class = ClassName}) ->
-    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)]);
+    %% BT-412: Class objects display as their class name (e.g., "Integer")
+    case beamtalk_object_class:is_class_name(ClassName) of
+        true ->
+            beamtalk_object_class:class_display_name(ClassName);
+        false ->
+            iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
+    end;
 print_string(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'Exception' ->
-            %% BT-338: Format exceptions nicely
-            beamtalk_exception_handler:dispatch('printString', [], X);
         'Association' ->
             %% BT-335: Format associations as "key -> value"
             beamtalk_association:format_string(X);
@@ -129,9 +184,18 @@ print_string(X) when is_map(X) ->
             Elements = maps:get(elements, X, []),
             ElemStrs = [print_string(E) || E <- Elements],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
-        _ ->
-            ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
-            iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+        'CompiledMethod' ->
+            %% BT-457: Delegate to ops module for "a CompiledMethod(selector)" format
+            beamtalk_compiled_method_ops:dispatch('printString', [], X);
+        Class ->
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Format exception hierarchy objects
+                    beamtalk_exception_handler:dispatch('printString', [], X);
+                false ->
+                    ClassName = beamtalk_tagged_map:class_of(X, 'Dictionary'),
+                    iolist_to_binary([<<"a ">>, erlang:atom_to_binary(ClassName, utf8)])
+            end
     end;
 print_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
@@ -139,7 +203,7 @@ print_string(X) ->
 %% @doc Send a message to any value (actor or primitive).
 %%
 %% Provides uniform dispatch across actors (via gen_server) and primitives
-%% (via static dispatch to class modules like beamtalk_integer).
+%% (via static dispatch to class modules like bt@stdlib@integer).
 %%
 %% Examples:
 %% ```
@@ -148,29 +212,27 @@ print_string(X) ->
 %% send(ActorObj, 'increment', []) % => Future or result
 %% ```
 %%
-%% Note: Primitive class modules (beamtalk_integer, beamtalk_string, etc.)
-%% are implemented in separate issues (BT-166, BT-167, etc.).
+%% Note: Primitive class modules (bt@stdlib@integer, bt@stdlib@string, etc.)
+%% use the ADR 0016 naming convention.
 -spec send(term(), atom(), list()) -> term().
 send(#beamtalk_object{pid = Pid}, Selector, Args) ->
     %% Actor: use gen_server
     gen_server:call(Pid, {Selector, Args});
 send(X, Selector, Args) when is_integer(X) ->
-    %% Primitive: static dispatch to class module
-    beamtalk_integer:dispatch(Selector, Args, X);
+    %% Primitive: static dispatch to class module (ADR 0016)
+    'bt@stdlib@integer':dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_binary(X) ->
-    beamtalk_string:dispatch(Selector, Args, X);
+    'bt@stdlib@string':dispatch(Selector, Args, X);
 send(X, Selector, Args) when X =:= true ->
-    %% BT-340: True dispatches to compiled beamtalk_true module
-    beamtalk_true:dispatch(Selector, Args, X);
+    'bt@stdlib@true':dispatch(Selector, Args, X);
 send(X, Selector, Args) when X =:= false ->
-    %% BT-340: False dispatches to compiled beamtalk_false module
-    beamtalk_false:dispatch(Selector, Args, X);
+    'bt@stdlib@false':dispatch(Selector, Args, X);
 send(nil, Selector, Args) ->
-    beamtalk_undefined_object:dispatch(Selector, Args, nil);
+    'bt@stdlib@undefined_object':dispatch(Selector, Args, nil);
 send(X, Selector, Args) when is_atom(X) ->
-    beamtalk_symbol:dispatch(Selector, Args, X);
+    'bt@stdlib@symbol':dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_function(X) ->
-    beamtalk_block:dispatch(Selector, Args, X);
+    'bt@stdlib@block':dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_tuple(X) ->
     %% Check if it's a beamtalk_object (should not happen - covered by clause above)
     %% but handle tuples that might not match the record pattern
@@ -182,47 +244,53 @@ send(X, Selector, Args) when is_tuple(X) ->
             gen_server:call(Pid, {Selector, Args});
         false ->
             %% Regular tuple - dispatch to tuple class
-            beamtalk_tuple:dispatch(Selector, Args, X)
+            'bt@stdlib@tuple':dispatch(Selector, Args, X)
     end;
 send(X, Selector, Args) when is_float(X) ->
-    beamtalk_float:dispatch(Selector, Args, X);
+    'bt@stdlib@float':dispatch(Selector, Args, X);
 send(X, Selector, Args) when is_map(X) ->
     %% Check for tagged maps (CompiledMethod, value type instances, plain maps)
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            beamtalk_compiled_method:dispatch(Selector, Args, X);
-        'Exception' ->
-            %% BT-338: Exception value type - direct dispatch
-            beamtalk_exception_handler:dispatch(Selector, Args, X);
+            'bt@stdlib@compiled_method':dispatch(Selector, Args, X);
         'Association' ->
-            %% BT-335: Association value type - direct dispatch
-            bt_stdlib_association:dispatch(Selector, Args, X);
+            %% BT-335: Association value type - direct dispatch (ADR 0016)
+            'bt@stdlib@association':dispatch(Selector, Args, X);
         'Set' ->
             %% BT-73: Set value type - dispatch to compiled stdlib
-            beamtalk_set:dispatch(Selector, Args, X);
+            'bt@stdlib@set':dispatch(Selector, Args, X);
+        'TestCase' ->
+            %% BT-438: TestCase value type - dispatch to compiled stdlib
+            'bt@stdlib@test_case':dispatch(Selector, Args, X);
         undefined ->
             %% Plain map (Dictionary) — BT-418: compiled stdlib dispatch
-            beamtalk_dictionary:dispatch(Selector, Args, X);
+            'bt@stdlib@dictionary':dispatch(Selector, Args, X);
         Class ->
-            %% Value type instance - route to class module (BT-354)
-            value_type_send(X, Class, Selector, Args)
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Exception hierarchy - direct dispatch
+                    beamtalk_exception_handler:dispatch(Selector, Args, X);
+                false ->
+                    %% Value type instance - route to class module (BT-354)
+                    value_type_send(X, Class, Selector, Args)
+            end
     end;
 send(X, Selector, Args) when is_list(X) ->
     %% List/Array dispatch
-    beamtalk_list:dispatch(Selector, Args, X);
+    'bt@stdlib@list':dispatch(Selector, Args, X);
 send(X, Selector, _Args) ->
     %% Other primitives: dispatch to generic handler
     Class = class_of(X),
     Error0 = beamtalk_error:new(does_not_understand, Class),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Primitive type does not support this message">>),
-    error(Error2).
+    beamtalk_error:raise(Error2).
 
 %% @doc Check if a value responds to a given selector.
 %%
 %% For actors, delegates to the module's has_method/1 function.
 %% For primitives, checks both built-in methods and extension registry
-%% via dedicated class modules (beamtalk_integer, beamtalk_string, etc.).
+%% via dedicated class modules (bt@stdlib@integer, bt@stdlib@string, etc.).
 %%
 %% Examples:
 %% ```
@@ -237,19 +305,19 @@ responds_to(#beamtalk_object{class_mod = Mod}, Selector) ->
     %% Actor: check if module exports has_method/1
     erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
 responds_to(X, Selector) when is_integer(X) ->
-    beamtalk_integer:has_method(Selector);
+    'bt@stdlib@integer':has_method(Selector);
 responds_to(X, Selector) when is_binary(X) ->
-    beamtalk_string:has_method(Selector);
+    'bt@stdlib@string':has_method(Selector);
 responds_to(X, Selector) when X =:= true ->
-    beamtalk_true:has_method(Selector);
+    'bt@stdlib@true':has_method(Selector);
 responds_to(X, Selector) when X =:= false ->
-    beamtalk_false:has_method(Selector);
+    'bt@stdlib@false':has_method(Selector);
 responds_to(nil, Selector) ->
-    beamtalk_undefined_object:has_method(Selector);
+    'bt@stdlib@undefined_object':has_method(Selector);
 responds_to(X, Selector) when is_atom(X) ->
-    beamtalk_symbol:has_method(Selector);
+    'bt@stdlib@symbol':has_method(Selector);
 responds_to(X, Selector) when is_function(X) ->
-    beamtalk_block:has_method(Selector);
+    'bt@stdlib@block':has_method(Selector);
 responds_to(X, Selector) when is_tuple(X) ->
     %% Check if it's a beamtalk_object (should not happen - covered by clause above)
     case tuple_size(X) >= 2 andalso element(1, X) =:= beamtalk_object of
@@ -259,31 +327,34 @@ responds_to(X, Selector) when is_tuple(X) ->
             erlang:function_exported(Mod, has_method, 1) andalso Mod:has_method(Selector);
         false ->
             %% Regular tuple
-            beamtalk_tuple:has_method(Selector)
+            'bt@stdlib@tuple':has_method(Selector)
     end;
 responds_to(X, Selector) when is_float(X) ->
-    beamtalk_float:has_method(Selector);
+    'bt@stdlib@float':has_method(Selector);
 responds_to(X, Selector) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' ->
-            beamtalk_compiled_method:has_method(Selector);
-        'Exception' ->
-            %% BT-338: Exception value type
-            beamtalk_exception_handler:has_method(Selector);
+            'bt@stdlib@compiled_method':has_method(Selector);
         'Association' ->
-            %% BT-335: Association value type
-            bt_stdlib_association:has_method(Selector);
+            %% BT-335: Association value type (ADR 0016)
+            'bt@stdlib@association':has_method(Selector);
         'Set' ->
             %% BT-73: Set value type
-            beamtalk_set:has_method(Selector);
+            'bt@stdlib@set':has_method(Selector);
         undefined ->
-            beamtalk_dictionary:has_method(Selector);
+            'bt@stdlib@dictionary':has_method(Selector);
         Class ->
-            %% Value type instance - check class module exports (BT-354)
-            value_type_responds_to(Class, Selector)
+            case beamtalk_exception_handler:is_exception_class(Class) of
+                true ->
+                    %% BT-338/BT-452: Exception hierarchy
+                    beamtalk_exception_handler:has_method(Selector);
+                false ->
+                    %% Value type instance - check class module exports (BT-354)
+                    value_type_responds_to(Class, Selector)
+            end
     end;
 responds_to(X, Selector) when is_list(X) ->
-    beamtalk_list:has_method(Selector);
+    'bt@stdlib@list':has_method(Selector);
 responds_to(_, _) ->
     %% Other primitives: no methods yet
     false.
@@ -304,28 +375,36 @@ value_type_send(Self, Class, Selector, Args) ->
             IvarErr0 = beamtalk_error:new(immutable_value, Class),
             IvarErr1 = beamtalk_error:with_selector(IvarErr0, Selector),
             IvarErr2 = beamtalk_error:with_hint(IvarErr1, Hint),
-            error(IvarErr2);
+            beamtalk_error:raise(IvarErr2);
         false ->
             ok
     end,
     Module = class_name_to_module(Class),
-    Arity = length(Args) + 1,  % +1 for Self parameter
     code:ensure_loaded(Module),
-    case erlang:function_exported(Module, Selector, Arity) of
+    %% BT-439: Use dispatch/3 for proper superclass delegation.
+    %% Previously called Module:Selector(Self, Args) directly, which
+    %% missed inherited methods (e.g., TestCase assertion methods).
+    case erlang:function_exported(Module, dispatch, 3) of
         true ->
-            erlang:apply(Module, Selector, [Self | Args]);
+            Module:dispatch(Selector, Args, Self);
         false ->
-            %% Fall back to Object base methods (class, printString, etc.)
-            case beamtalk_object:has_method(Selector) of
+            %% Fallback for modules without dispatch/3
+            Arity = length(Args) + 1,
+            case erlang:function_exported(Module, Selector, Arity) of
                 true ->
-                    case beamtalk_object:dispatch(Selector, Args, Self, Self) of
-                        {reply, Result, _State} -> Result;
-                        {error, Error, _State} -> error(Error)
-                    end;
+                    erlang:apply(Module, Selector, [Self | Args]);
                 false ->
-                    Error0 = beamtalk_error:new(does_not_understand, Class),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    error(Error1)
+                    case beamtalk_object_ops:has_method(Selector) of
+                        true ->
+                            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
+                                {reply, Result, _State} -> Result;
+                                {error, Error, _State} -> beamtalk_error:raise(Error)
+                            end;
+                        false ->
+                            Error0 = beamtalk_error:new(does_not_understand, Class),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            beamtalk_error:raise(Error1)
+                    end
             end
     end.
 
@@ -344,30 +423,39 @@ is_ivar_method(_) ->
 value_type_responds_to(Class, Selector) ->
     Module = class_name_to_module(Class),
     code:ensure_loaded(Module),
-    Exports = case erlang:function_exported(Module, module_info, 1) of
-        true -> Module:module_info(exports);
-        false -> []
-    end,
-    lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
-        orelse beamtalk_object:has_method(Selector).
+    case erlang:function_exported(Module, has_method, 1) of
+        true ->
+            Module:has_method(Selector);
+        false ->
+            Exports = case erlang:function_exported(Module, module_info, 1) of
+                true -> Module:module_info(exports);
+                false -> []
+            end,
+            lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
+                orelse beamtalk_object_ops:has_method(Selector)
+    end.
 
-%% @doc Convert a CamelCase class name atom to a snake_case module name atom.
+%% @doc Convert a CamelCase class name atom to a module name atom.
 %%
-%% Matches the Rust `to_module_name` function in codegen/core_erlang/util.rs.
-%% Examples: 'Point' → 'point', 'MyCounter' → 'my_counter'
+%% ADR 0016: User-defined value types use bt@ prefix.
+%% Matches the Rust codegen convention in build.rs.
 %%
-%% Uses list_to_existing_atom/1 to avoid atom table exhaustion from untrusted
-%% class names — the module atom must already exist if the module is loaded.
+%% Uses list_to_existing_atom/1 first to avoid atom table exhaustion.
+%% Falls back to list_to_atom/1 because Class is already a known atom
+%% (from class registration) — the new atom merely adds the bt@ prefix.
+%% Callers (value_type_send/responds_to) check function_exported which
+%% returns false for non-existent modules, triggering does_not_understand.
 -spec class_name_to_module(atom()) -> atom().
 class_name_to_module(Class) when is_atom(Class) ->
     SnakeCase = camel_to_snake(atom_to_list(Class)),
-    try list_to_existing_atom(SnakeCase)
+    %% ADR 0016: User code modules use bt@ prefix
+    ModName = "bt@" ++ SnakeCase,
+    try list_to_existing_atom(ModName)
     catch error:badarg ->
-        %% Module atom doesn't exist — cannot be a loaded module.
-        %% Return a non-existent atom safely; callers use code:ensure_loaded
-        %% and function_exported which will return false, triggering proper
-        %% does_not_understand error handling.
-        list_to_atom(SnakeCase)
+        %% Module atom doesn't exist yet. Since Class is already a known
+        %% atom, creating bt@{snake} is bounded by the number of registered
+        %% classes, not by arbitrary user input.
+        list_to_atom(ModName)
     end.
 
 %% @private CamelCase string to snake_case string conversion.

@@ -1,69 +1,30 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// E2E tests for CompiledMethod (BT-101)
+// E2E tests for >> operator on class variables (BT-323)
 //
-// Tests the >> operator for method lookup and CompiledMethod introspection:
-// - Counter >> #selector returns a CompiledMethod object
-// - CompiledMethod responds to: selector, source, argumentCount, class
+// Tests method lookup via >> when the receiver is not a class literal:
+// - Class stored in variable via Beamtalk classNamed:
+// - >> on variable returning CompiledMethod
 
+// @load lib/SystemDictionary.bt
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================
-// METHOD LOOKUP WITH >>
+// METHOD LOOKUP ON CLASS VARIABLE (Beamtalk classNamed:)
 // ===========================================================================
 
-// ---------------------------------------------------------------------------
-// Look up an existing method
-// ---------------------------------------------------------------------------
+cls := (Beamtalk classNamed: #Counter) await
+// => Counter
 
-method := Counter >> #getValue
-// => _
+cls >> #getValue
+// => {"$beamtalk_class":"CompiledMethod",_}
 
-// ---------------------------------------------------------------------------
-// CompiledMethod class
-// ---------------------------------------------------------------------------
-
-method class
-// => CompiledMethod
-
-// ---------------------------------------------------------------------------
-// CompiledMethod selector
-// ---------------------------------------------------------------------------
-
-method selector
+(cls >> #getValue) selector
 // => getValue
 
-// ---------------------------------------------------------------------------
-// CompiledMethod argumentCount
-// ---------------------------------------------------------------------------
-
-method argumentCount
-// => 0
-
-// ---------------------------------------------------------------------------
-// CompiledMethod source contains the method definition
-// ---------------------------------------------------------------------------
-
-src := method source
-// => getValue => ^self.value
-
-// ---------------------------------------------------------------------------
-// Look up another method
-// ---------------------------------------------------------------------------
-
-incMethod := Counter >> #increment
-// => _
-
-incMethod selector
-// => increment
-
-incMethod class
+(cls >> #getValue) class
 // => CompiledMethod
 
-// ---------------------------------------------------------------------------
-// Look up non-existent method returns nil
-// ---------------------------------------------------------------------------
-
-Counter >> #nonExistent
+cls >> #nonExistent
 // => nil

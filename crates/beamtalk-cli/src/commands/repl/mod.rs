@@ -109,6 +109,10 @@ struct ReplResponse {
     info: Option<serde_json::Value>,
     /// Actor state (new protocol: inspect op)
     state: Option<serde_json::Value>,
+    /// Compilation warnings (BT-407)
+    warnings: Option<Vec<String>>,
+    /// Documentation text (BT-500: :help command)
+    docs: Option<String>,
 }
 
 impl ReplResponse {
@@ -324,6 +328,38 @@ pub fn run(
                     }
                     ":help" | ":h" | ":?" => {
                         print_help();
+                        continue;
+                    }
+                    _ if line.starts_with(":help ") || line.starts_with(":h ") => {
+                        let args = if line.starts_with(":help ") {
+                            line.strip_prefix(":help ").unwrap().trim()
+                        } else {
+                            line.strip_prefix(":h ").unwrap().trim()
+                        };
+
+                        if args.is_empty() {
+                            print_help();
+                            continue;
+                        }
+
+                        // Parse "ClassName" or "ClassName selector"
+                        let (class_name, selector) = match args.split_once(' ') {
+                            Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
+                            None => (args, None),
+                        };
+
+                        match client.get_docs(class_name, selector) {
+                            Ok(response) => {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
+                                        eprintln!("{msg}");
+                                    }
+                                } else if let Some(docs) = &response.docs {
+                                    println!("{docs}");
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
                         continue;
                     }
                     ":clear" => {
@@ -562,6 +598,12 @@ pub fn run(
                                     println!();
                                 }
                                 let _ = std::io::Write::flush(&mut std::io::stdout());
+                            }
+                        }
+                        // Display compilation warnings (BT-407)
+                        if let Some(ref warnings) = response.warnings {
+                            for warning in warnings {
+                                eprintln!("⚠ {warning}");
                             }
                         }
                         if response.is_error() {
