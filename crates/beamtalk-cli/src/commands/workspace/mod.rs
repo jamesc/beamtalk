@@ -1346,28 +1346,38 @@ mod tests {
                 thread::spawn(move || {
                     // All threads wait here, then race to create the workspace
                     barrier.wait();
-                    create_workspace(&project_path, Some(&ws_id)).unwrap()
+                    let metadata = create_workspace(&project_path, Some(&ws_id)).unwrap();
+                    // Each worker captures the cookie value it observes immediately
+                    let cookie = read_workspace_cookie(&ws_id).unwrap();
+                    (metadata, cookie)
                 })
             })
             .collect();
 
-        let results: Vec<WorkspaceMetadata> =
+        let results: Vec<(WorkspaceMetadata, String)> =
             handles.into_iter().map(|h| h.join().unwrap()).collect();
 
         // All threads must get the same workspace_id and created_at
-        for r in &results {
-            assert_eq!(r.workspace_id, ws_id);
-            assert_eq!(r.created_at, results[0].created_at);
+        for (metadata, _) in &results {
+            assert_eq!(metadata.workspace_id, ws_id);
+            assert_eq!(metadata.created_at, results[0].0.created_at);
         }
 
         // Cookie must be a single consistent value (not corrupted by concurrent writes)
-        let cookie = read_workspace_cookie(&ws_id).unwrap();
-        assert!(!cookie.is_empty(), "Cookie should not be empty");
+        let first_cookie = &results[0].1;
+        assert!(!first_cookie.is_empty(), "Cookie should not be empty");
         assert_eq!(
-            cookie.len(),
+            first_cookie.len(),
             32,
             "Cookie should be valid (32 chars = 24 bytes base64)"
         );
+
+        for (_, cookie) in &results {
+            assert_eq!(
+                cookie, first_cookie,
+                "All threads must observe the same cookie value"
+            );
+        }
     }
 
     #[test]
