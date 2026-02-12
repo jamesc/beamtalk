@@ -58,7 +58,7 @@ load_file(SessionPid, Path) ->
 %% @doc Get the module tracker for this session (user-loaded modules only).
 -spec get_module_tracker(pid()) -> {ok, beamtalk_repl_modules:module_tracker()}.
 get_module_tracker(SessionPid) ->
-    gen_server:call(SessionPid, get_module_tracker).
+    gen_server:call(SessionPid, get_module_tracker, 5000).
 
 %%% gen_server callbacks
 
