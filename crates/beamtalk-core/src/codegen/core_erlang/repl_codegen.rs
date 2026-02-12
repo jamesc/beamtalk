@@ -75,12 +75,18 @@ impl CoreErlangGenerator {
         // Check if state was mutated (must happen after capture)
         let final_state = self.current_state_var();
 
-        let return_tuple = if final_state != "State" || self.repl_loop_mutated {
-            // Mutation occurred - Result is the updated state
-            // Return {nil, Result} since loops return nil but state was updated
+        let return_tuple = if self.repl_loop_mutated {
+            // BT-483: Mutation-threaded control flow returns {Result, State} tuple.
+            // Extract display value and updated bindings using element/2.
             // BT-245: repl_loop_mutated catches mutations inside StateAcc-threaded loops
-            // where current_state_var() is restored after the loop
-            "{'nil', Result}".to_string()
+            // where current_state_var() is restored after the loop.
+            "let _LoopResult = call 'erlang':'element'(1, Result) in \
+             let _LoopState = call 'erlang':'element'(2, Result) in \
+             {_LoopResult, _LoopState}"
+                .to_string()
+        } else if final_state != "State" {
+            // Direct state mutation (field assignment) — Result is the value, use updated state
+            format!("{{Result, {final_state}}}")
         } else {
             // No mutation - Result is the value, State is unchanged bindings
             "{Result, State}".to_string()

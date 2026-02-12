@@ -67,9 +67,11 @@ impl CoreErlangGenerator {
         // Capture current state before the foldl call
         let initial_state = self.current_state_var();
 
-        // Call foldl with the lambda variable - returns the final state
+        // BT-483: Return {Result, State} tuple — do: returns nil as result
+        let fold_result = self.fresh_temp_var("FoldResult");
         self.write_document(&docvec![format!(
-            " in call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var})"
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {initial_state}, {list_var}) \
+             in {{'nil', {fold_result}}}"
         )]);
 
         Ok(())
@@ -275,26 +277,33 @@ impl CoreErlangGenerator {
         let init_code = self.capture_expression(initial)?;
         let lambda_var = self.fresh_temp_var("temp");
 
+        let acc_state_var = self.fresh_temp_var("AccSt");
         self.write_document(&docvec![
             format!("let {list_var} = "),
             recv_code,
             format!(" in let {init_var} = "),
             init_code,
-            format!(" in let {lambda_var} = fun (Item, {{Acc, StateAcc}}) -> "),
+            format!(
+                " in let {lambda_var} = fun (Item, {acc_state_var}) -> \
+                 let Acc = call 'erlang':'element'(1, {acc_state_var}) in \
+                 let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
+            ),
         ]);
 
         // Generate body with state threading
         self.generate_list_inject_body_with_threading(body)?;
 
-        // Call foldl with the lambda variable
+        // BT-483: Return {Result, State} tuple — inject:into: returns accumulator as result
         let initial_state = self.current_state_var();
         let result_var = self.fresh_temp_var("temp");
-        let acc_var = self.fresh_temp_var("temp");
-        let new_state = self.next_state_var();
+        let acc_out = self.fresh_temp_var("AccOut");
+        let state_out = self.fresh_temp_var("StOut");
 
         self.write_document(&docvec![format!(
             " in let {result_var} = call 'lists':'foldl'({lambda_var}, {{{init_var}, {initial_state}}}, {list_var}) \
-             in let {{{acc_var}, {new_state}}} = {result_var} in {acc_var}"
+             in let {acc_out} = call 'erlang':'element'(1, {result_var}) \
+             in let {state_out} = call 'erlang':'element'(2, {result_var}) \
+             in {{{acc_out}, {state_out}}}"
         )]);
 
         Ok(())
