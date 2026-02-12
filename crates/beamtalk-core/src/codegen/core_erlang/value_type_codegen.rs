@@ -928,7 +928,7 @@ impl CoreErlangGenerator {
             "        <'class'> when 'true' ->\n",
             format!("            '{class_name}'\n"),
             // respondsTo:
-            "        <'respondsTo'> when 'true' ->\n",
+            "        <'respondsTo:'> when 'true' ->\n",
             "            case Args of\n",
             format!(
                 "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
@@ -936,7 +936,7 @@ impl CoreErlangGenerator {
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // perform:
-            "        <'perform'> when 'true' ->\n",
+            "        <'perform:'> when 'true' ->\n",
             "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
             format!("            call '{mod_name}':'dispatch'(PerfSel, [], Self)\n"),
             // perform:withArguments:
@@ -976,7 +976,7 @@ impl CoreErlangGenerator {
 
         let doc = docvec![
             "'has_method'/1 = fun (Selector) ->\n",
-            "    case call 'lists':'member'(Selector, ['class', 'respondsTo', 'perform', 'perform:withArguments:']) of\n",
+            "    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'perform:', 'perform:withArguments:']) of\n",
             "        <'true'> when 'true' -> 'true'\n",
             "        <'false'> when 'true' ->\n",
             format!(
