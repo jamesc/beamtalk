@@ -354,9 +354,10 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the `code_change/3` callback for hot code reload.
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_code_change(
-        &mut self,
+        &self,
     ) -> Result<Document<'static>> {
         let doc = docvec![
             "'code_change'/3 = fun (_OldVsn, State, _Extra) ->",

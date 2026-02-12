@@ -71,10 +71,7 @@ impl CoreErlangGenerator {
     }
 
     /// Common eval module body shared by REPL and test codegen.
-    fn generate_eval_module_body(
-        &mut self,
-        expression: &Expression,
-    ) -> Result<Document<'static>> {
+    fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<Document<'static>> {
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");

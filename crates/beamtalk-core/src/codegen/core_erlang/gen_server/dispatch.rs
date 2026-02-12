@@ -25,9 +25,10 @@ impl CoreErlangGenerator {
     /// 'method_table'/0 = fun () ->
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_method_table(
-        &mut self,
+        &self,
         module: &Module,
     ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
@@ -94,9 +95,10 @@ impl CoreErlangGenerator {
     /// 'has_method'/1 = fun (Selector) ->
     ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_has_method(
-        &mut self,
+        &self,
         module: &Module,
     ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
@@ -175,7 +177,9 @@ impl CoreErlangGenerator {
     ///         {'error', {Type, Error}, State}
     /// ```
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(
+        &mut self,
+    ) -> Result<Document<'static>> {
         let module_name = &self.module_name;
 
         let doc = docvec![

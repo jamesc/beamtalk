@@ -268,9 +268,10 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
-        &mut self,
+        &self,
     ) -> Result<Document<'static>> {
         let hint_binary = Self::binary_string_literal("Use spawn instead");
         let doc = docvec![
@@ -310,9 +311,10 @@ impl CoreErlangGenerator {
     ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
     ///     call 'beamtalk_error':'raise'(Error2)
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
-        &mut self,
+        &self,
     ) -> Result<Document<'static>> {
         let hint_binary = Self::binary_string_literal("Use spawnWith: instead");
         let doc = docvec![
@@ -432,9 +434,10 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'superclass'/0 = fun () -> 'Actor'
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_superclass_function(
-        &mut self,
+        &self,
         module: &Module,
     ) -> Result<Document<'static>> {
         let superclass_atom = module

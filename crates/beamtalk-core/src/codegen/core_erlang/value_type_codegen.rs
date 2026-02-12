@@ -58,7 +58,10 @@ impl CoreErlangGenerator {
     /// - Methods are synchronous functions operating on maps
     /// - No state threading (value types are immutable)
     /// - Methods return new instances rather than mutating
-    pub(super) fn generate_value_type_module(&mut self, module: &Module) -> Result<Document<'static>> {
+    pub(super) fn generate_value_type_module(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         // BT-213: Set context to ValueType for this module
         self.context = CodeGenContext::ValueType;
 
@@ -278,8 +281,12 @@ impl CoreErlangGenerator {
         Ok(docvec![
             function_head,
             "\n",
-            format!("    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in\n"),
-            format!("    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '{selector}') in\n"),
+            format!(
+                "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', '{class_name}') in\n"
+            ),
+            format!(
+                "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, '{selector}') in\n"
+            ),
             "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
             hint_binary,
             ") in\n",
@@ -291,7 +298,13 @@ impl CoreErlangGenerator {
     /// Generates `new/0` for a collection type that returns an empty native value.
     #[allow(clippy::unnecessary_wraps)]
     fn generate_collection_new(empty_value: &str) -> Document<'static> {
-        docvec!["'new'/0 = fun () ->\n", "    ", empty_value.to_string(), "\n", "\n",]
+        docvec![
+            "'new'/0 = fun () ->\n",
+            "    ",
+            empty_value.to_string(),
+            "\n",
+            "\n",
+        ]
     }
 
     /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
@@ -460,7 +473,10 @@ impl CoreErlangGenerator {
     /// minimal stub that handles only `class` and `respondsTo:`, delegating
     /// everything else to the superclass.
     #[allow(clippy::too_many_lines, clippy::format_push_string)]
-    fn generate_primitive_dispatch(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
+    fn generate_primitive_dispatch(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
@@ -565,7 +581,9 @@ impl CoreErlangGenerator {
             // respondsTo:
             "        <'respondsTo:'> when 'true' ->\n",
             "            case Args of\n",
-            format!("                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"),
+            format!(
+                "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
+            ),
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // asString (conditional)
@@ -575,7 +593,9 @@ impl CoreErlangGenerator {
             "            []\n",
             // instVarAt:
             "        <'instVarAt:'> when 'true' ->\n",
-            format!("            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"),
+            format!(
+                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
+            ),
             "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'instVarAt:') in\n",
             "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
             iva_hint,
@@ -583,7 +603,9 @@ impl CoreErlangGenerator {
             "            call 'beamtalk_error':'raise'(IvaErr2)\n",
             // instVarAt:put:
             "        <'instVarAt:put:'> when 'true' ->\n",
-            format!("            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"),
+            format!(
+                "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
+            ),
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'instVarAt:put:') in\n",
             "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
             immutable_hint,
@@ -602,7 +624,9 @@ impl CoreErlangGenerator {
             method_branches,
             // Default case
             "        <_Other> when 'true' ->\n",
-            format!("            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"),
+            format!(
+                "            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"
+            ),
             "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
             "                    apply ExtFun(Args, Self)\n",
             "                <'not_found'> when 'true' ->\n",
@@ -814,7 +838,10 @@ impl CoreErlangGenerator {
     ///
     /// Returns `true` for all known selectors (class-defined + reflection +
     /// extensions + superclass methods via delegation).
-    fn generate_primitive_has_method(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
+    fn generate_primitive_has_method(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let superclass_mod = Self::superclass_module_name(class.superclass_name());
 
@@ -903,7 +930,9 @@ impl CoreErlangGenerator {
             // respondsTo:
             "        <'respondsTo'> when 'true' ->\n",
             "            case Args of\n",
-            format!("                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"),
+            format!(
+                "                <[RtSelector | _]> when 'true' -> call '{mod_name}':'has_method'(RtSelector)\n"
+            ),
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
             // perform:
@@ -917,7 +946,9 @@ impl CoreErlangGenerator {
             format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
             // Default: extension check, then superclass delegation
             "        <_Other> when 'true' ->\n",
-            format!("            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"),
+            format!(
+                "            case call 'beamtalk_extensions':'lookup'('{class_name}', Selector) of\n"
+            ),
             "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
             "                    apply ExtFun(Args, Self)\n",
             "                <'not_found'> when 'true' ->\n",
@@ -935,7 +966,10 @@ impl CoreErlangGenerator {
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
     /// then extensions, then delegates to superclass.
     #[allow(clippy::unnecessary_wraps)]
-    fn generate_minimal_has_method(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
+    fn generate_minimal_has_method(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let super_mod = Self::superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");

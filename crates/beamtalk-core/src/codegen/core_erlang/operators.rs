@@ -82,7 +82,11 @@ impl CoreErlangGenerator {
     /// Lists use `erlang:'++'`, strings use `iolist_to_binary`.
     /// When the receiver type is known at compile time (literal), we emit
     /// the optimal path directly. Otherwise, a runtime `is_list` check selects.
-    fn generate_concat_op(&mut self, left: &Expression, right: &Expression) -> Result<Document<'static>> {
+    fn generate_concat_op(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+    ) -> Result<Document<'static>> {
         use crate::ast::Literal;
 
         // Compile-time optimization: detect known types from AST
@@ -96,7 +100,13 @@ impl CoreErlangGenerator {
             // List concatenation: erlang:'++'
             let left_code = self.expression_doc(left)?;
             let right_code = self.expression_doc(right)?;
-            Ok(docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",])
+            Ok(docvec![
+                "call 'erlang':'++'(",
+                left_code,
+                ", ",
+                right_code,
+                ")",
+            ])
         } else if is_string {
             // String concatenation: iolist_to_binary
             let left_code = self.expression_doc(left)?;

@@ -33,7 +33,8 @@ impl CoreErlangGenerator {
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    pub(super) fn generate_literal(&mut self, lit: &Literal) -> Result<Document<'static>> {
+    #[allow(clippy::self_only_used_in_recursion)]
+    pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
         match lit {
             Literal::Integer(n) => Ok(docvec![format!("{n}")]),
             Literal::Float(f) => Ok(docvec![format!("{f}")]),
@@ -143,10 +144,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// ~{'name' => <<"Alice">>, 'age' => 30}~
     /// ```
-    pub(super) fn generate_map_literal(
-        &mut self,
-        pairs: &[MapPair],
-    ) -> Result<Document<'static>> {
+    pub(super) fn generate_map_literal(&mut self, pairs: &[MapPair]) -> Result<Document<'static>> {
         if pairs.is_empty() {
             return Ok(docvec!["~{}~"]);
         }
@@ -398,9 +396,16 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// call 'beamtalk_future':'await_forever'(Future)
     /// ```
-    pub(super) fn generate_await_forever(&mut self, future: &Expression) -> Result<Document<'static>> {
+    pub(super) fn generate_await_forever(
+        &mut self,
+        future: &Expression,
+    ) -> Result<Document<'static>> {
         let future_doc = self.expression_doc(future)?;
-        Ok(docvec!["call 'beamtalk_future':'await_forever'(", future_doc, ")"])
+        Ok(docvec![
+            "call 'beamtalk_future':'await_forever'(",
+            future_doc,
+            ")"
+        ])
     }
 
     /// Generates code for cascade expressions.

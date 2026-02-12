@@ -3,7 +3,7 @@
 
 //! Exception handling code generation (Block `on:do:` and `ensure:`).
 //!
-//! **DDD Compilation Context:** Code Generation 
+//! **DDD Compilation Context:** Code Generation
 //!
 //! Generates Core Erlang `try/catch` for `on:do:` and `try/after` for `ensure:`.
 //! These are structural intrinsics because they must wrap the block execution
@@ -339,9 +339,7 @@ impl CoreErlangGenerator {
             format!("StateAcc{try_final}")
         };
         // BT-483: Return {Result, State} from try body
-        docs.push(docvec![format!(
-            " {{{try_result_var}, {try_final_var}}} "
-        )]);
+        docs.push(docvec![format!(" {{{try_result_var}, {try_final_var}}} ")]);
 
         // Success: run cleanup starting from try body's state
         // BT-483: Extract Result and State from {Result, State} tuple using element/N
@@ -464,12 +462,8 @@ impl CoreErlangGenerator {
                         docs.push(docvec![
                             format!("let {tuple_var} = "),
                             expr_doc,
-                            format!(
-                                " in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "
-                            ),
-                            format!(
-                                "let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"
-                            ),
+                            format!(" in let {rv} = call 'erlang':'element'(1, {tuple_var}) in "),
+                            format!("let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
                         ]);
                         self.set_state_version(next_version);
                         result_var = rv;

@@ -1212,7 +1212,7 @@ mod tests {
 
     #[test]
     fn test_generate_literal_integer() {
-        let mut generator = CoreErlangGenerator::new("test");
+        let generator = CoreErlangGenerator::new("test");
         let lit = Literal::Integer(42);
         let doc = generator.generate_literal(&lit).unwrap();
         assert_eq!(doc.to_pretty_string(), "42");
@@ -1220,7 +1220,7 @@ mod tests {
 
     #[test]
     fn test_generate_literal_float() {
-        let mut generator = CoreErlangGenerator::new("test");
+        let generator = CoreErlangGenerator::new("test");
         let lit = Literal::Float(2.5);
         let doc = generator.generate_literal(&lit).unwrap();
         assert_eq!(doc.to_pretty_string(), "2.5");
@@ -1228,7 +1228,7 @@ mod tests {
 
     #[test]
     fn test_generate_literal_symbol() {
-        let mut generator = CoreErlangGenerator::new("test");
+        let generator = CoreErlangGenerator::new("test");
         let lit = Literal::Symbol("ok".into());
         let doc = generator.generate_literal(&lit).unwrap();
         assert_eq!(doc.to_pretty_string(), "'ok'");
@@ -1236,7 +1236,7 @@ mod tests {
 
     #[test]
     fn test_generate_literal_string() {
-        let mut generator = CoreErlangGenerator::new("test");
+        let generator = CoreErlangGenerator::new("test");
         let lit = Literal::String("hello".into());
         let doc = generator.generate_literal(&lit).unwrap();
         // Core Erlang binary syntax: #{segment, ...}#
@@ -1275,13 +1275,11 @@ mod tests {
         let output = doc.to_pretty_string();
         assert!(
             output.contains("iolist_to_binary"),
-            "Should use iolist_to_binary for string concatenation. Got: {}",
-            output
+            "Should use iolist_to_binary for string concatenation. Got: {output}",
         );
         assert!(
             output.contains("binary_to_list"),
-            "Should convert binaries to lists first. Got: {}",
-            output
+            "Should convert binaries to lists first. Got: {output}",
         );
     }
 
@@ -1294,8 +1292,7 @@ mod tests {
         let output = doc.to_pretty_string();
         assert!(
             output.contains("call 'erlang':'=:='"),
-            "Should use strict equality =:=. Got: {}",
-            output
+            "Should use strict equality =:=. Got: {output}",
         );
     }
 
@@ -1308,8 +1305,7 @@ mod tests {
         let output = doc.to_pretty_string();
         assert!(
             output.contains("call 'erlang':'/='"),
-            "Should use loose inequality /= (negation of ==). Got: {}",
-            output
+            "Should use loose inequality /= (negation of ==). Got: {output}",
         );
     }
 
@@ -1322,8 +1318,7 @@ mod tests {
         let output = doc.to_pretty_string();
         assert!(
             output.contains("call 'erlang':'=='"),
-            "Should use loose equality ==. Got: {}",
-            output
+            "Should use loose equality ==. Got: {output}",
         );
         assert_eq!(output, "call 'erlang':'=='(5, 5)");
     }
@@ -1485,7 +1480,9 @@ end
         let receiver = Expression::Identifier(Identifier::new("counter", Span::new(0, 7)));
         let selector = MessageSelector::Unary("increment".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
@@ -1515,7 +1512,9 @@ end
             Expression::Literal(Literal::String("x".into()), Span::new(19, 22)),
         ];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
@@ -1536,7 +1535,9 @@ end
         let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
         let selector = MessageSelector::Unary("await".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         // Special case: await uses beamtalk_future:await(), not the async protocol
         assert!(
@@ -1561,7 +1562,9 @@ end
         }]);
         let timeout = Expression::Literal(Literal::Integer(5000), Span::new(16, 20));
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[timeout]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[timeout])
+            .unwrap();
         let output = doc.to_pretty_string();
         // Should call beamtalk_future:await/2 with timeout
         assert!(
@@ -1586,7 +1589,9 @@ end
         let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
         let selector = MessageSelector::Unary("awaitForever".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         // Should call beamtalk_future:await_forever/1
         assert!(
@@ -1608,7 +1613,9 @@ end
         let selector = MessageSelector::Binary("+".into());
         let arguments = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         // Binary ops use erlang's built-in operators - synchronous
         assert!(
@@ -1637,7 +1644,9 @@ end
         };
 
         let outer_selector = MessageSelector::Unary("increment".into());
-        let doc = generator.generate_message_send(&inner_send, &outer_selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&inner_send, &outer_selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
 
         // BT-430: Unified dispatch generates nested beamtalk_message_dispatch:send calls
@@ -1660,7 +1669,9 @@ end
         let selector = MessageSelector::Unary("spawn".into());
         let arguments = vec![];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(output.contains("call 'bt@counter':'spawn'()"));
     }
@@ -1680,7 +1691,9 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(8, 18))]);
         let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         // Should call spawn/1 with the argument
         assert!(
@@ -2113,7 +2126,9 @@ end
         let receiver = Expression::Block(block);
         let selector = MessageSelector::Unary("value".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("let _Fun1 = fun () -> 42 in apply _Fun1 ()"),
@@ -2149,7 +2164,9 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]);
         let arguments = vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("let _Fun"),
@@ -2192,7 +2209,9 @@ end
             Expression::Literal(Literal::Integer(4), Span::new(28, 29)),
         ];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("apply"),
@@ -2236,7 +2255,9 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(14, 24))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
@@ -2280,7 +2301,9 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileFalse:", Span::new(7, 18))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
@@ -2310,7 +2333,9 @@ end
         let receiver = Expression::Block(body_block);
         let selector = MessageSelector::Unary("repeat".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
@@ -2340,7 +2365,9 @@ end
         let receiver = Expression::Identifier(Identifier::new("actor", Span::new(0, 5)));
         let selector = MessageSelector::Unary("increment".into());
 
-        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("beamtalk_message_dispatch':'send'("),
@@ -2384,7 +2411,9 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
         full_output.push_str(&doc.to_pretty_string());
 
         full_output.push_str("\n\nend\n");
@@ -2414,8 +2443,7 @@ end
                 if !result.status.success() {
                     let stderr = String::from_utf8_lossy(&result.stderr);
                     panic!(
-                        "erlc compilation failed.\n\nGenerated Core Erlang:\n{}\n\nerlc error:\n{}",
-                        full_output, stderr
+                        "erlc compilation failed.\n\nGenerated Core Erlang:\n{full_output}\n\nerlc error:\n{stderr}",
                     );
                 }
             }
@@ -2505,25 +2533,18 @@ end
         // Symbols become atoms in Core Erlang
         assert!(
             output.contains("'name'"),
-            "Output should contain 'name': {}",
-            output
+            "Output should contain 'name': {output}",
         );
         // Strings are represented as binaries with character codes
         assert!(
             output.contains("#<65>"),
-            "Output should contain character code for 'A': {}",
-            output
+            "Output should contain character code for 'A': {output}",
         );
         assert!(
             output.contains("'age'"),
-            "Output should contain 'age': {}",
-            output
+            "Output should contain 'age': {output}",
         );
-        assert!(
-            output.contains("30"),
-            "Output should contain 30: {}",
-            output
-        );
+        assert!(output.contains("30"), "Output should contain 30: {output}",);
     }
 
     #[test]

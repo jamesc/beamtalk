@@ -152,8 +152,7 @@ impl CoreErlangGenerator {
 
                     // `to:do:` - range iteration (structural intrinsic from Integer)
                     "to:do:" if arguments.len() == 2 => {
-                        let doc =
-                            self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        let doc = self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
                         Ok(Some(doc))
                     }
 
@@ -170,8 +169,7 @@ impl CoreErlangGenerator {
 
                     // `on:do:` - exception handling (try/catch with class matching)
                     "on:do:" if arguments.len() == 2 => {
-                        let doc =
-                            self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                        let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
                         Ok(Some(doc))
                     }
 

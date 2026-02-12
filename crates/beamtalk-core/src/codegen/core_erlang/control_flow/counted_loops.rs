@@ -312,8 +312,7 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
         ]];
 
-        let (body_doc, final_state_version) =
-            self.generate_to_do_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) = self.generate_to_do_body_with_threading(body, &[])?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
@@ -402,9 +401,7 @@ impl CoreErlangGenerator {
                     docs.push(docvec![
                         format!("let {tuple_var} = "),
                         expr_code,
-                        format!(
-                            " in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in "
-                        ),
+                        format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in "),
                     ]);
                 } else {
                     // Not last, or there are direct field assignments that update state
@@ -564,8 +561,7 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
         ]];
 
-        let (body_doc, final_state_version) =
-            self.generate_to_do_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) = self.generate_to_do_body_with_threading(body, &[])?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()

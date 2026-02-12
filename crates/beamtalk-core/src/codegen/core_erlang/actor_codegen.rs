@@ -294,7 +294,10 @@ impl CoreErlangGenerator {
     /// Each sealed method gets a `'__sealed_{selector}'/N` function that
     /// can be called directly from self-sends, bypassing both `safe_dispatch/3`
     /// and the `dispatch/4` case selector matching.
-    fn generate_sealed_method_functions_doc(&mut self, module: &Module) -> Result<Document<'static>> {
+    fn generate_sealed_method_functions_doc(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
             return Ok(Document::String(String::new()));
         };

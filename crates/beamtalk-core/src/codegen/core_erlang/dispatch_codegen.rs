@@ -58,10 +58,7 @@ impl CoreErlangGenerator {
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
     /// Uses `expression_doc` for each argument, joining with commas.
-    fn capture_argument_list_doc(
-        &mut self,
-        arguments: &[Expression],
-    ) -> Result<Document<'static>> {
+    fn capture_argument_list_doc(&mut self, arguments: &[Expression]) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
@@ -138,9 +135,7 @@ impl CoreErlangGenerator {
 
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
-        if let Some(doc) =
-            self.try_generate_protoobject_message(receiver, selector, arguments)?
-        {
+        if let Some(doc) = self.try_generate_protoobject_message(receiver, selector, arguments)? {
             return Ok(doc);
         }
 
@@ -174,9 +169,7 @@ impl CoreErlangGenerator {
         }
 
         // BT-412: Self-sends in class methods route through class_send
-        if let Some(doc) =
-            self.try_handle_class_method_self_send(receiver, selector, arguments)?
-        {
+        if let Some(doc) = self.try_handle_class_method_self_send(receiver, selector, arguments)? {
             return Ok(doc);
         }
 
@@ -471,7 +464,10 @@ impl CoreErlangGenerator {
     /// it's discarded since this is used for non-last expressions in block bodies.
     ///
     /// Uses Document/docvec! (ADR 0018) for composable rendering.
-    pub(super) fn generate_self_dispatch_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(super) fn generate_self_dispatch_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         if let Expression::MessageSend {
             selector,
             arguments,
@@ -789,7 +785,10 @@ impl CoreErlangGenerator {
     ///
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
-    pub(super) fn generate_field_assignment_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(super) fn generate_field_assignment_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
@@ -928,7 +927,11 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// Returns a `CompiledMethod` map with selector, source, and arity metadata.
-    fn generate_method_lookup(&mut self, class_name: &str, arguments: &[Expression]) -> Result<Document<'static>> {
+    fn generate_method_lookup(
+        &mut self,
+        class_name: &str,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
         if arguments.len() != 1 {
             return Err(CodeGenError::Internal(format!(
                 ">> operator requires exactly one argument, got {}",
