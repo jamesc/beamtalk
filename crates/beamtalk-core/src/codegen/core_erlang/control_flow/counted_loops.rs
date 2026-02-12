@@ -133,7 +133,7 @@ impl CoreErlangGenerator {
         let prev_state = self.current_state_var();
         self.write_document(&docvec![
             format!(" apply 'repeat'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
-            "<'false'> when 'true' -> StateAcc ",
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
             "end ",
             format!("in apply 'repeat'/2 (1, {prev_state})"),
         ]);
@@ -178,14 +178,19 @@ impl CoreErlangGenerator {
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
                 self.generate_local_var_assignment_in_loop(expr)?;
             } else if is_last && !has_direct_field_assignments {
-                // BT-478: Last expression with no direct field assignments in body.
+                // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
-                // Bind the nested construct's returned state to the next StateAcc.
+                // Nested constructs return {Result, State} — extract State via element(2).
                 let next_version = self.state_version() + 1;
                 let next_var = format!("StateAcc{next_version}");
+                let tuple_var = format!("_NestTuple{next_version}");
                 let expr_code = self.capture_expression(expr)?;
                 self.set_state_version(next_version);
-                self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in"]);
+                self.write_document(&docvec![
+                    format!("let {tuple_var} = "),
+                    expr_code,
+                    format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                ]);
             } else {
                 let expr_code = self.capture_expression(expr)?;
                 self.write_document(&docvec!["let _ = ", expr_code, " in"]);
@@ -316,7 +321,7 @@ impl CoreErlangGenerator {
         let prev_state = self.current_state_var();
         self.write_document(&docvec![
             format!(" apply 'loop'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
-            "<'false'> when 'true' -> StateAcc ",
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
             "end ",
             format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
         ]);
@@ -372,21 +377,25 @@ impl CoreErlangGenerator {
             } else {
                 // Non-assignment expression (could be a nested control flow construct)
                 if is_last && !has_direct_field_assignments {
-                    // BT-478: Last expression with no direct field assignments in body.
+                    // BT-478/BT-483: Last expression with no direct field assignments in body.
                     // This means mutations come from nested constructs (e.g., inner to:do:).
-                    // The nested construct returns the updated StateAcc, so bind it.
+                    // Nested constructs return {Result, State} — extract State via element(2).
                     //
                     // IMPORTANT: Compute the next var name WITHOUT incrementing state_version
                     // first, so the inner expression generates code that reads from the
                     // CURRENT StateAcc, not the binding we're about to create.
                     let next_version = self.state_version() + 1;
                     let next_var = format!("StateAcc{next_version}");
+                    let tuple_var = format!("_NestTuple{next_version}");
                     let expr_code = self.capture_expression(expr)?;
                     // NOW increment state version
                     self.set_state_version(next_version);
-                    // Write " in " — the caller's recursive apply becomes the let body:
-                    // "let StateAcc1 = <inner loop> in apply 'loop'/2 (I+1, StateAcc1)"
-                    self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in ",]);
+                    // Write: let _NestTupleN = <inner loop> in let StateAccN = element(2, _NestTupleN) in
+                    self.write_document(&docvec![
+                        format!("let {tuple_var} = "),
+                        expr_code,
+                        format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in "),
+                    ]);
                 } else {
                     // Not last, or there are direct field assignments that update state
                     let expr_code = self.capture_expression(expr)?;
@@ -558,7 +567,7 @@ impl CoreErlangGenerator {
         let prev_state = self.current_state_var();
         self.write_document(&docvec![
             format!(" apply 'loop'/2 (call 'erlang':'+'(I, {step_var}), {final_state_var}) "),
-            "<'false'> when 'true' -> StateAcc ",
+            "<'false'> when 'true' -> {'nil', StateAcc} ",
             "end ",
             format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
         ]);

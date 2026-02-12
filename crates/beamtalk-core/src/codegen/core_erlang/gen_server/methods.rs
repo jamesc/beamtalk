@@ -177,11 +177,20 @@ impl CoreErlangGenerator {
                     // without wrapping in a reply tuple (would be unreachable code)
                     self.generate_expression(expr)?;
                 } else if self.control_flow_has_mutations(expr) {
-                    // BT-410: Last expression is control flow with field mutations.
-                    // The mutation variant returns the new state, not a result value.
-                    write!(self.output, "let _NewState = ")?;
+                    // BT-483: Last expression is control flow with field mutations.
+                    // The mutation variant returns {Result, State} tuple.
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    write!(self.output, "let {tuple_var} = ")?;
                     self.generate_expression(expr)?;
-                    write!(self.output, " in {{'reply', 'nil', _NewState}}")?;
+                    write!(
+                        self.output,
+                        " in let _Result = call 'erlang':'element'(1, {tuple_var})"
+                    )?;
+                    write!(
+                        self.output,
+                        " in let _NewState = call 'erlang':'element'(2, {tuple_var})"
+                    )?;
+                    write!(self.output, " in {{'reply', _Result, _NewState}}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -192,26 +201,22 @@ impl CoreErlangGenerator {
                 // Field assignment not at end: generate WITHOUT closing the value
                 self.generate_field_assignment_open(expr)?;
             } else if self.control_flow_has_mutations(expr) {
-                // Control flow that actually threads state: bind result to the next state variable
-                //
-                // We need to:
-                // 1. Write "let State1 = " (using NEXT state name)
-                // 2. Generate expression which uses CURRENT state (State)
-                // 3. Write " in "
-                //
-                // The trick: calculate next state name without incrementing yet,
-                // generate expression (which uses current state), then increment.
+                // BT-483: Control flow that threads state returns {Result, State} tuple.
+                // Extract State for subsequent expressions.
+                let tuple_var = self.fresh_temp_var("Tuple");
                 let next_version = self.state_version() + 1;
                 let new_state = if next_version == 1 {
                     "State1".to_string()
                 } else {
                     format!("State{next_version}")
                 };
-                write!(self.output, "let {new_state} = ")?;
+                write!(self.output, "let {tuple_var} = ")?;
                 self.generate_expression(expr)?;
-                // Now actually increment the version so subsequent code uses State1
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                )?;
                 let _ = self.next_state_var();
-                write!(self.output, " in ")?;
             } else {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
@@ -291,11 +296,20 @@ impl CoreErlangGenerator {
                     // without wrapping in a reply tuple (would be unreachable code)
                     self.generate_expression(expr)?;
                 } else if self.control_flow_has_mutations(expr) {
-                    // BT-410: Last expression is control flow with field mutations.
-                    // The mutation variant returns the new state, not a result value.
-                    write!(self.output, "let _NewState = ")?;
+                    // BT-483: Last expression is control flow with field mutations.
+                    // The mutation variant returns {Result, State} tuple.
+                    let tuple_var = self.fresh_temp_var("Tuple");
+                    write!(self.output, "let {tuple_var} = ")?;
                     self.generate_expression(expr)?;
-                    write!(self.output, " in {{'reply', 'nil', _NewState}}")?;
+                    write!(
+                        self.output,
+                        " in let _Result = call 'erlang':'element'(1, {tuple_var})"
+                    )?;
+                    write!(
+                        self.output,
+                        " in let _NewState = call 'erlang':'element'(2, {tuple_var})"
+                    )?;
+                    write!(self.output, " in {{'reply', _Result, _NewState}}")?;
                 } else {
                     // Regular last expression: bind to Result and reply
                     write!(self.output, "let _Result = ")?;
@@ -382,18 +396,22 @@ impl CoreErlangGenerator {
                     " in let {new_state} = call 'erlang':'element'(3, {super_result_var}) in "
                 )?;
             } else if self.control_flow_has_mutations(expr) {
-                // BT-410: Control flow with field mutations (on:do:, ensure:, etc.)
-                // Bind the returned state to the next state variable.
+                // BT-483: Control flow with field mutations returns {Result, State} tuple.
+                // Extract State for subsequent expressions.
+                let tuple_var = self.fresh_temp_var("Tuple");
                 let next_version = self.state_version() + 1;
                 let new_state = if next_version == 1 {
                     "State1".to_string()
                 } else {
                     format!("State{next_version}")
                 };
-                write!(self.output, "let {new_state} = ")?;
+                write!(self.output, "let {tuple_var} = ")?;
                 self.generate_expression(expr)?;
+                write!(
+                    self.output,
+                    " in let {new_state} = call 'erlang':'element'(2, {tuple_var}) in "
+                )?;
                 let _ = self.next_state_var();
-                write!(self.output, " in ")?;
             } else {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
@@ -831,7 +849,10 @@ impl CoreErlangGenerator {
     /// 2. The block argument contains field writes that need threading
     ///
     /// This prevents binding non-state return values (like `ok` or `nil`) to `StateN`.
-    fn control_flow_has_mutations(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn control_flow_has_mutations(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         // First check if it's a potential state-threading construct
         if !Self::is_state_threading_control_flow(expr) {
             return false;
