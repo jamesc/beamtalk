@@ -187,8 +187,11 @@ all_children_alive_test() ->
     Config0 = test_config(),
     Config = Config0#{tcp_port => 0},
 
-    %% Start the workspace supervisor
-    {ok, Sup} = beamtalk_workspace_sup:start_link(Config),
+    %% Handle already-started supervisor (registered name)
+    {Sup, WeStarted} = case beamtalk_workspace_sup:start_link(Config) of
+        {ok, Pid} -> {Pid, true};
+        {error, {already_started, Pid}} -> {Pid, false}
+    end,
 
     try
         %% Get all children
@@ -218,8 +221,13 @@ all_children_alive_test() ->
             ?assert(is_process_alive(ChildPid))
         end, Children)
     after
-        %% Guaranteed cleanup even on assertion failure
-        exit(Sup, shutdown),
-        receive {'EXIT', Sup, _} -> ok after 1000 -> ok end,
+        %% Only shut down supervisor if we started it
+        case WeStarted of
+            true ->
+                exit(Sup, shutdown),
+                receive {'EXIT', Sup, _} -> ok after 1000 -> ok end;
+            false ->
+                ok
+        end,
         process_flag(trap_exit, OldTrap)
     end.
