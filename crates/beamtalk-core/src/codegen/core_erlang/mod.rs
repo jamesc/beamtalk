@@ -243,15 +243,13 @@ pub fn generate(module: &Module) -> Result<String> {
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
 
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        let doc = generator.generate_actor_module(module)?;
-        generator.write_document(&doc);
+    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?
     } else {
-        let doc = generator.generate_value_type_module(module)?;
-        generator.write_document(&doc);
-    }
+        generator.generate_value_type_module(module)?
+    };
 
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Generates Core Erlang code with a specified module name.
@@ -289,15 +287,13 @@ pub fn generate_with_name_and_source(
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
 
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        let doc = generator.generate_actor_module(module)?;
-        generator.write_document(&doc);
+    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?
     } else {
-        let doc = generator.generate_value_type_module(module)?;
-        generator.write_document(&doc);
-    }
+        generator.generate_value_type_module(module)?
+    };
 
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Generates Core Erlang code with a specified module name and primitive bindings.
@@ -332,15 +328,13 @@ pub fn generate_with_bindings(
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
 
     // BT-213: Route based on whether class is actor or value type
-    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        let doc = generator.generate_actor_module(module)?;
-        generator.write_document(&doc);
+    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?
     } else {
-        let doc = generator.generate_value_type_module(module)?;
-        generator.write_document(&doc);
-    }
+        generator.generate_value_type_module(module)?
+    };
 
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Generates Core Erlang for a REPL expression.
@@ -362,8 +356,7 @@ pub fn generate_with_bindings(
 pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
     let doc = generator.generate_repl_module(expression)?;
-    generator.write_document(&doc);
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Generates Core Erlang for a test expression (no workspace bindings).
@@ -378,8 +371,7 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
     let mut generator = CoreErlangGenerator::new(module_name);
     let doc = generator.generate_test_module(expression)?;
-    generator.write_document(&doc);
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Generates Core Erlang code with workspace mode enabled.
@@ -420,15 +412,13 @@ pub fn generate_with_workspace_and_source(
 
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
 
-    if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        let doc = generator.generate_actor_module(module)?;
-        generator.write_document(&doc);
+    let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
+        generator.generate_actor_module(module)?
     } else {
-        let doc = generator.generate_value_type_module(module)?;
-        generator.write_document(&doc);
-    }
+        generator.generate_value_type_module(module)?
+    };
 
-    Ok(generator.output)
+    Ok(doc.to_pretty_string())
 }
 
 /// Code generation context (BT-213).
@@ -1500,9 +1490,7 @@ end
         let selector = MessageSelector::Unary("increment".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
             output.contains("beamtalk_message_dispatch':'send'("),
@@ -1532,9 +1520,7 @@ end
         ];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
         assert!(
             output.contains("beamtalk_message_dispatch':'send'("),
@@ -1555,9 +1541,7 @@ end
         let selector = MessageSelector::Unary("await".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // Special case: await uses beamtalk_future:await(), not the async protocol
         assert!(
             output.contains("beamtalk_future':'await'("),
@@ -1582,9 +1566,7 @@ end
         let timeout = Expression::Literal(Literal::Integer(5000), Span::new(16, 20));
 
         let doc = generator.generate_message_send(&receiver, &selector, &[timeout]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // Should call beamtalk_future:await/2 with timeout
         assert!(
             output.contains("beamtalk_future':'await'("),
@@ -1609,9 +1591,7 @@ end
         let selector = MessageSelector::Unary("awaitForever".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // Should call beamtalk_future:await_forever/1
         assert!(
             output.contains("beamtalk_future':'await_forever'("),
@@ -1633,9 +1613,7 @@ end
         let arguments = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         // Binary ops use erlang's built-in operators - synchronous
         assert!(
             output.contains("erlang':'+'("),
@@ -1664,9 +1642,7 @@ end
 
         let outer_selector = MessageSelector::Unary("increment".into());
         let doc = generator.generate_message_send(&inner_send, &outer_selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
 
         // BT-430: Unified dispatch generates nested beamtalk_message_dispatch:send calls
         let send_count = output.matches("beamtalk_message_dispatch':'send'(").count();
@@ -1689,8 +1665,8 @@ end
         let arguments = vec![];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-        assert!(generator.output.contains("call 'bt@counter':'spawn'()"));
+        let output = doc.to_pretty_string();
+        assert!(output.contains("call 'bt@counter':'spawn'()"));
     }
 
     #[test]
@@ -1709,18 +1685,16 @@ end
         let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
+        let output = doc.to_pretty_string();
         // Should call spawn/1 with the argument
         assert!(
-            generator.output.contains("call 'bt@counter':'spawn'(42)"),
-            "spawnWith: should generate spawn/1 call. Got: {}",
-            generator.output
+            output.contains("call 'bt@counter':'spawn'(42)"),
+            "spawnWith: should generate spawn/1 call. Got: {output}",
         );
         // Should NOT create a future (spawn is synchronous)
         assert!(
-            !generator.output.contains("beamtalk_future"),
-            "spawnWith: should NOT create futures. Got: {}",
-            generator.output
+            !output.contains("beamtalk_future"),
+            "spawnWith: should NOT create futures. Got: {output}",
         );
     }
 
@@ -2144,9 +2118,7 @@ end
         let selector = MessageSelector::Unary("value".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("let _Fun1 = fun () -> 42 in apply _Fun1 ()"),
             "Should generate let binding with apply. Got: {output}"
@@ -2182,9 +2154,7 @@ end
         let arguments = vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("let _Fun"),
             "Should use let binding for block evaluation. Got: {output}"
@@ -2227,9 +2197,7 @@ end
         ];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("apply"),
             "Should use apply for block evaluation. Got: {output}"
@@ -2273,9 +2241,7 @@ end
         let arguments = vec![Expression::Block(body_block)];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
             "whileTrue: should generate a letrec for looping. Got: {output}"
@@ -2319,9 +2285,7 @@ end
         let arguments = vec![Expression::Block(body_block)];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
             "whileFalse: should generate a letrec for looping. Got: {output}"
@@ -2351,9 +2315,7 @@ end
         let selector = MessageSelector::Unary("repeat".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("letrec"),
             "repeat should generate a letrec for looping. Got: {output}"
@@ -2383,9 +2345,7 @@ end
         let selector = MessageSelector::Unary("increment".into());
 
         let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
-        generator.write_document(&doc);
-
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
         assert!(
             output.contains("beamtalk_message_dispatch':'send'("),
             "Non-block unary messages should use unified dispatch. Got: {output}"
@@ -2403,10 +2363,9 @@ end
         let mut generator = CoreErlangGenerator::new("test_while_loop");
 
         // Start module
-        generator
-            .output
-            .push_str("module 'test_while_loop' ['main'/0]\n  attributes []\n\n");
-        generator.output.push_str("'main'/0 = fun () ->\n    ");
+        let mut full_output =
+            String::from("module 'test_while_loop' ['main'/0]\n  attributes []\n\n");
+        full_output.push_str("'main'/0 = fun () ->\n    ");
 
         // Generate: [true] whileTrue: [42]
         // This creates a loop that runs once (returns nil after first iteration)
@@ -2430,15 +2389,15 @@ end
         let arguments = vec![Expression::Block(body_block)];
 
         let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
-        generator.write_document(&doc);
+        full_output.push_str(&doc.to_pretty_string());
 
-        generator.output.push_str("\n\nend\n");
+        full_output.push_str("\n\nend\n");
 
         // Write to temp file
         let temp_dir = std::env::temp_dir();
         let core_file = temp_dir.join("test_while_loop.core");
         let mut file = std::fs::File::create(&core_file).expect("Failed to create temp file");
-        file.write_all(generator.output.as_bytes())
+        file.write_all(full_output.as_bytes())
             .expect("Failed to write Core Erlang");
 
         // Try to compile with erlc
@@ -2460,7 +2419,7 @@ end
                     let stderr = String::from_utf8_lossy(&result.stderr);
                     panic!(
                         "erlc compilation failed.\n\nGenerated Core Erlang:\n{}\n\nerlc error:\n{}",
-                        generator.output, stderr
+                        full_output, stderr
                     );
                 }
             }
@@ -2495,13 +2454,12 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let doc = generator
+        let _doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
-        generator.write_document(&doc);
 
-        // Clear output for the next test
-        generator.output.clear();
+        // generate_message_send registers temp vars as a side effect;
+        // the document output is discarded since we only need the scope state.
 
         // Now push a scope with a user variable named "Loop"
         generator.push_scope();
@@ -2654,8 +2612,7 @@ end
         let doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
-        generator.write_document(&doc);
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
 
         // BT-430: Unified dispatch
         assert!(
@@ -2685,8 +2642,7 @@ end
         let doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
-        generator.write_document(&doc);
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
 
         assert!(
             output.contains("beamtalk_message_dispatch") && output.contains("'at:put:'"),
@@ -2708,8 +2664,7 @@ end
         let doc = generator
             .generate_message_send(&receiver, &selector, &[])
             .unwrap();
-        generator.write_document(&doc);
-        let output = &generator.output;
+        let output = doc.to_pretty_string();
 
         assert!(
             output.contains("beamtalk_message_dispatch") && output.contains("'size'"),
