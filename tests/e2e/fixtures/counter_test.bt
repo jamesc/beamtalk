@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// CounterTest - TestCase subclass for testing Counter actor
+// Demonstrates BUnit test framework (ADR 0014 Phase 2)
+
+@load tests/e2e/fixtures/counter.bt
+
+Object subclass: CounterTest
+
+  setUp =>
+    self.counter := Counter spawn
+
+  tearDown =>
+    // Cleanup would go here if needed
+    nil
+
+  testIncrement =>
+    future := self.counter increment
+    result := future await
+    self assert: result equals: 1
+
+  testDecrement =>
+    self.counter increment await
+    result := self.counter decrement await
+    self assert: result equals: 0
+
+  testInitialValue =>
+    result := self.counter getValue await
+    self assert: result equals: 0
+
+  testMultipleIncrements =>
+    3 timesRepeat: [self.counter increment await]
+    result := self.counter getValue await
+    self assert: result equals: 3

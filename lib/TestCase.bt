@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TestCase - Base class for SUnit-style test cases
+//
+// ADR 0014 Phase 2: TestCase classes enable idiomatic Smalltalk-style testing.
+//
+// Usage:
+//   Object subclass: CounterTest
+//     setUp =>
+//       self.counter := Counter spawn
+//
+//     testIncrement =>
+//       self.counter increment await
+//       self assert: (self.counter getValue await) equals: 1
+//
+//   CounterTest runAll  // Run all test* methods
+//   CounterTest run: #testIncrement  // Run single test
+
+Object subclass: TestCase
+
+  // Lifecycle hooks — override in subclasses
+  setUp => nil
+  tearDown => nil
+
+  // Assertion methods
+  assert: condition =>
+    condition ifFalse: [
+      self signalFailure: 'Assertion failed'
+    ]
+
+  assert: actual equals: expected =>
+    (actual = expected) ifFalse: [
+      self signalFailure: 'Expected: ' ++ expected printString ++ ', but got: ' ++ actual printString
+    ]
+
+  deny: condition =>
+    condition ifTrue: [
+      self signalFailure: 'Assertion failed: expected false'
+    ]
+
+  should: aBlock raise: exceptionClass =>
+    [
+      aBlock value.
+      self signalFailure: 'Expected ' ++ exceptionClass printString ++ ' to be raised'
+    ] on: exceptionClass do: [:ex | ^true]
+
+  signalFailure: message => @primitive 'signalFailure:'
+
+  // Class-side methods for running tests
+  class runAll => @primitive 'runAll'
+  class run: testName => @primitive 'run:'

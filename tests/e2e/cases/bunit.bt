@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for BUnit REPL integration (BT-440 / ADR 0014 Phase 2)
+//
+// Tests TestCase class-side methods:
+//   - runAll: discover and run all test* methods
+//   - run:    run a single test method by name
+//
+// These tests verify that the REPL can load TestCase subclasses and
+// execute tests interactively.
+
+// ===========================================================================
+// LOAD TEST CLASS
+// ===========================================================================
+
+// Load CounterTest class (includes Counter actor via @load)
+@load tests/e2e/fixtures/counter_test.bt
+
+// Verify CounterTest class exists
+CounterTest
+// => CounterTest
+
+// ===========================================================================
+// RUN ALL TESTS
+// ===========================================================================
+
+// Run all test* methods in CounterTest
+CounterTest runAll
+// => _
+
+// Note: Output format is "N tests, N passed ✓ (X.Xs)"
+// We use wildcard (_) because exact timing varies
+
+// ===========================================================================
+// RUN SINGLE TEST
+// ===========================================================================
+
+// Run a single test method by name (as symbol)
+CounterTest run: #testIncrement
+// => _
+
+// Run another single test
+CounterTest run: #testInitialValue
+// => _
+
+// ===========================================================================
+// FUTURE: Test failure output (not in initial implementation)
+// ===========================================================================
+
+// When a test fails, the output should show:
+//   FAIL: testName
+//     Expected: X, but got: Y
+//
+// This will be tested once we have intentionally failing test fixtures
