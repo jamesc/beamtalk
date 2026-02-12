@@ -1,7 +1,7 @@
 # ADR 0002: Use Erlang Comparison Operators Directly
 
 ## Status
-Accepted
+Implemented (2026-02-08)
 
 ## Context
 

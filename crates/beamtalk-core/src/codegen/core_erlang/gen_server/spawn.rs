@@ -173,6 +173,9 @@ impl CoreErlangGenerator {
         };
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
+        // BT-476: This is the single source of truth for spawnWith: argument validation.
+        // The runtime (beamtalk_object_class.erl handle_call({spawn, Args})) delegates
+        // validation to this generated code for both static and dynamic dispatch paths.
         let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
         let doc = docvec![
             "'spawn'/1 = fun (InitArgs) ->",
