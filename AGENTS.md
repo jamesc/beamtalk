@@ -1153,11 +1153,11 @@ Query Linear directly for up-to-date Epic status — don't maintain static lists
 
 ```bash
 # Active epics (Backlog, Todo, In Progress)
-streamlinear-cli search --label Epic --state Backlog
-streamlinear-cli search --label Epic --state "In Progress"
+streamlinear-cli search "Epic:" --state Backlog
+streamlinear-cli search "Epic:" --state "In Progress"
 
 # Completed epics
-streamlinear-cli search --label Epic --state Done
+streamlinear-cli search "Epic:" --state Done
 
 # Get details on a specific epic
 streamlinear-cli get BT-XXX
