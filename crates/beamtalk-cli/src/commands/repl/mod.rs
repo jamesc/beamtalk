@@ -118,6 +118,8 @@ struct ReplResponse {
     docs: Option<String>,
     /// Number of actors affected by reload (BT-266)
     affected_actors: Option<u32>,
+    /// Number of actors that failed code migration (BT-266)
+    migration_failures: Option<u32>,
 }
 
 impl ReplResponse {
@@ -190,26 +192,26 @@ fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
     }
     let label = if let Some(ref classes) = response.classes {
         if classes.is_empty() {
-            module_name
-                .map(|n| format!("Reloaded {n}"))
-                .unwrap_or_else(|| "Reloaded".to_string())
+            module_name.map_or_else(|| "Reloaded".to_string(), |n| format!("Reloaded {n}"))
         } else {
             format!("Reloaded {}", classes.join(", "))
         }
     } else {
-        module_name
-            .map(|n| format!("Reloaded {n}"))
-            .unwrap_or_else(|| "Reloaded".to_string())
+        module_name.map_or_else(|| "Reloaded".to_string(), |n| format!("Reloaded {n}"))
     };
-    if let Some(count) = response.affected_actors {
-        if count > 0 {
+    match (response.affected_actors, response.migration_failures) {
+        (Some(count), Some(failures)) if count > 0 && failures > 0 => {
             let word = if count == 1 { "actor" } else { "actors" };
-            println!("{label} ({count} running {word})");
-        } else {
-            println!("{label}");
+            println!("{label} ({count} {word} updated, {failures} failed)");
+            eprintln!(
+                "Warning: {failures} actor(s) failed code migration. Consider restarting them with :kill"
+            );
         }
-    } else {
-        println!("{label}");
+        (Some(count), _) if count > 0 => {
+            let word = if count == 1 { "actor" } else { "actors" };
+            println!("{label} ({count} {word} updated)");
+        }
+        _ => println!("{label}"),
     }
 }
 
@@ -456,9 +458,7 @@ pub fn run(
                         }
                         continue;
                     }
-                    _ if line.starts_with(":reload ")
-                        || line.starts_with(":r ") =>
-                    {
+                    _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
                         let module_name = if line.starts_with(":reload ") {
                             line.strip_prefix(":reload ").unwrap().trim()
                         } else {

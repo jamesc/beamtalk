@@ -70,3 +70,20 @@ code_change_handles_various_extra_test() ->
     ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, [])),
     ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, #{config => value})),
     ?assertMatch({ok, State}, beamtalk_hot_reload:code_change(v1, State, {migration, data})).
+
+%%====================================================================
+%% Tests for trigger_code_change/2
+%%====================================================================
+
+trigger_code_change_empty_pids_test() ->
+    {ok, Upgraded, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, []),
+    ?assertEqual(0, Upgraded),
+    ?assertEqual([], Failures).
+
+trigger_code_change_dead_pid_test() ->
+    %% A dead PID should result in a failure (noproc)
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(10),
+    {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, [DeadPid]),
+    ?assertEqual(1, length(Failures)),
+    [{DeadPid, _Reason}] = Failures.

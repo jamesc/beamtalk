@@ -133,7 +133,7 @@ do_eval(Expression, State) ->
 
 %% @doc Load a Beamtalk file and register its classes.
 -spec handle_load(string(), beamtalk_repl_state:state()) -> 
-    {ok, [string()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
+    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
 handle_load(Path, State) ->
     %% Check if file exists
     case filelib:is_file(Path) of

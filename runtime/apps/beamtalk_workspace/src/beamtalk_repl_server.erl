@@ -872,57 +872,69 @@ format_rejection_reason(Reason) ->
 %%% Reload helpers
 
 %% @private
-%% Execute reload: load file and return response with affected actor count.
+%% Execute reload: load file, trigger code_change for affected actors,
+%% and return response with actor count and migration results.
 -spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 do_reload(Path, ModuleAtom, Msg, SessionPid) ->
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
         {ok, Classes} ->
-            ActorCount = count_affected_actors(ModuleAtom, Classes),
-            encode_reloaded(Classes, ActorCount, Msg);
+            %% Trigger sys:change_code/4 for affected actors
+            {ActorCount, MigrationFailures} =
+                trigger_actor_code_change(ModuleAtom, Classes),
+            encode_reloaded(Classes, ActorCount, MigrationFailures, Msg);
         {error, Reason} ->
             beamtalk_repl_protocol:encode_error(
                 Reason, Msg, fun format_error_message/1)
     end.
 
 %% @private
-%% Count actors using the reloaded module/classes.
--spec count_affected_actors(atom() | undefined, [map()]) -> non_neg_integer().
-count_affected_actors(ModuleAtom, Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
+%% Trigger code_change for actors using the reloaded module.
+%% Returns {ActorCount, Failures} where Failures is list of {Pid, Reason}.
+-spec trigger_actor_code_change(atom() | undefined, [map()]) ->
+    {non_neg_integer(), [{pid(), term()}]}.
+trigger_actor_code_change(ModuleAtom, Classes) ->
+    ModuleAtoms = resolve_module_atoms(ModuleAtom, Classes),
     case whereis(beamtalk_actor_registry) of
-        undefined -> 0;
-        Pid ->
-            case beamtalk_repl_actors:count_actors_for_module(Pid, ModuleAtom) of
-                {ok, Count} -> Count;
-                {error, _} -> 0
-            end
-    end;
-count_affected_actors(undefined, Classes) ->
-    %% Try each class name from the loaded classes
-    case whereis(beamtalk_actor_registry) of
-        undefined -> 0;
-        Pid ->
-            lists:foldl(fun(ClassMap, Acc) ->
-                Name = maps:get(name, ClassMap, ""),
-                case Name of
-                    "" -> Acc;
-                    _ ->
-                        ModAtom = list_to_atom(Name),
-                        case beamtalk_repl_actors:count_actors_for_module(Pid, ModAtom) of
-                            {ok, Count} -> Acc + Count;
-                            {error, _} -> Acc
-                        end
+        undefined -> {0, []};
+        RegistryPid ->
+            lists:foldl(fun(Mod, {CountAcc, FailAcc}) ->
+                case beamtalk_repl_actors:get_pids_for_module(RegistryPid, Mod) of
+                    {ok, []} ->
+                        {CountAcc, FailAcc};
+                    {ok, Pids} ->
+                        {ok, _Upgraded, Failures} =
+                            beamtalk_hot_reload:trigger_code_change(Mod, Pids),
+                        {CountAcc + length(Pids), FailAcc ++ Failures};
+                    {error, _} ->
+                        {CountAcc, FailAcc}
                 end
-            end, 0, Classes)
+            end, {0, []}, ModuleAtoms)
     end.
 
 %% @private
-%% Encode reload response with classes and affected actor count.
--spec encode_reloaded([map()], non_neg_integer(), beamtalk_repl_protocol:protocol_msg()) -> binary().
-encode_reloaded(Classes, ActorCount, Msg) ->
+%% Resolve module atoms from explicit module name or loaded class names.
+-spec resolve_module_atoms(atom() | undefined, [map()]) -> [atom()].
+resolve_module_atoms(ModuleAtom, _Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
+    [ModuleAtom];
+resolve_module_atoms(undefined, Classes) ->
+    lists:filtermap(fun(ClassMap) ->
+        case maps:get(name, ClassMap, "") of
+            "" -> false;
+            Name -> {true, list_to_atom(Name)}
+        end
+    end, Classes).
+
+%% @private
+%% Encode reload response with classes, affected actor count, and migration results.
+-spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
+    beamtalk_repl_protocol:protocol_msg()) -> binary().
+encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     Base = beamtalk_repl_protocol:base_response(Msg),
+    FailureCount = length(MigrationFailures),
     jsx:encode(Base#{<<"classes">> => ClassNames,
                      <<"affected_actors">> => ActorCount,
+                     <<"migration_failures">> => FailureCount,
                      <<"status">> => [<<"done">>]}).
 
 %%% Error Formatting

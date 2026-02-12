@@ -24,7 +24,7 @@
 -module(beamtalk_hot_reload).
 
 %% Public API
--export([code_change/3]).
+-export([code_change/3, trigger_code_change/2]).
 
 %%====================================================================
 %% Public API
@@ -49,11 +49,43 @@
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% @doc Trigger code_change for a list of actor PIDs after module reload.
+%%
+%% Calls sys:change_code/4 for each actor PID. Failures are collected
+%% but do not prevent other actors from being upgraded.
+%%
+%% @param Module The module that was reloaded
+%% @param Pids List of actor PIDs to upgrade
+%% @returns {ok, Upgraded, Failures} where Upgraded is count of successes
+%%          and Failures is list of {Pid, Reason} tuples
+-spec trigger_code_change(atom(), [pid()]) ->
+    {ok, non_neg_integer(), [{pid(), term()}]}.
+trigger_code_change(Module, Pids) ->
+    lists:foldl(
+        fun(Pid, {ok, Upgraded, Failures}) ->
+            case try_change_code(Pid, Module) of
+                ok ->
+                    {ok, Upgraded + 1, Failures};
+                {error, Reason} ->
+                    {ok, Upgraded, [{Pid, Reason} | Failures]}
+            end
+        end,
+        {ok, 0, []},
+        Pids
+    ).
+
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-%% Future: Add state migration helpers here
-%% - add_default_fields/2
-%% - validate_state/1
-%% - transform_by_version/3
+%% @private
+%% Try to trigger code_change for a single actor.
+-spec try_change_code(pid(), atom()) -> ok | {error, term()}.
+try_change_code(Pid, Module) ->
+    try
+        sys:change_code(Pid, Module, undefined, [])
+    catch
+        exit:{noproc, _} -> {error, noproc};
+        exit:{timeout, _} -> {error, timeout};
+        Class:Error -> {error, {Class, Error}}
+    end.

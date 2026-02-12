@@ -51,7 +51,7 @@ clear_bindings(SessionPid) ->
     gen_server:call(SessionPid, clear_bindings).
 
 %% @doc Load a Beamtalk source file in this session.
--spec load_file(pid(), string()) -> {ok, [atom()]} | {error, term()}.
+-spec load_file(pid(), string()) -> {ok, [map()]} | {error, term()}.
 load_file(SessionPid, Path) ->
     gen_server:call(SessionPid, {load_file, Path}, 30000).
 

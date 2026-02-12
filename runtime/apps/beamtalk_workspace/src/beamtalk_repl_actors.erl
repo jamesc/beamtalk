@@ -31,6 +31,7 @@
 %% Public API
 -export([start_link/1, register_actor/4, unregister_actor/2, 
          list_actors/1, kill_actor/2, get_actor/2, count_actors_for_module/2,
+         get_pids_for_module/2,
          on_actor_spawned/4]).
 
 %% gen_server callbacks
@@ -112,6 +113,12 @@ get_actor(RegistryPid, ActorPid) ->
 count_actors_for_module(RegistryPid, ModuleName) ->
     gen_server:call(RegistryPid, {count_for_module, ModuleName}).
 
+%% @doc Get PIDs of all actors using a specific module.
+%% Used by hot reload to trigger sys:change_code/4 after module reload.
+-spec get_pids_for_module(pid(), atom()) -> {ok, [pid()]} | {error, term()}.
+get_pids_for_module(RegistryPid, ModuleName) ->
+    gen_server:call(RegistryPid, {pids_for_module, ModuleName}).
+
 %%% gen_server callbacks
 
 %% @private
@@ -191,6 +198,20 @@ handle_call({count_for_module, ModuleName}, _From, State) ->
         Actors
     ),
     {reply, {ok, Count}, State};
+
+handle_call({pids_for_module, ModuleName}, _From, State) ->
+    #state{actors = Actors} = State,
+    Pids = maps:fold(
+        fun(Pid, #{module := Module}, Acc) ->
+            case Module of
+                ModuleName -> [Pid | Acc];
+                _ -> Acc
+            end
+        end,
+        [],
+        Actors
+    ),
+    {reply, {ok, Pids}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
