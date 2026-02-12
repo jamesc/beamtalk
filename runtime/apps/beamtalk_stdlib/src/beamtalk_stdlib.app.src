@@ -27,6 +27,7 @@
         {'bt@stdlib@string', 'String', 'Object'},
         {'bt@stdlib@symbol', 'Symbol', 'Object'},
         {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},
+        {'bt@stdlib@test_case', 'TestCase', 'Object'},
         {'bt@stdlib@transcript_stream', 'TranscriptStream', 'Actor'},
         {'bt@stdlib@true', 'True', 'Object'},
         {'bt@stdlib@tuple', 'Tuple', 'Object'},

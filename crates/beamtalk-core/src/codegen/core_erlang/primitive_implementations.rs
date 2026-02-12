@@ -775,7 +775,9 @@ fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
         "assert:equals:" => {
             let p0 = params.first().map_or("_Actual", String::as_str);
             let p1 = params.get(1).map_or("_Expected", String::as_str);
-            Some(format!("call 'beamtalk_test_case':'assert_equals'({p1}, {p0})"))
+            Some(format!(
+                "call 'beamtalk_test_case':'assert_equals'({p1}, {p0})"
+            ))
         }
         "deny:" => {
             let p0 = params.first().map_or("_Condition", String::as_str);
@@ -784,7 +786,9 @@ fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
         "should:raise:" => {
             let p0 = params.first().map_or("_Block", String::as_str);
             let p1 = params.get(1).map_or("_ErrorKind", String::as_str);
-            Some(format!("call 'beamtalk_test_case':'should_raise'({p0}, {p1})"))
+            Some(format!(
+                "call 'beamtalk_test_case':'should_raise'({p0}, {p1})"
+            ))
         }
         "fail:" => {
             let p0 = params.first().map_or("_Message", String::as_str);

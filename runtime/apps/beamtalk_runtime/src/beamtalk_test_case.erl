@@ -110,20 +110,31 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
         Error3 = beamtalk_error:with_details(Error2, #{expected_kind => ExpectedKind, actual => completed}),
         beamtalk_error:raise(Error3)
     catch
-        error:Exception ->
+        _:Exception ->
             ActualKind = extract_error_kind(Exception),
             case ActualKind of
                 ExpectedKind ->
                     nil;
                 _ ->
-                    Error0 = beamtalk_error:new(assertion_failed, 'TestCase'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'should:raise:'),
-                    Message = iolist_to_binary(io_lib:format("Expected error kind ~s but got ~s", [ExpectedKind, ActualKind])),
-                    Error2 = beamtalk_error:with_message(Error1, Message),
-                    Error3 = beamtalk_error:with_details(Error2, #{expected_kind => ExpectedKind, actual_kind => ActualKind}),
-                    beamtalk_error:raise(Error3)
+                    MismatchErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
+                    MismatchErr1 = beamtalk_error:with_selector(MismatchErr0, 'should:raise:'),
+                    MismatchMsg = iolist_to_binary(io_lib:format("Expected error kind ~s but got ~s", [ExpectedKind, ActualKind])),
+                    MismatchErr2 = beamtalk_error:with_message(MismatchErr1, MismatchMsg),
+                    MismatchErr3 = beamtalk_error:with_details(MismatchErr2, #{expected_kind => ExpectedKind, actual_kind => ActualKind}),
+                    beamtalk_error:raise(MismatchErr3)
             end
-    end.
+    end;
+should_raise(Block, ExpectedKind) ->
+    Error0 = beamtalk_error:new(type_error, 'TestCase'),
+    Error1 = beamtalk_error:with_selector(Error0, 'should:raise:'),
+    Message = case {is_function(Block, 0), is_atom(ExpectedKind)} of
+        {false, _} ->
+            iolist_to_binary(io_lib:format("Expected a zero-argument block, got: ~p", [Block]));
+        {_, false} ->
+            iolist_to_binary(io_lib:format("Expected an error kind atom, got: ~p", [ExpectedKind]))
+    end,
+    Error2 = beamtalk_error:with_message(Error1, Message),
+    beamtalk_error:raise(Error2).
 
 %% @doc Unconditionally fail with a message.
 %%
@@ -176,12 +187,19 @@ format_value(Value) ->
 
 %% @doc Extract the error kind from an exception.
 %%
-%% Handles both #beamtalk_error{} records and wrapped Exception objects (ADR 0015).
+%% Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
+%% and raw Erlang atom errors (e.g., badarith, badarg).
 -spec extract_error_kind(term()) -> atom().
 extract_error_kind(#beamtalk_error{kind = Kind}) ->
     Kind;
 extract_error_kind(#{class := 'Exception', error := #beamtalk_error{kind = Kind}}) ->
     % ADR 0015: Exception objects wrap #beamtalk_error{} records
+    Kind;
+extract_error_kind(#{'$beamtalk_class' := _, error := #beamtalk_error{kind = Kind}}) ->
+    % RuntimeError wraps #beamtalk_error{} records
+    Kind;
+extract_error_kind(Kind) when is_atom(Kind) ->
+    % Raw Erlang error atoms (badarith, badarg, function_clause, etc.)
     Kind;
 extract_error_kind(_) ->
     % Unknown error format - return generic 'error' kind

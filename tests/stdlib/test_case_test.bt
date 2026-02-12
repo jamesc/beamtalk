@@ -47,8 +47,8 @@ TestCase new deny: false
 // => nil
 
 // Test that TestCase is a proper Object subclass
-TestCase class
-// => TestCase class
+TestCase superclass
+// => Object
 
 testInstance := TestCase new
 // => _
@@ -72,4 +72,48 @@ tc3 setUp
 
 tc3 tearDown
 // => nil
+
+// ===========================================================================
+// ASSERTION FAILURE TESTS
+// ===========================================================================
+
+// Test assert: with false condition — should raise assertion_failed
+TestCase new assert: false
+// => ERROR: assertion_failed
+
+// Test assert:equals: with unequal values
+TestCase new assert: 3 equals: 4
+// => ERROR: assertion_failed
+
+// Test assert:equals: with different types
+TestCase new assert: 'hello' equals: 42
+// => ERROR: assertion_failed
+
+// Test deny: with true condition — should raise assertion_failed
+TestCase new deny: true
+// => ERROR: assertion_failed
+
+// Test fail: unconditional failure
+TestCase new fail: 'this test should fail'
+// => ERROR: assertion_failed
+
+// ===========================================================================
+// should:raise: TESTS
+// ===========================================================================
+
+// Test should:raise: with matching error kind
+TestCase new should: [1 / 0] raise: #badarith
+// => nil
+
+// Test should:raise: with does_not_understand error
+TestCase new should: [42 nonExistentMethod] raise: #does_not_understand
+// => nil
+
+// Test should:raise: block completes normally (no error raised)
+TestCase new should: [42] raise: #does_not_understand
+// => ERROR: assertion_failed
+
+// Test should:raise: with wrong error kind (mismatch)
+TestCase new should: [1 / 0] raise: #does_not_understand
+// => ERROR: assertion_failed
 
