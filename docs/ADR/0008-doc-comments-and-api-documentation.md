@@ -167,35 +167,35 @@ Elixir developers will miss `@doc` and runtime reflection. However, `///` with M
 
 ### Strongest Counterarguments Against This Decision
 
-#### 1. "You're building two doc systems" (Architecture)
+#### 1. "Docs are the wrong investment right now" (Priorities)
 
-`///` is parsed by the Rust compiler, but EEP-48 chunks live in BEAM. The doc pipeline touches every layer: lexer → parser → AST attachment → codegen → post-`erlc` chunk injection. If `@doc` were a pragma instead, it could flow through the existing pragma infrastructure (`@primitive`, `@intrinsic`, `@load`) and codegen would be simpler — just another module attribute. We chose the familiar *syntax* (`///`) but it creates a non-trivial *codegen path* that doesn't exist for any other comment type.
+Beamtalk has no type system, no pattern matching, no package manager, and an incomplete stdlib. Writing doc infrastructure — lexer changes, AST extensions, EEP-48 codegen, chunk injection, REPL `:help`, HTML generation — before the language stabilizes means documenting APIs that will change. Every hour on `///` parsing is an hour not spent on language features that users actually need. Gleam shipped versions 0.1–0.30 without doc tooling and it was fine. Ship the language first, add docs when the API surface is stable.
 
-**Why we accept this cost:** The pragma path is simpler for codegen but worse for authoring. `@doc 'long markdown string'` is awkward — string escaping, multi-line handling, no IDE support for Markdown-in-strings. `///` gets syntax highlighting, Markdown preview, and familiar ergonomics for free. The codegen complexity is a one-time cost; the authoring experience is paid on every doc comment written.
+**Why we accept this cost:** The ADR establishes *design decisions*, not delivery timelines. Deciding on `///` now means every new stdlib method gets docs from day one — retrofitting docs onto 200+ methods later is worse than growing them incrementally. The implementation phases (1–6) are deliberately sized so Phase 1 (lexer + AST) is small and can ship early without blocking language work. We're not building `beamtalk doc` HTML generation before pattern matching — we're recording the syntax decision so stdlib authors write `///` comments today.
 
-#### 2. "EEP-48 format mismatch — Beamtalk methods aren't Erlang functions" (Interop)
+#### 2. "EEP-48 can't express doc inheritance" (Architecture)
 
-EEP-48's `Docs` list uses `{Kind, Name, Arity}` tuples designed for Erlang's `function/arity` model. Beamtalk has unary messages (`abs`), binary operators (`+`), and keyword messages (`to:do:`) — none map cleanly. A keyword message `to:by:do:` becomes a single function with arity 3, but the "name" in EEP-48 would need to encode the selector. Elixir solved this for its model, but Beamtalk's message dispatch is further from Erlang's.
+When someone asks `:help Counter`, they should see Counter's own methods *and* inherited methods from Actor and Object. But EEP-48 docs are per-module — each `.beam` file contains only its own docs with no concept of class hierarchy. Building `:help` that walks the inheritance chain means building a doc resolution system *on top of* EEP-48, not just mapping into it. This is a second doc system — one that understands Beamtalk's class hierarchy, method resolution order, and overriding. The EEP-48 chunk becomes a storage format, not a query system.
 
-**Why we accept this cost:** EEP-48 is extensible — the `Metadata` map on each doc entry can carry Beamtalk-specific fields (selector, message kind). The `Name` field can use the Beamtalk selector string. This is the same trade-off every non-Erlang BEAM language makes — Elixir, Gleam, LFE all map their models onto EEP-48. The interop benefit (Erlang shell `h/2` works on Beamtalk modules) outweighs the mapping complexity.
+**Why we accept this cost:** The inheritance walk is already implemented for method dispatch (`beamtalk_object_class:find_method/2`). Doc inheritance reuses the same infrastructure — walk the class chain, call `code:get_doc/1` on each module, merge results. This is ~50 lines of Erlang, not a second system. Elixir's `IEx.Helpers.h/1` does the same for behaviours and protocols. The per-module storage is correct — each class documents *its own* methods. The REPL `:help` command composes them at query time.
 
-#### 3. "Docs should be objects, not frozen strings" (Philosophy)
+#### 3. "`///` locks you in before the language can express docs" (Premature Commitment)
 
-In Smalltalk, you can programmatically modify documentation — `MyClass comment: 'Updated docs'`. Docs are part of the live image. EEP-48 docs are frozen at compile time. For an "interactive-first" language promising hot code reloading and live development, static docs in `.beam` files mean the live environment can't evolve its own documentation. This contradicts Principle #1 (Interactive-first).
+Beamtalk might eventually have string interpolation, rich text objects, structured annotations (`@metadata`), or Newspeak-style module declarations. Choosing `///` now means docs are always flat Markdown strings parsed from comments — a design from the 1990s. If the language later gets first-class annotation syntax, the doc system can't use it without a breaking change or migration. Starting with `///` is easy, but it may become the legacy format that every future feature has to work around.
 
-**Why this tension resolves itself:** Beamtalk uses files-as-image with continuous compilation (ADR 0004). When the workspace supports `Integer doc: 'Updated docs'`, the flow is: (1) workspace writes updated `///` comments back to `lib/Integer.bt`, (2) file watcher detects change and recompiles, (3) hot-reloads the module with new EEP-48 chunk, (4) `code:get_doc/1` returns updated docs immediately. Git versions the change automatically. The "frozen" limitation of EEP-48 disappears because **compilation is continuous, not batch** — editing docs is just another source edit that flows through the normal live-reload pipeline. This is architecturally equivalent to Pharo's `comment:` but with files as the backing store instead of an image.
+**Why we accept this cost:** `///` is a *syntax* choice, not a *semantic* commitment. The AST stores `doc_comment: Option<String>` — any future annotation system can populate that same field. If `@doc` attributes arrive later, the compiler can accept both `///` and `@doc` (like Erlang accepts both `-doc` and EDoc comments). Markdown-in-comments is the dominant industry pattern (Rust, Gleam, Go, Swift, Kotlin) — it's not 1990s design, it's current best practice. The risk of premature commitment is real but small: `///` is trivially parseable and any migration tool can convert `///` to `@doc` mechanically.
 
-#### 4. "`README.md` for package docs is un-Smalltalk" (Philosophy)
+#### 4. "Post-`erlc` BEAM rewriting is fragile" (Engineering Risk)
 
-In Smalltalk, everything lives in the image — there are no external files. Using `README.md` for package-level docs introduces a file-based concern into a language that aspires to be interactive-first. A Smalltalk purist would say the package overview should be a class comment on the package's root class.
+The plan says "inject docs post-compilation via `beam_lib:build_module/2`." But Beamtalk shells out to `erlc` for Core Erlang → BEAM compilation — it doesn't control the full pipeline like Elixir does. Adding a post-processing step that rewrites `.beam` files means: (a) debugging compilation failures has another suspect, (b) the build pipeline can't be a simple `erlc` invocation anymore, (c) future OTP versions could change BEAM file internals, (d) the chunk injection step must handle every edge case `erlc` handles (compressed modules, native code, etc.). This is fragile plumbing for a young compiler.
 
-**Why we accept this cost:** Beamtalk is file-based, not image-based. `README.md` is the universal standard for project documentation — GitHub renders it, package managers index it, every developer expects it. Using `///` for class/method docs and `README.md` for project docs matches developer expectations. If Beamtalk gets an image-based workflow later, the README can be imported into the image.
+**Why we accept this cost:** `beam_lib:build_module/2` is a stable OTP API specifically designed for chunk manipulation — it's not low-level file surgery. Elixir, Gleam, and LFE all use similar post-processing for their metadata. The BEAM file format has been stable for decades and OTP guarantees backward compatibility for `beam_lib`. The post-processing step is isolated and testable: generate chunk data → call one OTP function → write file. If it becomes problematic, an alternative is to generate a companion `.docs` file and teach the REPL to load docs separately (but this loses EEP-48 interop).
 
 ### Residual Tension
 
-- **"Docs as objects" resolves with workspace maturity** — EEP-48 + continuous compilation means `doc:` edits flow naturally through the live-reload pipeline. The gap is one of *sequencing* (workspace needs file-write + recompile support from ADR 0004), not of architecture. No separate "source retention" feature needed.
-- **EEP-48 format mapping** needs a concrete design decision during Phase 2 implementation: how selectors map to `{Kind, Name, Arity}` tuples.
-- **The two-system cost** is real but bounded — the doc chunk injection is a well-understood post-processing step, not an ongoing maintenance burden.
+- **Doc inheritance** is architecturally straightforward but needs design work: how to present inherited vs overridden methods, how to handle `doesNotUnderstand:`, and how deep to walk the chain.
+- **EEP-48 selector mapping** needs a concrete design decision during Phase 2: how `to:by:do:` maps to `{function, Name, Arity}` tuples and what goes in the Metadata map.
+- **Priority sequencing** is the most practical concern — Phase 1 (lexer + AST) should ship alongside stdlib work, but Phases 2–6 should wait until core language features stabilize.
 
 ## Alternatives Considered
 
@@ -252,7 +252,14 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ## Implementation
 
-### Phase 1: Lexer + AST (S)
+### Phase 1: Write Stdlib `///` Docs (S)
+- Add `///` doc comments to all 26 classes and their methods in `lib/*.bt`
+- Add `README.md` for package-level overview documentation
+- Follow convention: first line = summary, `## Examples` section with `// =>` assertions
+- **Zero infrastructure needed** — `///` is currently a regular comment. Docs are immediately readable in source, on GitHub, and in code review.
+- This is the content investment that all future phases consume.
+
+### Phase 2: Lexer + AST (S)
 - Extend lexer to recognize `///` as `Trivia::DocComment`
 - Add `doc_comment: Option<String>` to `MethodDefinition` and `ClassDefinition` in AST
 - `///` before a class definition attaches to the `ClassDefinition` node
@@ -260,7 +267,7 @@ Rejected because there's no way to distinguish documentation comments from imple
 - Parser extracts leading doc-comment trivia and attaches to the following AST node
 - **Note:** Trivia currently attaches to *tokens*, not AST nodes. The parser must collect doc-comment trivia from the leading trivia of the first token of a method/class definition and "lift" it to the enclosing AST node during parsing. This is similar to how `leading_comments` is already handled for `Module`.
 
-### Phase 2: EEP-48 Doc Chunks in Codegen (M)
+### Phase 3: EEP-48 + REPL `:help` (M)
 - Generate EEP-48 `docs_v1` chunks in compiled `.beam` files so docs are runtime-accessible
 - Use the standard `docs_v1` structure:
   ```erlang
@@ -270,39 +277,28 @@ Rejected because there's no way to distinguish documentation comments from imple
 - `Format` = `<<"text/markdown">>` (raw Markdown from `///` comments)
 - `ModuleDoc` = class `///` doc (the `///` before the class definition, or `none` if absent)
 - `Docs` = list of `{{function, Name, Arity}, Anno, Signature, Doc, Metadata}` for each documented method
-- Docs become accessible at runtime via `code:get_doc/1` and `shell_docs:render/2`
-- Erlang/Elixir tools can read Beamtalk docs natively (BEAM ecosystem interop)
 - **Implementation note:** Core Erlang doesn't directly support doc chunks. The `Docs` chunk must be added post-compilation via `beam_lib:build_module/2` or by generating the chunk alongside the `.core` → `.beam` pipeline.
+- Implement `:help ClassName` and `:help ClassName selector` in the REPL
+- **Doc delivery:** Use `code:get_doc/1` to fetch docs from compiled `.beam` files at runtime (EEP-48). No source files or separate index needed — docs travel with compiled code.
+- **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (reuses existing `find_method` chain walk). If `Counter` doesn't document `spawn`, show `Actor`'s docs for it.
+- **Markdown rendering for terminal:** Use `shell_docs:render/2` (OTP built-in) for EEP-48 docs.
 
-### Phase 3: LSP Integration (S)
+### Phase 4: LSP Integration (S)
 - Hover provider reads `doc_comment` from Method/Class nodes (compile-time, from AST)
 - Completion provider includes first line of doc in completion items
 - **Markdown rendering:** LSP protocol natively supports Markdown in `MarkupContent` — pass raw Markdown to the editor, no rendering needed on our side
+- **Depends on:** LSP server existing (separate epic, not yet started)
 
-### Phase 4: REPL `:help` (M)
-- `:help ClassName` shows class `///` doc
-- `:help ClassName selector` shows method `///` doc
-- **Doc delivery:** Use `code:get_doc/1` to fetch docs from compiled `.beam` files at runtime (EEP-48). No source files or separate index needed — docs travel with compiled code.
-- **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `spawn`, show `Actor`'s docs for it.
-- Extend existing `:help` command to dispatch `:help ClassName selector` (currently only shows generic command help)
-- **Markdown rendering for terminal:** Use `shell_docs:render/2` (OTP built-in) for EEP-48 docs, or a crate like `termimad` for styled terminal output from raw Markdown.
-
-### Phase 5: Stdlib Documentation (M)
-- Add `///` doc comments to all classes and methods in `lib/*.bt`
-- Add `README.md` for package-level overview documentation
-- Follow convention: first line = summary, `## Examples` section with `// =>` assertions
-
-### Phase 6: `beamtalk doc` Command (M)
-- Generate HTML reference from `///` comments (or read from EEP-48 chunks)
+### Phase 5: `beamtalk doc` Command (M)
+- Generate HTML reference from EEP-48 chunks (or directly from `///` comments)
 - Use `README.md` as the landing page for generated documentation
 - Index by class, method name, category
 - Include cross-references between classes
 - **Markdown rendering for HTML:** Requires a Markdown-to-HTML library (e.g., `pulldown-cmark` or `comrak`)
 
-### Future: Smalltalk-style Source Retention
-- Full Smalltalk-style live source access (`MyClass >> #method` returns source) is deferred
-- Requires architectural decision about image-based vs file-based workflow
-- EEP-48 docs provide the critical runtime documentation path; source retention adds browsing capability on top
+### Future: Live Doc Editing
+- Workspace supports `Integer doc: 'Updated'` — writes `///` back to `.bt` file, recompiles, hot-reloads (see Steelman #3)
+- Full Smalltalk-style source retention deferred — EEP-48 provides the critical runtime path
 
 ## Migration Path
 
