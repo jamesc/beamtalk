@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit test: verify doc test extraction from /// doc comments (BT-441)
+
+/// A simple calculator for testing doc test extraction.
+///
+/// ## Examples
+/// ```beamtalk
+/// 2 + 3  // => 5
+/// 10 - 4  // => 6
+/// ```
+Object subclass: DocTestExample
+
+  /// Compute the answer to life, the universe, and everything.
+  ///
+  /// ```beamtalk
+  /// 42  // => 42
+  /// ```
+  answer => 42
+
+  /// Demonstrate stateful doc examples with variables.
+  ///
+  /// ```beamtalk
+  /// x := 10
+  /// // => _
+  /// x + 5
+  /// // => 15
+  /// ```
+  addFive => self answer + 5
