@@ -236,20 +236,30 @@ printFirst5: (LazyStream from: 1)
 
 ## Steelman Analysis
 
-### "Just use Erlang's file module directly via interop"
-**Best argument:** Beamtalk already has BEAM interop. Erlang's `file` module is battle-tested, zero-overhead, and covers every edge case. Adding Beamtalk wrappers adds maintenance burden and potential bugs for no functional gain. Experienced BEAM developers will use Erlang directly anyway.
+### "Just use Erlang's file module directly via interop" (BEAM developer)
+**Best argument:** Beamtalk already has BEAM interop. Erlang's `file` module is battle-tested with 30+ years of production use, zero-overhead, and covers every edge case (symlinks, encodings, permissions, large files). Adding Beamtalk wrappers means maintaining a second, less-tested abstraction that will always lag behind Erlang's capabilities. Experienced BEAM developers will bypass it anyway, and newcomers learning the wrapper still need to learn the Erlang module eventually for anything non-trivial. Every wrapper bug is a bug Erlang doesn't have.
 
-**Counter:** True for advanced users, but newcomers and Smalltalk developers expect `stream nextLine` not `file:read_line(Handle)`. The Beamtalk wrapper provides: (1) message-send syntax, (2) automatic path validation, (3) actor-based lifecycle management, (4) structured error handling. The wrapper is thin — it delegates to Erlang internally.
+**Counter:** True for advanced users, but Beamtalk's value proposition is interactive-first development with message-send syntax. `file nextLine` in the REPL is discoverable; `file:read_line(Handle)` requires knowing Erlang. The wrapper is thin (delegates to Erlang internally) and adds real value: (1) path validation security, (2) actor-based lifecycle management, (3) structured `#beamtalk_error{}` instead of Erlang error tuples, (4) block-scoped auto-close. Users who need raw Erlang can still use interop.
 
-### "ReadStream/WriteStream are unnecessary — collections have do:/collect:"
-**Best argument:** Beamtalk collections already support full iteration. ReadStream adds mutable position state that doesn't fit BEAM's immutable model. WriteStream is just `inject:into:` with extra steps. Modern languages (Elixir, Rust) dropped positional streams in favor of iterators.
+### "ReadStream/WriteStream are unnecessary — collections have do:/collect:" (Pragmatist)
+**Best argument:** Beamtalk collections already support full iteration. ReadStream adds mutable position state — fundamentally un-BEAM-like in a language targeting an immutable VM. WriteStream is just `inject:into:` with extra steps. Modern languages (Elixir, Rust, Kotlin) dropped positional streams entirely in favor of iterators and lazy pipelines. Smalltalk's Streams are a 1980s design from before people understood the iterator pattern well. We'd be adding legacy baggage that modern Smalltalk (Pharo) is actively moving away from (`FileReference` replacing `FileStream`). Nobody writes `WriteStream on: String new` when they can use string interpolation.
 
-**Counter:** Legitimate point. ReadStream is most useful for parsing (sequential consumption with lookahead), which is a real use case. WriteStream for string building is genuinely convenient and avoids O(n²) string concatenation. If we skip these, we should provide `StringBuffer` or similar.
+**Counter:** The strongest argument here. ReadStream's real value is **parsing** — sequential consumption with `peek` and `upToEnd` for building parsers, tokenizers, and protocol handlers. That's hard to replicate with `do:/collect:`. WriteStream for string building avoids O(n²) concatenation which matters for codegen and template output. But if we skip these, we should at minimum provide `StringBuffer` and evaluate whether lazy streams (Layer 3) subsume ReadStream's use cases entirely.
 
-### "FileStream should be a value type, not an actor"
-**Best argument:** Making FileStream an actor adds overhead (gen_server call per read/write) and complexity (supervision, mailbox). A simple value type wrapping a file handle would be simpler and faster.
+### "FileStream should be a value type, not an actor" (Simplicity advocate)
+**Best argument:** Making FileStream an actor adds per-call gen_server overhead, supervision complexity, and debugging difficulty (file reads go through mailbox, show up in process lists, can hit mailbox overflow). A value type wrapping a file handle would be simpler, faster, and match how every other language does it. The BEAM already links file handles to the calling process — if the process dies, the handle closes. You don't need a separate actor for cleanup. And in practice, most file operations are sequential within a single function — there's no concurrency benefit from making it an actor.
 
-**Counter:** On BEAM, file handles are already process-linked. Making FileStream an actor means the handle's lifecycle is tied to a supervised process — if the actor crashes, the file closes cleanly. This is idiomatic OTP. The gen_server overhead is negligible compared to actual I/O latency.
+**Counter:** Valid performance concern, but the gen_server overhead (~5μs per call) is negligible compared to actual I/O latency (~100μs+ per disk read). The actor model provides: (1) multiple REPL sessions can share a FileStream (pass actor ref), (2) supervision means crashed file operations don't leak handles, (3) `Workspace actors` can list open files for inspection. The real question is whether these benefits justify the complexity for the common case. A hybrid approach — value type for simple read-all, actor for streaming — may be worth considering, though `File readAll:` already covers the simple case.
+
+### "LazyStream under the Stream hierarchy is premature" (Incrementalist)
+**Best argument:** Layer 3 (LazyStream) is speculative — we don't know if Beamtalk users will need lazy streams, and designing an abstract `Stream` superclass to accommodate a feature that doesn't exist yet risks over-engineering. The abstract class might have the wrong protocol once we actually build LazyStream. ReadStream has `position`, `position:`, `reset` — none of which make sense for LazyStream. Better to build Layers 1 and 2, learn from real usage, then design the hierarchy. Premature abstraction is worse than no abstraction.
+
+**Counter:** This is the most compelling objection. The mitigation is keeping `Stream` minimal — only protocol that genuinely applies to all streams (`next`, `atEnd`, `do:`, `collect:`, `take:`). Position-related methods stay on ReadStream only. If LazyStream proves to need a different base, we can restructure before users depend on the hierarchy. The cost of the abstract class is near-zero (a few shared methods); the benefit is polymorphic code from day one.
+
+### "Three new classes is too much — just extend File" (Minimalist)
+**Best argument:** File already exists. Add `File readLines:` returning a list, `File forEachLine:path: do:` for iteration, and `String builder` for string building. Three new classes (plus an abstract superclass, plus LazyStream planned) is a lot of surface area for a young language that should be proving its actor model, not replicating Smalltalk's collection hierarchy. Every class is documentation, tests, maintenance, and cognitive load. Keep it simple.
+
+**Counter:** Extending File with streaming methods conflates "file system operations" (exists, read, write) with "sequential data access" (next, peek, atEnd). These are different concerns — Stream works over any data source, not just files. The Smalltalk insight that Streams are independent of their backing store (collection, file, network) has proven valuable over 40 years. Three focused classes is cleaner than one overloaded File class.
 
 ## Alternatives Considered
 
