@@ -149,7 +149,16 @@ pub fn is_daemon_running() -> Result<Option<u32>> {
     // Check if process exists using POSIX kill(pid, 0)
     // This is portable across Linux, macOS, and BSD systems
     // SAFETY: kill with signal 0 only checks if process exists, doesn't send a signal
-    let exists = unsafe { libc::kill(pid as i32, 0) == 0 };
+    let exists = unsafe {
+        let res = libc::kill(pid as i32, 0);
+        if res == 0 {
+            true
+        } else {
+            // EPERM means the process exists but we lack permission — treat as alive
+            let errno = *libc::__errno_location();
+            errno == libc::EPERM
+        }
+    };
     if exists {
         Ok(Some(pid))
     } else {

@@ -19,7 +19,7 @@
 //!   JSON-RPC 2.0      │  └─────────────────────────┘   │
 //!       │             └─────────────────────────────────┘
 //!       ▼
-//!  ~/.beamtalk/daemon.sock
+//!  ~/.beamtalk/sessions/<session>/daemon.sock
 //! ```
 //!
 //! # Usage
@@ -29,6 +29,9 @@
 //! beamtalk daemon start --foreground  # Run in foreground
 //! beamtalk daemon stop            # Stop the daemon
 //! beamtalk daemon status          # Check if running
+//! beamtalk daemon list            # List all daemon sessions
+//! beamtalk daemon clean           # Clean orphaned sessions
+//! beamtalk daemon clean --all     # Stop all daemons and clean
 //! ```
 //!
 //! # JSON-RPC Error Codes
