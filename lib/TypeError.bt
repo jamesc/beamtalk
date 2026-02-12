@@ -9,7 +9,6 @@
 /// ```beamtalk
 /// [1 + 'a'] on: TypeError do: [:e | e message]
 /// ```
-
 Error subclass: TypeError
   /// Human-readable description of the receiver.
   ///

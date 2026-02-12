@@ -17,7 +17,6 @@
 /// 2 ** 100       // => 1267650600228229401496703205376
 /// 17 % 5         // => 2
 /// ```
-
 sealed Number subclass: Integer
   /// Add an integer to the receiver.
   ///

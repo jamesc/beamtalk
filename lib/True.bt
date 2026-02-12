@@ -12,7 +12,6 @@
 /// true ifTrue: ['yes']         // => 'yes'
 /// true not                     // => false
 /// ```
-
 sealed Object subclass: True
   /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.
   ///

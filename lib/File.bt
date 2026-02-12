@@ -13,7 +13,6 @@
 /// File readAll: '/tmp/test.txt'
 /// File writeAll: '/tmp/test.txt' contents: 'hello'
 /// ```
-
 Object subclass: File
   /// Test if a file exists at the given path (class method).
   ///
