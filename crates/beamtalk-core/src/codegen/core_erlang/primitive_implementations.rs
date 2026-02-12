@@ -765,7 +765,7 @@ fn generate_compiled_method_bif(selector: &str, params: &[String]) -> Option<Str
     }
 }
 
-/// TestCase primitive implementations for BUnit test framework (ADR 0014).
+/// `TestCase` primitive implementations for `BUnit` test framework (ADR 0014).
 fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
     match selector {
         "assert:" => {
