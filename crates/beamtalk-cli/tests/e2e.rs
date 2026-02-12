@@ -561,6 +561,8 @@ impl Drop for DaemonManager {
 struct ReplClient {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
+    /// Last warnings from evaluation (for WARNING: assertions)
+    last_warnings: Vec<String>,
 }
 
 impl ReplClient {
@@ -572,7 +574,11 @@ impl ReplClient {
 
         let reader = BufReader::new(stream.try_clone()?);
 
-        Ok(Self { stream, reader })
+        Ok(Self {
+            stream,
+            reader,
+            last_warnings: Vec::new(),
+        })
     }
 
     /// Evaluate an expression and return the result.
@@ -602,6 +608,16 @@ impl ReplClient {
         // Parse JSON response (handles both legacy and new protocol)
         let response: serde_json::Value = serde_json::from_str(&response_line)
             .map_err(|e| format!("Failed to parse response: {e}"))?;
+
+        // Extract warnings if present (BT-407)
+        self.last_warnings.clear();
+        if let Some(warnings) = response.get("warnings").and_then(|w| w.as_array()) {
+            for warning in warnings {
+                if let Some(warn_str) = warning.as_str() {
+                    self.last_warnings.push(warn_str.to_string());
+                }
+            }
+        }
 
         // New protocol: check status for errors
         if let Some(status) = response.get("status").and_then(|s| s.as_array()) {
@@ -762,6 +778,10 @@ impl ReplClient {
 ///
 /// If the file contains `// @load <path>` directives, those files are loaded
 /// before any test cases run, making their classes available for spawning.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Test runner handles many assertion types"
+)]
 fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
     let test_file = parse_test_file(&content);
@@ -834,8 +854,23 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
     for case in &test_file.cases {
         match client.eval(&case.expression) {
             Ok(result) => {
-                // Wildcard "_" means run but don't check result
-                if case.expected == "_" || result == case.expected {
+                // Check if this is a WARNING assertion (BT-407)
+                if case.expected.starts_with("WARNING:") {
+                    let expected_warning = case.expected.strip_prefix("WARNING:").unwrap().trim();
+                    if client
+                        .last_warnings
+                        .iter()
+                        .any(|w| w.contains(expected_warning))
+                    {
+                        pass_count += 1;
+                    } else {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected warning containing `{}`, got warnings: {:?}",
+                            case.line, case.expression, expected_warning, client.last_warnings
+                        ));
+                    }
+                } else if case.expected == "_" || result == case.expected {
+                    // Wildcard "_" means run but don't check result
                     pass_count += 1;
                 } else {
                     failures.push(format!(

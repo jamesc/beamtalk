@@ -234,6 +234,10 @@ struct CompileResult {
     module_name: Option<String>,
     /// Pre-formatted diagnostic messages using miette
     formatted_diagnostics: Vec<String>,
+    /// Warnings (non-blocking diagnostics)
+    warnings: Vec<DiagnosticInfo>,
+    /// Pre-formatted warning messages using miette
+    formatted_warnings: Vec<String>,
 }
 
 /// Class metadata extracted from compiled source.
@@ -253,6 +257,10 @@ pub struct DiagnosticInfo {
 }
 
 /// Handle the compile method.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Warning separation logic adds necessary complexity"
+)]
 fn handle_compile(
     params: serde_json::Value,
     id: Option<serde_json::Value>,
@@ -303,21 +311,46 @@ fn handle_compile(
         );
     core_diagnostics.extend(primitive_diags);
 
-    let diagnostics: Vec<DiagnosticInfo> = core_diagnostics
+    // Separate errors and warnings
+    let errors: Vec<_> = core_diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
+        .collect();
+
+    let warnings_diags: Vec<_> = core_diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+            )
+        })
+        .collect();
+
+    // Convert errors to DiagnosticInfo
+    let diagnostics: Vec<DiagnosticInfo> = errors
         .iter()
         .map(|d| DiagnosticInfo {
             message: d.message.to_string(),
-            severity: match d.severity {
-                beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
-                beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
-            },
+            severity: "error".to_string(),
             start: d.span.start(),
             end: d.span.end(),
         })
         .collect();
 
-    // Generate formatted diagnostics using miette
-    let formatted_diagnostics: Vec<String> = core_diagnostics
+    // Convert warnings to DiagnosticInfo
+    let warnings: Vec<DiagnosticInfo> = warnings_diags
+        .iter()
+        .map(|d| DiagnosticInfo {
+            message: d.message.to_string(),
+            severity: "warning".to_string(),
+            start: d.span.start(),
+            end: d.span.end(),
+        })
+        .collect();
+
+    // Generate formatted diagnostics using miette (errors only)
+    let formatted_diagnostics: Vec<String> = errors
         .iter()
         .map(|d| {
             let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
@@ -329,7 +362,20 @@ fn handle_compile(
         })
         .collect();
 
-    let has_errors = diagnostics.iter().any(|d| d.severity == "error");
+    // Generate formatted warnings using miette
+    let formatted_warnings: Vec<String> = warnings_diags
+        .iter()
+        .map(|d| {
+            let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                d,
+                &params.path,
+                &source,
+            );
+            format!("{:?}", miette::Report::new(diag))
+        })
+        .collect();
+
+    let has_errors = !errors.is_empty();
 
     // Generate Core Erlang if no errors
     let (core_erlang, class_names, module_name) = if has_errors {
@@ -373,6 +419,8 @@ fn handle_compile(
         classes: class_names,
         module_name,
         formatted_diagnostics,
+        warnings,
+        formatted_warnings,
     };
 
     match serde_json::to_value(result) {
@@ -473,12 +521,20 @@ struct CompileExpressionResult {
     diagnostics: Vec<DiagnosticInfo>,
     /// Pre-formatted diagnostic messages using miette
     formatted_diagnostics: Vec<String>,
+    /// Warnings (non-blocking diagnostics)
+    warnings: Vec<DiagnosticInfo>,
+    /// Pre-formatted warning messages using miette
+    formatted_warnings: Vec<String>,
 }
 
 /// Handle the `compile_expression` method for REPL evaluation.
 ///
 /// This parses a single expression and generates Core Erlang code
 /// that can be compiled and executed by the Erlang runtime.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Warning separation logic adds necessary complexity"
+)]
 fn handle_compile_expression(
     params: serde_json::Value,
     id: Option<serde_json::Value>,
@@ -514,22 +570,46 @@ fn handle_compile_expression(
         );
     all_diagnostics.extend(primitive_diags);
 
-    // Convert diagnostics
-    let diagnostics: Vec<DiagnosticInfo> = all_diagnostics
+    // Separate errors and warnings
+    let errors: Vec<_> = all_diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
+        .collect();
+
+    let warnings_diags: Vec<_> = all_diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+            )
+        })
+        .collect();
+
+    // Convert errors to DiagnosticInfo
+    let diagnostics: Vec<DiagnosticInfo> = errors
         .iter()
         .map(|d| DiagnosticInfo {
             message: d.message.to_string(),
-            severity: match d.severity {
-                beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
-                beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
-            },
+            severity: "error".to_string(),
             start: d.span.start(),
             end: d.span.end(),
         })
         .collect();
 
-    // Generate formatted diagnostics using miette
-    let formatted_diagnostics: Vec<String> = all_diagnostics
+    // Convert warnings to DiagnosticInfo
+    let warnings: Vec<DiagnosticInfo> = warnings_diags
+        .iter()
+        .map(|d| DiagnosticInfo {
+            message: d.message.to_string(),
+            severity: "warning".to_string(),
+            start: d.span.start(),
+            end: d.span.end(),
+        })
+        .collect();
+
+    // Generate formatted diagnostics using miette (errors only)
+    let formatted_diagnostics: Vec<String> = errors
         .iter()
         .map(|d| {
             let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
@@ -541,7 +621,20 @@ fn handle_compile_expression(
         })
         .collect();
 
-    let has_errors = diagnostics.iter().any(|d| d.severity == "error");
+    // Generate formatted warnings using miette
+    let formatted_warnings: Vec<String> = warnings_diags
+        .iter()
+        .map(|d| {
+            let diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                d,
+                "repl",
+                &params.source,
+            );
+            format!("{:?}", miette::Report::new(diag))
+        })
+        .collect();
+
+    let has_errors = !errors.is_empty();
 
     // Generate Core Erlang for the expression
     let core_erlang = if has_errors || module.expressions.is_empty() {
@@ -569,6 +662,8 @@ fn handle_compile_expression(
         core_erlang,
         diagnostics,
         formatted_diagnostics,
+        warnings,
+        formatted_warnings,
     };
 
     match serde_json::to_value(result) {
