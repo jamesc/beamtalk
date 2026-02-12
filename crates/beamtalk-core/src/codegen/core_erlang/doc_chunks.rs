@@ -85,9 +85,13 @@ fn generate_method_docs(methods: &[MethodDefinition]) -> Vec<String> {
 /// Generates a single EEP-48 doc entry for a method.
 ///
 /// Format: `{{function, SelectorAtom, Arity}, Anno, [Signature], Doc, Metadata}`
+///
+/// Arity uses the Erlang function arity (message arity + 1 for Self parameter)
+/// to align with actual BEAM exports for value types.
 fn generate_method_doc_entry(method: &MethodDefinition) -> String {
     let selector_atom = escape_erlang_atom(&method.selector.to_erlang_atom());
-    let arity = method.selector.arity();
+    // Erlang function arity = message arity + 1 (implicit Self parameter)
+    let arity = method.selector.arity() + 1;
     let signature = format_signature(&method.selector, &method.parameters);
     let doc = format_doc(method.doc_comment.as_ref());
     let metadata = format_method_metadata(&method.selector);
@@ -255,7 +259,7 @@ mod tests {
         let term = generate_docs_term(&module).unwrap();
         assert!(term.contains("function"));
         assert!(term.contains("'increment'"));
-        assert!(term.contains(", 0}"));
+        assert!(term.contains(", 1}"));
         assert!(term.contains("Increment the counter."));
     }
 
@@ -270,7 +274,7 @@ mod tests {
         let module = make_module(class);
         let term = generate_docs_term(&module).unwrap();
         assert!(term.contains("'+'"));
-        assert!(term.contains(", 1}"));
+        assert!(term.contains(", 2}"));
         assert!(term.contains("+ other"));
     }
 
@@ -288,7 +292,7 @@ mod tests {
         let module = make_module(class);
         let term = generate_docs_term(&module).unwrap();
         assert!(term.contains("'at:put:'"));
-        assert!(term.contains(", 2}"));
+        assert!(term.contains(", 3}"));
         assert!(term.contains("at: index put: value"));
     }
 

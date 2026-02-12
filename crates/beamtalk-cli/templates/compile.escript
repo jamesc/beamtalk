@@ -149,7 +149,7 @@ inject_docs_chunk(CoreFile, ModuleName, OutDir) ->
                     DocsChunk = {"Docs", term_to_binary(DocsTerm)},
                     {ok, NewBinary} = beam_lib:build_module(Filtered ++ [DocsChunk]),
                     ok = file:write_file(BeamFile, NewBinary);
-                _ ->
+                {error, _, _} ->
                     ok
             end;
         _ ->

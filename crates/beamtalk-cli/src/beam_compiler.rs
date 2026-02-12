@@ -491,6 +491,8 @@ fn write_docs_file(module: &beamtalk_core::ast::Module, core_output_path: &Utf8P
     {
         if let Err(e) = std::fs::write(&docs_path, &docs_term) {
             debug!("Failed to write docs file '{}': {}", docs_path, e);
+            // Clean up on write failure so stale .docs aren't injected
+            let _ = std::fs::remove_file(&docs_path);
         }
     } else {
         // Remove stale .docs file if no docs to generate
