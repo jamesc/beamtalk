@@ -118,6 +118,8 @@ pub enum TokenKind {
     // === Pragmas ===
     /// The `@primitive` directive for primitive method injection (ADR 0007)
     AtPrimitive,
+    /// The `@intrinsic` directive, synonym for `@primitive` (ADR 0007 Amendment)
+    AtIntrinsic,
 
     // === Special ===
     /// End of file
@@ -216,6 +218,7 @@ impl TokenKind {
             | Self::Hash
             | Self::FatArrow
             | Self::AtPrimitive
+            | Self::AtIntrinsic
             | Self::Eof => None,
         }
     }
@@ -254,6 +257,7 @@ impl std::fmt::Display for TokenKind {
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
             Self::AtPrimitive => write!(f, "@primitive"),
+            Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::Eof => write!(f, "<eof>"),
         }
     }
@@ -444,6 +448,7 @@ mod tests {
         assert_eq!(TokenKind::Assign.to_string(), ":=");
         assert_eq!(TokenKind::Caret.to_string(), "^");
         assert_eq!(TokenKind::AtPrimitive.to_string(), "@primitive");
+        assert_eq!(TokenKind::AtIntrinsic.to_string(), "@intrinsic");
     }
 
     #[test]

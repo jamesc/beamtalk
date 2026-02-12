@@ -2138,6 +2138,61 @@ Actor subclass: Rectangle
         }
     }
 
+    // @intrinsic parsing tests (BT-484)
+    // ========================================================================
+
+    #[test]
+    fn parse_intrinsic_bare_identifier() {
+        // @intrinsic with bare identifier produces same AST as @primitive
+        let source = "Object subclass: Foo\n  blockValue => @intrinsic blockValue";
+        let module = parse_ok(source);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
+        match &method.body[0] {
+            Expression::Primitive {
+                name, is_quoted, ..
+            } => {
+                assert_eq!(name.as_ref(), "blockValue");
+                assert!(!is_quoted, "bare @intrinsic should not be quoted");
+            }
+            other => panic!("Expected Primitive, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_intrinsic_quoted_selector() {
+        // @intrinsic with quoted selector produces same AST as @primitive
+        let source = "Object subclass: Foo\n  size => @intrinsic 'size'";
+        let module = parse_ok(source);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.body.len(), 1);
+        match &method.body[0] {
+            Expression::Primitive {
+                name, is_quoted, ..
+            } => {
+                assert_eq!(name.as_ref(), "size");
+                assert!(*is_quoted, "quoted @intrinsic should be quoted");
+            }
+            other => panic!("Expected Primitive, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_intrinsic_outside_method_body_error() {
+        let diagnostics = parse_err("@intrinsic blockValue");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for @intrinsic outside method body"
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("@intrinsic can only appear inside a method body"),
+            "Got: {}",
+            diagnostics[0].message
+        );
+    }
+
     // BT-285: Consecutive binary method definitions
     #[test]
     fn parse_consecutive_binary_methods() {
