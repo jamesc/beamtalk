@@ -9,7 +9,7 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
-use super::document::{INDENT, line, nest};
+use super::document::{Document, INDENT, line, nest};
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module};
@@ -30,7 +30,7 @@ impl CoreErlangGenerator {
     /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
-    pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<()> {
+    pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
 
@@ -56,6 +56,8 @@ impl CoreErlangGenerator {
                             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
                             'superclass'/0";
 
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
         // Module header with exports and attributes
         let module_header = if has_classes {
             docvec![
@@ -79,105 +81,105 @@ impl CoreErlangGenerator {
                 "\n",
             ]
         };
-        self.write_document(&module_header);
-        self.output.push('\n');
+        docs.push(module_header);
+        docs.push(Document::String("\n".into()));
 
         // Generate start_link/1 (standard gen_server entry point)
-        self.generate_start_link();
-        self.output.push('\n');
+        docs.push(self.generate_start_link_doc());
+        docs.push(Document::String("\n".into()));
 
         if is_abstract {
             // BT-105: Abstract classes cannot be spawned — generate error methods
-            self.generate_abstract_spawn_error_method()?;
-            self.output.push('\n');
-            self.generate_abstract_spawn_with_args_error_method()?;
-            self.output.push('\n');
+            docs.push(self.generate_abstract_spawn_error_method()?);
+            docs.push(Document::String("\n".into()));
+            docs.push(self.generate_abstract_spawn_with_args_error_method()?);
+            docs.push(Document::String("\n".into()));
         } else {
             // Generate spawn/0 function (class method to instantiate actors)
-            self.generate_spawn_function(module)?;
-            self.output.push('\n');
+            docs.push(self.generate_spawn_function(module)?);
+            docs.push(Document::String("\n".into()));
 
             // Generate spawn/1 function (class method with init args)
-            self.generate_spawn_with_args_function(module)?;
-            self.output.push('\n');
+            docs.push(self.generate_spawn_with_args_function(module)?);
+            docs.push(Document::String("\n".into()));
         }
 
         // BT-217: Generate new/0 and new/1 error methods for actors
-        self.generate_actor_new_error_method()?;
-        self.output.push('\n');
-        self.generate_actor_new_with_args_error_method()?;
-        self.output.push('\n');
+        docs.push(self.generate_actor_new_error_method()?);
+        docs.push(Document::String("\n".into()));
+        docs.push(self.generate_actor_new_with_args_error_method()?);
+        docs.push(Document::String("\n".into()));
 
         // Generate superclass/0 class method for reflection
-        self.generate_superclass_function(module)?;
-        self.output.push('\n');
+        docs.push(self.generate_superclass_function(module)?);
+        docs.push(Document::String("\n".into()));
 
         // Generate init/1 function
-        self.generate_init_function(module)?;
-        self.output.push('\n');
+        docs.push(self.generate_init_function(module)?);
+        docs.push(Document::String("\n".into()));
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
         // These callbacks are only needed for instantiable actors that receive messages.
         if is_abstract {
             // BT-403: Abstract classes need minimal gen_server callbacks
             // (required by gen_server behaviour but will never be called)
-            self.generate_abstract_callbacks()?;
-            self.output.push('\n');
+            docs.push(self.generate_abstract_callbacks_doc());
+            docs.push(Document::String("\n".into()));
         } else {
             // Generate handle_cast/2 function with error handling
-            self.generate_handle_cast()?;
-            self.output.push('\n');
+            docs.push(self.generate_handle_cast()?);
+            docs.push(Document::String("\n".into()));
 
             // Generate handle_call/3 function with error handling
-            self.generate_handle_call()?;
-            self.output.push('\n');
+            docs.push(self.generate_handle_call()?);
+            docs.push(Document::String("\n".into()));
 
             // Generate code_change/3 function
-            self.generate_code_change()?;
-            self.output.push('\n');
+            docs.push(self.generate_code_change()?);
+            docs.push(Document::String("\n".into()));
 
             // Generate terminate/2 function (per BT-29)
-            self.generate_terminate(module)?;
-            self.output.push('\n');
+            docs.push(self.generate_terminate(module)?);
+            docs.push(Document::String("\n".into()));
 
             // Generate safe_dispatch/3 with error isolation (per BT-29)
-            self.generate_safe_dispatch()?;
-            self.output.push('\n');
+            docs.push(self.generate_safe_dispatch()?);
+            docs.push(Document::String("\n".into()));
         }
 
         // Generate dispatch function with DNU fallback
-        self.generate_dispatch(module)?;
-        self.output.push('\n');
+        docs.push(self.generate_dispatch(module)?);
+        docs.push(Document::String("\n".into()));
 
         // Generate method table
-        self.generate_method_table(module)?;
-        self.output.push('\n');
+        docs.push(self.generate_method_table(module)?);
+        docs.push(Document::String("\n".into()));
 
         // Generate has_method/1 for reflection (BT-242)
-        self.generate_has_method(module)?;
+        docs.push(self.generate_has_method(module)?);
 
         // BT-403: Generate sealed method standalone functions
         if !self.sealed_method_selectors.is_empty() {
-            self.generate_sealed_method_functions(module)?;
+            docs.push(self.generate_sealed_method_functions_doc(module)?);
         }
 
         // BT-411: Generate class-side method standalone functions
         if let Some(class) = module.classes.first() {
             if !class.class_methods.is_empty() {
-                self.generate_class_method_functions(class)?;
+                docs.push(self.generate_class_method_functions(class)?);
             }
         }
 
         // Generate class registration function (BT-218)
         if !module.classes.is_empty() {
-            self.output.push('\n');
-            self.generate_register_class(module)?;
+            docs.push(Document::String("\n".into()));
+            docs.push(self.generate_register_class(module)?);
         }
 
         // Module end
-        self.write_document(&docvec!["end\n"]);
+        docs.push(docvec!["end\n"]);
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 
     /// Sets up class identity and sealed method selectors from the module's class definition.
@@ -257,9 +259,9 @@ impl CoreErlangGenerator {
     /// Abstract classes can't be instantiated, so these callbacks will never
     /// be called. But `gen_server` behaviour requires them to be exported.
     #[allow(clippy::unnecessary_wraps)]
-    fn generate_abstract_callbacks(&mut self) -> Result<()> {
+    fn generate_abstract_callbacks_doc(&self) -> Document<'static> {
         let module_name = &self.module_name;
-        let doc = docvec![
+        docvec![
             // handle_cast - never called for abstract classes
             "'handle_cast'/2 = fun (_Msg, State) -> {'noreply', State}",
             "\n\n",
@@ -284,10 +286,7 @@ impl CoreErlangGenerator {
                 ]
             ),
             "\n\n",
-        ];
-        self.write_document(&doc);
-
-        Ok(())
+        ]
     }
 
     /// Generates standalone functions for sealed methods (BT-403).
@@ -295,10 +294,15 @@ impl CoreErlangGenerator {
     /// Each sealed method gets a `'__sealed_{selector}'/N` function that
     /// can be called directly from self-sends, bypassing both `safe_dispatch/3`
     /// and the `dispatch/4` case selector matching.
-    fn generate_sealed_method_functions(&mut self, module: &Module) -> Result<()> {
+    fn generate_sealed_method_functions_doc(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
-            return Ok(());
+            return Ok(Document::String(String::new()));
         };
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
 
         for method in &class.methods {
             if method.kind != MethodKind::Primary {
@@ -338,20 +342,18 @@ impl CoreErlangGenerator {
                 ") ->",
                 "\n",
             ];
-            self.write_document(&header);
+            docs.push(header);
 
             // Generate method body with reply tuple (reuse existing codegen)
-            let start = self.output.len();
-            self.generate_method_definition_body_with_reply(method)?;
-            let body_str = self.output[start..].to_string();
-            self.output.truncate(start);
+            let method_body_doc = self.generate_method_definition_body_with_reply(method)?;
+            let body_str = method_body_doc.to_pretty_string();
 
             let body_doc = docvec![nest(INDENT, docvec![line(), body_str,]), "\n",];
-            self.write_document(&body_doc);
+            docs.push(body_doc);
 
             self.pop_scope();
         }
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 }

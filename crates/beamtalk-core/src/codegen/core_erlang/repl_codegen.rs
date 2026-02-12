@@ -9,6 +9,7 @@
 //! simple modules with an `eval/1` function that evaluates an expression
 //! with the provided bindings map.
 
+use super::document::Document;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
@@ -34,43 +35,49 @@ impl CoreErlangGenerator {
     /// The `State` alias ensures that identifier lookups work correctly,
     /// since `generate_identifier` falls back to `maps:get(Name, State)`
     /// for variables not bound in the current scope.
-    pub(super) fn generate_repl_module(&mut self, expression: &Expression) -> Result<()> {
+    pub(super) fn generate_repl_module(
+        &mut self,
+        expression: &Expression,
+    ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true;
         // BT-374 / ADR 0010: REPL runs in workspace context
         self.workspace_mode = true;
 
-        self.generate_eval_module_body(expression)?;
+        let doc = self.generate_eval_module_body(expression)?;
 
         self.is_repl_mode = previous_is_repl_mode;
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates a test evaluation module (no workspace bindings).
     ///
     /// Like [`generate_repl_module`] but with `workspace_mode = false`.
     /// Used by `beamtalk test-stdlib` for compiled expression tests (ADR 0014).
-    pub(super) fn generate_test_module(&mut self, expression: &Expression) -> Result<()> {
+    pub(super) fn generate_test_module(
+        &mut self,
+        expression: &Expression,
+    ) -> Result<Document<'static>> {
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true;
         self.workspace_mode = false;
 
-        self.generate_eval_module_body(expression)?;
+        let doc = self.generate_eval_module_body(expression)?;
 
         self.is_repl_mode = previous_is_repl_mode;
-        Ok(())
+        Ok(doc)
     }
 
     /// Common eval module body shared by REPL and test codegen.
-    fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<()> {
+    fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<Document<'static>> {
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
 
-        // Capture the expression output (ADR 0018 bridge pattern)
-        let expr_code = self.capture_expression(expression)?;
+        // Capture the expression output (ADR 0018 bridge)
+        let expr_code = self.expression_doc(expression)?;
 
         // Check if state was mutated (must happen after capture)
         let final_state = self.current_state_var();
@@ -108,10 +115,8 @@ impl CoreErlangGenerator {
             "end\n",
         ];
 
-        self.write_document(&doc);
-
         self.pop_scope();
 
-        Ok(())
+        Ok(doc)
     }
 }

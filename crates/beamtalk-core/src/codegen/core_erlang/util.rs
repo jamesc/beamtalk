@@ -62,40 +62,24 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Bridge: renders a `Document` tree and appends it to `self.output`.
+    /// Captures the output of `generate_expression` as a `String`.
     ///
-    /// This enables incremental migration — functions that return `Document`
-    /// can coexist with functions that write directly to `self.output`.
-    /// The document is rendered starting at indent level 0; callers are
-    /// responsible for embedding indentation in the document tree itself
-    /// (e.g., via `nest()` or literal spaces).
-    pub(super) fn write_document(&mut self, doc: &super::document::Document<'_>) {
-        let rendered = doc.to_pretty_string();
-        self.output.push_str(&rendered);
+    /// ADR 0018: Renders the expression Document to a string. Used by code
+    /// that needs string interpolation or direct string manipulation
+    /// (e.g., cascade generation, value type default values).
+    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
+        let doc = self.generate_expression(expr)?;
+        Ok(doc.to_pretty_string())
     }
 
-    /// Captures the output of `generate_expression` as a `String` without
-    /// modifying the output buffer.
+    /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
-    /// This is the bridge mechanism for Phase 0 migration (ADR 0018): functions
-    /// that are being migrated to return `Document` can capture expression output
-    /// as owned strings and embed them in document trees.
-    ///
-    /// All side effects on `var_context` and `state_threading` are preserved.
-    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
-        let start = self.output.len();
-        match self.generate_expression(expr) {
-            Ok(()) => {
-                let captured = self.output[start..].to_string();
-                self.output.truncate(start);
-                Ok(captured)
-            }
-            Err(err) => {
-                // Roll back any partial output written by generate_expression.
-                self.output.truncate(start);
-                Err(err)
-            }
-        }
+    /// ADR 0018: Simple forwarding to `generate_expression`.
+    pub(super) fn expression_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<super::document::Document<'static>> {
+        self.generate_expression(expr)
     }
 
     /// Generates a fresh variable name and binds it in the current scope.

@@ -22,6 +22,7 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
+use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::docvec;
@@ -64,7 +65,7 @@ impl CoreErlangGenerator {
     /// These are structural intrinsics that the compiler generates inline code for.
     /// This function:
     ///
-    /// - Returns `Ok(Some(()))` if the message was an intrinsic and code was generated
+    /// - Returns `Ok(Some(doc))` if the message was an intrinsic and code was generated
     /// - Returns `Ok(None)` if the message is NOT an intrinsic (caller should continue)
     /// - Returns `Err(...)` on error
     ///
@@ -88,19 +89,19 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             // `value` - evaluate block with no arguments
             // BT-335: When the receiver is a block literal, use fast inline apply.
             // For other receivers, generate a runtime type check to handle both
             // blocks (apply) and non-blocks (runtime dispatch via send).
             MessageSelector::Unary(name) if name == "value" => {
-                if matches!(receiver, Expression::Block { .. }) {
-                    self.generate_block_value_call(receiver, &[])?;
+                let doc = if matches!(receiver, Expression::Block { .. }) {
+                    self.generate_block_value_call(receiver, &[])?
                 } else {
                     let recv_var = self.fresh_temp_var("ValRecv");
-                    let recv_code = self.capture_expression(receiver)?;
-                    let doc = docvec![
+                    let recv_code = self.expression_doc(receiver)?;
+                    docvec![
                         format!("let {recv_var} = "),
                         recv_code,
                         format!(
@@ -109,16 +110,15 @@ impl CoreErlangGenerator {
                              'false' when 'true' -> \
                              call 'beamtalk_primitive':'send'({recv_var}, 'value', []) end"
                         ),
-                    ];
-                    self.write_document(&doc);
-                }
-                Ok(Some(()))
+                    ]
+                };
+                Ok(Some(doc))
             }
 
             // `repeat` - infinite loop
             MessageSelector::Unary(name) if name == "repeat" => {
-                self.generate_repeat(receiver)?;
-                Ok(Some(()))
+                let doc = self.generate_repeat(receiver)?;
+                Ok(Some(doc))
             }
 
             // Keyword messages for block evaluation
@@ -128,55 +128,55 @@ impl CoreErlangGenerator {
                 match selector_name.as_str() {
                     // `value:`, `value:value:`, `value:value:value:` - evaluate block with args
                     "value:" | "value:value:" | "value:value:value:" => {
-                        self.generate_block_value_call(receiver, arguments)?;
-                        Ok(Some(()))
+                        let doc = self.generate_block_value_call(receiver, arguments)?;
+                        Ok(Some(doc))
                     }
 
                     // `whileTrue:` - loop while condition block returns true
                     "whileTrue:" => {
-                        self.generate_while_true(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_while_true(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // `whileFalse:` - loop while condition block returns false
                     "whileFalse:" => {
-                        self.generate_while_false(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_while_false(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // `timesRepeat:` - repeat body N times
                     "timesRepeat:" => {
-                        self.generate_times_repeat(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_times_repeat(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // `to:do:` - range iteration (structural intrinsic from Integer)
                     "to:do:" if arguments.len() == 2 => {
-                        self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
-                        Ok(Some(()))
+                        let doc = self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
 
                     // `to:by:do:` - range iteration with step (structural intrinsic from Integer)
                     "to:by:do:" if arguments.len() == 3 => {
-                        self.generate_to_by_do(
+                        let doc = self.generate_to_by_do(
                             receiver,
                             &arguments[0],
                             &arguments[1],
                             &arguments[2],
                         )?;
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
 
                     // `on:do:` - exception handling (try/catch with class matching)
                     "on:do:" if arguments.len() == 2 => {
-                        self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
-                        Ok(Some(()))
+                        let doc = self.generate_on_do(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
 
                     // `ensure:` - cleanup (try/after via try/catch + re-raise)
                     "ensure:" => {
-                        self.generate_ensure(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_ensure(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
 
                     // Not a block evaluation message
@@ -198,7 +198,7 @@ impl CoreErlangGenerator {
     /// String primitive methods. String literals use `@primitive` codegen that delegates
     /// to `beamtalk_string_ops`, not `lists:map/filter`.
     ///
-    /// - Returns `Ok(Some(()))` if the message was a List method and code was generated
+    /// - Returns `Ok(Some(doc))` if the message was a List method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
     /// - Returns `Err(...)` on error
     ///
@@ -214,8 +214,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
-        // BT-416: Skip list intrinsics for String literals.
+    ) -> Result<Option<Document<'static>>> {
         // String has its own @primitive implementations (collect:, select:, etc.)
         // that delegate to beamtalk_string_ops, not lists:map/filter.
         if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
@@ -228,24 +227,25 @@ impl CoreErlangGenerator {
 
                 match selector_name.as_str() {
                     "do:" if arguments.len() == 1 => {
-                        self.generate_list_do(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_list_do(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "collect:" if arguments.len() == 1 => {
-                        self.generate_list_collect(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_list_collect(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "select:" if arguments.len() == 1 => {
-                        self.generate_list_select(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_list_select(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "reject:" if arguments.len() == 1 => {
-                        self.generate_list_reject(receiver, &arguments[0])?;
-                        Ok(Some(()))
+                        let doc = self.generate_list_reject(receiver, &arguments[0])?;
+                        Ok(Some(doc))
                     }
                     "inject:into:" if arguments.len() == 2 => {
-                        self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
-                        Ok(Some(()))
+                        let doc =
+                            self.generate_list_inject(receiver, &arguments[0], &arguments[1])?;
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }
@@ -267,26 +267,27 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let fun_var = self.fresh_temp_var("Fun");
-        let recv_code = self.capture_expression(receiver)?;
+        let recv_code = self.expression_doc(receiver)?;
 
-        let mut arg_parts: Vec<String> = Vec::new();
+        let mut arg_parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
-                arg_parts.push(", ".to_string());
+                arg_parts.push(Document::String(", ".to_string()));
             }
-            arg_parts.push(self.capture_expression(arg)?);
+            arg_parts.push(self.expression_doc(arg)?);
         }
-        let args_str = arg_parts.join("");
+        let args_doc = Document::Vec(arg_parts);
 
         let doc = docvec![
             format!("let {fun_var} = "),
             recv_code,
-            format!(" in apply {fun_var} ({args_str})"),
+            format!(" in apply {fun_var} ("),
+            args_doc,
+            ")",
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Tries to generate code for `ProtoObject` methods.
@@ -297,7 +298,7 @@ impl CoreErlangGenerator {
     /// - `perform:withArguments:` - Dynamic message dispatch
     ///
     /// This function:
-    /// - Returns `Ok(Some(()))` if the message was a `ProtoObject` method and code was generated
+    /// - Returns `Ok(Some(doc))` if the message was a `ProtoObject` method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a `ProtoObject` method (caller should continue)
     /// - Returns `Err(...)` on error
     ///
@@ -338,20 +339,19 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "class" if arguments.is_empty() => {
                     // BT-412: Return class as first-class object (#beamtalk_object{})
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
                         format!(" in call 'beamtalk_primitive':'class_of_object'({recv_var})"),
                     ];
-                    self.write_document(&doc);
-                    Ok(Some(()))
+                    Ok(Some(doc))
                 }
                 _ => Ok(None),
             },
@@ -364,9 +364,9 @@ impl CoreErlangGenerator {
                         let selector_var = self.fresh_var("Selector");
                         let args_var = self.fresh_var("Args");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
-                        let args_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
+                        let args_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -379,15 +379,14 @@ impl CoreErlangGenerator {
                                 " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, {args_var})"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "perform:" if arguments.len() == 1 => {
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -398,8 +397,7 @@ impl CoreErlangGenerator {
                                 " in call 'beamtalk_message_dispatch':'send'({receiver_var}, {selector_var}, [])"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }
@@ -418,7 +416,7 @@ impl CoreErlangGenerator {
     /// - Object identity (`yourself`, `hash`)
     /// - Object reflection (`respondsTo:`, `instVarNames`, `instVarAt:`, `instVarAt:put:`)
     ///
-    /// - Returns `Ok(Some(()))` if the message was an Object method and code was generated
+    /// - Returns `Ok(Some(doc))` if the message was an Object method and code was generated
     /// - Returns `Ok(None)` if the message is NOT an Object method (caller should continue)
     /// - Returns `Err(...)` on error
     pub(in crate::codegen::core_erlang) fn try_generate_object_message(
@@ -426,18 +424,18 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
-        if let Some(r) = self.try_generate_nil_protocol(receiver, selector, arguments)? {
-            return Ok(Some(r));
+    ) -> Result<Option<Document<'static>>> {
+        if let Some(doc) = self.try_generate_nil_protocol(receiver, selector, arguments)? {
+            return Ok(Some(doc));
         }
-        if let Some(r) = self.try_generate_error_signaling(receiver, selector, arguments)? {
-            return Ok(Some(r));
+        if let Some(doc) = self.try_generate_error_signaling(receiver, selector, arguments)? {
+            return Ok(Some(doc));
         }
-        if let Some(r) = self.try_generate_object_identity(receiver, selector, arguments)? {
-            return Ok(Some(r));
+        if let Some(doc) = self.try_generate_object_identity(receiver, selector, arguments)? {
+            return Ok(Some(doc));
         }
-        if let Some(r) = self.try_generate_object_reflection(receiver, selector, arguments)? {
-            return Ok(Some(r));
+        if let Some(doc) = self.try_generate_object_reflection(receiver, selector, arguments)? {
+            return Ok(Some(doc));
         }
         Ok(None)
     }
@@ -460,12 +458,12 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "isNil" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -473,12 +471,11 @@ impl CoreErlangGenerator {
                             " in case {recv_var} of <'nil'> when 'true' -> 'true' <_> when 'true' -> 'false' end"
                         ),
                     ];
-                    self.write_document(&doc);
-                    Ok(Some(()))
+                    Ok(Some(doc))
                 }
                 "notNil" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -486,8 +483,7 @@ impl CoreErlangGenerator {
                             " in case {recv_var} of <'nil'> when 'true' -> 'false' <_> when 'true' -> 'true' end"
                         ),
                     ];
-                    self.write_document(&doc);
-                    Ok(Some(()))
+                    Ok(Some(doc))
                 }
                 _ => Ok(None),
             },
@@ -498,8 +494,8 @@ impl CoreErlangGenerator {
                     "ifNil:" if arguments.len() == 1 => {
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NilBlk");
-                        let recv_code = self.capture_expression(receiver)?;
-                        let block_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let block_code = self.expression_doc(&arguments[0])?;
                         let doc = docvec![
                             format!("let {recv_var} = "),
                             recv_code,
@@ -509,8 +505,7 @@ impl CoreErlangGenerator {
                                 " in case {recv_var} of <'nil'> when 'true' -> apply {block_var} () <_> when 'true' -> {recv_var} end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "ifNotNil:" if arguments.len() == 1 => {
                         // If the block has 0 parameters, don't pass the receiver (avoids badarity)
@@ -518,8 +513,8 @@ impl CoreErlangGenerator {
                         let block_var = self.fresh_temp_var("NotNilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let block_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let block_code = self.expression_doc(&arguments[0])?;
                         let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -530,8 +525,7 @@ impl CoreErlangGenerator {
                                 " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> {apply} end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "ifNil:ifNotNil:" if arguments.len() == 2 => {
                         // If the notNil block has 0 parameters, don't pass the receiver
@@ -540,9 +534,9 @@ impl CoreErlangGenerator {
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let nil_code = self.capture_expression(&arguments[0])?;
-                        let not_nil_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let nil_code = self.expression_doc(&arguments[0])?;
+                        let not_nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -555,8 +549,7 @@ impl CoreErlangGenerator {
                                 " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "ifNotNil:ifNil:" if arguments.len() == 2 => {
                         // If the notNil block has 0 parameters, don't pass the receiver
@@ -565,9 +558,9 @@ impl CoreErlangGenerator {
                         let nil_var = self.fresh_temp_var("NilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let not_nil_code = self.capture_expression(&arguments[0])?;
-                        let nil_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let not_nil_code = self.expression_doc(&arguments[0])?;
+                        let nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -580,8 +573,7 @@ impl CoreErlangGenerator {
                                 " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }
@@ -600,7 +592,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
@@ -613,8 +605,8 @@ impl CoreErlangGenerator {
                         let err0 = self.fresh_temp_var("Err");
                         let err1 = self.fresh_temp_var("Err");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let msg_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let msg_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -628,8 +620,7 @@ impl CoreErlangGenerator {
                                  call 'beamtalk_error':'raise'({err1})"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }
@@ -649,25 +640,23 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
                     // Identity: just return the receiver
-                    let recv_code = self.capture_expression(receiver)?;
-                    self.write_document(&docvec![recv_code]);
-                    Ok(Some(()))
+                    let recv_code = self.expression_doc(receiver)?;
+                    Ok(Some(docvec![recv_code]))
                 }
                 "hash" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
                         format!(" in call 'erlang':'phash2'({recv_var})"),
                     ];
-                    self.write_document(&doc);
-                    Ok(Some(()))
+                    Ok(Some(doc))
                 }
                 // BT-477: printString removed as intrinsic — now uses polymorphic
                 // dispatch via Object >> printString and per-class overrides.
@@ -694,7 +683,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         match selector {
             MessageSelector::Unary(name) => match name.as_str() {
                 "instVarNames" if arguments.is_empty() => {
@@ -702,7 +691,7 @@ impl CoreErlangGenerator {
                     let pid_var = self.fresh_var("Pid");
                     let future_var = self.fresh_var("Future");
 
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
 
                     let doc = docvec![
                         format!("let {receiver_var} = "),
@@ -714,8 +703,7 @@ impl CoreErlangGenerator {
                                  {future_var}"
                         ),
                     ];
-                    self.write_document(&doc);
-                    Ok(Some(()))
+                    Ok(Some(doc))
                 }
                 _ => Ok(None),
             },
@@ -727,8 +715,8 @@ impl CoreErlangGenerator {
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -739,8 +727,7 @@ impl CoreErlangGenerator {
                                 " in call 'beamtalk_primitive':'responds_to'({receiver_var}, {selector_var})"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "instVarAt:" if arguments.len() == 1 => {
                         let receiver_var = self.fresh_var("Receiver");
@@ -754,8 +741,8 @@ impl CoreErlangGenerator {
                         let hint =
                             Self::binary_string_literal("Value types have no instance variables");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let name_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let name_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -788,8 +775,7 @@ impl CoreErlangGenerator {
                                  end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     "instVarAt:put:" if arguments.len() == 2 => {
                         let receiver_var = self.fresh_var("Receiver");
@@ -805,9 +791,9 @@ impl CoreErlangGenerator {
                             "Value types are immutable. Use a method that returns a new instance instead.",
                         );
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let name_code = self.capture_expression(&arguments[0])?;
-                        let value_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let value_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -842,8 +828,7 @@ impl CoreErlangGenerator {
                                  end"
                             ),
                         ];
-                        self.write_document(&doc);
-                        Ok(Some(()))
+                        Ok(Some(doc))
                     }
                     _ => Ok(None),
                 }

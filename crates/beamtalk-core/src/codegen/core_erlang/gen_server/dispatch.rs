@@ -8,7 +8,7 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::document::{INDENT, line, nest};
+use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, MethodKind, Module};
 use crate::docvec;
@@ -25,11 +25,12 @@ impl CoreErlangGenerator {
     /// 'method_table'/0 = fun () ->
     ///     ~{'increment' => 0, 'value' => 0}~
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_method_table(
-        &mut self,
+        &self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<(String, usize)> = module
             .expressions
@@ -78,9 +79,8 @@ impl CoreErlangGenerator {
             nest(INDENT, docvec![line(), format!("~{{{entries_str}}}~"),]),
             "\n\n",
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `has_method/1` function for runtime reflection.
@@ -95,11 +95,12 @@ impl CoreErlangGenerator {
     /// 'has_method'/1 = fun (Selector) ->
     ///     call 'lists':'member'(Selector, ['increment', 'decrement', 'getValue', 'setValue:'])
     /// ```
+    #[allow(clippy::unused_self)]
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::codegen::core_erlang) fn generate_has_method(
-        &mut self,
+        &self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Collect methods from expression-based definitions (legacy)
         let mut methods: Vec<String> = module
             .expressions
@@ -152,9 +153,8 @@ impl CoreErlangGenerator {
             ),
             "\n\n",
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the `safe_dispatch/3` function with error isolation.
@@ -177,7 +177,9 @@ impl CoreErlangGenerator {
     ///         {'error', {Type, Error}, State}
     /// ```
     #[allow(clippy::unnecessary_wraps)]
-    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(&mut self) -> Result<()> {
+    pub(in crate::codegen::core_erlang) fn generate_safe_dispatch(
+        &mut self,
+    ) -> Result<Document<'static>> {
         let module_name = &self.module_name;
 
         let doc = docvec![
@@ -200,9 +202,7 @@ impl CoreErlangGenerator {
             ),
             "\n\n",
         ];
-        self.write_document(&doc);
-
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates the dispatch/4 function for message routing.
@@ -216,14 +216,16 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_dispatch(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
         // Write function header
         let header_doc = docvec![
             "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
             nest(INDENT, docvec![line(), "case Selector of",]),
             "\n",
         ];
-        self.write_document(&header_doc);
+        docs.push(header_doc);
 
         // Case clauses are at indent level 2 (inside function + inside case)
         let case_clause_indent: isize = 2;
@@ -248,11 +250,9 @@ impl CoreErlangGenerator {
                         .map(|p| self.fresh_var(&p.name))
                         .collect();
 
-                    // Capture body output
-                    let start = self.output.len();
-                    self.generate_method_body_with_reply(block)?;
-                    let body_str = self.output[start..].to_string();
-                    self.output.truncate(start);
+                    // Generate body as Document, render to string for embedding
+                    let body_doc = self.generate_method_body_with_reply(block)?;
+                    let body_str = body_doc.to_pretty_string();
 
                     // Build method clause as Document tree
                     let clause_doc = if param_vars.is_empty() {
@@ -292,7 +292,7 @@ impl CoreErlangGenerator {
                     let indent_spaces = case_clause_indent * INDENT;
                     #[allow(clippy::cast_sign_loss)]
                     let indent_str = " ".repeat(indent_spaces as usize);
-                    self.write_document(&docvec![indent_str, nest(indent_spaces, clause_doc)]);
+                    docs.push(docvec![indent_str, nest(indent_spaces, clause_doc)]);
 
                     // Pop the scope when done with this method
                     self.pop_scope();
@@ -302,7 +302,8 @@ impl CoreErlangGenerator {
 
         // Generate case clauses for methods in class definitions
         for class in &module.classes {
-            self.generate_class_method_dispatches(class, case_clause_indent)?;
+            let doc = self.generate_class_method_dispatches(class, case_clause_indent)?;
+            docs.push(doc);
         }
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
@@ -448,12 +449,12 @@ impl CoreErlangGenerator {
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)]
         let indent_str = " ".repeat(indent_spaces as usize);
-        self.write_document(&docvec![indent_str, nest(indent_spaces, default_body),]);
+        docs.push(docvec![indent_str, nest(indent_spaces, default_body),]);
 
         // Close case and function
         let footer_doc = docvec![nest(INDENT, docvec![line(), "end",]), "\n\n",];
-        self.write_document(&footer_doc);
+        docs.push(footer_doc);
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 }
