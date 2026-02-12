@@ -7,7 +7,7 @@
 // @load tests/e2e/fixtures/field_mutation_counter.bt
 
 counter := FieldMutationCounter spawn
-// => _
+// => #Actor<FieldMutationCounter,_>
 
 counter getValue await
 // => 0
@@ -57,7 +57,7 @@ counter getValue await
 // @load tests/e2e/fixtures/field_mutation_accumulator.bt
 
 acc := FieldMutationAccumulator spawn
-// => _
+// => #Actor<FieldMutationAccumulator,_>
 
 (acc processArray: #(2, 3, 4)) await
 // => _

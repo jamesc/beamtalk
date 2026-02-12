@@ -14,7 +14,7 @@
 
 // Spawn a sealed counter
 c := SealedCounter spawn
-// => _
+// => #Actor<SealedCounter,_>
 
 // Basic read: getValue (uses __sealed_getValue direct call internally)
 c getValue await

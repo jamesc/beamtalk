@@ -161,6 +161,45 @@ just test-e2e      # E2E tests
 
 **Error enforcement (BT-249):** Missing assertions are treated as test failures, not just warnings. CI will catch broken tests before they're merged.
 
+### Pattern Matching in Test Assertions (BT-502)
+
+Test assertions support **glob-style pattern matching** where `_` acts as a wildcard segment within a pattern:
+
+| Pattern | Matches | Use Case |
+|---------|---------|----------|
+| `_` | Any result | Bare wildcard (run but don't check) |
+| `#Actor<Counter,_>` | `#Actor<Counter,0.173.0>` | Actor spawn (ignore PID) |
+| `#Actor<_,_>` | Any actor reference | Any actor class |
+| `{\: Set, elements: _}` | Full Set output | Collection type check |
+| `Alice` | `Alice` (exact) | Exact string match |
+
+**Rules:**
+- **Bare `_`** → full wildcard (backward compatible, matches anything)
+- **`_` within a pattern** → matches any substring at that position
+- Non-`_` literal segments must appear **in order** in the actual result
+- First segment must match at the start, last segment must match at the end
+
+**Examples:**
+```beamtalk
+// Actor spawn — validate class name, ignore PID
+counter := Counter spawn
+// => #Actor<Counter,_>
+
+// Actor method returning nil
+(counter setValue: 5) await
+// => nil
+
+// Exact value match
+counter getValue await
+// => 5
+
+// Collection with actors — validate type, ignore contents
+room online
+// => _                    ← Still bare wildcard for complex structures
+```
+
+**Prefer patterns over bare wildcards** when the result has a predictable structure (like actor class names). This catches format/class regressions that bare `_` would miss.
+
 ### Verification Checklist
 
 Before using ANY Beamtalk syntax, verify it exists in **at least one** of these sources:

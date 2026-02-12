@@ -769,6 +769,52 @@ impl ReplClient {
     }
 }
 
+/// Pattern matcher for test assertions (BT-502).
+///
+/// Supports glob-style matching where `_` acts as a wildcard segment:
+/// - Bare `_` → matches any result (full wildcard)
+/// - `_` within a pattern → matches any substring at that position
+/// - `#Actor<Counter,_>` matches `#Actor<Counter,0.173.0>`
+/// - `{\: Set, elements: _}` matches the full Set output
+/// - `Alice` still exact-matches `Alice`
+fn matches_pattern(pattern: &str, actual: &str) -> bool {
+    if pattern == "_" {
+        return true;
+    }
+    if !pattern.contains('_') {
+        return actual == pattern;
+    }
+
+    // Split pattern on `_` to get literal segments that must appear in order
+    let segments: Vec<&str> = pattern.split('_').collect();
+    let mut pos = 0;
+
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            // Leading, trailing, or consecutive `_` — skip (matches any chars)
+            continue;
+        }
+        if let Some(found) = actual[pos..].find(segment) {
+            // First segment must match at the start
+            if i == 0 && found != 0 {
+                return false;
+            }
+            pos += found + segment.len();
+        } else {
+            return false;
+        }
+    }
+
+    // Last segment must match at the end (unless pattern ends with `_`)
+    if let Some(last) = segments.last() {
+        if !last.is_empty() {
+            return actual.ends_with(last);
+        }
+    }
+
+    true
+}
+
 /// Run a single test file.
 ///
 /// Note: Bindings are cleared at the start of each file, but NOT between
@@ -869,8 +915,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_warning, client.last_warnings
                         ));
                     }
-                } else if case.expected == "_" || result == case.expected {
-                    // Wildcard "_" means run but don't check result
+                } else if matches_pattern(&case.expected, &result) {
                     pass_count += 1;
                 } else {
                     failures.push(format!(
@@ -891,8 +936,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_error, e
                         ));
                     }
-                } else if case.expected == "_" {
-                    // Wildcard means "run but don't check result" - errors are still failures
+                } else if case.expected == "_" || case.expected.contains('_') {
+                    // Wildcard/pattern means "run but don't check result" - errors are still failures
                     // because we want to know if spawn or other side-effect operations fail
                     failures.push(format!(
                         "{file_name}:{}: `{}` (wildcard) failed with error: {}",
@@ -1208,5 +1253,67 @@ Counter spawn
         assert!(parsed.load_error_cases.is_empty());
         assert_eq!(parsed.warnings.len(), 1);
         assert!(parsed.warnings[0].contains("Malformed @load-error"));
+    }
+
+    #[test]
+    fn test_matches_pattern_bare_wildcard() {
+        assert!(matches_pattern("_", "anything"));
+        assert!(matches_pattern("_", ""));
+        assert!(matches_pattern("_", "#Actor<Counter,0.173.0>"));
+    }
+
+    #[test]
+    fn test_matches_pattern_exact_match() {
+        assert!(matches_pattern("Alice", "Alice"));
+        assert!(!matches_pattern("Alice", "Bob"));
+        assert!(matches_pattern("42", "42"));
+        assert!(!matches_pattern("42", "43"));
+    }
+
+    #[test]
+    fn test_matches_pattern_actor_pid() {
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.173.0>"
+        ));
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.999.0>"
+        ));
+        assert!(!matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<ChatRoom,0.173.0>"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_collection() {
+        assert!(matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: Set, elements: [<0.173.0>, <0.174.0>]}"
+        ));
+        assert!(!matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: List, elements: [1, 2]}"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_multiple_wildcards() {
+        assert!(matches_pattern("#Actor<_,_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("#Actor<_,_>", "something else"));
+    }
+
+    #[test]
+    fn test_matches_pattern_leading_wildcard() {
+        assert!(matches_pattern("_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("_>", "no closing bracket"));
+    }
+
+    #[test]
+    fn test_matches_pattern_no_false_positives() {
+        // Pattern without underscore is exact match
+        assert!(!matches_pattern("hello", "hello world"));
+        assert!(!matches_pattern("hello world", "hello"));
     }
 }

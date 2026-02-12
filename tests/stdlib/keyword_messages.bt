@@ -102,7 +102,7 @@ applyBlock value: [:x | x + 100] value: 42
 // @load tests/e2e/fixtures/multi_keyword.bt
 
 mk := MultiKeyword spawn
-// => _
+// => #Actor<MultiKeyword,_>
 
 // 4-keyword method: sum four arguments
 (mk add: 1 and: 2 and: 3 and: 4) await
