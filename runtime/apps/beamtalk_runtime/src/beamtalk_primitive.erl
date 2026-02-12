@@ -380,23 +380,31 @@ value_type_send(Self, Class, Selector, Args) ->
             ok
     end,
     Module = class_name_to_module(Class),
-    Arity = length(Args) + 1,  % +1 for Self parameter
     code:ensure_loaded(Module),
-    case erlang:function_exported(Module, Selector, Arity) of
+    %% BT-439: Use dispatch/3 for proper superclass delegation.
+    %% Previously called Module:Selector(Self, Args) directly, which
+    %% missed inherited methods (e.g., TestCase assertion methods).
+    case erlang:function_exported(Module, dispatch, 3) of
         true ->
-            erlang:apply(Module, Selector, [Self | Args]);
+            Module:dispatch(Selector, Args, Self);
         false ->
-            %% Fall back to Object base methods (class, printString, etc.)
-            case beamtalk_object_ops:has_method(Selector) of
+            %% Fallback for modules without dispatch/3
+            Arity = length(Args) + 1,
+            case erlang:function_exported(Module, Selector, Arity) of
                 true ->
-                    case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
-                        {reply, Result, _State} -> Result;
-                        {error, Error, _State} -> beamtalk_error:raise(Error)
-                    end;
+                    erlang:apply(Module, Selector, [Self | Args]);
                 false ->
-                    Error0 = beamtalk_error:new(does_not_understand, Class),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
-                    beamtalk_error:raise(Error1)
+                    case beamtalk_object_ops:has_method(Selector) of
+                        true ->
+                            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
+                                {reply, Result, _State} -> Result;
+                                {error, Error, _State} -> beamtalk_error:raise(Error)
+                            end;
+                        false ->
+                            Error0 = beamtalk_error:new(does_not_understand, Class),
+                            Error1 = beamtalk_error:with_selector(Error0, Selector),
+                            beamtalk_error:raise(Error1)
+                    end
             end
     end.
 
@@ -415,12 +423,17 @@ is_ivar_method(_) ->
 value_type_responds_to(Class, Selector) ->
     Module = class_name_to_module(Class),
     code:ensure_loaded(Module),
-    Exports = case erlang:function_exported(Module, module_info, 1) of
-        true -> Module:module_info(exports);
-        false -> []
-    end,
-    lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
-        orelse beamtalk_object_ops:has_method(Selector).
+    case erlang:function_exported(Module, has_method, 1) of
+        true ->
+            Module:has_method(Selector);
+        false ->
+            Exports = case erlang:function_exported(Module, module_info, 1) of
+                true -> Module:module_info(exports);
+                false -> []
+            end,
+            lists:any(fun({Name, _Arity}) -> Name =:= Selector end, Exports)
+                orelse beamtalk_object_ops:has_method(Selector)
+    end.
 
 %% @doc Convert a CamelCase class name atom to a module name atom.
 %%
