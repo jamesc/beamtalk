@@ -138,9 +138,7 @@ Interop is not an afterthought — it's essential for adoption. The BEAM ecosyst
 - Phoenix, Ecto, Nx are too valuable to abandon
 - Gradual migration must be possible
 
-**Implication:** Generated code follows BEAM conventions exactly. Foreign function interface is simple and low-friction. Build tools integrate with Mix/Rebar3.
-
-See [beamtalk-interop.md](beamtalk-interop.md) for detailed specification.
+**Implication:** Generated code follows BEAM conventions exactly. Foreign function interface is simple and low-friction. Build tools integrate with Mix/Rebar3. BEAM interop design needs an ADR.
 
 ---
 
@@ -220,8 +218,6 @@ Following Anders Hejlsberg's TypeScript principle: the compiler IS the language 
 ## References
 
 - [Architecture](beamtalk-architecture.md) - Compiler, runtime, and live development flow
-- [IDE and Live Development](beamtalk-ide.md) - Smalltalk-style integrated environment
-- [BEAM Interop Specification](beamtalk-interop.md) - Detailed Erlang/Elixir integration
 - [TypeScript Compiler Architecture](https://github.com/microsoft/TypeScript/wiki/Architectural-Overview) - Tooling-first design
 - [Newspeak Language](https://newspeaklanguage.org/) - Module system, encapsulation, async actors
 - [Dylan](https://opendylan.org/) - Sealing, conditions, method combinations
