@@ -32,10 +32,13 @@ Type :help for available commands
 
 ```beamtalk
 > :load examples/chat_room.bt
-Loaded: ChatRoom, ChatMember
+Loaded: ChatRoom
+
+> :load examples/chat_member.bt
+Loaded: ChatMember
 ```
 
-This loads two actor classes:
+This loads two actor classes from separate files:
 - `ChatRoom`: Manages members (Set) and message history (List)
 - `ChatMember`: Represents a chat participant with name and inbox
 
@@ -70,32 +73,32 @@ Give each member a name and connect them to the room:
 
 ```beamtalk
 > alice setName: "Alice"
-<future>
+"Alice"
 
 > bob setName: "Bob"
-<future>
+"Bob"
 ```
 
-Actor messages return **futures** immediately. The message is sent asynchronously, and the future represents the eventual result. For state changes, we don't need to await the result.
+Actor messages are sent asynchronously under the hood, but the REPL **auto-awaits** the result, so you see the return value directly.
 
 Now connect members to the room:
 
 ```beamtalk
 > alice setRoom: room
-<future>
+<pid>
 
 > bob setRoom: room
-<future>
+<pid>
 ```
 
 ## Step 6: Members Join the Room
 
 ```beamtalk
 > room join: alice
-<future>
+nil
 
 > room join: bob
-<future>
+nil
 ```
 
 Behind the scenes:
@@ -108,14 +111,17 @@ The `members` field now contains a **Set of actor references** (PIDs).
 ## Step 7: Check Who's Online
 
 ```beamtalk
-> (room online) await
+> room online
 <Set with 2 members>
 
-> ((room online) await) size
+> members := room online
+<Set with 2 members>
+
+> members size
 2
 ```
 
-The `await` method blocks until the future resolves. Here we're asking the room for its member Set and getting the size.
+The REPL auto-awaits futures, so `room online` returns the Set directly. To call methods on the result, store it in a variable first — variable assignment triggers auto-await.
 
 ## Step 8: Send Messages
 
@@ -123,7 +129,7 @@ Now for the fun part! Let's send a message:
 
 ```beamtalk
 > room say: "Hello everyone!" from: alice
-<future>
+nil
 ```
 
 What just happened?
@@ -134,7 +140,7 @@ What just happened?
 5. Each member receives the message in their inbox
 
 This demonstrates:
-- **List concatenation** (`,` operator)
+- **List concatenation** (`++` operator)
 - **Set iteration** (`do:` method)
 - **Blocks as closures** (captured `message` variable)
 - **Actor method calls inside blocks** (calling `receiveMessage:` on each member)
@@ -142,7 +148,7 @@ This demonstrates:
 ## Step 9: Check Message History
 
 ```beamtalk
-> (room getHistory) await
+> room getHistory
 ["Hello everyone!"]
 ```
 
@@ -151,10 +157,10 @@ The room maintains a **List** of all messages sent.
 ## Step 10: Check Member Inboxes
 
 ```beamtalk
-> (alice getInbox) await
+> alice getInbox
 ["Hello everyone!"]
 
-> (bob getInbox) await
+> bob getInbox
 ["Hello everyone!"]
 ```
 
@@ -164,15 +170,15 @@ Both members received the broadcast message!
 
 ```beamtalk
 > room say: "Hey Alice!" from: bob
-<future>
+nil
 
-> (room getHistory) await
+> room getHistory
 ["Hello everyone!", "Hey Alice!"]
 
-> (alice getInbox) await
+> alice getInbox
 ["Hello everyone!", "Hey Alice!"]
 
-> (bob getInbox) await
+> bob getInbox
 ["Hello everyone!", "Hey Alice!"]
 ```
 
@@ -182,9 +188,12 @@ Note that members receive their own messages too (just like in real chat apps).
 
 ```beamtalk
 > room leave: alice
-<future>
+nil
 
-> ((room online) await) size
+> members := room online
+<Set with 1 member>
+
+> members size
 1
 ```
 
@@ -194,12 +203,12 @@ Alice is removed from the members Set.
 
 ```beamtalk
 > room say: "Anyone there?" from: bob
-<future>
+nil
 
-> (alice getInbox) await
+> alice getInbox
 ["Hello everyone!", "Hey Alice!"]
 
-> (bob getInbox) await
+> bob getInbox
 ["Hello everyone!", "Hey Alice!", "Anyone there?"]
 ```
 
@@ -220,10 +229,18 @@ The `do:` iteration uses a **block**: `[:m | m receiveMessage: message]`. The bl
 - Executes for each element in the Set
 
 ### Futures Enable Async
-All actor messages return futures immediately. You can:
-- Ignore the future for "fire and forget" messages
-- `await` to get the result synchronously
-- Chain with `whenResolved:whenRejected:` (not shown here)
+All actor messages return futures immediately. In the REPL, results are automatically awaited before being printed, so you'll usually see the final value rather than the Future itself.
+
+You can:
+- Ignore the Future for "fire and forget" messages
+- In non-REPL code, store the Future in a variable and `await` it later if you need the result:
+
+  ```beamtalk
+  future := room broadcast: "hello".
+  // ... do other work ...
+  future await
+  ```
+- Use higher-level combinators like `whenResolved:whenRejected:` (not shown here) to react asynchronously without blocking
 
 ## What's Next?
 

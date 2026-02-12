@@ -10,6 +10,7 @@
 // - Set and List operations with actors
 
 // @load tests/e2e/fixtures/chat_room.bt
+// @load tests/e2e/fixtures/chat_member.bt
 
 // ===========================================================================
 // CHAT ROOM CREATION & BASIC OPERATIONS
@@ -20,11 +21,17 @@ room := ChatRoom spawn
 // => _
 
 // Initially no members
-(room online) isEmpty
+online := room online
+// => _
+
+online isEmpty
 // => true
 
 // No message history
-(room getHistory) size
+hist := room getHistory
+// => _
+
+hist size
 // => 0
 
 // ===========================================================================
@@ -127,14 +134,23 @@ room say: "Hey Alice!" from: bob
 // => _
 
 // History now has 2 messages
-(room getHistory) size
+history2 := room getHistory
+// => _
+
+history2 size
 // => 2
 
 // Both members received both messages
-(alice getInbox) size
+aliceInbox2 := alice getInbox
+// => _
+
+aliceInbox2 size
 // => 2
 
-(bob getInbox) size
+bobInbox2 := bob getInbox
+// => _
+
+bobInbox2 size
 // => 2
 
 // ===========================================================================
@@ -146,13 +162,16 @@ room leave: alice
 // => _
 
 // Online members now has only bob
-(room online) size
+onlineAfter := room online
+// => _
+
+onlineAfter size
 // => 1
 
-(room online) includes: alice
+onlineAfter includes: alice
 // => false
 
-(room online) includes: bob
+onlineAfter includes: bob
 // => true
 
 // Message sent after alice leaves
@@ -160,12 +179,18 @@ room say: "Anyone there?" from: bob
 // => _
 
 // Alice doesn't receive the new message
-(alice getInbox) size
+aliceInbox3 := alice getInbox
+// => _
+
+aliceInbox3 size
 // => 2
 
 // Bob receives it
-(bob getInbox) size
+bobInbox3 := bob getInbox
+// => _
+
+bobInbox3 size
 // => 3
 
-(bob getInbox) last
+bobInbox3 last
 // => Anyone there?

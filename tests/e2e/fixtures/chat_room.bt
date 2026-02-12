@@ -30,33 +30,3 @@ Actor subclass: ChatRoom
   // Return message history (List of strings)
   getHistory =>
     ^self.history
-
-// ChatMember actor represents a chat participant
-Actor subclass: ChatMember
-  state: name = "Guest"
-  state: inbox = #()
-  state: room = nil
-
-  // Set the member's display name
-  setName: newName =>
-    self.name := newName
-  
-  // Set the chat room reference
-  setRoom: newRoom =>
-    self.room := newRoom
-
-  // Receive a message (called by ChatRoom)
-  receiveMessage: msg =>
-    self.inbox := self.inbox ++ #(msg)
-
-  // Send a message via the room
-  say: message =>
-    self.room say: message from: self
-
-  // Return received messages
-  getInbox =>
-    ^self.inbox
-  
-  // Return member's name
-  getName =>
-    ^self.name
