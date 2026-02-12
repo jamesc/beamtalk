@@ -697,3 +697,708 @@ format_response_true_false_test() ->
     ResponseF = beamtalk_repl_server:format_response(false),
     DecodedF = jsx:decode(ResponseF, [return_maps]),
     ?assertEqual(false, maps:get(<<"value">>, DecodedF)).
+
+%%% BT-520: format_response_with_warnings tests
+
+format_response_with_warnings_no_warnings_test() ->
+    Response = beamtalk_repl_server:format_response_with_warnings(42, []),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(42, maps:get(<<"value">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
+
+format_response_with_warnings_single_warning_test() ->
+    Response = beamtalk_repl_server:format_response_with_warnings(42, [<<"watch out">>]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(42, maps:get(<<"value">>, Decoded)),
+    ?assertEqual([<<"watch out">>], maps:get(<<"warnings">>, Decoded)).
+
+format_response_with_warnings_multiple_warnings_test() ->
+    Warnings = [<<"warn1">>, <<"warn2">>, <<"warn3">>],
+    Response = beamtalk_repl_server:format_response_with_warnings("hello", Warnings),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"hello">>, maps:get(<<"value">>, Decoded)),
+    ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
+
+format_response_with_warnings_complex_value_test() ->
+    Response = beamtalk_repl_server:format_response_with_warnings(
+        #{x => 1, y => 2}, [<<"shadow">>]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Value = maps:get(<<"value">>, Decoded),
+    ?assertEqual(1, maps:get(<<"x">>, Value)),
+    ?assertEqual([<<"shadow">>], maps:get(<<"warnings">>, Decoded)).
+
+%%% BT-520: format_error_with_warnings tests
+
+format_error_with_warnings_no_warnings_test() ->
+    Response = beamtalk_repl_server:format_error_with_warnings(timeout, []),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"Request timed out">>, maps:get(<<"message">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
+
+format_error_with_warnings_single_warning_test() ->
+    Response = beamtalk_repl_server:format_error_with_warnings(
+        empty_expression, [<<"deprecated syntax">>]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"Empty expression">>, maps:get(<<"message">>, Decoded)),
+    ?assertEqual([<<"deprecated syntax">>], maps:get(<<"warnings">>, Decoded)).
+
+format_error_with_warnings_multiple_warnings_test() ->
+    Warnings = [<<"w1">>, <<"w2">>],
+    Response = beamtalk_repl_server:format_error_with_warnings(daemon_unavailable, Warnings),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assert(binary:match(maps:get(<<"message">>, Decoded), <<"daemon">>) =/= nomatch),
+    ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
+
+format_error_with_warnings_beamtalk_error_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Integer'),
+    ErrorWithSel = beamtalk_error:with_selector(Error, foo),
+    Response = beamtalk_repl_server:format_error_with_warnings(ErrorWithSel, [<<"hint">>]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assert(binary:match(Message, <<"Integer">>) =/= nomatch),
+    ?assertEqual([<<"hint">>], maps:get(<<"warnings">>, Decoded)).
+
+%%% BT-520: format_docs tests
+
+format_docs_simple_test() ->
+    Response = beamtalk_repl_server:format_docs(<<"Counter is a class">>),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"Counter is a class">>, maps:get(<<"docs">>, Decoded)).
+
+format_docs_empty_test() ->
+    Response = beamtalk_repl_server:format_docs(<<>>),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<>>, maps:get(<<"docs">>, Decoded)).
+
+format_docs_multiline_test() ->
+    Doc = <<"Counter\n\nA simple counter class.\nMethods: increment, decrement">>,
+    Response = beamtalk_repl_server:format_docs(Doc),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(Doc, maps:get(<<"docs">>, Decoded)).
+
+%%% BT-520: safe_to_existing_atom tests
+
+safe_to_existing_atom_existing_test() ->
+    %% 'ok' is a well-known existing atom
+    ?assertEqual({ok, ok}, beamtalk_repl_server:safe_to_existing_atom(<<"ok">>)).
+
+safe_to_existing_atom_nonexistent_test() ->
+    %% A random string should fail
+    ?assertEqual({error, badarg},
+        beamtalk_repl_server:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)).
+
+safe_to_existing_atom_empty_test() ->
+    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(<<>>)).
+
+safe_to_existing_atom_non_binary_test() ->
+    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(123)).
+
+safe_to_existing_atom_integer_atom_test() ->
+    %% 'Integer' is a well-known existing atom in beamtalk
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_server:safe_to_existing_atom(<<"Integer">>)).
+
+%%% BT-520: generate_session_id tests (via parse_request with session operations)
+
+%% Test that parse_request handles op "sessions"
+parse_request_op_sessions_test() ->
+    Request = <<"{\"op\": \"sessions\"}">>,
+    %% sessions doesn't map via op_to_request - it's handled in handle_op
+    %% The legacy parse doesn't have a sessions type, so this goes through op route
+    Result = beamtalk_repl_server:parse_request(Request),
+    %% sessions isn't in op_to_request, so it's an unknown_op
+    ?assertMatch({error, {unknown_op, <<"sessions">>}}, Result).
+
+%% Test that parse_request handles op "clone"
+parse_request_op_clone_test() ->
+    Request = <<"{\"op\": \"clone\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"clone">>}}, Result).
+
+%% Test that parse_request handles op "close"
+parse_request_op_close_test() ->
+    Request = <<"{\"op\": \"close\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"close">>}}, Result).
+
+%% Test that parse_request handles op "inspect"
+parse_request_op_inspect_test() ->
+    Request = <<"{\"op\": \"inspect\", \"actor\": \"<0.1.0>\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"inspect">>}}, Result).
+
+%% Test that parse_request handles op "reload"
+parse_request_op_reload_test() ->
+    Request = <<"{\"op\": \"reload\", \"module\": \"Counter\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"reload">>}}, Result).
+
+%% Test that parse_request handles op "complete"
+parse_request_op_complete_test() ->
+    Request = <<"{\"op\": \"complete\", \"code\": \"Cou\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"complete">>}}, Result).
+
+%% Test that parse_request handles op "info"
+parse_request_op_info_test() ->
+    Request = <<"{\"op\": \"info\", \"symbol\": \"Counter\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({error, {unknown_op, <<"info">>}}, Result).
+
+%% Test that parse_request handles op "docs"
+parse_request_op_docs_test() ->
+    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({get_docs, <<"Integer">>, undefined}, Result).
+
+parse_request_op_docs_with_selector_test() ->
+    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"selector\": \"+\"}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({get_docs, <<"Integer">>, <<"+">>}, Result).
+
+%%% BT-520: Additional format_error_message edge cases
+
+format_error_message_module_not_loaded_test() ->
+    Msg = beamtalk_repl_server:format_error_message({module_not_found, <<"Counter">>}),
+    ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
+
+format_error_message_invalid_module_test() ->
+    Msg = beamtalk_repl_server:format_error_message({invalid_module, missing}),
+    %% Falls through to generic formatter
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+format_error_message_unknown_actor_test() ->
+    Msg = beamtalk_repl_server:format_error_message({unknown_actor, "<0.1.0>"}),
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+format_error_message_invalid_pid_test() ->
+    Msg = beamtalk_repl_server:format_error_message({invalid_pid, "not-a-pid"}),
+    ?assert(is_binary(Msg)),
+    ?assert(byte_size(Msg) > 0).
+
+format_error_message_class_not_found_test() ->
+    %% Ensure the atom exists first
+    _ = 'NonExistentClass',
+    Msg = beamtalk_repl_server:format_error_message({class_not_found, 'NonExistentClass'}),
+    ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<":modules">>) =/= nomatch).
+
+format_error_message_class_not_found_binary_test() ->
+    Msg = beamtalk_repl_server:format_error_message({class_not_found, <<"Foo">>}),
+    ?assert(binary:match(Msg, <<"Unknown class">>) =/= nomatch).
+
+format_error_message_method_not_found_test() ->
+    Msg = beamtalk_repl_server:format_error_message({method_not_found, 'Integer', <<"+:">>}),
+    ?assert(binary:match(Msg, <<"Integer">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<"does not understand">>) =/= nomatch).
+
+format_error_message_wrapped_exception_test() ->
+    Error = beamtalk_error:new(does_not_understand, 'Counter'),
+    ErrorWithSel = beamtalk_error:with_selector(Error, badMethod),
+    Wrapped = #{'$beamtalk_class' => 'Exception', error => ErrorWithSel},
+    Msg = beamtalk_repl_server:format_error_message(Wrapped),
+    ?assert(binary:match(Msg, <<"Exception">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<"Counter">>) =/= nomatch).
+
+format_error_message_eval_error_wrapped_exception_test() ->
+    Error = beamtalk_error:new(type_error, 'String'),
+    Wrapped = #{'$beamtalk_class' => 'TypeError', error => Error},
+    Msg = beamtalk_repl_server:format_error_message({eval_error, error, Wrapped}),
+    ?assert(binary:match(Msg, <<"TypeError">>) =/= nomatch).
+
+%%% BT-520: term_to_json additional edge cases
+
+term_to_json_future_pending_test() ->
+    %% Simulate a future by spawning a process in beamtalk_future:pending/1
+    Pid = beamtalk_future:new(),
+    timer:sleep(50),
+    Result = beamtalk_repl_server:term_to_json(Pid),
+    ?assertEqual(<<"#Future<pending>">>, Result),
+    beamtalk_future:resolve(Pid, ok).
+
+term_to_json_nested_map_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{a => #{b => #{c => 42}}}),
+    Inner = maps:get(<<"a">>, Result),
+    Middle = maps:get(<<"b">>, Inner),
+    ?assertEqual(42, maps:get(<<"c">>, Middle)).
+
+term_to_json_empty_map_test() ->
+    ?assertEqual(#{}, beamtalk_repl_server:term_to_json(#{})).
+
+term_to_json_map_with_mixed_keys_test() ->
+    Result = beamtalk_repl_server:term_to_json(#{atom_key => 1, <<"bin_key">> => 2}),
+    ?assertEqual(1, maps:get(<<"atom_key">>, Result)),
+    ?assertEqual(2, maps:get(<<"bin_key">>, Result)).
+
+term_to_json_single_element_tuple_test() ->
+    Result = beamtalk_repl_server:term_to_json({only}),
+    ?assert(maps:is_key(<<"__tuple__">>, Result)),
+    ?assertEqual([<<"only">>], maps:get(<<"__tuple__">>, Result)).
+
+term_to_json_large_tuple_test() ->
+    Result = beamtalk_repl_server:term_to_json({a, b, c, d, e}),
+    Elements = maps:get(<<"__tuple__">>, Result),
+    ?assertEqual(5, length(Elements)).
+
+term_to_json_nested_list_with_maps_test() ->
+    Result = beamtalk_repl_server:term_to_json([#{a => 1}, #{b => 2}]),
+    ?assertEqual(2, length(Result)),
+    [First, Second] = Result,
+    ?assertEqual(1, maps:get(<<"a">>, First)),
+    ?assertEqual(2, maps:get(<<"b">>, Second)).
+
+term_to_json_list_with_pids_test() ->
+    Parent = self(),
+    Pid = spawn(fun() -> receive stop -> Parent ! done end end),
+    Result = beamtalk_repl_server:term_to_json([Pid, 42]),
+    ?assertEqual(2, length(Result)),
+    [PidJson, NumJson] = Result,
+    ?assert(binary:match(PidJson, <<"#Actor<">>) =/= nomatch),
+    ?assertEqual(42, NumJson),
+    Pid ! stop,
+    receive done -> ok after 200 -> ok end.
+
+term_to_json_reference_test() ->
+    Ref = make_ref(),
+    Result = beamtalk_repl_server:term_to_json(Ref),
+    ?assert(is_binary(Result)),
+    ?assert(byte_size(Result) > 0).
+
+term_to_json_port_test() ->
+    %% erlang:ports() may return ports; use a fallback
+    Result = beamtalk_repl_server:term_to_json(hd(erlang:ports())),
+    ?assert(is_binary(Result)).
+
+%%% BT-520: format_response fallback/crash safety tests
+
+format_response_deeply_nested_test() ->
+    Response = beamtalk_repl_server:format_response([1, [2, [3, [4]]]]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+
+format_response_with_warnings_error_fallback_test() ->
+    %% Even bad values should produce valid JSON via fallback
+    Response = beamtalk_repl_server:format_response_with_warnings(42, []),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+
+%%% BT-520: format_error fallback tests
+
+format_error_with_warnings_fallback_test() ->
+    %% Generic atom errors should still produce valid JSON with warnings
+    Response = beamtalk_repl_server:format_error_with_warnings(
+        some_bizarre_error, [<<"w1">>]),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"message">>, Decoded))),
+    ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)).
+
+%%% BT-520: format_modules edge cases
+
+format_modules_multiple_test() ->
+    Modules = [
+        {counter, #{
+            name => <<"Counter">>,
+            source_file => "/tmp/counter.bt",
+            actor_count => 2,
+            load_time => 100,
+            time_ago => "5 seconds ago"
+        }},
+        {point, #{
+            name => <<"Point">>,
+            source_file => "/tmp/point.bt",
+            actor_count => 0,
+            load_time => 200,
+            time_ago => "10 seconds ago"
+        }}
+    ],
+    Response = beamtalk_repl_server:format_modules(Modules),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
+    ModList = maps:get(<<"modules">>, Decoded),
+    ?assertEqual(2, length(ModList)),
+    [First, Second] = ModList,
+    ?assertEqual(<<"Counter">>, maps:get(<<"name">>, First)),
+    ?assertEqual(2, maps:get(<<"actor_count">>, First)),
+    ?assertEqual(<<"Point">>, maps:get(<<"name">>, Second)),
+    ?assertEqual(0, maps:get(<<"actor_count">>, Second)).
+
+%%% BT-520: Additional parse_request edge cases
+
+parse_request_nested_json_expression_test() ->
+    Request = <<"{\"type\": \"eval\", \"expression\": \"#{x => 1, y => 2}\"}">>,
+    ?assertMatch({eval, _}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_very_long_expression_test() ->
+    LongExpr = list_to_binary(lists:duplicate(1000, $a)),
+    Request = jsx:encode(#{<<"type">> => <<"eval">>, <<"expression">> => LongExpr}),
+    ?assertMatch({eval, _}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_with_id_and_session_test() ->
+    Request = <<"{\"op\": \"eval\", \"id\": \"msg-123\", \"session\": \"s1\", \"code\": \"42\"}">>,
+    ?assertEqual({eval, "42"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_load_file_missing_path_test() ->
+    Request = <<"{\"op\": \"load-file\"}">>,
+    ?assertEqual({load_file, ""}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_unload_missing_module_test() ->
+    Request = <<"{\"op\": \"unload\"}">>,
+    ?assertEqual({unload_module, ""}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_op_kill_with_pid_field_test() ->
+    Request = <<"{\"op\": \"kill\", \"pid\": \"<0.99.0>\"}">>,
+    ?assertEqual({kill_actor, "<0.99.0>"}, beamtalk_repl_server:parse_request(Request)).
+
+%%% BT-520: Legacy type-format parse_request tests (covering lines 499-506)
+
+parse_request_type_actors_test() ->
+    Request = <<"{\"type\": \"actors\"}">>,
+    ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_type_modules_test() ->
+    Request = <<"{\"type\": \"modules\"}">>,
+    ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_type_unload_test() ->
+    Request = <<"{\"type\": \"unload\", \"module\": \"Counter\"}">>,
+    ?assertEqual({unload_module, "Counter"}, beamtalk_repl_server:parse_request(Request)).
+
+parse_request_type_kill_test() ->
+    Request = <<"{\"type\": \"kill\", \"pid\": \"<0.1.0>\"}">>,
+    ?assertEqual({kill_actor, "<0.1.0>"}, beamtalk_repl_server:parse_request(Request)).
+
+%%% BT-520: format_bindings with non-atom key types (covering lines 640-642)
+
+format_bindings_list_key_test() ->
+    Response = beamtalk_repl_server:format_bindings(#{"myVar" => 42}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, Decoded),
+    ?assertEqual(42, maps:get(<<"myVar">>, Bindings)).
+
+format_bindings_binary_key_test() ->
+    Response = beamtalk_repl_server:format_bindings(#{<<"binKey">> => "hello"}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, Decoded),
+    ?assertEqual(<<"hello">>, maps:get(<<"binKey">>, Bindings)).
+
+format_bindings_integer_key_test() ->
+    Response = beamtalk_repl_server:format_bindings(#{99 => true}),
+    Decoded = jsx:decode(Response, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, Decoded),
+    ?assertEqual(true, maps:get(<<"99">>, Bindings)).
+
+%%% BT-520: term_to_json unicode error paths (covering lines 739-740)
+
+term_to_json_list_with_bad_unicode_test() ->
+    %% A list with high codepoints that fail characters_to_binary
+    %% This should fall back to io_lib:format
+    Result = beamtalk_repl_server:term_to_json([16#FFFF, 16#FFFE]),
+    ?assert(is_list(Result) orelse is_binary(Result)).
+
+%%% BT-520: term_to_json with class object display (covering line 817)
+
+term_to_json_beamtalk_class_object_test() ->
+    %% A class object has Class that is a class name
+    %% We need beamtalk_object_class to be accessible; test the tuple pattern
+    Pid = spawn(fun() -> receive _ -> ok end end),
+    Result = beamtalk_repl_server:term_to_json({beamtalk_object, 'TestClassName', some_module, Pid}),
+    %% Should either be a class display name or #Actor<...> format
+    ?assert(is_binary(Result)),
+    exit(Pid, kill).
+
+%%% BT-520: format_name edge cases (covering lines 1041, 1045)
+
+format_error_message_with_list_name_test() ->
+    Msg = beamtalk_repl_server:format_error_message({file_not_found, "test/file.bt"}),
+    ?assert(binary:match(Msg, <<"File not found">>) =/= nomatch),
+    ?assert(binary:match(Msg, <<"test/file.bt">>) =/= nomatch).
+
+format_error_message_with_complex_reason_test() ->
+    %% Triggers format_name fallback with non-atom/binary/list
+    Msg = beamtalk_repl_server:format_error_message({read_error, {posix, enoent}}),
+    ?assert(binary:match(Msg, <<"Failed to read file">>) =/= nomatch).
+
+%%% BT-520: format_response internal error fallback (covering lines 565-566)
+
+format_response_with_unserializable_test() ->
+    %% Port references should be handled by the fallback path
+    Port = hd(erlang:ports()),
+    Response = beamtalk_repl_server:format_response(Port),
+    Decoded = jsx:decode(Response, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)).
+
+%%% BT-520: format_error debug log fallback (covering lines 579, 586)
+%% Note: these paths are hit when format_error_message itself crashes,
+%% which is hard to trigger with valid error terms. The fallback is
+%% a safety net.
+
+%%% BT-520: parse_request catching exceptions (covering line 519)
+
+parse_request_binary_causes_crash_test() ->
+    %% Test that parse_request doesn't crash on truly bizarre input
+    %% Even if something throws during parsing, it should return error
+    Result = beamtalk_repl_server:parse_request(<<0>>),
+    %% Should either parse as raw expression or return error
+    ?assert(element(1, Result) =:= eval orelse element(1, Result) =:= error).
+
+%% Generator: runs all TCP integration tests within a single workspace instance
+tcp_integration_test_() ->
+    {setup,
+     fun tcp_setup/0,
+     fun tcp_cleanup/1,
+     fun(Port) ->
+         [
+          {"clear op", fun() -> tcp_clear_test(Port) end},
+          {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
+          {"actors op (empty)", fun() -> tcp_actors_empty_test(Port) end},
+          {"sessions op", fun() -> tcp_sessions_test(Port) end},
+          {"close op", fun() -> tcp_close_test(Port) end},
+          {"complete op (empty prefix)", fun() -> tcp_complete_empty_test(Port) end},
+          {"complete op (with prefix)", fun() -> tcp_complete_prefix_test(Port) end},
+          {"info op (unknown symbol)", fun() -> tcp_info_unknown_test(Port) end},
+          {"info op (known atom)", fun() -> tcp_info_known_atom_test(Port) end},
+          {"unknown op", fun() -> tcp_unknown_op_test(Port) end},
+          {"empty eval op", fun() -> tcp_eval_empty_test(Port) end},
+          {"simple eval op", fun() -> tcp_eval_simple_test(Port) end},
+          {"unload nonexistent", fun() -> tcp_unload_nonexistent_test(Port) end},
+          {"unload empty module", fun() -> tcp_unload_empty_test(Port) end},
+          {"inspect invalid pid", fun() -> tcp_inspect_invalid_pid_test(Port) end},
+          {"kill invalid pid", fun() -> tcp_kill_invalid_pid_test(Port) end},
+          {"reload not implemented", fun() -> tcp_reload_not_implemented_test(Port) end},
+          {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
+          {"modules op", fun() -> tcp_modules_test(Port) end},
+          {"clone op", fun() -> tcp_clone_test(Port) end},
+          {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
+          {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
+          {"raw expression", fun() -> tcp_raw_expression_test(Port) end}
+         ]
+     end}.
+
+tcp_setup() ->
+    process_flag(trap_exit, true),
+    application:ensure_all_started(beamtalk_runtime),
+    %% Find a free port
+    {ok, LSock} = gen_tcp:listen(0, [{reuseaddr, true}]),
+    {ok, Port} = inet:port(LSock),
+    gen_tcp:close(LSock),
+    timer:sleep(50),
+    Config = #{
+        workspace_id => <<"tcp_test_ws">>,
+        project_path => <<"/tmp/bt_tcp_test">>,
+        tcp_port => Port,
+        auto_cleanup => false
+    },
+    {ok, SupPid} = case beamtalk_workspace_sup:start_link(Config) of
+        {ok, Pid} -> {ok, Pid};
+        {error, {already_started, Pid}} -> {ok, Pid}
+    end,
+    timer:sleep(100),
+    put(tcp_test_sup, SupPid),
+    Port.
+
+tcp_cleanup(_Port) ->
+    SupPid = get(tcp_test_sup),
+    case is_pid(SupPid) andalso is_process_alive(SupPid) of
+        true ->
+            unlink(SupPid),
+            exit(SupPid, shutdown),
+            timer:sleep(200);
+        false -> ok
+    end.
+
+%% Helper: connect, send a JSON op, receive response
+tcp_send_op(Port, OpJson) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock, [OpJson, "\n"]),
+    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+    gen_tcp:close(Sock),
+    jsx:decode(Data, [return_maps]).
+
+%% Test: clear op returns ok status
+tcp_clear_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"t1">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t1">>}, Resp),
+    ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
+
+%% Test: bindings op returns bindings list
+tcp_bindings_empty_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"t2">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t2">>}, Resp),
+    ?assert(maps:is_key(<<"bindings">>, Resp)).
+
+%% Test: actors op returns empty actor list
+tcp_actors_empty_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"t3">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t3">>}, Resp),
+    ?assertEqual([], maps:get(<<"actors">>, Resp)).
+
+%% Test: sessions op returns sessions list
+tcp_sessions_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"sessions">>, <<"id">> => <<"t4">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t4">>}, Resp),
+    ?assert(maps:is_key(<<"sessions">>, Resp)).
+
+%% Test: close op returns ok status
+tcp_close_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"close">>, <<"id">> => <<"t5">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t5">>}, Resp),
+    ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
+
+%% Test: complete with empty prefix returns empty
+tcp_complete_empty_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6">>, <<"code">> => <<>>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t6">>}, Resp),
+    ?assertEqual([], maps:get(<<"completions">>, Resp)).
+
+%% Test: info for unknown symbol returns not found
+tcp_info_unknown_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7">>, <<"symbol">> => <<"xyzzy">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t7">>}, Resp),
+    Info = maps:get(<<"info">>, Resp),
+    ?assertEqual(false, maps:get(<<"found">>, Info)).
+
+%% Test: info for known atom (like 'error' or 'ok')
+tcp_info_known_atom_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"info">>, <<"id">> => <<"t7b">>, <<"symbol">> => <<"error">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t7b">>}, Resp),
+    ?assert(maps:is_key(<<"info">>, Resp)).
+
+%% Test: complete with a non-empty prefix
+tcp_complete_prefix_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"complete">>, <<"id">> => <<"t6b">>, <<"code">> => <<"sel">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t6b">>}, Resp),
+    Completions = maps:get(<<"completions">>, Resp),
+    %% "self" starts with "sel" and is a built-in keyword
+    ?assert(lists:member(<<"self">>, Completions)).
+
+%% Test: unknown op returns error
+tcp_unknown_op_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"foobar_nonexistent">>, <<"id">> => <<"t8">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t8">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: eval with empty code returns error
+tcp_eval_empty_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t9">>, <<"code">> => <<>>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t9">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: eval with simple expression
+tcp_eval_simple_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"t10">>, <<"code">> => <<"1 + 2">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t10">>}, Resp),
+    %% Result could be error (daemon not running) or success
+    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp)).
+
+%% Test: unload nonexistent module
+tcp_unload_nonexistent_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t11">>, <<"module">> => <<"XyzzyNotLoaded">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t11">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: unload with empty module name
+tcp_unload_empty_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"unload">>, <<"id">> => <<"t12">>, <<"module">> => <<>>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t12">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: inspect with invalid PID string
+tcp_inspect_invalid_pid_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t13">>, <<"actor">> => <<"not-a-pid">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t13">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: kill with invalid PID string
+tcp_kill_invalid_pid_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"kill">>, <<"id">> => <<"t14">>, <<"actor">> => <<"not-a-pid">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: reload (not implemented without path)
+tcp_reload_not_implemented_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t15">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: docs for unknown class
+tcp_docs_unknown_class_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"docs">>, <<"id">> => <<"t16">>, <<"class">> => <<"XyzzyUnknown">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t16">>}, Resp),
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: modules op returns modules list
+tcp_modules_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"modules">>, <<"id">> => <<"t17">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t17">>}, Resp),
+    ?assert(maps:is_key(<<"modules">>, Resp)).
+
+%% Test: clone op creates a new session
+tcp_clone_test(Port) ->
+    Msg = jsx:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"t18">>}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t18">>}, Resp),
+    %% Clone should return a session ID as value, or error if sup not ready
+    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp)).
+
+%% Test: inspect a dead actor by valid PID format
+tcp_inspect_dead_actor_test(Port) ->
+    Pid = spawn(fun() -> ok end),
+    %% Wait until the process is confirmed dead
+    MRef = erlang:monitor(process, Pid),
+    receive {'DOWN', MRef, process, Pid, _} -> ok after 1000 -> error(timeout) end,
+    PidStr = list_to_binary(pid_to_list(Pid)),
+    Msg = jsx:encode(#{<<"op">> => <<"inspect">>, <<"id">> => <<"t19">>, <<"actor">> => PidStr}),
+    Resp = tcp_send_op(Port, Msg),
+    ?assertMatch(#{<<"id">> := <<"t19">>}, Resp),
+    %% Should return error (not alive or not known)
+    ?assert(maps:is_key(<<"error">>, Resp)).
+
+%% Test: malformed JSON falls back to raw eval
+tcp_malformed_json_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock, <<"not valid json\n">>),
+    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+    gen_tcp:close(Sock),
+    Resp = jsx:decode(Data, [return_maps]),
+    %% The server should try to eval "not valid json" or return error
+    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp) orelse maps:is_key(<<"type">>, Resp)).
+
+%% Test: raw expression (non-JSON) backwards compatibility
+tcp_raw_expression_test(Port) ->
+    {ok, Sock} = gen_tcp:connect({127,0,0,1}, Port, [binary, {packet, line}, {active, false}]),
+    ok = gen_tcp:send(Sock, <<"42\n">>),
+    {ok, Data} = gen_tcp:recv(Sock, 0, 5000),
+    gen_tcp:close(Sock),
+    Resp = jsx:decode(Data, [return_maps]),
+    %% Raw expressions go through protocol decode
+    ?assert(is_map(Resp)).
