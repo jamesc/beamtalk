@@ -184,6 +184,9 @@ print_string(X) when is_map(X) ->
             Elements = maps:get(elements, X, []),
             ElemStrs = [print_string(E) || E <- Elements],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
+        'Stream' ->
+            %% BT-511: Format streams with pipeline description
+            beamtalk_stream:print_string(X);
         'CompiledMethod' ->
             %% BT-457: Delegate to ops module for "a CompiledMethod(selector)" format
             beamtalk_compiled_method_ops:dispatch('printString', [], X);
@@ -259,6 +262,9 @@ send(X, Selector, Args) when is_map(X) ->
         'Set' ->
             %% BT-73: Set value type - dispatch to compiled stdlib
             'bt@stdlib@set':dispatch(Selector, Args, X);
+        'Stream' ->
+            %% BT-511: Stream value type - dispatch to compiled stdlib
+            'bt@stdlib@stream':dispatch(Selector, Args, X);
         'TestCase' ->
             %% BT-438: TestCase value type - dispatch to compiled stdlib
             'bt@stdlib@test_case':dispatch(Selector, Args, X);
@@ -341,6 +347,9 @@ responds_to(X, Selector) when is_map(X) ->
         'Set' ->
             %% BT-73: Set value type
             'bt@stdlib@set':has_method(Selector);
+        'Stream' ->
+            %% BT-511: Stream value type
+            'bt@stdlib@stream':has_method(Selector);
         undefined ->
             'bt@stdlib@dictionary':has_method(Selector);
         Class ->

@@ -26,6 +26,7 @@
         {'bt@stdlib@proto_object', 'ProtoObject', 'none'},
         {'bt@stdlib@runtime_error', 'RuntimeError', 'Error'},
         {'bt@stdlib@set', 'Set', 'Collection'},
+        {'bt@stdlib@stream', 'Stream', 'Object'},
         {'bt@stdlib@string', 'String', 'Object'},
         {'bt@stdlib@symbol', 'Symbol', 'Object'},
         {'bt@stdlib@system_dictionary', 'SystemDictionary', 'Actor'},

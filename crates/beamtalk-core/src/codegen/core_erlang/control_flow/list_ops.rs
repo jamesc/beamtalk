@@ -239,7 +239,7 @@ impl CoreErlangGenerator {
         }
 
         // Simple case: no mutations, use standard lists:foldl
-        // BT-505: Add is_list guard for non-list collection types
+        // BT-505/BT-511: Add is_list guard for non-list collection types (Stream, etc.)
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.capture_expression(receiver)?;
         let init_var = self.fresh_temp_var("temp");
