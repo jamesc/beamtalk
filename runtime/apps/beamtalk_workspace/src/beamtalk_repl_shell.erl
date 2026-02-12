@@ -16,7 +16,8 @@
 -behaviour(gen_server).
 
 %% Public API
--export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2]).
+-export([start_link/1, stop/1, eval/2, get_bindings/1, clear_bindings/1, load_file/2,
+         get_module_tracker/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -53,6 +54,11 @@ clear_bindings(SessionPid) ->
 -spec load_file(pid(), string()) -> {ok, [atom()]} | {error, term()}.
 load_file(SessionPid, Path) ->
     gen_server:call(SessionPid, {load_file, Path}, 30000).
+
+%% @doc Get the module tracker for this session (user-loaded modules only).
+-spec get_module_tracker(pid()) -> {ok, beamtalk_repl_modules:module_tracker()}.
+get_module_tracker(SessionPid) ->
+    gen_server:call(SessionPid, get_module_tracker, 5000).
 
 %%% gen_server callbacks
 
@@ -99,6 +105,10 @@ handle_call({load_file, Path}, _From, {SessionId, State}) ->
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState}}
     end;
+
+handle_call(get_module_tracker, _From, {SessionId, State}) ->
+    Tracker = beamtalk_repl_state:get_module_tracker(State),
+    {reply, {ok, Tracker}, {SessionId, State}};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

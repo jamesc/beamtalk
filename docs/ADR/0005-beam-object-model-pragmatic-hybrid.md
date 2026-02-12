@@ -169,7 +169,6 @@ The meta-circular interpreter loses BEAM's core value proposition. Dual-mode is 
   - [docs/beamtalk-object-model.md](../beamtalk-object-model.md) - Full technical analysis and feasibility study (1772 lines)
   - [docs/beamtalk-principles.md](../beamtalk-principles.md) - Core philosophy (actors, async-first, hot reload)
   - [docs/beamtalk-architecture.md](../beamtalk-architecture.md) - Compiler and runtime architecture
-  - [docs/beamtalk-interop.md](../beamtalk-interop.md) - Erlang/Elixir integration
   
 - **External inspiration:**
   - [LFE Flavors](https://github.com/rvirding/flavors) - Robert Virding's OOP implementation on BEAM

@@ -331,39 +331,17 @@ handle_op(<<"kill">>, Params, Msg, _SessionPid) ->
                 {invalid_pid, PidStr}, Msg, fun format_error_message/1)
     end;
 
-handle_op(<<"modules">>, _Params, Msg, _SessionPid) ->
-    ClassPids = try beamtalk_object_class:all_classes()
-                catch _:_ -> [] end,
+handle_op(<<"modules">>, _Params, Msg, SessionPid) ->
+    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
+    TrackedModules = beamtalk_repl_modules:list_modules(Tracker),
     RegistryPid = whereis(beamtalk_actor_registry),
-    ModulesWithInfo = lists:filtermap(
-        fun(Pid) ->
-            try
-                Name = gen_server:call(Pid, class_name, 1000),
-                ModName = gen_server:call(Pid, module_name, 1000),
-                SourceFile = case code:is_loaded(ModName) of
-                    {file, F} when is_list(F) -> F;
-                    _ -> "loaded"
-                end,
-                ActorCount = case RegistryPid of
-                    undefined -> 0;
-                    _ ->
-                        case beamtalk_repl_actors:count_actors_for_module(RegistryPid, ModName) of
-                            {ok, N} -> N;
-                            _ -> 0
-                        end
-                end,
-                Info = #{
-                    name => atom_to_binary(Name, utf8),
-                    source_file => SourceFile,
-                    actor_count => ActorCount,
-                    load_time => 0,
-                    time_ago => "n/a"
-                },
-                {true, {Name, Info}}
-            catch _:_ -> false
-            end
+    ModulesWithInfo = lists:map(
+        fun({ModName, ModInfo}) ->
+            ActorCount = beamtalk_repl_modules:get_actor_count(ModName, RegistryPid, Tracker),
+            Info = beamtalk_repl_modules:format_module_info(ModInfo, ActorCount),
+            {ModName, Info}
         end,
-        ClassPids
+        TrackedModules
     ),
     beamtalk_repl_protocol:encode_modules(ModulesWithInfo, Msg, fun term_to_json/1);
 
