@@ -257,6 +257,10 @@ pub struct DiagnosticInfo {
 }
 
 /// Handle the compile method.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Warning separation logic adds necessary complexity"
+)]
 fn handle_compile(
     params: serde_json::Value,
     id: Option<serde_json::Value>,
@@ -312,10 +316,15 @@ fn handle_compile(
         .iter()
         .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
         .collect();
-    
+
     let warnings_diags: Vec<_> = core_diagnostics
         .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Warning))
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+            )
+        })
         .collect();
 
     // Convert errors to DiagnosticInfo
@@ -522,6 +531,10 @@ struct CompileExpressionResult {
 ///
 /// This parses a single expression and generates Core Erlang code
 /// that can be compiled and executed by the Erlang runtime.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Warning separation logic adds necessary complexity"
+)]
 fn handle_compile_expression(
     params: serde_json::Value,
     id: Option<serde_json::Value>,
@@ -562,10 +575,15 @@ fn handle_compile_expression(
         .iter()
         .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
         .collect();
-    
+
     let warnings_diags: Vec<_> = all_diagnostics
         .iter()
-        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Warning))
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+            )
+        })
         .collect();
 
     // Convert errors to DiagnosticInfo

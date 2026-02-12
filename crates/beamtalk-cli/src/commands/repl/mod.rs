@@ -566,6 +566,12 @@ pub fn run(
                                 let _ = std::io::Write::flush(&mut std::io::stdout());
                             }
                         }
+                        // Display compilation warnings (BT-407)
+                        if let Some(ref warnings) = response.warnings {
+                            for warning in warnings {
+                                eprintln!("⚠ {warning}");
+                            }
+                        }
                         if response.is_error() {
                             if let Some(msg) = response.error_message() {
                                 eprintln!("Error: {msg}");

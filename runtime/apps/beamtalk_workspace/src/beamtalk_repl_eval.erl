@@ -252,7 +252,7 @@ connect_to_daemon(SocketPath) ->
 
 %% Send compile request to daemon and process response.
 -spec compile_via_daemon_socket(string(), atom(), map(), gen_tcp:socket()) ->
-    {ok, binary()} | {error, term()}.
+    {ok, binary(), [binary()]} | {error, term()}.
 compile_via_daemon_socket(Expression, ModuleName, Bindings, Socket) ->
     %% Extract known variable names from bindings (filter internal keys)
     KnownVariables = [atom_to_binary(K, utf8) 

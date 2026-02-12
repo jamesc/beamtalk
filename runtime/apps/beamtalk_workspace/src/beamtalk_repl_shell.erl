@@ -35,7 +35,7 @@ stop(SessionPid) ->
     gen_server:stop(SessionPid, normal, 5000).
 
 %% @doc Evaluate an expression in this session.
--spec eval(pid(), string()) -> {ok, term(), binary()} | {error, term(), binary()}.
+-spec eval(pid(), string()) -> {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 

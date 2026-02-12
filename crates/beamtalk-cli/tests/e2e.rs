@@ -778,6 +778,10 @@ impl ReplClient {
 ///
 /// If the file contains `// @load <path>` directives, those files are loaded
 /// before any test cases run, making their classes available for spawning.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Test runner handles many assertion types"
+)]
 fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).expect("Failed to read test file");
     let test_file = parse_test_file(&content);
@@ -853,7 +857,11 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 // Check if this is a WARNING assertion (BT-407)
                 if case.expected.starts_with("WARNING:") {
                     let expected_warning = case.expected.strip_prefix("WARNING:").unwrap().trim();
-                    if client.last_warnings.iter().any(|w| w.contains(expected_warning)) {
+                    if client
+                        .last_warnings
+                        .iter()
+                        .any(|w| w.contains(expected_warning))
+                    {
                         pass_count += 1;
                     } else {
                         failures.push(format!(

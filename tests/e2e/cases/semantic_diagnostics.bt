@@ -46,9 +46,11 @@ myVar := 42
 
 // --- Semantic warnings (BT-407) ---
 
-// Captured variable mutation in stored closure produces a warning
+// Captured variable mutation in stored closure is currently a codegen error
+// (codegen treats it as blocking; semantic analysis emits a Warning but codegen
+// independently returns Err, so the warning never surfaces as non-blocking)
 count := 0
 // => 0
 myBlock := [count := count + 1]
-// => WARNING: has no effect on outer scope
+// => ERROR: has no effect on outer scope
 
