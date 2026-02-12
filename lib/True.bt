@@ -13,7 +13,7 @@
 /// true not                     // => false
 /// ```
 
-sealed Object subclass: True
+sealed Boolean subclass: True
   /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `trueBlock` result.
   ///
   /// ## Examples
@@ -38,23 +38,6 @@ sealed Object subclass: True
   /// ```
   ifFalse: falseBlock => self
 
-  /// Logical AND with lazy evaluation. Evaluates `aBlock` since receiver is true.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// true and: [false]          // => false
-  /// true and: [true]           // => true
-  /// ```
-  and: aBlock => aBlock value
-
-  /// Logical OR with lazy evaluation. Returns self (true) without evaluating `aBlock`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// true or: [false]           // => true
-  /// ```
-  or: aBlock => self
-
   /// Logical NOT. Returns false.
   ///
   /// ## Examples
@@ -62,15 +45,6 @@ sealed Object subclass: True
   /// true not                   // => false
   /// ```
   not => false
-
-  /// Logical XOR. Returns the negation of `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// true xor: false            // => true
-  /// true xor: true             // => false
-  /// ```
-  xor: other => other not
 
   /// Returns true.
   ///

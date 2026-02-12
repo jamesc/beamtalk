@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Boolean — Abstract superclass for True and False.
+///
+/// Provides shared boolean protocol. Cannot be instantiated directly.
+/// True and False are the only subclasses.
+///
+/// ## Examples
+/// ```beamtalk
+/// true isBoolean          // => true
+/// false isBoolean         // => true
+/// true and: [false]       // => false
+/// false or: [true]        // => true
+/// ```
+
+abstract Object subclass: Boolean
+  /// Returns true — the receiver is a boolean value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true isBoolean         // => true
+  /// false isBoolean        // => true
+  /// ```
+  isBoolean => true
+
+  /// Logical AND with lazy evaluation. Evaluates `aBlock` only if receiver is true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true and: [false]      // => false
+  /// false and: [true]      // => false
+  /// ```
+  and: aBlock => self ifTrue: [aBlock value] ifFalse: [false]
+
+  /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true or: [false]       // => true
+  /// false or: [true]       // => true
+  /// ```
+  or: aBlock => self ifTrue: [true] ifFalse: [aBlock value]
+
+  /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true xor: false        // => true
+  /// false xor: false       // => false
+  /// ```
+  xor: other => self ifTrue: [other not] ifFalse: [other]
