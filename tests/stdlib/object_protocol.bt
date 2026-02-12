@@ -100,7 +100,7 @@ nil yourself
 // hash — hash value (integer)
 // ===========================================================================
 
-// hash returns an integer
+// hash returns an integer (non-deterministic, keep wildcard)
 42 hash
 // => _
 
@@ -113,5 +113,6 @@ nil yourself
 
 // Different values typically produce different hashes (not guaranteed, but
 // verifying hash returns a usable integer for all types)
+// Hash values are non-deterministic, keep wildcard
 'hello' hash
 // => _

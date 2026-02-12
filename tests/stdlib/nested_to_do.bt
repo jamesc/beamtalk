@@ -8,7 +8,7 @@
 
 // Spawn actor
 nested := FieldMutationNested spawn
-// => _
+// => #Actor<FieldMutationNested,_>
 
 // Test nested to:do: — 3 outer × 2 inner = 6 increments
 (nested nestedIncrement: 3 inner: 2) await

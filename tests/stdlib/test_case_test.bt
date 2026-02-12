@@ -6,7 +6,7 @@
 
 // Test setUp/tearDown exist (no-op by default)
 testCase := TestCase new
-// => _
+// => {"$beamtalk_class":"TestCase"}
 
 testCase setUp
 // => nil
@@ -51,21 +51,21 @@ TestCase superclass
 // => Object
 
 testInstance := TestCase new
-// => _
+// => {"$beamtalk_class":"TestCase"}
 
 testInstance class
 // => TestCase
 
 // Test that multiple instances can be created
 tc2 := TestCase new
-// => _
+// => {"$beamtalk_class":"TestCase"}
 
 tc2 class
 // => TestCase
 
 // Test lifecycle methods can be called on different instances
 tc3 := TestCase new
-// => _
+// => {"$beamtalk_class":"TestCase"}
 
 tc3 setUp
 // => nil

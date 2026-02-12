@@ -26,7 +26,7 @@ Point new
 
 // Access fields via instance methods (BT-354)
 p := Point new
-// => _
+// => {"$beamtalk_class":"Point","x":0,"y":0}
 
 p getX
 // => 0
