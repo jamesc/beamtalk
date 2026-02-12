@@ -48,6 +48,8 @@ pub fn generate_primitive_bif(
         "CompiledMethod" => generate_compiled_method_bif(selector, params),
         "Character" => generate_character_bif(selector, params),
         "TestCase" => generate_test_case_bif(selector, params),
+        "Stream" => generate_stream_bif(selector, params),
+        "Collection" => generate_collection_bif(selector, params),
         _ => None,
     }
 }
@@ -396,6 +398,10 @@ fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<String> {
         "asString" => {
             Some("call 'beamtalk_tuple_ops':'as_string'(Self)".to_string())
         }
+        "do:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!("call 'beamtalk_tuple_ops':'do'(Self, {p0})"))
+        }
         _ => None,
     }
 }
@@ -630,6 +636,14 @@ fn generate_dictionary_bif(selector: &str, params: &[String]) -> Option<String> 
                 "call 'beamtalk_map_ops':'keys_and_values_do'(Self, {p0})"
             ))
         }
+        "do:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!("call 'beamtalk_map_ops':'do'(Self, {p0})"))
+        }
+        "includes:" => {
+            let p0 = params.first().map_or("_Element", String::as_str);
+            Some(format!("call 'beamtalk_map_ops':'includes'(Self, {p0})"))
+        }
         _ => None,
     }
 }
@@ -716,6 +730,43 @@ fn generate_set_bif(selector: &str, params: &[String]) -> Option<String> {
             // formats Sets as "Set(element1, element2, ...)"
             Some("call 'beamtalk_primitive':'print_string'(Self)".to_string())
         }
+        _ => None,
+    }
+}
+
+/// Stream primitive implementations (BT-511).
+///
+/// Class-side constructors delegate to `beamtalk_stream` module.
+/// Instance methods delegate to `beamtalk_stream` module with Self as first arg.
+fn generate_stream_bif(selector: &str, params: &[String]) -> Option<String> {
+    let p0 = params.first().map_or("_Arg0", String::as_str);
+    match selector {
+        // Class-side constructors
+        "from:" => Some(format!("call 'beamtalk_stream':'from'({p0})")),
+        "from:by:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(format!("call 'beamtalk_stream':'from_by'({p0}, {p1})"))
+        }
+        "on:" => Some(format!("call 'beamtalk_stream':'on'({p0})")),
+        // Lazy operations
+        "select:" => Some(format!("call 'beamtalk_stream':'select'(Self, {p0})")),
+        "collect:" => Some(format!("call 'beamtalk_stream':'collect'(Self, {p0})")),
+        "reject:" => Some(format!("call 'beamtalk_stream':'reject'(Self, {p0})")),
+        "drop:" => Some(format!("call 'beamtalk_stream':'drop'(Self, {p0})")),
+        // Terminal operations
+        "take:" => Some(format!("call 'beamtalk_stream':'take'(Self, {p0})")),
+        "do:" => Some(format!("call 'beamtalk_stream':'do'(Self, {p0})")),
+        "inject:into:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(format!(
+                "call 'beamtalk_stream':'inject_into'(Self, {p0}, {p1})"
+            ))
+        }
+        "detect:" => Some(format!("call 'beamtalk_stream':'detect'(Self, {p0})")),
+        "asList" => Some("call 'beamtalk_stream':'as_list'(Self)".to_string()),
+        "anySatisfy:" => Some(format!("call 'beamtalk_stream':'any_satisfy'(Self, {p0})")),
+        "allSatisfy:" => Some(format!("call 'beamtalk_stream':'all_satisfy'(Self, {p0})")),
+        "printString" => Some("call 'beamtalk_stream':'print_string'(Self)".to_string()),
         _ => None,
     }
 }
@@ -817,6 +868,73 @@ fn generate_test_case_bif(selector: &str, params: &[String]) -> Option<String> {
                  let <_RunNameStr2> = call 'lists':'sublist'(_RunTagStr2, _RunNameLen2) in \
                  let <_RunClassName2> = call 'erlang':'list_to_atom'(_RunNameStr2) in \
                  call 'beamtalk_test_case':'run_single'(_RunClassName2, {p0})"
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Collection primitive implementations.
+///
+/// Default implementations for abstract Collection protocol methods.
+/// These dispatch `do:` on the actual Self value, which routes to
+/// the concrete subclass (Set, Dictionary, Tuple).
+fn generate_collection_bif(selector: &str, params: &[String]) -> Option<String> {
+    match selector {
+        "includes:" => {
+            let p0 = params.first().map_or("_Element", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'includes'(Self, {p0})"
+            ))
+        }
+        "inject:into:" => {
+            let p0 = params.first().map_or("_Initial", String::as_str);
+            let p1 = params.get(1).map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'inject_into'(Self, {p0}, {p1})"
+            ))
+        }
+        "collect:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'collect'(Self, {p0})"
+            ))
+        }
+        "select:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'select'(Self, {p0})"
+            ))
+        }
+        "reject:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'reject'(Self, {p0})"
+            ))
+        }
+        "detect:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'detect'(Self, {p0})"
+            ))
+        }
+        "detect:ifNone:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            let p1 = params.get(1).map_or("_NoneBlock", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'detect_if_none'(Self, {p0}, {p1})"
+            ))
+        }
+        "anySatisfy:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'any_satisfy'(Self, {p0})"
+            ))
+        }
+        "allSatisfy:" => {
+            let p0 = params.first().map_or("_Block", String::as_str);
+            Some(format!(
+                "call 'beamtalk_collection_ops':'all_satisfy'(Self, {p0})"
             ))
         }
         _ => None,

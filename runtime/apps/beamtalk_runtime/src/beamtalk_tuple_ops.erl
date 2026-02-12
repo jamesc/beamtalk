@@ -21,7 +21,7 @@
 %%% See: BT-417, ADR 0007
 
 -module(beamtalk_tuple_ops).
--export([at/2, unwrap/1, unwrap_or/2, unwrap_or_else/2, as_string/1]).
+-export([at/2, unwrap/1, unwrap_or/2, unwrap_or_else/2, as_string/1, do/2]).
 
 -include("beamtalk.hrl").
 
@@ -85,6 +85,12 @@ as_string(X) ->
     ElementStrs = [format_element(E) || E <- Elements],
     Joined = lists:join(<<", ">>, ElementStrs),
     iolist_to_binary([<<"{">>, Joined, <<"}">>]).
+
+%% @doc Iterate over each element of the tuple.
+-spec do(tuple(), fun((term()) -> term())) -> nil.
+do(Tuple, Block) when is_function(Block, 1) ->
+    lists:foreach(Block, tuple_to_list(Tuple)),
+    nil.
 
 %%% ============================================================================
 %%% Internal Functions
