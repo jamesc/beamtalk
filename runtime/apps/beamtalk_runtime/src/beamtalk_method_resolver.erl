@@ -36,7 +36,7 @@
     ClassRef :: pid() | atom() | tuple().
 resolve(ClassPid, Selector) when is_pid(ClassPid) ->
     gen_server:call(ClassPid, {method, Selector});
-resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when is_pid(ClassPid) ->
+resolve({beamtalk_object, ClassTag, _Module, ClassPid} = Obj, Selector) when is_atom(ClassTag), is_pid(ClassPid) ->
     case beamtalk_object_class:is_class_name(ClassTag) of
         true ->
             gen_server:call(ClassPid, {method, Selector});
@@ -58,7 +58,8 @@ resolve(ClassName, Selector) when is_atom(ClassName) ->
             gen_server:call(Pid, {method, Selector})
     end;
 resolve(Other, _Selector) ->
-    Error0 = beamtalk_error:new(type_error, 'Object'),
+    Class = beamtalk_primitive:class_of(Other),
+    Error0 = beamtalk_error:new(type_error, Class),
     Error1 = beamtalk_error:with_selector(Error0, '>>'),
     Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(
         io_lib:format(">> expects a class, got ~p", [Other]))),

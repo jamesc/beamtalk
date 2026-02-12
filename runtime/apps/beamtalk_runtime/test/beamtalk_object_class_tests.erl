@@ -327,6 +327,12 @@ method_resolver_test_() ->
                      InstanceObj = {beamtalk_object, 'Counter', counter, self()},
                      ?assertException(error, _,
                          beamtalk_method_resolver:resolve(InstanceObj, foo))
+                 end),
+          %% Malformed tuple with non-atom ClassTag falls through to catch-all
+          ?_test(begin
+                     BadTuple = {beamtalk_object, 123, counter, self()},
+                     ?assertException(error, _,
+                         beamtalk_method_resolver:resolve(BadTuple, foo))
                  end)
          ]
      end}.
