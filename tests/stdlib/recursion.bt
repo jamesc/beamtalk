@@ -71,7 +71,7 @@ m countdown: 20
 // @load tests/e2e/fixtures/recursive_actor.bt
 
 a := RecursiveActor spawn
-// => _
+// => #Actor<RecursiveActor,_>
 
 // Base case (no self-send needed)
 (a factorial: 1) await

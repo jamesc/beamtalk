@@ -1,22 +1,57 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// CompiledMethod - Method introspection object (BT-101)
-//
-// CompiledMethod objects are created by the >> operator and enable
-// method introspection in Beamtalk:
-//
-//   method := Counter >> #increment
-//   method selector         // => #increment
-//   method source           // => "increment => self.value := self.value + 1"
-//   method argumentCount    // => 0
-//
-// CompiledMethod is a value type (tagged map) — not instantiable via new.
+/// CompiledMethod — Method introspection object.
+///
+/// CompiledMethod objects are created by the `>>` operator and enable
+/// method introspection in Beamtalk. CompiledMethod is a value type
+/// (tagged map) — not instantiable via `new`.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Integer >> #+) selector       // => #+
+/// (Integer >> #+) argumentCount  // => 1
+/// ```
 
 sealed Object subclass: CompiledMethod
 
+  /// Return the method selector as a symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) selector       // => #+
+  /// ```
   selector => @primitive 'selector'
+
+  /// Return the method source code as a string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) source
+  /// ```
   source => @primitive 'source'
+
+  /// Return the number of arguments the method expects.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) argumentCount  // => 1
+  /// (Integer >> #abs) argumentCount // => 0
+  /// ```
   argumentCount => @primitive 'argumentCount'
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) printString
+  /// ```
   printString => @primitive 'printString'
+
+  /// Convert the compiled method to a string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer >> #+) asString
+  /// ```
   asString => @primitive 'asString'

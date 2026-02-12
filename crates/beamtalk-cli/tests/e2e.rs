@@ -783,6 +783,98 @@ impl ReplClient {
     }
 }
 
+/// Pattern matcher for test assertions (BT-502).
+///
+/// Supports glob-style matching where `_` acts as a wildcard segment:
+/// - Bare `_` → matches any result (full wildcard)
+/// - `_` within a pattern → matches any substring at that position
+/// - `#Actor<Counter,_>` matches `#Actor<Counter,0.173.0>`
+/// - `{\: Set, elements: _}` matches the full Set output
+/// - `Alice` still exact-matches `Alice`
+///
+/// A `_` is only treated as a wildcard if it is NOT flanked on both sides by
+/// alphanumeric characters. This preserves literal underscores in identifiers
+/// like `does_not_understand` or `beamtalk_class`.
+fn matches_pattern(pattern: &str, actual: &str) -> bool {
+    if pattern == "_" {
+        return true;
+    }
+    if !has_wildcard_underscore(pattern) {
+        return actual == pattern;
+    }
+
+    // Split pattern on wildcard `_` characters only
+    let segments = split_on_wildcard_underscores(pattern);
+    let mut pos = 0;
+
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            // Leading, trailing, or consecutive `_` — skip (matches any chars)
+            continue;
+        }
+        if let Some(found) = actual[pos..].find(segment) {
+            // First segment must match at the start
+            if i == 0 && found != 0 {
+                return false;
+            }
+            pos += found + segment.len();
+        } else {
+            return false;
+        }
+    }
+
+    // Last segment must match at the end (unless pattern ends with `_`)
+    if let Some(last) = segments.last() {
+        if !last.is_empty() {
+            return actual.ends_with(last);
+        }
+    }
+
+    true
+}
+
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. Examples:
+/// - `Counter,_>` → wildcard (`,` before, `>` after)
+/// - `does_not` → literal (`s` before, `n` after)
+fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Split a pattern on wildcard `_` characters only, preserving literal
+/// underscores in identifiers.
+fn split_on_wildcard_underscores(pattern: &str) -> Vec<&str> {
+    let bytes = pattern.as_bytes();
+    let mut segments = Vec::new();
+    let mut start = 0;
+
+    for i in 0..bytes.len() {
+        if bytes[i] == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                segments.push(&pattern[start..i]);
+                start = i + 1;
+            }
+        }
+    }
+
+    segments.push(&pattern[start..]);
+    segments
+}
+
 /// Run a single test file.
 ///
 /// Note: Bindings are cleared at the start of each file, but NOT between
@@ -883,8 +975,7 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_warning, client.last_warnings
                         ));
                     }
-                } else if case.expected == "_" || result == case.expected {
-                    // Wildcard "_" means run but don't check result
+                } else if matches_pattern(&case.expected, &result) {
                     pass_count += 1;
                 } else {
                     failures.push(format!(
@@ -905,8 +996,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             case.line, case.expression, expected_error, e
                         ));
                     }
-                } else if case.expected == "_" {
-                    // Wildcard means "run but don't check result" - errors are still failures
+                } else if case.expected == "_" || has_wildcard_underscore(&case.expected) {
+                    // Wildcard/pattern means "run but don't check result" - errors are still failures
                     // because we want to know if spawn or other side-effect operations fail
                     failures.push(format!(
                         "{file_name}:{}: `{}` (wildcard) failed with error: {}",
@@ -1222,5 +1313,88 @@ Counter spawn
         assert!(parsed.load_error_cases.is_empty());
         assert_eq!(parsed.warnings.len(), 1);
         assert!(parsed.warnings[0].contains("Malformed @load-error"));
+    }
+
+    #[test]
+    fn test_matches_pattern_bare_wildcard() {
+        assert!(matches_pattern("_", "anything"));
+        assert!(matches_pattern("_", ""));
+        assert!(matches_pattern("_", "#Actor<Counter,0.173.0>"));
+    }
+
+    #[test]
+    fn test_matches_pattern_exact_match() {
+        assert!(matches_pattern("Alice", "Alice"));
+        assert!(!matches_pattern("Alice", "Bob"));
+        assert!(matches_pattern("42", "42"));
+        assert!(!matches_pattern("42", "43"));
+    }
+
+    #[test]
+    fn test_matches_pattern_literal_underscores() {
+        // Underscores between alphanumeric chars are literal, not wildcards
+        assert!(matches_pattern(
+            "does_not_understand",
+            "does_not_understand"
+        ));
+        assert!(!matches_pattern(
+            "does_not_understand",
+            "does_XXX_understand"
+        ));
+        assert!(matches_pattern("runtime_error", "runtime_error"));
+        assert!(!matches_pattern("runtime_error", "runtimeXerror"));
+        assert!(matches_pattern("a-b_c", "a-b_c"));
+        // $beamtalk_class has literal underscore (both sides alphanumeric)
+        assert!(matches_pattern(
+            r#"{"$beamtalk_class":"Point"}"#,
+            r#"{"$beamtalk_class":"Point"}"#
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_actor_pid() {
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.173.0>"
+        ));
+        assert!(matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<Counter,0.999.0>"
+        ));
+        assert!(!matches_pattern(
+            "#Actor<Counter,_>",
+            "#Actor<ChatRoom,0.173.0>"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_collection() {
+        assert!(matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: Set, elements: [<0.173.0>, <0.174.0>]}"
+        ));
+        assert!(!matches_pattern(
+            r"{\: Set, elements: _}",
+            r"{\: List, elements: [1, 2]}"
+        ));
+    }
+
+    #[test]
+    fn test_matches_pattern_multiple_wildcards() {
+        assert!(matches_pattern("#Actor<_,_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("#Actor<_,_>", "something else"));
+    }
+
+    #[test]
+    fn test_matches_pattern_leading_wildcard() {
+        assert!(matches_pattern("_>", "#Actor<Counter,0.173.0>"));
+        assert!(!matches_pattern("_>", "no closing bracket"));
+    }
+
+    #[test]
+    fn test_matches_pattern_no_false_positives() {
+        // Pattern without underscore is exact match
+        assert!(!matches_pattern("hello", "hello world"));
+        assert!(!matches_pattern("hello world", "hello"));
     }
 }

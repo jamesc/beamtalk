@@ -50,7 +50,7 @@ beforeCount := allActors size
 
 // Spawn a counter actor
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // Workspace actors now has more actors
 actors := (Workspace actors) await
@@ -72,7 +72,7 @@ countersBeforeSize := countersBefore size
 
 // Spawn a second counter
 c2 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // actorsOf: Counter now returns one more
 countersAfter := (Workspace actorsOf: Counter) await
@@ -87,7 +87,7 @@ countersAfter size > countersBeforeSize
 
 // Actors returned by Workspace are fully functional — pick one and message it
 c increment
-// => _
+// => 1
 
 c getValue
 // => 1

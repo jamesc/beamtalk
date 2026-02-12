@@ -277,6 +277,9 @@ pub enum Trivia {
 
     /// A block comment: `/* comment text */`
     BlockComment(EcoString),
+
+    /// A doc comment: `/// doc text`
+    DocComment(EcoString),
 }
 
 impl Trivia {
@@ -284,7 +287,10 @@ impl Trivia {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Whitespace(s) | Self::LineComment(s) | Self::BlockComment(s) => s,
+            Self::Whitespace(s)
+            | Self::LineComment(s)
+            | Self::BlockComment(s)
+            | Self::DocComment(s) => s,
         }
     }
 
@@ -303,7 +309,16 @@ impl Trivia {
     /// Returns `true` if this is a comment.
     #[must_use]
     pub const fn is_comment(&self) -> bool {
-        matches!(self, Self::LineComment(_) | Self::BlockComment(_))
+        matches!(
+            self,
+            Self::LineComment(_) | Self::BlockComment(_) | Self::DocComment(_)
+        )
+    }
+
+    /// Returns `true` if this is a doc comment.
+    #[must_use]
+    pub const fn is_doc_comment(&self) -> bool {
+        matches!(self, Self::DocComment(_))
     }
 }
 

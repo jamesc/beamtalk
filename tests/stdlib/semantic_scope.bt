@@ -39,7 +39,7 @@ scopeTestVar
 outerVal := 10
 // => 10
 adder := [:x | x + outerVal]
-// => _
+// => a Block/1
 adder value: 5
 // => 15
 
@@ -47,7 +47,7 @@ adder value: 5
 
 // self is valid in method bodies — actor methods use self.field
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 c increment await
 // => 1
 c increment await

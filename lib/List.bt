@@ -1,69 +1,328 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// List - Ordered collection of elements (Erlang linked list)
-//
-// Lists in Beamtalk are Erlang linked lists, created with the #() syntax.
-// Fast prepend (O(1)), sequential access. Use for stack-like and functional patterns.
-// Example: #(1, 2, 3)
+/// List — Ordered collection of elements.
+///
+/// Lists in Beamtalk are Erlang linked lists, created with `#()` syntax.
+/// Fast prepend (O(1)), sequential access. Use for stack-like and
+/// functional patterns.
+///
+/// ## BEAM Mapping
+/// Beamtalk lists map directly to Erlang lists.
+///
+/// ## Examples
+/// ```beamtalk
+/// #(1, 2, 3) class         // => List
+/// #(1, 2, 3) size          // => 3
+/// #(1, 2, 3) first         // => 1
+/// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
+/// ```
 
 sealed Object subclass: List
-  // Access
+  /// Number of elements in the list.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) size          // => 3
+  /// #() size                 // => 0
+  /// ```
   size => @primitive 'size'
+
+  /// Test if the list has no elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #() isEmpty              // => true
+  /// #(1) isEmpty             // => false
+  /// ```
   isEmpty => @primitive 'isEmpty'
+
+  /// Return the first element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) first         // => 1
+  /// ```
   first => @primitive 'first'
+
+  /// Return all elements except the first (the tail).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) rest          // => #(2, 3)
+  /// ```
   rest => @primitive 'rest'
+
+  /// Return the last element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) last          // => 3
+  /// ```
   last => @primitive 'last'
+
+  /// Return the element at the given 1-based index.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(10, 20, 30) at: 2      // => 20
+  /// ```
   at: index => @primitive 'at:'
+
+  /// Test if the list contains the given item.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) includes: 2   // => true
+  /// #(1, 2, 3) includes: 9   // => false
+  /// ```
   includes: item => @primitive 'includes:'
 
-  // Ordering
+  /// Sort the list in ascending order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(3, 1, 2) sort          // => #(1, 2, 3)
+  /// ```
   sort => @primitive 'sort'
+
+  /// Sort the list using a custom comparator block.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(3, 1, 2) sort: [:a :b | a > b]   // => #(3, 2, 1)
+  /// ```
   sort: comparator => @primitive 'sort:'
+
+  /// Reverse the order of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) reversed      // => #(3, 2, 1)
+  /// ```
   reversed => @primitive 'reversed'
+
+  /// Remove duplicate elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 2, 3) unique     // => #(1, 2, 3)
+  /// ```
   unique => @primitive 'unique'
 
-  // Search
+  /// Find the first element for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) detect: [:x | x > 1]   // => 2
+  /// ```
   detect: block => @primitive 'detect:'
+
+  /// Find the first element matching `block`, or evaluate `default` if none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) detect: [:x | x > 5] ifNone: [0]   // => 0
+  /// ```
   detect: block ifNone: default => @primitive 'detect:ifNone:'
 
-  // Iteration — selector-based runtime dispatch
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) do: [:x | Transcript show: x]
+  /// ```
   do: block => @primitive 'do:'
+
+  /// Collect results of evaluating `block` on each element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) collect: [:x | x * 2]   // => #(2, 4, 6)
+  /// ```
   collect: block => @primitive 'collect:'
+
+  /// Select elements for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) select: [:x | x > 2]   // => #(3, 4)
+  /// ```
   select: block => @primitive 'select:'
+
+  /// Reject elements for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) reject: [:x | x > 2]   // => #(1, 2)
+  /// ```
   reject: block => @primitive 'reject:'
+
+  /// Reduce the list with an accumulator. Evaluates `block` with accumulator and each element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]   // => 6
+  /// ```
   inject: initial into: block => @primitive 'inject:into:'
 
-  // Functional
+  /// Return the first `n` elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) take: 2          // => #(1, 2)
+  /// ```
   take: n => @primitive 'take:'
+
+  /// Return all elements after the first `n`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) drop: 2          // => #(3, 4)
+  /// ```
   drop: n => @primitive 'drop:'
+
+  /// Flatten one level of nested lists.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(#(1, 2), #(3, 4)) flatten    // => #(1, 2, 3, 4)
+  /// ```
   flatten => @primitive 'flatten'
+
+  /// Map each element with `block` then flatten one level.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) flatMap: [:x | #(x, x * 10)]   // => #(1, 10, 2, 20)
+  /// ```
   flatMap: block => @primitive 'flatMap:'
+
+  /// Count elements for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) count: [:x | x > 2]      // => 2
+  /// ```
   count: block => @primitive 'count:'
+
+  /// Test if any element satisfies `block`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) anySatisfy: [:x | x > 2]    // => true
+  /// ```
   anySatisfy: block => @primitive 'anySatisfy:'
+
+  /// Test if all elements satisfy `block`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(2, 4, 6) allSatisfy: [:x | x isEven] // => true
+  /// ```
   allSatisfy: block => @primitive 'allSatisfy:'
 
-  // Concatenation
+  /// Concatenate two lists.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) ++ #(3, 4)              // => #(1, 2, 3, 4)
+  /// ```
   ++ other => @primitive '++'
 
-  // Display
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) printString           // => '#(1, 2, 3)'
+  /// ```
   printString => @primitive 'printString'
 
-  // Subsequence / Search
+  /// Return a subsequence from `start` to `end` (1-based, inclusive).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(10, 20, 30, 40) from: 2 to: 3 // => #(20, 30)
+  /// ```
   from: start to: end => @primitive 'from:to:'
+
+  /// Return the 1-based index of the first occurrence, or `nil` if not found.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(10, 20, 30) indexOf: 20        // => 2
+  /// #(10, 20, 30) indexOf: 99        // => nil
+  /// ```
   indexOf: item => @primitive 'indexOf:'
 
-  // Iteration with index
+  /// Iterate with both element and 1-based index.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #('a', 'b') eachWithIndex: [:item :i | Transcript show: i]
+  /// ```
   eachWithIndex: block => @primitive 'eachWithIndex:'
 
-  // Advanced
+  /// Combine two lists element-wise into a list of pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) zip: #('a', 'b')        // => #(#(1, 'a'), #(2, 'b'))
+  /// ```
   zip: other => @primitive 'zip:'
+
+  /// Group elements by the result of `block` into a Dictionary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) groupBy: [:x | x isEven]
+  /// ```
   groupBy: block => @primitive 'groupBy:'
+
+  /// Partition elements into two lists: those matching `block` and those not.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) partition: [:x | x isEven]
+  /// ```
   partition: block => @primitive 'partition:'
+
+  /// Take elements from the front while `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) takeWhile: [:x | x < 3]    // => #(1, 2)
+  /// ```
   takeWhile: block => @primitive 'takeWhile:'
+
+  /// Drop elements from the front while `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) dropWhile: [:x | x < 3]    // => #(3, 4)
+  /// ```
   dropWhile: block => @primitive 'dropWhile:'
+
+  /// Insert `separator` between each pair of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) intersperse: 0        // => #(1, 0, 2, 0, 3)
+  /// ```
   intersperse: separator => @primitive 'intersperse:'
+
+  /// Append an item to the end of the list (returns a new list).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2) add: 3                   // => #(1, 2, 3)
+  /// ```
   add: item => @primitive 'add:'
 
-  // Reflection
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) describe              // => 'a List'
+  /// ```
   describe => 'a List'
