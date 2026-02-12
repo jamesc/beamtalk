@@ -595,9 +595,17 @@ format_error_message_actor_not_alive_test() ->
     Msg = beamtalk_repl_server:format_error_message({actor_not_alive, "<0.1.0>"}),
     ?assert(binary:match(Msg, <<"Actor is not alive">>) =/= nomatch).
 
-format_error_message_not_implemented_reload_test() ->
-    Msg = beamtalk_repl_server:format_error_message({not_implemented, {reload, "counter"}}),
-    ?assert(binary:match(Msg, <<"Reload not yet implemented">>) =/= nomatch).
+format_error_message_reload_module_not_loaded_test() ->
+    Msg = beamtalk_repl_server:format_error_message({module_not_loaded, "counter"}),
+    ?assert(binary:match(Msg, <<"Module not loaded">>) =/= nomatch).
+
+format_error_message_no_source_file_test() ->
+    Msg = beamtalk_repl_server:format_error_message({no_source_file, "Counter"}),
+    ?assert(binary:match(Msg, <<"No source file recorded">>) =/= nomatch).
+
+format_error_message_missing_module_name_test() ->
+    Msg = beamtalk_repl_server:format_error_message({missing_module_name, reload}),
+    ?assert(binary:match(Msg, <<"Usage">>) =/= nomatch).
 
 format_error_message_session_creation_failed_test() ->
     Msg = beamtalk_repl_server:format_error_message({session_creation_failed, max_children}),
@@ -1195,7 +1203,7 @@ tcp_integration_test_() ->
           {"unload empty module", fun() -> tcp_unload_empty_test(Port) end},
           {"inspect invalid pid", fun() -> tcp_inspect_invalid_pid_test(Port) end},
           {"kill invalid pid", fun() -> tcp_kill_invalid_pid_test(Port) end},
-          {"reload not implemented", fun() -> tcp_reload_not_implemented_test(Port) end},
+          {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
           {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
           {"modules op", fun() -> tcp_modules_test(Port) end},
           {"clone op", fun() -> tcp_clone_test(Port) end},
@@ -1365,12 +1373,14 @@ tcp_kill_invalid_pid_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t14">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
-%% Test: reload (not implemented without path)
-tcp_reload_not_implemented_test(Port) ->
+%% Test: reload module that hasn't been loaded returns error
+tcp_reload_module_not_loaded_test(Port) ->
     Msg = jsx:encode(#{<<"op">> => <<"reload">>, <<"id">> => <<"t15">>, <<"module">> => <<"Counter">>}),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t15">>}, Resp),
-    ?assert(maps:is_key(<<"error">>, Resp)).
+    ?assert(maps:is_key(<<"error">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"Module not loaded">>) =/= nomatch).
 
 %% Test: docs for unknown class
 tcp_docs_unknown_class_test(Port) ->

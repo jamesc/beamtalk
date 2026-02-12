@@ -10,7 +10,7 @@
 
 -export([new/0, add_module/3, remove_module/2, get_module_info/2,
          list_modules/1, module_exists/2, get_actor_count/3,
-         format_module_info/2]).
+         format_module_info/2, get_source_file/1]).
 
 -export_type([module_tracker/0, module_info/0]).
 
@@ -53,6 +53,11 @@ get_module_info(ModuleName, Tracker) ->
         {ok, Info} -> {ok, Info};
         error -> {error, not_found}
     end.
+
+%% @doc Get the source file path from a module_info record.
+-spec get_source_file(module_info()) -> string() | undefined.
+get_source_file(#module_info{source_file = SourceFile}) ->
+    SourceFile.
 
 %% @doc List all tracked modules with their information.
 %% Optionally updates actor counts from the actor registry.

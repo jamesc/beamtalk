@@ -262,14 +262,39 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
 
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     Module = binary_to_list(maps:get(<<"module">>, Params, <<>>)),
-    %% Reload is load with the same path - delegate to load-file
-    %% For now, treat as load-file if path is available
     case maps:get(<<"path">>, Params, undefined) of
+        undefined when Module =/= [] ->
+            %% Use list_to_existing_atom to prevent atom table exhaustion
+            case catch list_to_existing_atom(Module) of
+                ModuleAtom when is_atom(ModuleAtom) ->
+                    {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
+                    case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
+                        {ok, Info} ->
+                            case beamtalk_repl_modules:get_source_file(Info) of
+                                undefined ->
+                                    beamtalk_repl_protocol:encode_error(
+                                        {no_source_file, Module}, Msg,
+                                        fun format_error_message/1);
+                                SourcePath ->
+                                    do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
+                            end;
+                        {error, not_found} ->
+                            beamtalk_repl_protocol:encode_error(
+                                {module_not_loaded, Module}, Msg,
+                                fun format_error_message/1)
+                    end;
+                _ ->
+                    %% Atom doesn't exist — module was never loaded
+                    beamtalk_repl_protocol:encode_error(
+                        {module_not_loaded, Module}, Msg,
+                        fun format_error_message/1)
+            end;
         undefined ->
             beamtalk_repl_protocol:encode_error(
-                {not_implemented, {reload, Module}}, Msg, fun format_error_message/1);
+                {missing_module_name, reload}, Msg, fun format_error_message/1);
         Path ->
-            handle_op(<<"load-file">>, #{<<"path">> => Path}, Msg, SessionPid)
+            PathStr = binary_to_list(Path),
+            do_reload(PathStr, undefined, Msg, SessionPid)
     end;
 
 handle_op(<<"actors">>, _Params, Msg, _SessionPid) ->
@@ -851,6 +876,81 @@ format_rejection_reason(Reason) ->
     %% Fallback: format arbitrary rejection reasons as printable terms
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
+%%% Reload helpers
+
+%% @private
+%% Execute reload: load file, trigger code_change for affected actors,
+%% and return response with actor count and migration results.
+-spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
+do_reload(Path, ModuleAtom, Msg, SessionPid) ->
+    case beamtalk_repl_shell:load_file(SessionPid, Path) of
+        {ok, Classes} ->
+            %% Trigger sys:change_code/4 for affected actors
+            {ActorCount, MigrationFailures} =
+                trigger_actor_code_change(ModuleAtom, Classes),
+            encode_reloaded(Classes, ActorCount, MigrationFailures, Msg);
+        {error, Reason} ->
+            beamtalk_repl_protocol:encode_error(
+                Reason, Msg, fun format_error_message/1)
+    end.
+
+%% @private
+%% Trigger code_change for actors using the reloaded module.
+%% Returns {ActorCount, Failures} where Failures is list of {Pid, Reason}.
+-spec trigger_actor_code_change(atom() | undefined, [map()]) ->
+    {non_neg_integer(), [{pid(), term()}]}.
+trigger_actor_code_change(ModuleAtom, Classes) ->
+    ModuleAtoms = lists:usort(resolve_module_atoms(ModuleAtom, Classes)),
+    case whereis(beamtalk_actor_registry) of
+        undefined -> {0, []};
+        RegistryPid ->
+            {Count, FailsRev} = lists:foldl(fun(Mod, {CountAcc, FailAcc}) ->
+                case beamtalk_repl_actors:get_pids_for_module(RegistryPid, Mod) of
+                    {ok, []} ->
+                        {CountAcc, FailAcc};
+                    {ok, Pids} ->
+                        {ok, Upgraded, Failures} =
+                            beamtalk_hot_reload:trigger_code_change(Mod, Pids),
+                        NewFailAcc = lists:foldl(
+                            fun(F, A) -> [F | A] end, FailAcc, Failures),
+                        {CountAcc + Upgraded, NewFailAcc};
+                    {error, _} ->
+                        {CountAcc, FailAcc}
+                end
+            end, {0, []}, ModuleAtoms),
+            {Count, lists:reverse(FailsRev)}
+    end.
+
+%% @private
+%% Resolve module atoms from explicit module name or loaded class names.
+-spec resolve_module_atoms(atom() | undefined, [map()]) -> [atom()].
+resolve_module_atoms(ModuleAtom, _Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
+    [ModuleAtom];
+resolve_module_atoms(undefined, Classes) ->
+    lists:filtermap(fun(ClassMap) ->
+        case maps:get(name, ClassMap, "") of
+            "" -> false;
+            Name ->
+                case catch list_to_existing_atom(Name) of
+                    Atom when is_atom(Atom) -> {true, Atom};
+                    _ -> false
+                end
+        end
+    end, Classes).
+
+%% @private
+%% Encode reload response with classes, affected actor count, and migration results.
+-spec encode_reloaded([map()], non_neg_integer(), [{pid(), term()}],
+    beamtalk_repl_protocol:protocol_msg()) -> binary().
+encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
+    ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
+    Base = beamtalk_repl_protocol:base_response(Msg),
+    FailureCount = length(MigrationFailures),
+    jsx:encode(Base#{<<"classes">> => ClassNames,
+                     <<"affected_actors">> => ActorCount,
+                     <<"migration_failures">> => FailureCount,
+                     <<"status">> => [<<"done">>]}).
+
 %%% Error Formatting
 
 %% @private
@@ -920,8 +1020,14 @@ format_error_message({inspect_failed, PidStr}) ->
     iolist_to_binary([<<"Failed to inspect actor: ">>, list_to_binary(PidStr)]);
 format_error_message({actor_not_alive, PidStr}) ->
     iolist_to_binary([<<"Actor is not alive: ">>, list_to_binary(PidStr)]);
-format_error_message({not_implemented, {reload, Module}}) ->
-    iolist_to_binary([<<"Reload not yet implemented for: ">>, list_to_binary(Module)]);
+format_error_message({no_source_file, Module}) ->
+    iolist_to_binary([<<"No source file recorded for module: ">>, list_to_binary(Module),
+                      <<". Try :load <path> to load it first.">>]);
+format_error_message({module_not_loaded, Module}) ->
+    iolist_to_binary([<<"Module not loaded: ">>, list_to_binary(Module),
+                      <<". Use :load <path> to load it first.">>]);
+format_error_message({missing_module_name, reload}) ->
+    <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->
     iolist_to_binary([<<"Failed to create session: ">>, format_name(Reason)]);
 format_error_message(Reason) ->

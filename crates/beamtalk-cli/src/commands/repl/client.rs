@@ -80,6 +80,15 @@ impl ReplClient {
         self.load_file(&path)
     }
 
+    /// Reload a specific module by name (looks up source path on server).
+    pub(super) fn reload_module(&mut self, module_name: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "reload",
+            "id": protocol::next_msg_id(),
+            "module": module_name
+        }))
+    }
+
     /// List running actors.
     pub(super) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&serde_json::json!({
