@@ -408,7 +408,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                self.write_document(&docvec![" "]);
+                self.output.push(' ');
             }
             let is_last = i == body.body.len() - 1;
 
