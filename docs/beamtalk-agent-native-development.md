@@ -1,6 +1,6 @@
 # Beamtalk: The Agent-Native Development Environment
 
-> **Note:** This document explores why beamtalk is uniquely suited as a **development environment for AI coding agents** — agents that write, test, and evolve code. For beamtalk as a **platform for building agent products**, see [beamtalk-for-agents.md](beamtalk-for-agents.md). For AI agents contributing to the beamtalk compiler itself, see [AGENTS.md](../AGENTS.md).
+> **Note:** This document explores why beamtalk is uniquely suited as a **development environment for AI coding agents** — agents that write, test, and evolve code. For AI agents contributing to the beamtalk compiler itself, see [AGENTS.md](../AGENTS.md).
 
 ## Executive Summary
 
@@ -980,7 +980,6 @@ The Smalltalk research (SemanticSqueak, Latta, MIT) validates that live objects 
 
 | Document | Focus | Relationship |
 |----------|-------|-------------|
-| [beamtalk-for-agents.md](beamtalk-for-agents.md) | Building agent *products* with beamtalk | Complementary — that doc covers agents as *users*; this covers agents as *developers* |
 | [beamtalk-principles.md](beamtalk-principles.md) | Core design philosophy | Foundation — interactive-first, hot reload, actors-are-everything |
 | [ADR 0004](ADR/0004-persistent-workspace-management.md) | Persistent workspace architecture | Enabling technology for agent session persistence |
 | [beamtalk-architecture.md](beamtalk-architecture.md) | Compilation pipeline and runtime | The system agents would interact with |
@@ -1010,5 +1009,4 @@ The Smalltalk research (SemanticSqueak, Latta, MIT) validates that live objects 
 
 ### Beamtalk
 - [ADR 0004: Persistent Workspace Management](ADR/0004-persistent-workspace-management.md) — Beamtalk's workspace architecture
-- [beamtalk-for-agents.md](beamtalk-for-agents.md) — Building agent products with beamtalk
 - [beamtalk-principles.md](beamtalk-principles.md) — Core design philosophy

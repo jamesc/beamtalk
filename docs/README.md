@@ -46,7 +46,7 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 
 | Document | Description |
 |----------|-------------|
-| [For AI Agents](beamtalk-for-agents.md) | Multi-agent AI systems with live actors |
+| [Agent-Native Development](beamtalk-agent-native-development.md) | AI agents as developers and live actor systems |
 | [Feasibility Assessment](beamtalk-feasibility.md) | Technical and market analysis |
 
 ---
@@ -72,7 +72,7 @@ For implementation details, see [internal/](internal/) documentation.
 
 ### "I want to build AI agents"
 
-1. [For AI Agents](beamtalk-for-agents.md) — Multi-agent AI systems
+1. [Agent-Native Development](beamtalk-agent-native-development.md) — Live actor systems for AI agents
 2. [Design Principles](beamtalk-principles.md) — Live programming for exploration
 3. [IDE & Live Development](beamtalk-ide.md) — Interactive debugging and inspection
 

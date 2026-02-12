@@ -1813,7 +1813,7 @@ RUST_LOG=beamtalk_cli=debug,beamtalk_core=info beamtalk build
 - [IDE and Live Development](docs/beamtalk-ide.md) - Smalltalk-style integrated environment
 - [BEAM Interop](docs/beamtalk-interop.md) - Erlang/Elixir integration specification
 - [Feasibility Assessment](docs/beamtalk-feasibility.md) - Technical and market analysis
-- [Agent Systems](docs/beamtalk-for-agents.md) - Multi-agent AI use cases
+- [Agent-Native Development](docs/beamtalk-agent-native-development.md) - AI agents as developers and live actor systems
 
 ### Rust Guidelines
 - [Microsoft Rust Guidelines](https://microsoft.github.io/rust-guidelines/) - Pragmatic patterns for safety and maintainability
