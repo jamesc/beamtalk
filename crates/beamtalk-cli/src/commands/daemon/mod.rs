@@ -56,12 +56,13 @@
 use clap::Subcommand;
 use miette::Result;
 
+mod cleanup;
 mod lifecycle;
 mod protocol;
 mod transport;
 
 /// Daemon subcommand actions.
-#[derive(Debug, Clone, Copy, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum DaemonAction {
     /// Start the compiler daemon
     Start {
@@ -75,6 +76,16 @@ pub enum DaemonAction {
 
     /// Check if the daemon is running
     Status,
+    
+    /// List all daemon sessions
+    List,
+    
+    /// Clean up orphaned sessions
+    Clean {
+        /// Clean all sessions (stop all daemons)
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 /// Run the daemon command.
@@ -83,7 +94,49 @@ pub fn run(action: DaemonAction) -> Result<()> {
         DaemonAction::Start { foreground } => lifecycle::start_daemon(foreground),
         DaemonAction::Stop => lifecycle::stop_daemon(),
         DaemonAction::Status => lifecycle::show_status(),
+        DaemonAction::List => list_sessions(),
+        DaemonAction::Clean { all } => clean_sessions(all),
     }
+}
+
+/// List all daemon sessions with their status.
+fn list_sessions() -> Result<()> {
+    let sessions = cleanup::list_sessions()?;
+    
+    if sessions.is_empty() {
+        println!("No daemon sessions found");
+        return Ok(());
+    }
+    
+    println!("Active daemon sessions:");
+    println!();
+    
+    for session in sessions {
+        let status = if session.is_alive { "ALIVE" } else { "DEAD " };
+        let pid_str = session.pid.map_or("???".to_string(), |p| p.to_string());
+        println!(
+            "  {} {} (PID: {}, age: {}d)",
+            status, session.name, pid_str, session.age_days
+        );
+    }
+    
+    Ok(())
+}
+
+/// Clean up sessions.
+fn clean_sessions(all: bool) -> Result<()> {
+    if all {
+        println!("Stopping all daemons and cleaning all sessions...");
+        let cleaned = cleanup::cleanup_all_sessions()?;
+        println!("✓ Cleaned {} session(s)", cleaned);
+    } else {
+        println!("Cleaning orphaned sessions...");
+        let cleaned = cleanup::cleanup_orphaned_sessions()?;
+        let sessions = cleanup::list_sessions()?;
+        let kept = sessions.len();
+        println!("✓ Cleaned {} session(s), kept {} active", cleaned, kept);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
