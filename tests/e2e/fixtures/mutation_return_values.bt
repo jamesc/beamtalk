@@ -12,12 +12,12 @@ Actor subclass: MutationReturnValues
   setValue: v => self.value := v
 
   // inject:into: should return the accumulator result
-  // Note: in inject:into:, parameter order is [:acc :item | ...]
-  // where acc is the running accumulator and item is the list element
+  // Note: foldl calls fun(Elem, Acc), so first block param is list element,
+  // second is accumulator
   sumViaInject: items =>
-    items inject: 0 into: [:sum :item |
-      self.value := self.value + item.
-      sum + item
+    items inject: 0 into: [:elem :acc |
+      self.value := self.value + elem.
+      acc + elem
     ]
 
   // on:do: should return the try body result on success
