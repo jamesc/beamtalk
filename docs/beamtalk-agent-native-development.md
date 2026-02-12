@@ -6,9 +6,9 @@
 
 AI coding agents — Copilot, Claude Code, Cursor, Devin — are the fastest-growing segment of software development tooling. Yet they all operate in an environment designed for humans typing text into files: write code, compile, run tests, read output, iterate. This loop is the fundamental bottleneck.
 
-Beamtalk, by inheriting Smalltalk's live programming model and running on the BEAM, offers something no other modern language does: **a development environment where the code is alive, inspectable, and modifiable without ever stopping.** This isn't a feature bolted on — it's the core design.
+Beamtalk is a new programming language that compiles to the BEAM virtual machine (the runtime behind Erlang, Elixir, WhatsApp, and Discord). Its syntax descends from Smalltalk — the 1970s language that pioneered live programming, objects, and GUIs. By inheriting Smalltalk's live programming model and running on the BEAM, beamtalk offers something no other modern language does: **a development environment where the code is alive, inspectable, and modifiable without ever stopping.** This isn't a feature bolted on — it's the core design.
 
-The thesis: **Smalltalk was accidentally designed for AI agents.** Its core properties — live objects, message passing, reflection, incremental modification, graceful failure — map precisely to how AI agents need to work. Beamtalk brings these properties to a modern, distributed runtime.
+The thesis: **Smalltalk was accidentally designed for AI agents.** Its core properties — live objects, message passing, reflection, incremental modification, graceful failure — map precisely to how AI agents need to work. Beamtalk brings these properties to a modern, fault-tolerant, distributed runtime that already powers some of the world's largest concurrent systems.
 
 ---
 
@@ -73,6 +73,50 @@ These aren't incidental features. They're the **core design** of Smalltalk, and 
 ---
 
 ## 3. How Beamtalk Changes Agent Development
+
+### What is beamtalk?
+
+Beamtalk is a new programming language that compiles to the BEAM virtual machine — the same runtime that powers Erlang, Elixir, WhatsApp, and Discord. Its syntax is inspired by Smalltalk, the 1970s language that pioneered live programming, objects, and graphical user interfaces.
+
+The core idea: **everything is an object, and all communication happens by sending messages.** There are no functions, no static methods, no special syntax for control flow — just objects sending messages to other objects.
+
+Here's what a complete beamtalk class looks like:
+
+```beamtalk
+Actor subclass: Counter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
+  getValue => ^self.value
+```
+
+This defines a `Counter` that's a subclass of `Actor`. It has one piece of state (`value`, initialized to 0) and three methods. The `^` means "return this value." That's the entire class — no boilerplate, no imports, no ceremony.
+
+Under the hood, `Actor subclass: Counter` creates a BEAM process (an Erlang `gen_server`), so every Counter instance is a lightweight concurrent process with its own isolated heap and mailbox. But the developer doesn't see any of that — they see an object with methods.
+
+Using it in the REPL:
+
+```beamtalk
+c := Counter spawn           // Create a new Counter (spawns a BEAM process)
+c increment                  // Send the 'increment' message
+c increment                  // Send it again
+c getValue                   // => 2
+```
+
+`spawn` creates the process. `increment` is a message send that becomes an inter-process call. The BEAM handles scheduling, memory isolation, and garbage collection per-process. If this Counter crashes, nothing else in the system is affected.
+
+**Key language properties:**
+- **Keyword messages** — named parameters built into the syntax: `array at: 1 put: "hello"` reads like English
+- **Blocks** — closures with concise syntax: `[:x | x + 1]`
+- **`:=` for assignment** — clearly distinct from equality (`=`)
+- **`//` comments** — familiar to C/JavaScript developers (Smalltalk traditionally used `"..."` for comments)
+- **No semicolons or periods** — newlines separate statements
+- **Implicit returns** — last expression is the return value; `^` is only for early returns
+
+The language compiles `.bt` source files to Core Erlang (an intermediate representation), which the standard Erlang compiler (`erlc`) then compiles to BEAM bytecode. This means beamtalk gets BEAM's battle-tested runtime — hot code reloading, preemptive scheduling, per-process garbage collection, and transparent distribution across cluster nodes — for free.
+
+Now, here's how each of these properties helps AI coding agents:
 
 ### 3.1 Live Workspace Eliminates the Compile-Wait Cycle
 
@@ -158,11 +202,11 @@ The error is a structured object (`#beamtalk_error{}`), not a string. The agent 
 ]
 ```
 
-### 3.4 Persistent Workspace Preserves Context
+### 3.4 Persistent Workspace Preserves Context (Planned)
 
-**Today:** Every agent session starts from scratch. Previous experiments are gone. Variables, spawned processes, modified classes — all lost when the session ends.
+**Today:** Every agent session starts from scratch. Previous experiments are gone. Variables, spawned processes, modified classes — all lost when the session ends. (This is the current state — the REPL starts a fresh BEAM node that terminates when the session ends.)
 
-**With beamtalk's persistent workspace ([ADR 0004](ADR/0004-persistent-workspace-management.md)):**
+**With beamtalk's planned persistent workspace ([ADR 0004](ADR/0004-persistent-workspace-management.md)):**
 
 ```beamtalk
 // Monday: Agent spawns actors, builds up state
@@ -177,7 +221,7 @@ server users          // => #("alice")
 server addRoom: "dev" // Continue where we left off
 ```
 
-The workspace **is** the agent's memory. Not a text file the agent re-reads, but living objects the agent picks back up. This is the BEAM model — processes survive node reconnections, state lives in running actors.
+The workspace **becomes** the agent's memory. Not a text file the agent re-reads, but living objects the agent picks back up. ADR 0004 designs this using detached BEAM nodes with supervision trees — processes survive REPL disconnections, state lives in running actors, and multiple sessions can share a workspace.
 
 ### 3.5 Incremental Verification, Not Batch Testing
 
@@ -380,7 +424,7 @@ The difference isn't incremental — it's **an order of magnitude**. And the qua
 | Feature | Agent benefit | Status |
 |---------|--------------|--------|
 | **Hot code reload** | <100ms edit-to-effect, no compile wait | ✅ Core BEAM |
-| **REPL with persistent state** | Incremental experiments that accumulate | ✅ Implemented |
+| **REPL with session-local state** | Bindings persist within a single REPL session | ✅ Implemented |
 | **`respondsTo:`** | Agent asks "can this object do X?" | ✅ Implemented |
 | **`doesNotUnderstand:`** | Graceful failure with context, not crashes | ✅ Implemented |
 | **Structured errors** | `#beamtalk_error{kind, hint}` — machine-readable failure | ✅ Implemented |
@@ -760,11 +804,11 @@ The agent never left the conversation. No file I/O, no shell commands, no output
 
 ---
 
-## 10. Related Work
+## 12. Related Work
 
 The idea that live, reflective programming environments are well-suited for AI agents is emerging across several independent research efforts. No single project combines all the elements beamtalk targets, but together they validate the core thesis from different angles.
 
-### 10.1 SemanticSqueak — Talking to Objects in Natural Language (HPI, Onward! 2024)
+### 12.1 SemanticSqueak — Talking to Objects in Natural Language (HPI, Onward! 2024)
 
 The most directly relevant work. Researchers at Hasso Plattner Institute built **SemanticSqueak**, a system that lets programmers (and AI agents) interact with live Squeak/Smalltalk objects using natural language. An "exploratory programming agent" translates questions like "when was this order created?" into method calls on running objects, then returns human-readable answers.
 
@@ -778,7 +822,7 @@ This is direct proof that Smalltalk's reflective, live object system is a *drama
 - Paper: Thiede et al., ["Talking to Objects in Natural Language: Toward Semantic Tools for Exploratory Programming"](https://dl.acm.org/doi/10.1145/3689492.3690049), Onward! 2024
 - Repository: [github.com/hpi-swa-lab/SemanticSqueak](https://github.com/hpi-swa-lab/SemanticSqueak)
 
-### 10.2 SemanticText — Generative AI Framework for Squeak/Smalltalk
+### 12.2 SemanticText — Generative AI Framework for Squeak/Smalltalk
 
 A complementary framework to SemanticSqueak, **SemanticText** provides LLM tooling deeply integrated into the Squeak environment: prompt prototyping, in-system debugging of LLM interactions, cost tracking, function calling, audio interaction via OpenAI APIs, and editor integration for code explanation and method generation.
 
@@ -786,7 +830,7 @@ The key insight: a live Smalltalk environment doesn't just *benefit* from AI —
 
 - Discussion: [OpenAI Community Forum](https://community.openai.com/t/semantictext-generative-ai-framework-llm-tooling-and-natural-language-debugging-for-squeak-smalltalk/1031820)
 
-### 10.3 Craig Latta — Livecoding Language Models (2024–2025)
+### 12.3 Craig Latta — Livecoding Language Models (2024–2025)
 
 Craig Latta (longtime Smalltalk community figure, creator of Spoon/Naiad) has been demonstrating how selecting objects in Smalltalk inspectors provides **rich, structured context** for AI models — far richer than files can. His "contextual co-pilot" concept uses the live Smalltalk environment as the context source rather than the traditional file + LSP approach.
 
@@ -795,7 +839,7 @@ Key observation: when you select an object in a Smalltalk inspector, the AI know
 - Blog: [thiscontext.com — Context-Aware AI Conversations in Smalltalk](https://thiscontext.com/2024/12/03/context-aware-ai-conversations-in-smalltalk/)
 - Talk: [UK Smalltalk User Group, 2025](https://www.youtube.com/watch?v=5HbbIa5NT0A)
 
-### 10.4 Examples out of Thin Air (MIT, ‹Programming› 2024)
+### 12.4 Examples out of Thin Air (MIT, ‹Programming› 2024)
 
 MIT researchers built a system that uses LLMs to **auto-generate runnable code examples** inside a Smalltalk IDE. The AI proposes plausible method invocations with realistic input data; the developer runs them live and sees concrete results. This addresses the "how do I use this code?" problem without requiring documentation.
 
@@ -803,19 +847,19 @@ The critical insight for beamtalk: in a live environment, AI-generated examples 
 
 - Paper: ["Examples out of Thin Air: AI-Generated Dynamic Context to Assist Program Comprehension by Example"](https://dl.acm.org/doi/fullHtml/10.1145/3660829.3660845), ‹Programming› Companion 2024
 
-### 10.5 Ronacher — A Language for Agents (February 2026)
+### 12.5 Ronacher — A Language for Agents (February 2026)
 
 Armin Ronacher's [blog post](https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/) (discussed in §8 above) represents the **file-based optimization** school. His observations about what agents need — greppability, explicit context, structured errors, no macros, dependency-aware builds — are sharp and practical. He's designing a better experience for agents that read and write source files.
 
 Beamtalk's response: many of these problems dissolve when the agent interacts with running objects instead of text. But Ronacher's insights about syntax familiarity and the importance of single build commands apply to beamtalk's file-based mode as well.
 
-### 10.6 Nedelcu — Programming Languages in the Age of AI Agents (November 2025)
+### 12.6 Nedelcu — Programming Languages in the Age of AI Agents (November 2025)
 
 Alexandru Nedelcu [argues](https://alexn.org/blog/2025/11/16/programming-languages-in-the-age-of-ai-agents/) that **static type systems give agents faster feedback loops** — if the code compiles, it's closer to correct. Languages like Scala, Rust, and Haskell provide compile-time guardrails that help agents converge on working code more quickly.
 
 This creates an interesting tension with beamtalk's dynamic typing. In a file-based world, Nedelcu is right — types are the cheapest form of feedback. But in a live workspace where the agent can interrogate objects directly (`c class`, `c count class`), runtime type information is always available. Whether optional/gradual typing would further help agents in live environments is an open question.
 
-### 10.7 Replit Agent 3 and Model Context Protocol (2025–2026)
+### 12.7 Replit Agent 3 and Model Context Protocol (2025–2026)
 
 Replit's cloud IDE is the closest **commercial product** to some of beamtalk's ideas: persistent workspaces, agent autonomy (up to 200 minutes of autonomous operation), agents spawning agents, and deep MCP integration for tool access. Their RAG architecture indexes source code, commit history, and runtime state into high-dimensional vectors for agent context.
 
@@ -823,13 +867,13 @@ However, Replit is still fundamentally **file-based with a cloud wrapper**. The 
 
 - [Replit Agent Architecture Case Study](https://www.langchain.com/breakoutagents/replit)
 
-### 10.8 Anthropic — Code Execution with MCP (2025)
+### 12.8 Anthropic — Code Execution with MCP (2025)
 
 Anthropic's engineering team [demonstrated](https://www.anthropic.com/engineering/code-execution-with-mcp) that agents are more efficient when they **write code to call tools** rather than having all tool definitions stuffed into the context window. This is a move toward "agent programs the environment" rather than "agent reads tool schemas."
 
 This is philosophically aligned with beamtalk's approach — the agent sends messages to objects rather than invoking predefined tool APIs. The difference is that beamtalk makes this the *primary* interaction mode, not an optimization on top of a tool-calling protocol.
 
-### 10.9 Where beamtalk sits in the landscape
+### 12.9 Where beamtalk sits in the landscape
 
 ```
                     File-based ◄──────────────────────► Live objects
@@ -858,7 +902,7 @@ The Smalltalk research (SemanticSqueak, Latta, MIT) validates that live objects 
 
 ---
 
-## 11. Relation to Existing Documents
+## 13. Relation to Existing Documents
 
 | Document | Focus | Relationship |
 |----------|-------|-------------|
