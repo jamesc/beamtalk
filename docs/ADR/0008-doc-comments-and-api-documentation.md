@@ -134,6 +134,7 @@ open docs/index.html        # Browse generated reference
 | **Gleam** | `///` method, `////` module | Markdown | No | gleam docs |
 | **Rust** | `///` item, `//!` module | Markdown | No | rustdoc |
 | **Elixir** | `@doc`, `@moduledoc` | Markdown | Yes (Code.fetch_docs) | ExDoc |
+| **Erlang (OTP 27+)** | `-doc`, EDoc | Markdown/HTML | Yes (EEP-48, code:get_doc) | shell_docs |
 | **Pharo** | `"..."` class/method comments | Plain text | Yes (comment protocol) | Browser |
 | **Newspeak** | `(* ... *)` | Plain text | No | None |
 | **Python** | `"""..."""` docstrings | reStructuredText | Yes (__doc__) | Sphinx |
@@ -141,12 +142,13 @@ open docs/index.html        # Browse generated reference
 **What we adopted:**
 - **Gleam/Rust `///` syntax** — Cleanest integration with existing `//` comment syntax. The lexer already handles `//`; extending to `///` is a minimal change. Markdown support comes free.
 - **Gleam's `////` for modules** — Cleaner than Rust's `//!` which requires being inside the item.
+- **EEP-48 doc chunks** — BEAM-standard documentation format. Docs are compiled into `.beam` files and accessible at runtime via `code:get_doc/1`. This aligns with Smalltalk's philosophy (docs are always available) and enables interop with Erlang/Elixir tooling.
 
 **What we adapted:**
 - **Elixir's doc testing** — `/// ```beamtalk` blocks could be validated by the test runner (future work), similar to Elixir's doctests.
 
 **What we rejected:**
-- **Elixir `@doc` pragma** — Would reuse the `@` pragma syntax but adds significant complexity (parser + codegen + runtime metadata storage). The `///` approach gives 90% of the benefit at 30% of the cost. Runtime doc access can be added later if needed.
+- **Elixir `@doc` pragma as syntax** — We use `///` for authoring (familiar, tooling-friendly) but compile to EEP-48 like Elixir does. No `@doc` attribute needed in source.
 - **Pharo `"..."` comments** — Beamtalk deliberately chose `//` over Smalltalk's `"..."` for comments (see `docs/beamtalk-syntax-rationale.md`). Using `"..."` for docs would be inconsistent.
 - **Python docstrings** — Requires string expressions as the first statement in a body, which doesn't fit Beamtalk's `method => body` syntax.
 
@@ -221,18 +223,18 @@ Rejected because there's no way to distinguish documentation comments from imple
 ## Consequences
 
 ### Positive
-- **Tooling-ready:** LSP hover, completions, and REPL help can extract structured documentation
+- **Runtime-accessible:** Docs are embedded in `.beam` files via EEP-48, accessible at runtime via `code:get_doc/1` — aligns with Smalltalk philosophy and BEAM ecosystem conventions
+- **BEAM interop:** Erlang and Elixir tools can read Beamtalk docs natively (IEx `h/1`, Erlang shell `h/2`)
+- **Tooling-ready:** LSP hover, completions, and REPL `:help` can extract structured documentation
 - **Familiar:** `///` is widely recognized (Rust, Gleam, C#, Dart, Swift)
-- **Incremental:** Can start with just lexer support, add doc generation later
-- **Composable with `@doc`:** If runtime doc access is needed later, `@doc` can complement `///` without replacing it
+- **Incremental:** Can start with lexer/AST support, add EEP-48 codegen, then REPL `:help`
 - **Markdown support:** Rich formatting, code examples, and links in documentation
 - **Doctest potential:** `/// ```beamtalk` blocks could be tested automatically (future work)
 
 ### Negative
 - **New syntax to learn:** Developers must know `///` vs `//` distinction
-- **Not runtime-accessible:** Unlike Elixir's `@doc`, docs aren't available via reflection at runtime (until/unless `@doc` is added later)
 - **Stdlib rewrite:** All 26 `lib/*.bt` files need doc comments added
-- **Doc delivery for REPL:** The `:help` command needs access to doc strings at runtime, but the stdlib is precompiled to `.beam` files (ADR 0007). This requires either shipping source alongside binaries, a separate doc index, or embedding docs in BEAM modules — each with trade-offs (see Phase 3)
+- **Codegen complexity:** Generating EEP-48 `Docs` chunks requires building the `docs_v1` term structure and injecting it into the `.core` → `.beam` pipeline
 
 ### Neutral
 - The existing `//` comment syntax is unaffected — regular comments remain for implementation notes
@@ -259,37 +261,48 @@ Rejected because there's no way to distinguish documentation comments from imple
 - Parser extracts leading doc-comment trivia and attaches to the following AST node
 - **Note:** Trivia currently attaches to *tokens*, not AST nodes. The parser must collect doc-comment trivia from the leading trivia of the first token of a method/class definition and "lift" it to the enclosing AST node during parsing. This is similar to how `leading_comments` is already handled for `Module`.
 
-### Phase 2: LSP Integration (S)
-- Hover provider reads `doc_comment` from Method/Class nodes
+### Phase 2: EEP-48 Doc Chunks in Codegen (M)
+- Generate EEP-48 `docs_v1` chunks in compiled `.beam` files so docs are runtime-accessible
+- Use the standard `docs_v1` structure:
+  ```erlang
+  {docs_v1, Anno, beamtalk, <<"text/markdown">>, ModuleDoc, Metadata, Docs}
+  ```
+- `BeamLanguage` = `beamtalk` (identifies docs as Beamtalk-originated)
+- `Format` = `<<"text/markdown">>` (raw Markdown from `///` comments)
+- `ModuleDoc` = content from `////` comments (or `none` if absent)
+- `Docs` = list of `{{function, Name, Arity}, Anno, Signature, Doc, Metadata}` for each documented method
+- Docs become accessible at runtime via `code:get_doc/1` and `shell_docs:render/2`
+- Erlang/Elixir tools can read Beamtalk docs natively (BEAM ecosystem interop)
+- **Implementation note:** Core Erlang doesn't directly support doc chunks. The `Docs` chunk must be added post-compilation via `beam_lib:build_module/2` or by generating the chunk alongside the `.core` → `.beam` pipeline.
+
+### Phase 3: LSP Integration (S)
+- Hover provider reads `doc_comment` from Method/Class nodes (compile-time, from AST)
 - Completion provider includes first line of doc in completion items
 - **Markdown rendering:** LSP protocol natively supports Markdown in `MarkupContent` — pass raw Markdown to the editor, no rendering needed on our side
 
-### Phase 3: REPL `:help` (M)
+### Phase 4: REPL `:help` (M)
 - `:help ClassName` shows class `///` doc (and module `////` doc if available)
 - `:help ClassName selector` shows method `///` doc
+- **Doc delivery:** Use `code:get_doc/1` to fetch docs from compiled `.beam` files at runtime (EEP-48). No source files or separate index needed — docs travel with compiled code.
 - **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `spawn`, show `Actor`'s docs for it.
-- **Doc delivery strategy** (choose one during implementation):
-  - **Option A: Parse-at-startup** — Parse `lib/*.bt` source files at REPL startup to extract docs. Simple but requires source files to be present alongside compiled `.beam` files. Adds startup latency (~26 files).
-  - **Option B: Pre-compiled doc index** — `beamtalk build-stdlib` generates a doc index file (JSON/ETF) alongside `.beam` files. REPL loads the index at startup. Faster, no source dependency at runtime.
-  - **Option C: Embedded in BEAM** — Compile `///` docs into module attributes (similar to Elixir's `Code.fetch_docs/1`). Adds codegen complexity but docs travel with compiled code. This overlaps with the future `@doc` pragma and may warrant a separate ADR.
 - Extend existing `:help` command to dispatch `:help ClassName selector` (currently only shows generic command help)
-- **Markdown rendering for terminal:** Requires either a crate like `termimad` for styled terminal output, or a minimal custom pass that strips `#` headings, indents code blocks, and applies basic formatting. No Markdown rendering dependency exists in the project today.
+- **Markdown rendering for terminal:** Use `shell_docs:render/2` (OTP built-in) for EEP-48 docs, or a crate like `termimad` for styled terminal output from raw Markdown.
 
-### Phase 4: Stdlib Documentation (M)
+### Phase 5: Stdlib Documentation (M)
 - Add `///` doc comments to all methods in `lib/*.bt`
 - Add `////` module docs to all 26 stdlib files
 - Follow convention: first line = summary, `## Examples` section with `// =>` assertions
 
-### Phase 5: `beamtalk doc` Command (M)
-- Generate HTML reference from `///` comments
+### Phase 6: `beamtalk doc` Command (M)
+- Generate HTML reference from `///` comments (or read from EEP-48 chunks)
 - Index by class, method name, category
 - Include cross-references between classes
 - **Markdown rendering for HTML:** Requires a Markdown-to-HTML library (e.g., `pulldown-cmark` or `comrak`)
 
-### Future: `@doc` for Runtime Access
-- If runtime doc reflection is needed, add `@doc` as a complementary pragma
-- `@doc` could be auto-generated from `///` at compile time
-- This would be a separate ADR
+### Future: Smalltalk-style Source Retention
+- Full Smalltalk-style live source access (`MyClass >> #method` returns source) is deferred
+- Requires architectural decision about image-based vs file-based workflow
+- EEP-48 docs provide the critical runtime documentation path; source retention adds browsing capability on top
 
 ## Migration Path
 
@@ -306,6 +319,8 @@ Recommended migration order:
 ## References
 - Related issues: BT-293 (stdlib conversion that removed API docs)
 - Related ADRs: ADR 0007 (compilable stdlib with `@primitive` injection), ADR 0014 (test framework — doctest interaction)
+- EEP-48: https://www.erlang.org/doc/apps/kernel/eep48_chapter.html (BEAM documentation storage standard)
+- Erlang `code:get_doc/1`: https://www.erlang.org/doc/man/code.html#get_doc-1
 - Gleam documentation: https://tour.gleam.run/functions/documentation-comments/
 - Rust rustdoc: https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html
 - Elixir ExDoc: https://hexdocs.pm/elixir/writing-documentation.html
