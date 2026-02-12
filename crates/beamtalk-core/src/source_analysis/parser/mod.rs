@@ -524,6 +524,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::MethodKind;
     use crate::source_analysis::lex_with_eof;
 
     /// Helper to parse a string and check for errors.
@@ -2555,6 +2556,167 @@ Actor subclass: Counter
         assert_eq!(
             module.classes[0].doc_comment.as_deref(),
             Some("Actual class doc.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_with_sealed_modifier() {
+        let module = parse_ok(
+            "/// A sealed value type.
+sealed Object subclass: Point
+  state: x = 0
+  state: y = 0
+  x => self.x",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert!(module.classes[0].is_sealed);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("A sealed value type.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_before_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Logging before increment.
+  before increment => Transcript show: 'incrementing'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::Before);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Logging before increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_after_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Logging after increment.
+  after increment => Transcript show: 'done'",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::After);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Logging after increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_around_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Wrapping around increment.
+  around increment => self.value := self.value + 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.kind, MethodKind::Around);
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Wrapping around increment.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_sealed_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Cannot be overridden.
+  sealed getValue => self.value",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert!(method.is_sealed);
+        assert_eq!(method.doc_comment.as_deref(), Some("Cannot be overridden."));
+    }
+
+    #[test]
+    fn parse_doc_comment_on_keyword_method() {
+        let module = parse_ok(
+            "Actor subclass: MyCollection
+  state: items = #()
+
+  /// Stores a value at the given index.
+  at: index put: value => self.items",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "at:put:");
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Stores a value at the given index.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_binary_method() {
+        let module = parse_ok(
+            "Object subclass: Vector
+  state: x = 0
+
+  /// Adds two vectors.
+  + other => self.x + other x",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert_eq!(method.doc_comment.as_deref(), Some("Adds two vectors."));
+    }
+
+    #[test]
+    fn parse_empty_doc_comment_line() {
+        let module = parse_ok(
+            "/// First line.
+///
+/// After empty line.
+Actor subclass: Counter
+  increment => 1",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("First line.\n\nAfter empty line.")
+        );
+    }
+
+    #[test]
+    fn parse_doc_comment_on_class_method() {
+        let module = parse_ok(
+            "Actor subclass: Counter
+  state: value = 0
+
+  /// Creates a counter starting at the given value.
+  class withValue: v => self new initialize: v",
+        );
+
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].class_methods[0];
+        assert_eq!(
+            method.doc_comment.as_deref(),
+            Some("Creates a counter starting at the given value.")
         );
     }
 }

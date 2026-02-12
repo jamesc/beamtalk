@@ -1217,4 +1217,29 @@ mod tests {
         assert_eq!(doc_trivia[0].as_str(), "/// line one");
         assert_eq!(doc_trivia[1].as_str(), "/// line two");
     }
+
+    #[test]
+    fn lex_empty_doc_comment() {
+        let tokens = lex("///\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 1);
+        assert_eq!(doc_trivia[0].as_str(), "///");
+    }
+
+    #[test]
+    fn lex_five_slashes_is_line_comment() {
+        let tokens = lex("///// five slashes\nx");
+        assert_eq!(tokens.len(), 1);
+        let doc_trivia: Vec<_> = tokens[0]
+            .leading_trivia()
+            .iter()
+            .filter(|t| t.is_doc_comment())
+            .collect();
+        assert_eq!(doc_trivia.len(), 0);
+    }
 }
