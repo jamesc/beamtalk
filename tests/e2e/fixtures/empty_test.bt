@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// EmptyTest — TestCase subclass with no test methods (BT-440)
+// Used to test "no test methods found" output path.
+
+TestCase subclass: EmptyTest
+
+  helperMethod =>
+    42

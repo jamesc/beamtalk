@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FailingTest — TestCase subclass with one passing and one failing test (BT-440)
+// Used to test failure output formatting in BUnit REPL integration.
+
+TestCase subclass: FailingTest
+
+  testPass =>
+    self assert: true
+
+  testFail =>
+    self assert: 1 equals: 2

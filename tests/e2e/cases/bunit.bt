@@ -6,10 +6,16 @@
 // Tests TestCase class-side methods:
 //   - runAll: discover and run all test* methods
 //   - run:   run a single test method by name
+//   - failure output formatting
+//   - edge cases: unknown method, no test methods
 
 // Load Counter actor first, then CounterTest (depends on Counter)
 // @load tests/e2e/fixtures/counter.bt
 // @load tests/e2e/fixtures/counter_test.bt
+// @load tests/e2e/fixtures/failing_test.bt
+// @load tests/e2e/fixtures/empty_test.bt
+
+// === Happy path: all tests pass ===
 
 // Verify CounterTest class loaded
 CounterTest
@@ -26,3 +32,27 @@ CounterTest run: #testIncrement
 // Run another single test
 CounterTest run: #testInitialValue
 // => 1 tests, 1 passed (_)
+
+// === Failure path: mixed pass/fail ===
+
+// Run FailingTest — one pass, one fail (output includes failure details)
+FailingTest runAll
+// => _
+
+// Run the passing test individually
+FailingTest run: #testPass
+// => 1 tests, 1 passed (_)
+
+// Run the failing test individually (output includes failure details)
+FailingTest run: #testFail
+// => _
+
+// === Edge case: unknown method name ===
+
+CounterTest run: #nonExistentTest
+// => Method 'nonExistentTest' not found in CounterTest
+
+// === Edge case: no test methods ===
+
+EmptyTest runAll
+// => No test methods found in EmptyTest
