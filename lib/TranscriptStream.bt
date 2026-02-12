@@ -14,7 +14,6 @@
 /// Transcript cr
 /// Transcript recent
 /// ```
-
 Actor subclass: TranscriptStream
   /// Write a value to the transcript.
   ///
