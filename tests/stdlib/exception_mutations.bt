@@ -8,7 +8,7 @@
 
 // Spawn actor with initial state (value=0, errorCount=0)
 c := ErrorCounter spawn
-// => _
+// => #Actor<ErrorCounter,_>
 
 // riskyIncrement triggers 1/0 exception, handler increments errorCount
 c riskyIncrement
@@ -33,7 +33,7 @@ c getErrorCount await
 
 // Spawn a fresh actor
 d := ErrorCounter spawn
-// => _
+// => #Actor<ErrorCounter,_>
 
 // safeIncrementWithCleanup: body increments value, cleanup increments errorCount
 d safeIncrementWithCleanup

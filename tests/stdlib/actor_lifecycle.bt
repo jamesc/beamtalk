@@ -15,7 +15,7 @@
 
 // Spawn a counter actor
 counter := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // isAlive returns true for a running actor
 counter isAlive await
@@ -66,7 +66,7 @@ Counter spawnWith: true
 
 // Actor instance printString returns "a ClassName"
 c2 := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 c2 printString await
 // => a Counter

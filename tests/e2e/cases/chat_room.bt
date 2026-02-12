@@ -18,7 +18,7 @@
 
 // Create a chat room
 room := ChatRoom spawn
-// => _
+// => #Actor<ChatRoom,_>
 
 // Initially no members
 online := room online
@@ -40,10 +40,10 @@ hist size
 
 // Create members
 alice := ChatMember spawn
-// => _
+// => #Actor<ChatMember,_>
 
 bob := ChatMember spawn
-// => _
+// => #Actor<ChatMember,_>
 
 // Set member names
 alice setName: "Alice"

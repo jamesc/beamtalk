@@ -200,6 +200,8 @@ pub struct ClassDefinition {
     pub class_methods: Vec<MethodDefinition>,
     /// Class variable declarations (defined with `classVar:`).
     pub class_variables: Vec<StateDeclaration>,
+    /// Doc comment attached to this class (`///` lines).
+    pub doc_comment: Option<String>,
     /// Source location of the entire class definition.
     pub span: Span,
 }
@@ -223,6 +225,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            doc_comment: None,
             span,
         }
     }
@@ -247,6 +250,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            doc_comment: None,
             span,
         }
     }
@@ -360,6 +364,8 @@ pub struct MethodDefinition {
     pub is_sealed: bool,
     /// The kind of method (primary, before, after, around).
     pub kind: MethodKind,
+    /// Doc comment attached to this method (`///` lines).
+    pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
 }
@@ -380,6 +386,7 @@ impl MethodDefinition {
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
+            doc_comment: None,
             span,
         }
     }
@@ -400,6 +407,7 @@ impl MethodDefinition {
             return_type: Some(return_type),
             is_sealed: false,
             kind: MethodKind::Primary,
+            doc_comment: None,
             span,
         }
     }
@@ -422,6 +430,7 @@ impl MethodDefinition {
             return_type,
             is_sealed,
             kind,
+            doc_comment: None,
             span,
         }
     }

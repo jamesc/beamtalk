@@ -11,13 +11,13 @@
 // ===========================================================================
 
 a := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 b := a
-// => _
+// => #Actor<Counter,_>
 
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // Same reference
 a == b
@@ -47,7 +47,7 @@ ProtoObject superclass
 // ===========================================================================
 
 counter := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // Test initial state
 counter getValue await

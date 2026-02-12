@@ -1,52 +1,207 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Object - Root class for value types in Beamtalk
-//
-// Object inherits from ProtoObject and adds the standard protocol that almost
-// all objects need: instantiation, reflection, nil testing, and debugging.
+/// Object — Base class for all Beamtalk objects.
+///
+/// Object inherits from ProtoObject and adds the standard protocol that
+/// almost all objects need: instantiation, reflection, nil testing, and
+/// debugging. Both value types and actors inherit from Object.
+///
+/// ## Examples
+/// ```beamtalk
+/// 42 isNil              // => false
+/// nil notNil            // => false
+/// 42 class              // => Integer
+/// ```
 
 ProtoObject subclass: Object
-  // Type introspection — override ProtoObject's class to ensure actor hierarchy
-  // walk invokes Object's state-aware dispatch/4 (BT-446)
+  /// Return the class of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 class              // => Integer
+  /// 'hello' class         // => String
+  /// ```
   class => @primitive 'class'
 
-  // Instantiation — structural intrinsics
+  /// Create a new instance of the receiver class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new               // => a Set
+  /// ```
   new => @intrinsic basicNew
+
+  /// Create a new instance with initialization arguments.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Tuple new: #(1, 2, 3)
+  /// ```
   new: initArgs => @intrinsic basicNewWith
 
-  // Nil testing — pure Beamtalk
+  /// Test if the receiver is nil. Returns false for all objects except nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 isNil              // => false
+  /// nil isNil             // => true
+  /// ```
   isNil => false
+
+  /// Test if the receiver is not nil. Returns true for all objects except nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 notNil             // => true
+  /// nil notNil            // => false
+  /// ```
   notNil => true
+
+  /// If the receiver is nil, evaluate `nilBlock`. Otherwise return self.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 ifNil: [0]         // => 42
+  /// nil ifNil: [0]        // => 0
+  /// ```
   ifNil: nilBlock => self
+
+  /// If the receiver is not nil, evaluate `notNilBlock` with self.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 ifNotNil: [:v | v + 1]   // => 43
+  /// nil ifNotNil: [:v | v + 1]  // => nil
+  /// ```
   ifNotNil: notNilBlock => notNilBlock value: self
+
+  /// If nil, evaluate `nilBlock`; otherwise evaluate `notNilBlock` with self.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 ifNil: [0] ifNotNil: [:v | v + 1]    // => 43
+  /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
+  /// ```
   ifNil: nilBlock ifNotNil: notNilBlock => notNilBlock value: self
+
+  /// If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 ifNotNil: [:v | v + 1] ifNil: [0]    // => 43
+  /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
+  /// ```
   ifNotNil: notNilBlock ifNil: nilBlock => notNilBlock value: self
 
-  // Display — pure Beamtalk polymorphic dispatch (BT-477)
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 printString         // => '42'
+  /// ```
   printString => 'a ' ++ self class printString
+
+  /// Inspect the receiver (alias for `describe`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 inspect             // => '42'
+  /// ```
   inspect => self describe
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Object new describe    // => 'an Object'
+  /// ```
   describe => 'an Object'
 
-  // Identity and hashing — structural intrinsics
+  /// Return the receiver itself. Useful for cascading side effects.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 yourself            // => 42
+  /// ```
   sealed yourself => self
+
+  /// Return a hash value for the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 hash
+  /// ```
   hash => @intrinsic hash
 
-  // Reflection — structural intrinsics
+  /// Test if the receiver responds to the given selector.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 respondsTo: #abs    // => true
+  /// ```
   sealed respondsTo: selector => @intrinsic respondsTo
+
+  /// Return the names of instance variables.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Object new instVarNames
+  /// ```
   sealed instVarNames => @intrinsic instVarNames
+
+  /// Return the value of the named instance variable.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// object instVarAt: #name
+  /// ```
   sealed instVarAt: name => @intrinsic instVarAt
+
+  /// Set the value of the named instance variable (returns new state).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// object instVarAt: #name put: 'Alice'
+  /// ```
   sealed instVarAt: name put: value => @intrinsic instVarAtPut
 
-  // Dynamic dispatch — structural intrinsic
+  /// Send a unary message dynamically.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 perform: #abs       // => 42
+  /// ```
   sealed perform: selector => @intrinsic dynamicSend
+
+  /// Send a message dynamically with arguments.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 perform: #max: withArguments: #(5)   // => 5
+  /// ```
   sealed perform: selector withArguments: args => @intrinsic dynamicSendWithArgs
 
-  // Association creation — key-value pair
+  /// Create an Association (key-value pair) with the receiver as key.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #name -> 'Alice'
+  /// ```
   -> value => @primitive '->'
 
-  // Abstract method marker — raises error if not overridden by subclass
+  /// Raise an error indicating this method must be overridden by a subclass.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self subclassResponsibility
+  /// ```
   subclassResponsibility => self error: 'This method is abstract and must be overridden by a subclass'
 
-  // Error signaling — Smalltalk-style error from any object
+  /// Raise an error with the given message.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self error: 'something went wrong'
+  /// ```
   error: message => @intrinsic error

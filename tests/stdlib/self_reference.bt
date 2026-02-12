@@ -13,7 +13,7 @@
 
 // Spawn actor
 a := SelfRefActor spawn
-// => _
+// => #Actor<SelfRefActor,_>
 
 // ===========================================================================
 // METHOD RETURNING SELF
@@ -21,7 +21,7 @@ a := SelfRefActor spawn
 
 // returnSelf returns the actor's self reference
 ref := a returnSelf await
-// => _
+// => #Actor<SelfRefActor,_>
 
 // The returned reference responds to class
 ref class
