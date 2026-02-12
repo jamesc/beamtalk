@@ -56,6 +56,8 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::paths::socket_path;
+
 /// Default idle timeout in seconds (4 hours)
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
 
@@ -382,40 +384,19 @@ pub fn start_detached_node(
     );
 
     // Start detached BEAM node
-    let (node_flag, node_arg) = if node_name.contains('@') {
-        ("-name", node_name.clone())
-    } else {
-        ("-sname", node_name.clone())
-    };
+    let mut cmd = build_detached_node_command(
+        &node_name,
+        &cookie,
+        runtime_beam_dir,
+        repl_beam_dir,
+        jsx_beam_dir,
+        stdlib_beam_dir,
+        &eval_cmd,
+    )?;
 
-    let args = vec![
-        "-detached".to_string(),
-        "-noshell".to_string(),
-        node_flag.to_string(),
-        node_arg,
-        "-setcookie".to_string(),
-        cookie,
-        "-pa".to_string(),
-        runtime_beam_dir.to_str().unwrap_or("").to_string(),
-        "-pa".to_string(),
-        repl_beam_dir.to_str().unwrap_or("").to_string(),
-        "-pa".to_string(),
-        jsx_beam_dir.to_str().unwrap_or("").to_string(),
-        "-pa".to_string(),
-        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
-        "-eval".to_string(),
-        eval_cmd,
-    ];
-
-    let _child = Command::new("erl")
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| {
-            miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
-        })?;
+    let _child = cmd.spawn().map_err(|e| {
+        miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
+    })?;
 
     // With -detached, the spawn() returns immediately and the real BEAM node
     // runs independently. We need to wait a bit for it to start up.
@@ -435,6 +416,54 @@ pub fn start_detached_node(
     save_node_info(workspace_id, &node_info)?;
 
     Ok(node_info)
+}
+
+/// Build a `Command` for starting a detached BEAM workspace node.
+///
+/// Extracted from `start_detached_node` so the command configuration
+/// (args, env vars) can be inspected in tests without spawning a process.
+fn build_detached_node_command(
+    node_name: &str,
+    cookie: &str,
+    runtime_beam_dir: &Path,
+    repl_beam_dir: &Path,
+    jsx_beam_dir: &Path,
+    stdlib_beam_dir: &Path,
+    eval_cmd: &str,
+) -> Result<Command> {
+    let (node_flag, node_arg) = if node_name.contains('@') {
+        ("-name", node_name.to_string())
+    } else {
+        ("-sname", node_name.to_string())
+    };
+
+    let args = vec![
+        "-detached".to_string(),
+        "-noshell".to_string(),
+        node_flag.to_string(),
+        node_arg,
+        "-setcookie".to_string(),
+        cookie.to_string(),
+        "-pa".to_string(),
+        runtime_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        repl_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        jsx_beam_dir.to_str().unwrap_or("").to_string(),
+        "-pa".to_string(),
+        stdlib_beam_dir.to_str().unwrap_or("").to_string(),
+        "-eval".to_string(),
+        eval_cmd.to_string(),
+    ];
+
+    let mut cmd = Command::new("erl");
+    cmd.args(&args)
+        .env("BEAMTALK_DAEMON_SOCKET", socket_path()?.as_os_str())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    Ok(cmd)
 }
 
 /// Find the PID of a BEAM process by its node name.
@@ -1338,6 +1367,32 @@ mod tests {
             cookie.len(),
             32,
             "Cookie should be valid (32 chars = 24 bytes base64)"
+        );
+    }
+
+    #[test]
+    fn test_detached_node_command_sets_daemon_socket_env() {
+        let cmd = build_detached_node_command(
+            "beamtalk_workspace_test@localhost",
+            "test-cookie",
+            Path::new("/tmp/runtime"),
+            Path::new("/tmp/repl"),
+            Path::new("/tmp/jsx"),
+            Path::new("/tmp/stdlib"),
+            "ok.",
+        )
+        .unwrap();
+
+        let expected_socket = socket_path().unwrap();
+        let env_vars: std::collections::HashMap<_, _> = cmd.get_envs().collect();
+        assert!(
+            env_vars.contains_key(std::ffi::OsStr::new("BEAMTALK_DAEMON_SOCKET")),
+            "Command must set BEAMTALK_DAEMON_SOCKET env var"
+        );
+        assert_eq!(
+            env_vars[std::ffi::OsStr::new("BEAMTALK_DAEMON_SOCKET")],
+            Some(expected_socket.as_os_str()),
+            "BEAMTALK_DAEMON_SOCKET must match socket_path()"
         );
     }
 }
