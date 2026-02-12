@@ -12,7 +12,6 @@
 
 use super::{CoreErlangGenerator, Result};
 use crate::ast::Expression;
-use std::fmt::Write;
 
 /// Value Object: A class's compile-time identity.
 ///
@@ -63,16 +62,6 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Writes indentation to the output buffer.
-    ///
-    /// Each indentation level is 4 spaces.
-    pub(super) fn write_indent(&mut self) -> Result<()> {
-        for _ in 0..self.indent {
-            write!(self.output, "    ")?;
-        }
-        Ok(())
-    }
-
     /// Bridge: renders a `Document` tree and appends it to `self.output`.
     ///
     /// This enables incremental migration — functions that return `Document`
