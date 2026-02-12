@@ -8,19 +8,19 @@
 
 sealed Object subclass: Block
   // Evaluation — structural intrinsics
-  value => @primitive blockValue
-  value: arg => @primitive blockValue1
-  value: arg1 value: arg2 => @primitive blockValue2
-  value: arg1 value: arg2 value: arg3 => @primitive blockValue3
+  value => @intrinsic blockValue
+  value: arg => @intrinsic blockValue1
+  value: arg1 value: arg2 => @intrinsic blockValue2
+  value: arg1 value: arg2 value: arg3 => @intrinsic blockValue3
 
   // Control flow — structural intrinsics
-  whileTrue: bodyBlock => @primitive whileTrue
-  whileFalse: bodyBlock => @primitive whileFalse
-  repeat => @primitive repeat
+  whileTrue: bodyBlock => @intrinsic whileTrue
+  whileFalse: bodyBlock => @intrinsic whileFalse
+  repeat => @intrinsic repeat
 
   // Exception handling — structural intrinsics (try/catch, try/after)
-  on: exClass do: handler => @primitive onDo
-  ensure: cleanupBlock => @primitive ensure
+  on: exClass do: handler => @intrinsic onDo
+  ensure: cleanupBlock => @intrinsic ensure
 
   // Reflection
   arity => @primitive 'arity'
