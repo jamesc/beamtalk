@@ -13,7 +13,7 @@
 /// ```beamtalk
 /// Tuple new: #(1, 2, 3)
 /// ```
-sealed Object subclass: Tuple
+sealed Collection subclass: Tuple
 
   /// Number of elements in the tuple.
   ///
@@ -78,3 +78,11 @@ sealed Object subclass: Tuple
   /// (Tuple new: #(1, 2)) asString
   /// ```
   asString => @primitive 'asString'
+
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Tuple new: #(1, 2, 3)) do: [:x | Transcript show: x]
+  /// ```
+  do: block => @primitive 'do:'
