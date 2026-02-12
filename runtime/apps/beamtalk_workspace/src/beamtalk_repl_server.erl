@@ -900,22 +900,25 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
 -spec trigger_actor_code_change(atom() | undefined, [map()]) ->
     {non_neg_integer(), [{pid(), term()}]}.
 trigger_actor_code_change(ModuleAtom, Classes) ->
-    ModuleAtoms = resolve_module_atoms(ModuleAtom, Classes),
+    ModuleAtoms = lists:usort(resolve_module_atoms(ModuleAtom, Classes)),
     case whereis(beamtalk_actor_registry) of
         undefined -> {0, []};
         RegistryPid ->
-            lists:foldl(fun(Mod, {CountAcc, FailAcc}) ->
+            {Count, FailsRev} = lists:foldl(fun(Mod, {CountAcc, FailAcc}) ->
                 case beamtalk_repl_actors:get_pids_for_module(RegistryPid, Mod) of
                     {ok, []} ->
                         {CountAcc, FailAcc};
                     {ok, Pids} ->
-                        {ok, _Upgraded, Failures} =
+                        {ok, Upgraded, Failures} =
                             beamtalk_hot_reload:trigger_code_change(Mod, Pids),
-                        {CountAcc + length(Pids), FailAcc ++ Failures};
+                        NewFailAcc = lists:foldl(
+                            fun(F, A) -> [F | A] end, FailAcc, Failures),
+                        {CountAcc + Upgraded, NewFailAcc};
                     {error, _} ->
                         {CountAcc, FailAcc}
                 end
-            end, {0, []}, ModuleAtoms)
+            end, {0, []}, ModuleAtoms),
+            {Count, lists:reverse(FailsRev)}
     end.
 
 %% @private

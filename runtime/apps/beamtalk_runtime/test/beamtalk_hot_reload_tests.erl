@@ -83,7 +83,12 @@ trigger_code_change_empty_pids_test() ->
 trigger_code_change_dead_pid_test() ->
     %% A dead PID should result in a failure (noproc)
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(10),
+    Ref = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 ->
+        error(timeout_waiting_for_dead_pid)
+    end,
     {ok, 0, Failures} = beamtalk_hot_reload:trigger_code_change(test_module, [DeadPid]),
     ?assertEqual(1, length(Failures)),
     [{DeadPid, _Reason}] = Failures.
