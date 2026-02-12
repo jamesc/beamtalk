@@ -116,15 +116,22 @@ fn test_cases_dir() -> PathBuf {
 /// Get the daemon socket path.
 ///
 /// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation,
-/// falling back to the default `~/.beamtalk/daemon.sock`.
+/// falling back to the session-based default `~/.beamtalk/sessions/shell-{ppid}/daemon.sock`.
 fn daemon_socket_path() -> PathBuf {
     if let Ok(socket_path) = env::var("BEAMTALK_DAEMON_SOCKET") {
         if !socket_path.is_empty() {
             return PathBuf::from(socket_path);
         }
     }
+    // Match session-based path resolution from paths.rs
+    let ppid = std::os::unix::process::parent_id();
     dirs::home_dir()
-        .map(|h| h.join(".beamtalk/daemon.sock"))
+        .map(|h| {
+            h.join(".beamtalk")
+                .join("sessions")
+                .join(format!("shell-{ppid}"))
+                .join("daemon.sock")
+        })
         .unwrap_or_default()
 }
 
