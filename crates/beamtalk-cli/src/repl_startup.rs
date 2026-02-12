@@ -44,13 +44,13 @@ pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
 /// It performs the following steps:
 /// 1. Stores the port in the application environment
 /// 2. Starts the `beamtalk_workspace` OTP application (and its dependencies)
-/// 3. Starts the REPL TCP listener on the given port
+/// 3. Starts the workspace supervisor (which starts the REPL TCP server,
+///    actor registry, session supervisor, and all singletons)
 /// 4. Prints a ready message
 /// 5. Blocks forever (the BEAM VM stays alive while the REPL runs)
 pub fn build_eval_cmd(port: u16) -> String {
     format!(
         "{}, \
-         {{ok, _}} = beamtalk_repl:start_link({port}), \
          io:format(\"REPL backend started on port {port}~n\"), \
          receive stop -> ok end.",
         startup_prelude(port),
@@ -69,7 +69,6 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
     format!(
         "application:set_env(beamtalk_runtime, node_name, '{safe_name}'), \
          {}, \
-         {{ok, _}} = beamtalk_repl:start_link({port}), \
          io:format(\"REPL backend started on port {port} (node: {safe_name})~n\"), \
          receive stop -> ok end.",
         startup_prelude(port),
@@ -78,17 +77,27 @@ pub fn build_eval_cmd_with_node(port: u16, node_name: &str) -> String {
 
 /// The startup prelude shared by all startup modes.
 ///
-/// Sets the port in the application environment and starts the workspace
-/// OTP application.  Callers append the REPL listener start and their own
-/// shutdown logic (e.g. `receive stop -> ok end` or cover export).
+/// Starts the workspace OTP application and the workspace supervisor,
+/// which brings up the full supervision tree: REPL TCP server, actor
+/// registry, session supervisor, transcript stream, system dictionary,
+/// workspace actor, and idle monitor.
+///
+/// The workspace uses a unique per-run ID and resolves the project path
+/// to an absolute directory at startup to avoid cross-run metadata reuse.
+///
+/// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
+/// or cover export).
 pub fn startup_prelude(port: u16) -> String {
     format!(
         "application:set_env(beamtalk_runtime, repl_port, {port}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-         _ = beamtalk_transcript_stream:start_link_singleton(1000), \
-         _ = beamtalk_system_dictionary:start_link_singleton(), \
-         _ = beamtalk_repl_actors:start_link(registered), \
-         _ = beamtalk_workspace_actor:start_link_singleton()"
+         {{ok, Cwd}} = file:get_cwd(), \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
+             workspace_id => list_to_binary(\"foreground_\" ++ integer_to_list(erlang:unique_integer([positive]))), \
+             project_path => list_to_binary(Cwd), \
+             tcp_port => {port}, \
+             auto_cleanup => false, \
+             max_idle_seconds => 14400}})"
     )
 }
 
@@ -199,8 +208,9 @@ mod tests {
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
         assert!(cmd.contains("application:ensure_all_started(beamtalk_workspace)"));
-        // Must start the REPL TCP listener
-        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+        // Must start the workspace supervisor
+        assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
+        assert!(cmd.contains("tcp_port => 9000"));
         // Must block to keep the VM alive
         assert!(cmd.contains("receive stop -> ok end"));
     }
@@ -209,7 +219,7 @@ mod tests {
     fn eval_cmd_with_node_includes_node_name() {
         let cmd = build_eval_cmd_with_node(9000, "mynode");
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
-        assert!(cmd.contains("beamtalk_repl:start_link(9000)"));
+        assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
@@ -224,10 +234,13 @@ mod tests {
         let prelude = startup_prelude(9000);
         assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
-        // Must start workspace singletons (ADR 0010 — workspace bindings)
-        assert!(prelude.contains("beamtalk_transcript_stream:start_link_singleton"));
-        assert!(prelude.contains("beamtalk_system_dictionary:start_link_singleton"));
-        assert!(prelude.contains("beamtalk_workspace_actor:start_link_singleton"));
+        // Must start workspace supervisor (which starts all singletons and services)
+        assert!(prelude.contains("beamtalk_workspace_sup:start_link"));
+        assert!(prelude.contains("tcp_port => 9000"));
+        // Uses unique workspace_id and absolute project_path from Cwd
+        assert!(prelude.contains("foreground_"));
+        assert!(prelude.contains("unique_integer"));
+        assert!(prelude.contains("file:get_cwd()"));
         // Prelude should NOT contain the blocking receive
         assert!(!prelude.contains("receive"));
     }
