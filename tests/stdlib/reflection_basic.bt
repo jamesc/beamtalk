@@ -7,7 +7,7 @@
 
 // Create counter instance
 c := Counter spawn
-// => _
+// => #Actor<Counter,_>
 
 // Test class reflection
 c class
