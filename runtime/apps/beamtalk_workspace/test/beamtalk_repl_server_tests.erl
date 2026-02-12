@@ -476,7 +476,8 @@ term_to_json_printable_list_test() ->
     ?assertEqual(<<"hello">>, beamtalk_repl_server:term_to_json("hello")).
 
 term_to_json_printable_list_unicode_test() ->
-    ?assertEqual(<<"café"/utf8>>, beamtalk_repl_server:term_to_json("café")).
+    %% Use explicit codepoints for encoding independence
+    ?assertEqual(<<"café"/utf8>>, beamtalk_repl_server:term_to_json("caf" ++ [16#00E9])).
 
 term_to_json_non_printable_list_test() ->
     Result = beamtalk_repl_server:term_to_json([1, 2, 3]),

@@ -310,7 +310,8 @@ to_string(Value) ->
     list_to_binary(io_lib:format("~p", [Value])).
 
 %% @doc Ensure a binary is valid UTF-8. Returns the binary unchanged if valid,
-%% or a safely escaped representation if it contains invalid bytes.
+%% or a ~p (io_lib:format("~p", ...)) representation if it contains invalid
+%% or incomplete UTF-8 data.
 -spec ensure_utf8(binary()) -> binary().
 ensure_utf8(Bin) ->
     case unicode:characters_to_binary(Bin) of
