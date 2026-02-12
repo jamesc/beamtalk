@@ -1,7 +1,7 @@
 # ADR 0021: Stream — Universal Data Interface
 
 ## Status
-Proposed (2026-02-12)
+Accepted (2026-02-12)
 
 ## Context
 
