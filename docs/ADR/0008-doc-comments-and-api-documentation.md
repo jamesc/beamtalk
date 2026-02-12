@@ -56,7 +56,7 @@ Object subclass: Integer
   abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
 ```
 
-### Class Documentation
+### Module Documentation
 
 ```beamtalk
 //// Integer - Whole number arithmetic and operations
@@ -76,6 +76,9 @@ Object subclass: Integer
 //// 1 to: 5 do: [:n | Transcript show: n]
 //// ```
 
+/// Integer - The class for whole numbers.
+///
+/// Supports arbitrary precision arithmetic.
 Object subclass: Integer
   // ... methods
 ```
@@ -238,9 +241,9 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ## Resolved Questions
 
-1. **`////` vs `///` for class docs:** **Keep `////` for module/class docs.** The explicit distinction follows Gleam convention and makes intent clear, even though each file currently contains one class. If multi-class files are supported later, the distinction becomes essential.
+1. **`////` vs `///` for class docs:** **`////` is for module/file docs, `///` is for class and method docs.** The `////` at the top of a file documents the module (file-level overview, usage examples). The `///` before a class definition documents the class, and `///` before a method documents the method. This follows Gleam convention. Today each file has one class, so module ≈ class, but the distinction matters if multi-class files are ever supported.
 
-2. **Doc inheritance:** **Yes — walk the hierarchy.** `:help Counter increment` should show docs inherited from `Actor >> increment` if Counter doesn't override the documentation, following Pharo's approach. This matches the existing `respondsTo:` hierarchy walking (ADR 0006) and provides better UX for users exploring unfamiliar classes.
+2. **Doc inheritance:** **Yes — walk the hierarchy.** `:help Counter spawn` should show docs inherited from `Actor >> spawn` if Counter doesn't override the documentation, following Pharo's approach. This matches the existing `respondsTo:` hierarchy walking (ADR 0006) and provides better UX for users exploring unfamiliar classes.
 
 3. **Structured parameter docs:** **Freeform Markdown only**, following Rust and Gleam. Parameter names are inferred from the method signature. Use conventional headings (`## Arguments`, `## Examples`) for structure. No `@param`/`@returns` tags — keeps it simple and avoids JSDoc-style syntax in a Smalltalk-inspired language.
 
@@ -250,8 +253,10 @@ Rejected because there's no way to distinguish documentation comments from imple
 
 ### Phase 1: Lexer + AST (S)
 - Extend lexer to recognize `///` as `Trivia::DocComment` and `////` as `Trivia::ModuleDocComment`
-- Add `doc_comment: Option<String>` to `MethodDefinition` and `ClassDefinition` in AST
-- Parser extracts leading `///` trivia and attaches to the following AST node
+- Add `doc_comment: Option<String>` to `MethodDefinition`, `ClassDefinition`, and `Module` in AST
+- `////` (module doc) attaches to the `Module` AST node — it documents the file, not a specific class
+- `///` (class/method doc) attaches to the next `ClassDefinition` or `MethodDefinition` node
+- Parser extracts leading doc-comment trivia and attaches to the following AST node
 - **Note:** Trivia currently attaches to *tokens*, not AST nodes. The parser must collect doc-comment trivia from the leading trivia of the first token of a method/class definition and "lift" it to the enclosing AST node during parsing. This is similar to how `leading_comments` is already handled for `Module`.
 
 ### Phase 2: LSP Integration (S)
@@ -260,9 +265,9 @@ Rejected because there's no way to distinguish documentation comments from imple
 - **Markdown rendering:** LSP protocol natively supports Markdown in `MarkupContent` — pass raw Markdown to the editor, no rendering needed on our side
 
 ### Phase 3: REPL `:help` (M)
-- `:help ClassName` shows class `////` doc
+- `:help ClassName` shows class `///` doc (and module `////` doc if available)
 - `:help ClassName selector` shows method `///` doc
-- **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `increment`, show `Actor`'s docs for it.
+- **Doc inheritance:** Walk the class hierarchy to find docs for inherited methods (like Pharo). If `Counter` doesn't document `spawn`, show `Actor`'s docs for it.
 - **Doc delivery strategy** (choose one during implementation):
   - **Option A: Parse-at-startup** — Parse `lib/*.bt` source files at REPL startup to extract docs. Simple but requires source files to be present alongside compiled `.beam` files. Adds startup latency (~26 files).
   - **Option B: Pre-compiled doc index** — `beamtalk build-stdlib` generates a doc index file (JSON/ETF) alongside `.beam` files. REPL loads the index at startup. Faster, no source dependency at runtime.
