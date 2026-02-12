@@ -583,14 +583,17 @@ impl<'src> Lexer<'src> {
             if ident == "primitive" {
                 return TokenKind::AtPrimitive;
             }
+            if ident == "intrinsic" {
+                return TokenKind::AtIntrinsic;
+            }
             let text = self.text_for(self.span_from(start));
             return TokenKind::Error(EcoString::from(format!(
-                "unknown directive '{text}', only '@primitive' is supported"
+                "unknown directive '{text}', only '@primitive' and '@intrinsic' are supported"
             )));
         }
 
         TokenKind::Error(EcoString::from(
-            "expected directive name after '@', only '@primitive' is supported",
+            "expected directive name after '@', only '@primitive' and '@intrinsic' are supported",
         ))
     }
 
@@ -1032,6 +1035,30 @@ mod tests {
         assert_eq!(
             lex_kinds("@primitive foo"),
             vec![TokenKind::AtPrimitive, TokenKind::Identifier("foo".into()),]
+        );
+    }
+
+    #[test]
+    fn lex_at_intrinsic() {
+        assert_eq!(lex_kinds("@intrinsic"), vec![TokenKind::AtIntrinsic]);
+    }
+
+    #[test]
+    fn lex_at_intrinsic_followed_by_identifier() {
+        assert_eq!(
+            lex_kinds("@intrinsic blockValue"),
+            vec![
+                TokenKind::AtIntrinsic,
+                TokenKind::Identifier("blockValue".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_at_intrinsic_followed_by_string() {
+        assert_eq!(
+            lex_kinds("@intrinsic 'size'"),
+            vec![TokenKind::AtIntrinsic, TokenKind::String("size".into())]
         );
     }
 

@@ -473,16 +473,9 @@ impl CoreErlangGenerator {
     }
 
     /// Encode a string as a Core Erlang binary literal.
-    /// Core Erlang uses `#{#<charcode>(8,1,'integer',['unsigned'|['big']]),..}#`
+    /// Delegates to the shared UTF-8 binary literal helper.
     fn core_erlang_binary(s: &str) -> String {
-        if s.is_empty() {
-            return "#{}#".to_string();
-        }
-        let segments: Vec<String> = s
-            .chars()
-            .map(|ch| format!("#<{}>(8,1,'integer',['unsigned'|['big']])", ch as u32))
-            .collect();
-        format!("#{{{}}}#", segments.join(","))
+        Self::binary_string_literal(s)
     }
 
     /// Generates the `dispatch/3` function for a value type.

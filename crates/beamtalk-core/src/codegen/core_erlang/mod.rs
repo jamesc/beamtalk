@@ -1186,12 +1186,10 @@ impl CoreErlangGenerator {
         // instead of delegating through a hand-written dispatch module.
         if is_quoted {
             let params = self.current_method_params.clone();
-            if let Some(()) = primitive_implementations::generate_primitive_bif(
-                &mut self.output,
-                &class_name,
-                name,
-                &params,
-            ) {
+            if let Some(code) =
+                primitive_implementations::generate_primitive_bif(&class_name, name, &params)
+            {
+                self.output.push_str(&code);
                 return Ok(());
             }
         }

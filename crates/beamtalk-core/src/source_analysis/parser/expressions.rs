@@ -372,8 +372,8 @@ impl Parser {
             // List literal
             TokenKind::ListOpen => self.parse_list_literal(),
 
-            // Primitive pragma: @primitive 'name' or @primitive intrinsicName
-            TokenKind::AtPrimitive => self.parse_primitive(),
+            // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
+            TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
 
             // Unexpected token - consume it to avoid getting stuck
             _ => {
@@ -562,18 +562,19 @@ impl Parser {
         Expression::Block(block)
     }
 
-    /// Parses a `@primitive` pragma: `@primitive 'selector'` or `@primitive intrinsicName`.
+    /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive 'selector'` or `@intrinsic intrinsicName`.
     ///
-    /// The `@primitive` token has already been identified by `parse_primary`.
+    /// The `@primitive`/`@intrinsic` token has already been identified by `parse_primary`.
     /// This method consumes it and parses the primitive name that follows.
     fn parse_primitive(&mut self) -> Expression {
-        let start_token = self.advance(); // consume AtPrimitive
+        let start_token = self.advance(); // consume AtPrimitive or AtIntrinsic
+        let directive = start_token.kind().to_string();
         let start = start_token.span();
 
-        // @primitive is only valid inside method bodies (after =>)
+        // @primitive/@intrinsic is only valid inside method bodies (after =>)
         if !self.in_method_body {
             let message: EcoString =
-                "@primitive can only appear inside a method body (after =>)".into();
+                format!("{directive} can only appear inside a method body (after =>)").into();
             self.diagnostics
                 .push(Diagnostic::error(message.clone(), start));
             // Still parse the name for error recovery
@@ -615,7 +616,8 @@ impl Parser {
             _ => {
                 let span = start;
                 let message: EcoString =
-                    "@primitive must be followed by a quoted selector or identifier".into();
+                    format!("{directive} must be followed by a quoted selector or identifier")
+                        .into();
                 self.diagnostics
                     .push(Diagnostic::error(message.clone(), span));
                 Expression::Error { message, span }

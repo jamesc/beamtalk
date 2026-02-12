@@ -71,6 +71,7 @@ Actor subclass: Counter
 | **Assumed features** | `Integer subclass: MyInt` | Primitives are sealed, cannot subclass |
 | **Smalltalk ported verbatim** | `Object subclass: #Counter` | Beamtalk uses identifiers, not symbols: `Object subclass: Counter` |
 | **Load syntax confusion** | `@load` in REPL | Use `:load` in REPL, `@load` only in E2E test files |
+| **Pragma confusion** | `@primitive blockValue` | Structural intrinsics use `@intrinsic blockValue`; `@primitive 'selector'` is for quoted selector-based dispatch only |
 
 ### E2E Test Directives vs REPL Commands
 
