@@ -22,9 +22,41 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
-use super::{CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, Literal, MessageSelector};
 use std::fmt::Write;
+
+/// Returns the arity of a block expression, or `None` if the expression is not a block literal.
+fn block_arity(expr: &Expression) -> Option<usize> {
+    match expr {
+        Expression::Block(b) => Some(b.parameters.len()),
+        _ => None,
+    }
+}
+
+/// Validates that an `ifNotNil:` block has arity 0 or 1.
+/// Returns `true` if the block takes an argument (arity 1 or non-literal), `false` for arity 0.
+fn validate_if_not_nil_block(expr: &Expression, selector: &str) -> Result<bool> {
+    match block_arity(expr) {
+        Some(0) => Ok(false),
+        Some(n) if n > 1 => Err(CodeGenError::BlockArityMismatch {
+            selector: selector.to_string(),
+            arity: n,
+        }),
+        // Arity 1 or non-literal block — pass the receiver (Smalltalk convention)
+        _ => Ok(true),
+    }
+}
+
+/// Generates a Core Erlang `apply` call that adapts to block arity.
+/// For 0-arg blocks: `apply BlockVar ()`, for 1-arg blocks: `apply BlockVar (RecvVar)`.
+fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> String {
+    if block_takes_arg {
+        format!("apply {block_var} ({recv_var})")
+    } else {
+        format!("apply {block_var} ()")
+    }
+}
 
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
@@ -473,49 +505,61 @@ impl CoreErlangGenerator {
                     }
                     "ifNotNil:" if arguments.len() == 1 => {
                         // case Receiver of 'nil' -> 'nil'; _ -> apply Block (Receiver) end
+                        // If the block has 0 parameters, don't pass the receiver (avoids badarity)
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NotNilBlk");
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
                         write!(self.output, "let {recv_var} = ")?;
                         self.generate_expression(receiver)?;
                         write!(self.output, " in let {block_var} = ")?;
                         self.generate_expression(&arguments[0])?;
+                        let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
                         write!(
                             self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> apply {block_var} ({recv_var}) end"
+                            " in case {recv_var} of <'nil'> when 'true' -> 'nil' <_> when 'true' -> {apply} end"
                         )?;
                         Ok(Some(()))
                     }
                     "ifNil:ifNotNil:" if arguments.len() == 2 => {
                         // case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        // If the notNil block has 0 parameters, don't pass the receiver
                         let recv_var = self.fresh_temp_var("Obj");
                         let nil_var = self.fresh_temp_var("NilBlk");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
                         write!(self.output, "let {recv_var} = ")?;
                         self.generate_expression(receiver)?;
                         write!(self.output, " in let {nil_var} = ")?;
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in let {not_nil_var} = ")?;
                         self.generate_expression(&arguments[1])?;
+                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         write!(
                             self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
+                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
                         )?;
                         Ok(Some(()))
                     }
                     "ifNotNil:ifNil:" if arguments.len() == 2 => {
                         // Reversed order: case Receiver of 'nil' -> apply NilBlock (); _ -> apply NotNilBlock (Receiver) end
+                        // If the notNil block has 0 parameters, don't pass the receiver
                         let recv_var = self.fresh_temp_var("Obj");
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
                         let nil_var = self.fresh_temp_var("NilBlk");
+                        let block_takes_arg =
+                            validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
                         write!(self.output, "let {recv_var} = ")?;
                         self.generate_expression(receiver)?;
                         write!(self.output, " in let {not_nil_var} = ")?;
                         self.generate_expression(&arguments[0])?;
                         write!(self.output, " in let {nil_var} = ")?;
                         self.generate_expression(&arguments[1])?;
+                        let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         write!(
                             self.output,
-                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> apply {not_nil_var} ({recv_var}) end"
+                            " in case {recv_var} of <'nil'> when 'true' -> apply {nil_var} () <_> when 'true' -> {apply} end"
                         )?;
                         Ok(Some(()))
                     }
@@ -852,4 +896,58 @@ fn core_erlang_binary_string(s: &str) -> String {
         .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
         .collect();
     format!("#{{{}}}#", segments.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Block, BlockParameter, Literal};
+    use crate::source_analysis::Span;
+
+    #[test]
+    fn test_validate_if_not_nil_block_zero_args() {
+        let block = Expression::Block(Block {
+            parameters: vec![],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+            span: Span::new(0, 3),
+        });
+        assert!(!validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_if_not_nil_block_one_arg() {
+        let block = Expression::Block(Block {
+            parameters: vec![BlockParameter::new("v", Span::new(1, 2))],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(5, 6))],
+            span: Span::new(0, 7),
+        });
+        assert!(validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_if_not_nil_block_two_args_errors() {
+        let block = Expression::Block(Block {
+            parameters: vec![
+                BlockParameter::new("a", Span::new(1, 2)),
+                BlockParameter::new("b", Span::new(3, 4)),
+            ],
+            body: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
+            span: Span::new(0, 9),
+        });
+        let result = validate_if_not_nil_block(&block, "ifNotNil:");
+        assert!(result.is_err());
+        if let Err(CodeGenError::BlockArityMismatch { selector, arity }) = result {
+            assert_eq!(selector, "ifNotNil:");
+            assert_eq!(arity, 2);
+        } else {
+            panic!("Expected BlockArityMismatch error");
+        }
+    }
+
+    #[test]
+    fn test_validate_if_not_nil_block_non_literal() {
+        // Non-block expression (variable) — assumes 1 arg
+        let expr = Expression::Identifier(crate::ast::Identifier::new("myBlock", Span::new(0, 7)));
+        assert!(validate_if_not_nil_block(&expr, "ifNotNil:").unwrap());
+    }
 }
