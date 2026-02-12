@@ -443,6 +443,20 @@ TranscriptStream does not understand 'show:'
   Hint: 'show:' is an instance method. Did you mean: TranscriptStream current show: 'hello'
 ```
 
+## Implementation Tracking
+
+**Epic:** BT-487 — Singleton Access via Class Variables (ADR 0019)
+**Issues:** BT-488, BT-489, BT-490, BT-491, BT-492
+**Status:** Planned
+
+| Phase | Issue | Title | Size |
+|-------|-------|-------|------|
+| 1 | BT-488 | Add classVar and current accessors to singleton stdlib classes | S |
+| 2 | BT-489 | Bootstrap singleton class variables in workspace supervisor | M |
+| 3 | BT-490 | Remove workspace binding codegen path | M |
+| 4 | BT-491 | Remove persistent_term singleton infrastructure from runtime | S |
+| 5 | BT-492 | Rename workspace_actor to workspace_environment + docs | S |
+
 ## References
 
 - Supersedes: ADR 0010 (Global Objects and Singleton Dispatch)
@@ -451,4 +465,4 @@ TranscriptStream does not understand 'show:'
 - Related: ADR 0009 (OTP Application Structure) — WorkspaceEnvironment actor lives in `beamtalk_workspace` app
 - Related epic: BT-319 (Metaclass & First-Class Classes) — now complete
 - Related epic: BT-320 (Object Protocol & Live Development)
-- Beamtalk principles: `docs/beamtalk-principles.md` (Interactive-first, BEAM-native) 
+- Beamtalk principles: `docs/beamtalk-principles.md` (Interactive-first, BEAM-native)
