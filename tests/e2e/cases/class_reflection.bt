@@ -62,6 +62,7 @@ counterClass class_name
 stringClass := (Beamtalk classNamed: #String) await
 // => String
 
+// Method lists are fragile (change when methods are added), keep wildcard
 methods := stringClass methods
 // => _
 
@@ -95,6 +96,7 @@ methods isEmpty
 intClass := (Beamtalk classNamed: #Integer) await
 // => Integer
 
+// Method list fragile (changes when methods are added), keep wildcard
 intMethods := intClass methods
 // => _
 
