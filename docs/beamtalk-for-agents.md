@@ -4,9 +4,9 @@
 
 ## Executive Summary
 
-Beamtalk brings Smalltalk's legendary live, reflective programming paradigm to the BEAM runtime (Erlang/Elixir VM), creating a purpose-built language for **exploratory, agentic AI systems**. Every agent is a first-class actor—a lightweight process with a mailbox and dynamic message dispatch—enabling teams to spawn swarms of autonomous agents (Claude, Copilot, GPT), interact with them via live browsers, hot-patch behaviors mid-execution, and scale to millions of concurrent agents across BEAM clusters without restarts.
+Beamtalk brings Smalltalk's legendary live, reflective programming paradigm to the BEAM runtime (Erlang/Elixir VM), creating a purpose-built language for **exploratory, agentic AI systems**. Every agent is a first-class actor—a lightweight BEAM process with a mailbox and dynamic message dispatch—enabling teams to spawn autonomous agents, inspect their state at runtime, hot-reload behaviors mid-execution, and scale to millions of concurrent agents across BEAM clusters without restarts.
 
-Unlike static actor languages (Gleam) or imperative shells, Beamtalk treats agents as living objects: modify their prompts, tools, and strategies in real-time while they run; inspect mailboxes and memory; supervise failures gracefully. No new VM needed—compile to BEAM bytecode for seamless interop with Elixir, OTP supervisors, and Anthropic/GitHub/OpenAI SDKs.
+Unlike static actor languages (Gleam) or imperative shells, Beamtalk treats agents as living objects: modify their methods in real-time while they run; query their capabilities via reflection; supervise failures gracefully via OTP. No new VM needed—compile to BEAM bytecode for seamless interop with Elixir, OTP supervisors, and LLM SDKs.
 
 **Target users**: AI product teams, researchers, and engineers building autonomous agent systems who demand rapid iteration, introspection, and fault tolerance.
 
@@ -32,49 +32,46 @@ Teams prototype agent workflows in notebooks or IDEs, then struggle to turn them
 Treat agents as **persistent BEAM actors** with Smalltalk-style liveness:
 
 - **Spawn agents instantly**:
-  ```
+  ```beamtalk
   researcher := Researcher spawn model: #openai_gpt4
   ```
   One line, no boilerplate; maps to a BEAM process with its own mailbox.
 
 - **Message asynchronously** (returns futures by default):
-  ```
+  ```beamtalk
   result := researcher query: "Analyze this code"
   result await  // Explicitly wait for response
-
-  // Or use continuation style
-  researcher query: "Analyze this code"
-    whenResolved: [:analysis | self process: analysis]
   ```
   Late-bound sends; unknown messages trigger `doesNotUnderstand:` handlers.
 
 - **Edit live**:
-  ```
-  patch Researcher >> plan: prompt {
-    Telemetry log: 'Planning with: ', prompt
+  ```beamtalk
+  // Redefine a method on the running class — takes effect on next message send
+  Researcher >> plan: prompt =>
+    Transcript show: "Planning with: ", prompt.
     ^super plan: prompt
-  }
   ```
   Hot-reload behaviors without restart, leveraging BEAM's code upgrade semantics.
 
 - **Inspect everything**:
+  ```beamtalk
+  researcher class              // => Researcher
+  researcher respondsTo: #plan: // => true
+  researcher inspect            // => detailed description of state and methods
+  Researcher methods            // => #(query:, plan:, addTool:, ...)
   ```
-  researcher inspect       // Opens live browser on state
-  researcher mailbox peek  // Non-destructive mailbox view
-  researcher state         // => {model: #openai_gpt4, memory: [...], ...}
-  ```
-  A Smalltalk-style image view of a BEAM cluster.
+  Every object describes itself at runtime — no grep, no source files needed.
 
-- **Swarm & supervise**:
+- **Swarm & supervise** *(planned — OTP supervision integration)*:
+  ```beamtalk
+  // Each agent is its own BEAM process — if one crashes, others are unaffected
+  researcher := Researcher spawn model: #claude_opus
+  critic := Critic spawn model: #gpt4_turbo
+
+  // OTP supervisors automatically restart crashed agents
+  // Beamtalk maps supervision trees onto class hierarchies
   ```
-  Supervisor subclass: ResearchTeam
-    children: [
-      Researcher spawn model: #claude_opus,
-      Critic spawn model: #gpt4_turbo
-    ]
-    strategy: #oneForOne
-  ```
-  Declarative multi-agent topologies with restart strategies.
+  Declarative multi-agent topologies with restart strategies, built on OTP.
 
 - **Scale**: Millions of agents/node via BEAM's lightweight processes; distribute across nodes transparently.
 
@@ -88,27 +85,23 @@ Treat agents as **persistent BEAM actors** with Smalltalk-style liveness:
 
 **Scenario**: Analyze a codebase using specialized agents (Researcher, Architect, Critic) working in parallel, debating findings and converging on recommendations.
 
-```
-Supervisor subclass: CodeAnalysisTeam
-  children: [
-    Researcher spawn model: #claude_opus,
-    Architect spawn model: #gpt4_turbo,
-    Critic spawn model: #claude_sonnet
-  ]
+```beamtalk
+// Spawn specialized agents — each is an isolated BEAM process
+researcher := Researcher spawn model: #claude_opus
+architect := Architect spawn model: #gpt4_turbo
+critic := Critic spawn model: #claude_sonnet
 
-team := CodeAnalysisTeam spawn
-
-// Async analysis - returns future
-analysis := team analyze: codeRepo
+// Async analysis — returns a future
+analysis := researcher analyze: codeRepo
 
 // Live inspection while running
-team inspect  // Browser shows: researcher -> architect -> critic message flow
+researcher class       // => Researcher
+researcher inspect     // => current state and activity
 
-// Mid-run: patch critic to focus on security
-patch Critic >> review: code {
+// Mid-run: redefine critic's review to focus on security
+Critic >> review: code =>
   self.prompt := "Focus on security flaws"
   ^super review: code
-}
 
 // Wait for completion
 findings := analysis await
@@ -116,11 +109,11 @@ findings := analysis await
 
 ### 2.2 LLM Agent with Memory and Tools
 
-```
+```beamtalk
 Actor subclass: ResearchAgent
   state:
     model = #claude_opus,
-    memory = OrderedCollection new,
+    memory = List new,
     tools = ToolRegistry default
 
   query: question =>
@@ -130,56 +123,53 @@ Actor subclass: ResearchAgent
       complete: question
       context: context
       tools: self.tools
-    self.memory add: {question, response}
+    self.memory add: #{#question => question, #response => response}
     ^response
 
   addTool: tool =>
     self.tools register: tool
 
   clearMemory =>
-    self.memory := OrderedCollection new
+    self.memory := List new
 ```
 
 ### 2.3 Agent Orchestration with Futures
 
-```
-// Fan-out: multiple agents work in parallel
-agents := (1 to: 10) collect: [:i |
-  Researcher spawn model: #claude_sonnet
+```beamtalk
+// Fan-out: spawn multiple agents in parallel
+agents := List new
+1 to: 10 do: [:i |
+  agents add: (Researcher spawn model: #claude_sonnet)
 ]
 
 // Send tasks, collect futures
-futures := agents withIndexCollect: [:agent :i |
-  agent analyze: (tasks at: i)
+futures := List new
+agents doWithIndex: [:agent :i |
+  futures add: (agent analyze: (tasks at: i))
 ]
 
 // Wait for all to complete
 results := futures collect: [:f | f await]
-
-// Or process as they complete
-futures do: [:f |
-  f whenResolved: [:result | self aggregate: result]
-]
 ```
 
 ### 2.4 Supervised Agent with Retry
 
-```
-Supervisor subclass: ResilientAnalyzer
-  children: [
-    {Researcher spawn model: #claude_opus, restartStrategy: #transient}
-  ]
-  strategy: #oneForOne
-  maxRestarts: 5
-  restartWindow: 60  // seconds
+*(Planned — OTP supervision tree integration)*
 
-analyzer := ResilientAnalyzer spawn
+```beamtalk
+// Each agent is its own BEAM process with fault isolation
+researcher := Researcher spawn model: #claude_opus
 
-// If agent crashes (e.g., API timeout), supervisor restarts it
-result := analyzer analyze: data
-result
-  whenResolved: [:r | self handleSuccess: r]
-  whenRejected: [:e | self handleFailure: e]
+// If the agent crashes (e.g., API timeout), it can be restarted
+// OTP supervision strategies (one-for-one, rest-for-one) provide
+// automatic restart with configurable limits
+
+// Synchronous call with explicit await
+result := (researcher analyze: data) await
+
+// Error handling via structured errors
+[result := (researcher analyze: data) await]
+  on: DoesNotUnderstand do: [:e | self handleFailure: e]
 ```
 
 ---
@@ -204,8 +194,8 @@ result
 | Aspect | Beamtalk | LangChain (Python) | Elixir + GenServer |
 |--------|----------|-------------------|-------------------|
 | **Concurrency model** | Native actors | asyncio bolted on | Native actors |
-| **Live editing** | First-class `patch` | Restart required | Hot-code only |
-| **Introspection** | `inspect`, `browser` | print debugging | Limited |
+| **Live editing** | Hot code reload | Restart required | Hot-code only |
+| **Introspection** | `inspect`, `methods`, `respondsTo:` | print debugging | Limited |
 | **Fault tolerance** | Supervision trees | Try/except | Supervision trees |
 | **Scaling** | Millions of actors | Process pools | Millions of actors |
 | **Distribution** | Transparent | Manual | Transparent |
@@ -215,6 +205,7 @@ result
 
 ## References
 
+- [beamtalk-agent-native-development.md](beamtalk-agent-native-development.md) - Beamtalk as a development environment *for* AI coding agents (companion document)
 - [beamtalk-principles.md](beamtalk-principles.md) - Core design philosophy (13 principles)
 - [beamtalk-language-features.md](beamtalk-language-features.md) - Full syntax, features, and tooling
 - [beamtalk-syntax-rationale.md](beamtalk-syntax-rationale.md) - Syntax design decisions
