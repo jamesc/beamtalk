@@ -287,10 +287,12 @@ class_object_tag(ClassName) when is_atom(ClassName) ->
 
 %% @doc Get a compiled method object.
 %%
-%% Accepts either a class process pid or a class name atom.
+%% Accepts a class process pid, a class name atom, or a class object tuple.
 %% Returns a CompiledMethod map or nil if the method is not found.
--spec method(pid() | class_name(), selector()) -> map() | nil.
+-spec method(pid() | class_name() | tuple(), selector()) -> map() | nil.
 method(ClassPid, Selector) when is_pid(ClassPid) ->
+    gen_server:call(ClassPid, {method, Selector});
+method({beamtalk_object, _ClassTag, _Module, ClassPid}, Selector) when is_pid(ClassPid) ->
     gen_server:call(ClassPid, {method, Selector});
 method(ClassName, Selector) when is_atom(ClassName) ->
     case whereis_class(ClassName) of

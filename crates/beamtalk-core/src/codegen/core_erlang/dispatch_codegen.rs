@@ -105,15 +105,13 @@ impl CoreErlangGenerator {
         // For binary operators, use Erlang's built-in operators (these are synchronous)
         if let MessageSelector::Binary(op) = selector {
             // BT-101: Method lookup via `>>` operator (e.g., Counter >> #increment)
+            // BT-323: Support `>>` on any expression, not just class literals
             if op.as_str() == ">>" {
                 if let Expression::ClassReference { name, .. } = receiver {
                     return self.generate_method_lookup(&name.name, arguments);
                 }
-                // >> is only supported on class literals for now
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: ">> (method lookup) is only supported on class literals (e.g., Counter >> #increment), not on expressions".to_string(),
-                    location: format!("{receiver:?}"),
-                });
+                // Runtime fallback: evaluate receiver and call method/2
+                return self.generate_runtime_method_lookup(receiver, arguments);
             }
 
             // BT-335: Association creation via `->` binary message
@@ -950,6 +948,38 @@ impl CoreErlangGenerator {
         let arg_str = self.capture_expression(&arguments[0])?;
         let doc = docvec![
             format!("call 'beamtalk_object_class':'method'('{class_name}', "),
+            arg_str,
+            ")"
+        ];
+        self.write_document(&doc);
+        Ok(())
+    }
+
+    /// Generates a runtime method lookup via `>>` for non-class-literal receivers (BT-323).
+    ///
+    /// `cls >> #increment` (where cls holds a class object) compiles to:
+    /// ```erlang
+    /// call 'beamtalk_object_class':'method'(cls, 'increment')
+    /// ```
+    ///
+    /// The runtime `method/2` accepts pids, atoms, and class object tuples.
+    fn generate_runtime_method_lookup(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<()> {
+        if arguments.len() != 1 {
+            return Err(CodeGenError::Internal(format!(
+                ">> operator requires exactly one argument, got {}",
+                arguments.len()
+            )));
+        }
+        let receiver_str = self.capture_expression(receiver)?;
+        let arg_str = self.capture_expression(&arguments[0])?;
+        let doc = docvec![
+            "call 'beamtalk_object_class':'method'(",
+            receiver_str,
+            ", ",
             arg_str,
             ")"
         ];
