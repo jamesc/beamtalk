@@ -102,7 +102,8 @@ impl CoreErlangGenerator {
 
             if Self::is_field_assignment(expr) {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
 
                 if is_last {
                     // Last expression: close with the final state variable
@@ -110,7 +111,8 @@ impl CoreErlangGenerator {
                 }
             } else if self.is_actor_self_send(expr) {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
-                self.generate_self_dispatch_open(expr)?;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                self.write_document(&doc);
 
                 if is_last {
                     self.write_document(&docvec![self.current_state_var()]);
@@ -347,7 +349,8 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 has_mutations = true;
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
 
                 if is_last {
                     let final_state = self.current_state_var();
@@ -356,7 +359,8 @@ impl CoreErlangGenerator {
             } else if self.is_actor_self_send(expr) {
                 has_mutations = true;
                 // BT-245: Self-sends may mutate state — thread state through dispatch
-                self.generate_self_dispatch_open(expr)?;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                self.write_document(&doc);
 
                 if is_last {
                     let final_state = self.current_state_var();

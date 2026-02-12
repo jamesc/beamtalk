@@ -168,11 +168,13 @@ impl CoreErlangGenerator {
                 // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
                 // Field assignment handles state version internally
                 // (removed - generate_field_assignment_open does this)
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
                 // Note: generate_field_assignment_open already writes trailing " in "
             } else if self.is_actor_self_send(expr) {
                 // BT-245: Self-sends may mutate state — thread state through dispatch
-                self.generate_self_dispatch_open(expr)?;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                self.write_document(&doc);
             } else if Self::is_local_var_assignment(expr) {
                 // BT-153: Handle local variable assignments for REPL context
                 // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
@@ -362,7 +364,8 @@ impl CoreErlangGenerator {
             if Self::is_field_assignment(expr) {
                 // Field assignment - generate_field_assignment_open writes:
                 //   "let _Val = <value> in let StateAccN = maps:put(..., StateAccN-1) in "
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
 
                 // BT-478: Do NOT write a bare state var for the last expression.
                 // The trailing "in " from generate_field_assignment_open means the

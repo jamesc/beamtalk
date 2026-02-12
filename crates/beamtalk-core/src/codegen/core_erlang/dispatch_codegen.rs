@@ -34,6 +34,7 @@
 //! - **Await messages**: `future await` → Blocking future resolution
 //! - **Super sends**: `super methodName:` → Parent class dispatch
 
+use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, MessageSelector};
 use crate::docvec;
@@ -60,8 +61,7 @@ impl CoreErlangGenerator {
     fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],
-    ) -> Result<super::document::Document<'static>> {
-        use super::document::Document;
+    ) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
@@ -95,7 +95,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // Special case: super message send
         // Super calls invoke the superclass implementation
         if matches!(receiver, Expression::Super(_)) {
@@ -130,59 +130,87 @@ impl CoreErlangGenerator {
                     val_str,
                     "}~"
                 ];
-                self.write_document(&doc);
-                return Ok(());
+                return Ok(doc);
             }
-            return self.generate_binary_op(op, receiver, arguments);
+            // Bridge: generate_binary_op still writes to buffer
+            let start = self.output.len();
+            self.generate_binary_op(op, receiver, arguments)?;
+            let result = self.output[start..].to_string();
+            self.output.truncate(start);
+            return Ok(Document::String(result));
         }
 
         // Special case: ProtoObject methods - fundamental operations on all objects
         // class returns the class name for any object (primitives or actors)
-        if let Some(result) =
-            self.try_generate_protoobject_message(receiver, selector, arguments)?
+        // Bridge: try_generate_protoobject_message still writes to buffer
         {
-            return Ok(result);
+            let start = self.output.len();
+            if let Some(()) =
+                self.try_generate_protoobject_message(receiver, selector, arguments)?
+            {
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Document::String(result));
+            }
         }
 
         // Special case: Object methods - reflection and introspection
         // respondsTo:, instVarNames, instVarAt: enable runtime introspection
-        if let Some(result) = self.try_generate_object_message(receiver, selector, arguments)? {
-            return Ok(result);
+        // Bridge: try_generate_object_message still writes to buffer
+        {
+            let start = self.output.len();
+            if let Some(()) = self.try_generate_object_message(receiver, selector, arguments)? {
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Document::String(result));
+            }
         }
 
         // Special case: Block evaluation messages (value, value:, whileTrue:, etc.)
         // These are synchronous function calls, not async actor messages
-        if let Some(result) = self.try_generate_block_message(receiver, selector, arguments)? {
-            return Ok(result);
+        // Bridge: try_generate_block_message still writes to buffer
+        {
+            let start = self.output.len();
+            if let Some(()) = self.try_generate_block_message(receiver, selector, arguments)? {
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Document::String(result));
+            }
         }
 
         // Special case: List iteration messages (do:, collect:, select:, reject:, inject:into:)
         // These are structural intrinsics that require inline code generation for proper
         // state threading when used inside actor methods with field mutations.
-        if let Some(result) = self.try_generate_list_message(receiver, selector, arguments)? {
-            return Ok(result);
+        // Bridge: try_generate_list_message still writes to buffer
+        {
+            let start = self.output.len();
+            if let Some(()) = self.try_generate_list_message(receiver, selector, arguments)? {
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Document::String(result));
+            }
         }
 
         // Special case: spawn, spawnWith:, await, awaitForever, await:
-        if let Some(result) = self.try_handle_spawn_await(receiver, selector, arguments)? {
-            return Ok(result);
+        if let Some(doc) = self.try_handle_spawn_await(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // BT-374 / ADR 0010: Workspace binding dispatch + class method calls
-        if let Some(result) = self.try_handle_class_reference(receiver, selector, arguments)? {
-            return Ok(result);
+        if let Some(doc) = self.try_handle_class_reference(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // BT-412: Self-sends in class methods route through class_send
-        if let Some(result) =
+        if let Some(doc) =
             self.try_handle_class_method_self_send(receiver, selector, arguments)?
         {
-            return Ok(result);
+            return Ok(doc);
         }
 
         // BT-330: Self-sends in actor methods use direct synchronous dispatch
-        if let Some(result) = self.try_handle_self_dispatch(receiver, selector, arguments)? {
-            return Ok(result);
+        if let Some(doc) = self.try_handle_self_dispatch(receiver, selector, arguments)? {
+            return Ok(doc);
         }
 
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
@@ -199,7 +227,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(CodeGenError::Internal(format!(
@@ -217,9 +245,8 @@ impl CoreErlangGenerator {
             args_doc,
             "])"
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Handles spawn, spawnWith:, await, awaitForever, and await: intrinsics.
@@ -231,37 +258,49 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         // Unary spawn/await messages
         if let MessageSelector::Unary(name) = selector {
             // BT-246: Only match ClassReference, not Identifier.
             if name == "spawn" && arguments.is_empty() {
                 if let Expression::ClassReference { name, .. } = receiver {
-                    self.generate_actor_spawn(&name.name, None)?;
-                    return Ok(Some(()));
+                    let doc = self.generate_actor_spawn(&name.name, None)?;
+                    return Ok(Some(doc));
                 }
             }
             if name == "await" && arguments.is_empty() {
+                // Bridge: generate_await still writes to buffer
+                let start = self.output.len();
                 self.generate_await(receiver)?;
-                return Ok(Some(()));
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Some(Document::String(result)));
             }
             if name == "awaitForever" && arguments.is_empty() {
+                // Bridge: generate_await_forever still writes to buffer
+                let start = self.output.len();
                 self.generate_await_forever(receiver)?;
-                return Ok(Some(()));
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Some(Document::String(result)));
             }
         }
 
         // Keyword await:/spawnWith: messages
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
+                // Bridge: generate_await_with_timeout still writes to buffer
+                let start = self.output.len();
                 self.generate_await_with_timeout(receiver, &arguments[0])?;
-                return Ok(Some(()));
+                let result = self.output[start..].to_string();
+                self.output.truncate(start);
+                return Ok(Some(Document::String(result)));
             }
             // BT-246: Only match ClassReference, not Identifier.
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
                 if let Expression::ClassReference { name, .. } = receiver {
-                    self.generate_actor_spawn(&name.name, Some(&arguments[0]))?;
-                    return Ok(Some(()));
+                    let doc = self.generate_actor_spawn(&name.name, Some(&arguments[0]))?;
+                    return Ok(Some(doc));
                 }
             }
         }
@@ -277,19 +316,20 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, .. } = receiver {
             if is_workspace_binding(&name.name) {
                 if self.workspace_mode {
-                    self.generate_workspace_binding_send(&name.name, selector, arguments)?;
-                    return Ok(Some(()));
+                    let doc =
+                        self.generate_workspace_binding_send(&name.name, selector, arguments)?;
+                    return Ok(Some(doc));
                 }
                 return Err(CodeGenError::WorkspaceBindingInBatchMode {
                     name: name.name.to_string(),
                 });
             }
-            self.generate_class_method_call(&name.name, selector, arguments)?;
-            return Ok(Some(()));
+            let doc = self.generate_class_method_call(&name.name, selector, arguments)?;
+            return Ok(Some(doc));
         }
         Ok(None)
     }
@@ -302,12 +342,12 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         if self.context == CodeGenContext::Actor {
             if let Expression::Identifier(id) = receiver {
                 if id.name == "self" {
-                    self.generate_self_dispatch(selector, arguments)?;
-                    return Ok(Some(()));
+                    let doc = self.generate_self_dispatch(selector, arguments)?;
+                    return Ok(Some(doc));
                 }
             }
         }
@@ -327,7 +367,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<Option<()>> {
+    ) -> Result<Option<Document<'static>>> {
         if !self.in_class_method {
             return Ok(None);
         }
@@ -369,22 +409,20 @@ impl CoreErlangGenerator {
                              end in "
                         )
                     ];
-                    self.write_document(&doc);
                     // NOTE: scope is OPEN — caller provides continuation
                     self.last_open_scope_result = Some(result);
-                } else {
-                    // Built-in export (spawn, new, superclass, etc.)
-                    let fun_name = match selector_atom.as_str() {
-                        "spawnWith:" => "spawn".to_string(),
-                        _ => selector_atom.replace(':', ""),
-                    };
-                    let module = self.module_name.clone();
-                    let args_doc = self.capture_argument_list_doc(arguments)?;
-
-                    let doc = docvec![format!("call '{module}':'{fun_name}'("), args_doc, ")"];
-                    self.write_document(&doc);
+                    return Ok(Some(doc));
                 }
-                return Ok(Some(()));
+                // Built-in export (spawn, new, superclass, etc.)
+                let fun_name = match selector_atom.as_str() {
+                    "spawnWith:" => "spawn".to_string(),
+                    _ => selector_atom.replace(':', ""),
+                };
+                let module = self.module_name.clone();
+                let args_doc = self.capture_argument_list_doc(arguments)?;
+
+                let doc = docvec![format!("call '{module}':'{fun_name}'("), args_doc, ")"];
+                return Ok(Some(doc));
             }
         }
         Ok(None)
@@ -425,7 +463,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         // BT-403: Sealed class optimization — skip safe_dispatch try/catch
         if self.is_class_sealed() {
             return self.generate_sealed_self_dispatch(selector, arguments);
@@ -451,8 +489,7 @@ impl CoreErlangGenerator {
             "end"
         ];
 
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// BT-245: Generates self-dispatch with state threading (open binding pattern).
@@ -474,7 +511,7 @@ impl CoreErlangGenerator {
     /// it's discarded since this is used for non-last expressions in block bodies.
     ///
     /// Uses Document/docvec! (ADR 0018) for composable rendering.
-    pub(super) fn generate_self_dispatch_open(&mut self, expr: &Expression) -> Result<()> {
+    pub(super) fn generate_self_dispatch_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
         if let Expression::MessageSend {
             selector,
             arguments,
@@ -550,14 +587,11 @@ impl CoreErlangGenerator {
                 format!("let {new_state} = call 'erlang':'element'(2, {dispatch_var}) in ")
             ];
 
-            self.write_document(&doc);
             self.last_dispatch_var = Some(dispatch_var);
-            return Ok(());
+            return Ok(doc);
         }
         // Fallback
-        let doc = self.generate_expression(expr)?;
-        self.write_document(&doc);
-        Ok(())
+        self.generate_expression(expr)
     }
     ///
     /// Two levels of optimization:
@@ -569,7 +603,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let selector_name = selector.name().to_string();
 
         // Level 1: Direct call to standalone sealed method function
@@ -599,8 +633,7 @@ impl CoreErlangGenerator {
             "end"
         ];
 
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates a direct call to a sealed method's standalone function (BT-403).
@@ -611,7 +644,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector_name: &str,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let result_var = self.fresh_var("SealedResult");
         let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
@@ -633,8 +666,7 @@ impl CoreErlangGenerator {
             "end"
         ];
 
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
     ///
     /// This is used to detect state mutations that require threading through
@@ -797,7 +829,7 @@ impl CoreErlangGenerator {
     ///
     /// The caller is responsible for closing the expression (generating the body
     /// that uses the new state).
-    pub(super) fn generate_field_assignment_open(&mut self, expr: &Expression) -> Result<()> {
+    pub(super) fn generate_field_assignment_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
@@ -814,15 +846,12 @@ impl CoreErlangGenerator {
                         field.name
                     )
                 ];
-                self.write_document(&doc);
 
-                return Ok(());
+                return Ok(doc);
             }
         }
         // Fallback: should not reach here if is_field_assignment check was correct
-        let doc = self.generate_expression(expr)?;
-        self.write_document(&doc);
-        Ok(())
+        self.generate_expression(expr)
     }
 
     /// Generates code for a super message send.
@@ -849,7 +878,7 @@ impl CoreErlangGenerator {
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         let class_name = self.class_name();
         let current_state = self.current_state_var();
@@ -860,8 +889,7 @@ impl CoreErlangGenerator {
             args_doc,
             format!("], Self, {current_state}, '{class_name}')")
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.
@@ -899,7 +927,7 @@ impl CoreErlangGenerator {
         &mut self,
         class_name: &str,
         init_args: Option<&Expression>,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let module_name = Self::compiled_module_name(class_name);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
@@ -925,13 +953,11 @@ impl CoreErlangGenerator {
                 "SpawnResult ",
                 "end"
             ];
-            self.write_document(&doc);
+            Ok(doc)
         } else {
             let doc = docvec![format!("call '{module_name}':'spawn'("), args_str, ")"];
-            self.write_document(&doc);
+            Ok(doc)
         }
-
-        Ok(())
     }
 
     /// Generates a method lookup via `>>` operator (BT-101).
@@ -942,7 +968,7 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// Returns a `CompiledMethod` map with selector, source, and arity metadata.
-    fn generate_method_lookup(&mut self, class_name: &str, arguments: &[Expression]) -> Result<()> {
+    fn generate_method_lookup(&mut self, class_name: &str, arguments: &[Expression]) -> Result<Document<'static>> {
         if arguments.len() != 1 {
             return Err(CodeGenError::Internal(format!(
                 ">> operator requires exactly one argument, got {}",
@@ -955,8 +981,7 @@ impl CoreErlangGenerator {
             arg_str,
             ")"
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates a runtime method resolution via `>>` for non-class-literal receivers (BT-323).
@@ -971,7 +996,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         if arguments.len() != 1 {
             return Err(CodeGenError::Internal(format!(
                 ">> operator requires exactly one argument, got {}",
@@ -987,8 +1012,7 @@ impl CoreErlangGenerator {
             arg_str,
             ")"
         ];
-        self.write_document(&doc);
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates a workspace binding message send (BT-374 / ADR 0010).
@@ -1013,7 +1037,7 @@ impl CoreErlangGenerator {
         binding_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let pid_var = self.fresh_var("BindingPid");
         let future_var = self.fresh_var("Future");
         let selector_atom = selector.to_erlang_atom();
@@ -1030,9 +1054,8 @@ impl CoreErlangGenerator {
             args_doc,
             format!("], {future_var}) in {future_var}")
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 
     /// Generates a class-level method call (BT-215).
@@ -1052,7 +1075,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         selector: &MessageSelector,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         let selector_atom = selector.to_erlang_atom();
         let class_pid_var = self.fresh_var("ClassPid");
         let args_doc = self.capture_argument_list_doc(arguments)?;
@@ -1067,9 +1090,8 @@ impl CoreErlangGenerator {
             args_doc,
             "])"
         ];
-        self.write_document(&doc);
 
-        Ok(())
+        Ok(doc)
     }
 }
 

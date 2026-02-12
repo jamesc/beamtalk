@@ -852,13 +852,7 @@ impl CoreErlangGenerator {
                 selector,
                 arguments,
                 ..
-            } => {
-                let start = self.output.len();
-                self.generate_message_send(receiver, selector, arguments)?;
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                Ok(Document::String(result))
-            }
+            } => self.generate_message_send(receiver, selector, arguments),
             Expression::Assignment {
                 target,
                 value,
@@ -1498,8 +1492,8 @@ end
         let receiver = Expression::Identifier(Identifier::new("counter", Span::new(0, 7)));
         let selector = MessageSelector::Unary("increment".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
@@ -1530,8 +1524,8 @@ end
             Expression::Literal(Literal::String("x".into()), Span::new(19, 22)),
         ];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // BT-430: Unified dispatch via beamtalk_message_dispatch:send/3
@@ -1553,8 +1547,8 @@ end
         let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
         let selector = MessageSelector::Unary("await".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // Special case: await uses beamtalk_future:await(), not the async protocol
@@ -1580,8 +1574,8 @@ end
         }]);
         let timeout = Expression::Literal(Literal::Integer(5000), Span::new(16, 20));
 
-        let result = generator.generate_message_send(&receiver, &selector, &[timeout]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[timeout]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // Should call beamtalk_future:await/2 with timeout
@@ -1607,8 +1601,8 @@ end
         let receiver = Expression::Identifier(Identifier::new("myFuture", Span::new(0, 8)));
         let selector = MessageSelector::Unary("awaitForever".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // Should call beamtalk_future:await_forever/1
@@ -1631,8 +1625,8 @@ end
         let selector = MessageSelector::Binary("+".into());
         let arguments = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         // Binary ops use erlang's built-in operators - synchronous
@@ -1662,8 +1656,8 @@ end
         };
 
         let outer_selector = MessageSelector::Unary("increment".into());
-        let result = generator.generate_message_send(&inner_send, &outer_selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&inner_send, &outer_selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
 
@@ -1687,8 +1681,8 @@ end
         let selector = MessageSelector::Unary("spawn".into());
         let arguments = vec![];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
         assert!(generator.output.contains("call 'bt@counter':'spawn'()"));
     }
 
@@ -1707,8 +1701,8 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(8, 18))]);
         let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(19, 21))];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
         // Should call spawn/1 with the argument
         assert!(
             generator.output.contains("call 'bt@counter':'spawn'(42)"),
@@ -2142,8 +2136,8 @@ end
         let receiver = Expression::Block(block);
         let selector = MessageSelector::Unary("value".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2180,8 +2174,8 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]);
         let arguments = vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2225,8 +2219,8 @@ end
             Expression::Literal(Literal::Integer(4), Span::new(28, 29)),
         ];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2271,8 +2265,8 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(14, 24))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2317,8 +2311,8 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileFalse:", Span::new(7, 18))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2349,8 +2343,8 @@ end
         let receiver = Expression::Block(body_block);
         let selector = MessageSelector::Unary("repeat".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2381,8 +2375,8 @@ end
         let receiver = Expression::Identifier(Identifier::new("actor", Span::new(0, 5)));
         let selector = MessageSelector::Unary("increment".into());
 
-        let result = generator.generate_message_send(&receiver, &selector, &[]);
-        assert!(result.is_ok());
+        let doc = generator.generate_message_send(&receiver, &selector, &[]).unwrap();
+        generator.write_document(&doc);
 
         let output = &generator.output;
         assert!(
@@ -2428,8 +2422,8 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        let result = generator.generate_message_send(&receiver, &selector, &arguments);
-        assert!(result.is_ok(), "Code generation should succeed");
+        let doc = generator.generate_message_send(&receiver, &selector, &arguments).unwrap();
+        generator.write_document(&doc);
 
         generator.output.push_str("\n\nend\n");
 
@@ -2494,9 +2488,10 @@ end
             MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", Span::new(7, 17))]);
         let arguments = vec![Expression::Block(body_block)];
 
-        generator
+        let doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
+        generator.write_document(&doc);
 
         // Clear output for the next test
         generator.output.clear();
@@ -2649,9 +2644,10 @@ end
             Span::new(11, 16),
         )];
 
-        generator
+        let doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
+        generator.write_document(&doc);
         let output = &generator.output;
 
         // BT-430: Unified dispatch
@@ -2679,9 +2675,10 @@ end
             Expression::Literal(Literal::Integer(31), Span::new(19, 21)),
         ];
 
-        generator
+        let doc = generator
             .generate_message_send(&receiver, &selector, &arguments)
             .unwrap();
+        generator.write_document(&doc);
         let output = &generator.output;
 
         assert!(
@@ -2701,9 +2698,10 @@ end
         let receiver = Expression::Identifier(Identifier::new("person", Span::new(0, 6)));
         let selector = MessageSelector::Unary("size".into());
 
-        generator
+        let doc = generator
             .generate_message_send(&receiver, &selector, &[])
             .unwrap();
+        generator.write_document(&doc);
         let output = &generator.output;
 
         assert!(

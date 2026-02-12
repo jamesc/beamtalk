@@ -112,6 +112,10 @@ impl CoreErlangGenerator {
     /// Generates a method definition body wrapped in a reply tuple.
     ///
     /// For `MethodDefinition` nodes with explicit body expressions.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "method body generation handles many expression types and state threading"
+    )]
     pub(in crate::codegen::core_erlang) fn generate_method_definition_body_with_reply(
         &mut self,
         method: &MethodDefinition,
@@ -210,7 +214,8 @@ impl CoreErlangGenerator {
                 }
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
             } else if self.control_flow_has_mutations(expr) {
                 // BT-483: Control flow that threads state returns {Result, State} tuple.
                 // Extract State for subsequent expressions.
@@ -334,7 +339,8 @@ impl CoreErlangGenerator {
                 }
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {

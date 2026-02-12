@@ -413,7 +413,8 @@ impl CoreErlangGenerator {
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {
-                self.generate_field_assignment_open(expr)?;
+                let doc = self.generate_field_assignment_open(expr)?;
+                self.write_document(&doc);
                 if is_last {
                     // BT-483: Field assignment returns the assigned value
                     // The val was already bound by generate_field_assignment_open
@@ -424,7 +425,8 @@ impl CoreErlangGenerator {
                     result_var = "'nil'".to_string();
                 }
             } else if self.is_actor_self_send(expr) {
-                self.generate_self_dispatch_open(expr)?;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                self.write_document(&doc);
                 if is_last {
                     // BT-483: Self-dispatch result is in last_dispatch_var
                     if let Some(dv) = self.last_dispatch_var.clone() {
