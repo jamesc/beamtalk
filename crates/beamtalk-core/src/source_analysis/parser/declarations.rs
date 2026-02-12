@@ -37,6 +37,7 @@ impl Parser {
     /// ```
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
         let mut is_abstract = false;
         let mut is_sealed = false;
 
@@ -109,6 +110,7 @@ impl Parser {
         );
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
+        class_def.doc_comment = doc_comment;
         class_def
     }
 
@@ -446,6 +448,7 @@ impl Parser {
     /// - `sealed methodName => body`
     fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
         let mut method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut _is_class_method = false;
@@ -499,7 +502,7 @@ impl Parser {
         let end = body.last().map_or(start, Expression::span);
         let span = start.merge(end);
 
-        Some(MethodDefinition::with_options(
+        let mut method = MethodDefinition::with_options(
             selector,
             parameters,
             body,
@@ -507,7 +510,9 @@ impl Parser {
             method_is_sealed,
             method_kind,
             span,
-        ))
+        );
+        method.doc_comment = doc_comment;
+        Some(method)
     }
 
     /// Parses a method selector and its parameters.
