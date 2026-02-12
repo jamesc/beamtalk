@@ -9,7 +9,6 @@ This document analyzes the feasibility of Smalltalk-style object reification on 
 **Related documents:**
 - [Design Principles](beamtalk-principles.md) — Core philosophy (actors, async-first, hot reload)
 - [Architecture](beamtalk-architecture.md) — Compiler, runtime, and code generation details
-- [BEAM Interop](beamtalk-interop.md) — Erlang/Elixir integration specification
 - [Language Features](beamtalk-language-features.md) — Syntax and feature reference
 - [ADR 0006: Unified Method Dispatch](ADR/0006-unified-method-dispatch.md) — How dispatch and hierarchy walking work
 

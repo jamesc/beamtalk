@@ -1,20 +1,21 @@
 # Stdlib Implementation Status
 
-> **Last updated:** 2026-02-11
+> **Last updated:** 2026-02-12
 > **Issue:** BT-247
 > **Methodology:** Audit of `lib/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
-> runtime dispatch modules (`beamtalk_*.erl`), and E2E test coverage (`tests/e2e/cases/*.bt`).
+> runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`tests/stdlib/*.bt`), and E2E test coverage (`tests/e2e/cases/*.bt`).
 
 ## Executive Summary
 
 | Metric | Value |
 |--------|-------|
-| **Total stdlib methods** | 297 |
-| **✅ Implemented** | 297 (100%) |
+| **Total stdlib methods** | 332 |
+| **✅ Implemented** | 332 (100%) |
 | **❌ Not Implemented** | 0 (0%) |
-| **E2E test coverage** | 212 methods (71.4%) |
-| **Stdlib .bt files** | 22 |
-| **Runtime-only classes** | 1 (CompiledMethod) |
+| **Stdlib test coverage** | 1046 assertions in tests/stdlib/ |
+| **E2E test coverage** | 213 assertions in tests/e2e/cases/ |
+| **Stdlib .bt files** | 29 |
+| **Runtime-only classes** | 0 (CompiledMethod now has lib/CompiledMethod.bt) |
 | **Missing .bt files** | 0 |
 
 ## Status Categories
@@ -23,7 +24,7 @@
 |--------|---------|
 | ✅ Implemented | Fully working — compiler intrinsic, runtime dispatch, or pure Beamtalk |
 | ❌ Not Implemented | Defined in stdlib but no backing implementation |
-| 🧪 E2E | Has end-to-end test coverage |
+| 🧪 Tested | Has stdlib or E2E test coverage |
 
 ## Implementation Mechanisms
 
@@ -32,7 +33,6 @@
 | **Compiler intrinsic** | Inlined at call site by codegen (`intrinsics.rs`) | `Block >> value`, `Object >> class` |
 | **@primitive selector** | Runtime dispatch via `beamtalk_*.erl` module | `Integer >> +`, `String >> length` |
 | **Pure Beamtalk** | Compiled from `.bt` source (ADR 0007) | `True >> not`, `Integer >> isEven` |
-| **Runtime only** | Erlang module with no `.bt` definition | `CompiledMethod >> selector` |
 
 ---
 
@@ -54,7 +54,7 @@
 ### Object (`lib/Object.bt`)
 
 **Class:** `Object` — superclass: `ProtoObject`
-**Methods:** 22/22 implemented (100%)
+**Methods:** 23/23 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Notes |
 |----------|-----------|--------|-----|-------|
@@ -80,6 +80,7 @@
 | `->` | intrinsic | ✅ | 🧪 | Association creation (key-value pair) |
 | `subclassResponsibility` | pure BT | ✅ | 🧪 | Calls `self error:` — pure Beamtalk method (BT-405) |
 | `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
+| `sealed` | modifier | ✅ | 🧪 | Method modifier preventing override |
 
 ### Number (`lib/Number.bt`)
 
@@ -97,7 +98,7 @@
 ### Integer (`lib/Integer.bt`)
 
 **Class:** `Integer` — superclass: `Number` — `@sealed`
-**Methods:** 33/33 implemented (100%)
+**Methods:** 38/38 implemented (100%)
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -134,6 +135,11 @@
 | `factorial` | pure BT | ✅ | 🧪 | `Integer>>factorial` |
 | `gcd:` | pure BT | ✅ | 🧪 | `Integer>>gcd:` |
 | `lcm:` | pure BT | ✅ | 🧪 | `Integer>>lcm:` |
+| `isLetter` | @primitive selector | ✅ | | Character classification (BT-461) |
+| `isDigit` | @primitive selector | ✅ | | Character classification (BT-461) |
+| `isUppercase` | @primitive selector | ✅ | | Character classification (BT-461) |
+| `isLowercase` | @primitive selector | ✅ | | Character classification (BT-461) |
+| `isWhitespace` | @primitive selector | ✅ | | Character classification (BT-461) |
 
 ### String (`lib/String.bt`)
 
@@ -194,7 +200,7 @@
 ### List (`lib/List.bt`)
 
 **Class:** `List` — superclass: `Object` — `@sealed`
-**Methods:** 37/37 implemented (100%)
+**Methods:** 38/38 implemented (100%)
 **Note:** List in Beamtalk maps to Erlang linked lists. Literal syntax: `#(1, 2, 3)`. Renamed from Array in BT-419 — `Array` is reserved for a future tuple-backed O(1)-indexed collection.
 **Migration:** BT-419 — migrated from hand-written `beamtalk_list.erl` (Option B) to compiled `lib/List.bt` with BIF mappings (Option A). Complex operations delegate to `beamtalk_list_ops.erl`.
 
@@ -260,18 +266,16 @@
 
 ### True (`lib/True.bt`) & False (`lib/False.bt`)
 
-**Class:** `True` / `False` — superclass: `Object` — `@sealed`
-**Methods:** 11/11 implemented each (100%)
+**Class:** `True` / `False` — superclass: `Boolean` — `@sealed`
+**Methods:** 8/8 implemented each (100%)
+**Inherits:** `and:`, `or:`, `xor:`, `isBoolean` from `Boolean`
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
 | `ifTrue:ifFalse:` | pure BT | ✅ | 🧪 | `Boolean>>ifTrue:ifFalse:` |
 | `ifTrue:` | pure BT | ✅ | 🧪 | `Boolean>>ifTrue:` |
 | `ifFalse:` | pure BT | ✅ | 🧪 | `Boolean>>ifFalse:` |
-| `and:` | pure BT | ✅ | 🧪 | `Boolean>>and:` |
-| `or:` | pure BT | ✅ | 🧪 | `Boolean>>or:` |
 | `not` | pure BT | ✅ | 🧪 | `Boolean>>not` |
-| `xor:` | pure BT | ✅ | 🧪 | `Boolean>>xor:` |
 | `isTrue` | pure BT | ✅ | | N/A |
 | `isFalse` | pure BT | ✅ | | N/A |
 | `describe` | pure BT | ✅ | | N/A |
@@ -503,20 +507,99 @@
 
 ---
 
-## Tier 3: Runtime-Only Classes (No `.bt` File)
+### CompiledMethod (`lib/CompiledMethod.bt`)
 
-These classes are implemented entirely in Erlang runtime modules with no corresponding `lib/*.bt` definition.
+**Class:** `CompiledMethod` — superclass: `Object`
+**Methods:** 5/5 implemented (100%)
 
-### CompiledMethod (`beamtalk_compiled_method.erl`)
+| Selector | Mechanism | Status | E2E | Pharo Equivalent |
+|----------|-----------|--------|-----|------------------|
+| `selector` | @primitive selector | ✅ | 🧪 | `CompiledMethod>>selector` |
+| `source` | @primitive selector | ✅ | 🧪 | `CompiledMethod>>sourceCode` |
+| `argumentCount` | @primitive selector | ✅ | 🧪 | `CompiledMethod>>numArgs` |
+| `printString` | @primitive selector | ✅ | 🧪 | `CompiledMethod>>printString` |
+| `asString` | @primitive selector | ✅ | | `CompiledMethod>>asString` |
 
-**Runtime module:** `beamtalk_compiled_method.erl`
-**Methods:** 3 — all implemented
+### Character (`lib/Character.bt`)
 
-| Selector | Status | E2E | Pharo Equivalent |
-|----------|--------|-----|------------------|
-| `selector` | ✅ | 🧪 | `CompiledMethod>>selector` |
-| `source` | ✅ | 🧪 | `CompiledMethod>>sourceCode` |
-| `argumentCount` | ✅ | 🧪 | `CompiledMethod>>numArgs` |
+**Class:** `Character` — superclass: `Object` — `@sealed`
+**Methods:** 19/19 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `=` | @primitive selector | ✅ | 🧪 | Character equality |
+| `~=` | pure BT | ✅ | 🧪 | Character not-equal |
+| `<` | @primitive selector | ✅ | 🧪 | Ordering |
+| `>` | @primitive selector | ✅ | 🧪 | Ordering |
+| `<=` | @primitive selector | ✅ | 🧪 | Ordering |
+| `>=` | @primitive selector | ✅ | 🧪 | Ordering |
+| `asInteger` | @primitive selector | ✅ | 🧪 | Unicode code point |
+| `asString` | @primitive selector | ✅ | 🧪 | Single-character string |
+| `printString` | @primitive selector | ✅ | 🧪 | Display representation |
+| `describe` | pure BT | ✅ | | N/A |
+| `hash` | @primitive selector | ✅ | 🧪 | Hash value |
+| `isLetter` | @primitive selector | ✅ | 🧪 | Unicode letter check |
+| `isDigit` | @primitive selector | ✅ | 🧪 | Unicode digit check |
+| `isUppercase` | @primitive selector | ✅ | 🧪 | Case check |
+| `isLowercase` | @primitive selector | ✅ | 🧪 | Case check |
+| `isWhitespace` | @primitive selector | ✅ | 🧪 | Whitespace check |
+| `uppercase` | @primitive selector | ✅ | 🧪 | Case conversion |
+| `lowercase` | @primitive selector | ✅ | 🧪 | Case conversion |
+| `class value:` | @primitive selector | ✅ | 🧪 | Construct from code point |
+
+### Boolean (`lib/Boolean.bt`)
+
+**Class:** `Boolean` — superclass: `Object` — `abstract`
+**Methods:** 4/4 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `isBoolean` | pure BT | ✅ | 🧪 | Type check |
+| `and:` | pure BT | ✅ | 🧪 | Logical AND |
+| `or:` | pure BT | ✅ | 🧪 | Logical OR |
+| `xor:` | pure BT | ✅ | 🧪 | Logical XOR |
+
+### TestCase (`lib/TestCase.bt`)
+
+**Class:** `TestCase` — superclass: `Object`
+**Methods:** 7/7 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `setUp` | pure BT | ✅ | 🧪 | Override for test setup |
+| `tearDown` | pure BT | ✅ | 🧪 | Override for test cleanup |
+| `assert:` | @primitive selector | ✅ | 🧪 | Assert truthy |
+| `assert:equals:` | @primitive selector | ✅ | 🧪 | Assert equality |
+| `deny:` | @primitive selector | ✅ | 🧪 | Assert falsy |
+| `should:raise:` | @primitive selector | ✅ | 🧪 | Assert exception |
+| `fail:` | @primitive selector | ✅ | 🧪 | Fail with message |
+
+### InstantiationError (`lib/InstantiationError.bt`)
+
+**Class:** `InstantiationError` — superclass: `Error`
+**Methods:** 1/1 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `describe` | pure BT | ✅ | 🧪 | Error description |
+
+### RuntimeError (`lib/RuntimeError.bt`)
+
+**Class:** `RuntimeError` — superclass: `Error`
+**Methods:** 1/1 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `describe` | pure BT | ✅ | 🧪 | Error description |
+
+### TypeError (`lib/TypeError.bt`)
+
+**Class:** `TypeError` — superclass: `Error`
+**Methods:** 1/1 implemented (100%)
+
+| Selector | Mechanism | Status | E2E | Notes |
+|----------|-----------|--------|-----|-------|
+| `describe` | pure BT | ✅ | 🧪 | Error description |
 
 ---
 
@@ -586,8 +669,7 @@ Methods that Pharo users would expect but Beamtalk does **not** define or implem
 
 ## Missing `.bt` Files
 
-All stdlib classes now have corresponding `lib/*.bt` definitions. The only runtime-only class is `CompiledMethod`,
-which is implemented entirely in `beamtalk_compiled_method.erl`.
+All stdlib classes now have corresponding `lib/*.bt` definitions.
 
 | Class | Status | Notes |
 |-------|--------|-------|
@@ -596,9 +678,11 @@ which is implemented entirely in `beamtalk_compiled_method.erl`.
 
 ---
 
-## E2E Test Coverage Analysis
+## Test Coverage Gaps
 
-Methods with no E2E test coverage that should be tested:
+Test coverage is now spread across both `tests/stdlib/` (1046 assertions) and `tests/e2e/cases/` (213 assertions).
+Many previously untested methods now have stdlib test coverage. The following gaps remain for methods
+with no coverage in either test suite:
 
 ### High Priority (Core functionality untested)
 
@@ -609,7 +693,6 @@ Methods with no E2E test coverage that should be tested:
 | **String** | `,`, `lines`, `asAtom`, `describe`, `printString` |
 | **List** | `detect:ifNone:`, `describe`, `printString` |
 | **Block** | `repeat`, `describe` |
-| **Tuple** | ALL methods (0 E2E coverage — no tuple literal syntax yet) |
 
 ### Medium Priority
 
@@ -633,11 +716,12 @@ Methods with no E2E test coverage that should be tested:
 
 For each method, testing was performed in this priority order:
 
-1. **E2E test files** (`tests/e2e/cases/*.bt`) — checked for explicit `// =>` assertions exercising the method
-2. **Compiler intrinsics** (`crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs`) — verified codegen handler exists
-3. **Primitive bindings** (`crates/beamtalk-core/src/codegen/core_erlang/primitive_bindings.rs`, `primitive_implementations.rs`) — verified selector-based dispatch codegen
-4. **Runtime dispatch** (`runtime/apps/beamtalk_runtime/src/beamtalk_*.erl`) — verified dispatch clause handles the selector
-5. **Pure Beamtalk** (`lib/*.bt`) — verified method body compiles (not just a comment)
+1. **Stdlib tests** (`tests/stdlib/*.bt`) — compiled expression tests (ADR 0014)
+2. **E2E test files** (`tests/e2e/cases/*.bt`) — REPL integration tests
+3. **Compiler intrinsics** (`crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs`) — verified codegen handler exists
+4. **Primitive bindings** (`crates/beamtalk-core/src/codegen/core_erlang/primitive_bindings.rs`, `primitive_implementations.rs`) — verified selector-based dispatch codegen
+5. **Runtime dispatch** (`runtime/apps/beamtalk_runtime/src/beamtalk_*.erl`) — verified dispatch clause handles the selector
+6. **Pure Beamtalk** (`lib/*.bt`) — verified method body compiles (not just a comment)
 
 A method is marked ✅ if at least one implementation path exists (intrinsic, runtime dispatch, or compiled Beamtalk).
-A method is marked 🧪 if an E2E test file exercises it with a `// =>` assertion.
+A method is marked 🧪 if a stdlib or E2E test file exercises it with a `// =>` assertion.

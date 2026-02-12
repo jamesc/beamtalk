@@ -626,4 +626,3 @@ If a spawned actor doesn't respond:
 ## See Also
 
 - [beamtalk-architecture.md](../beamtalk-architecture.md) — Overall system architecture
-- [beamtalk-ide.md](../beamtalk-ide.md) — IDE and live development environment

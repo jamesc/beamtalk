@@ -1810,9 +1810,6 @@ RUST_LOG=beamtalk_cli=debug,beamtalk_core=info beamtalk build
 - [Language Features](docs/beamtalk-language-features.md) - Planned syntax and features
 - [Syntax Rationale](docs/beamtalk-syntax-rationale.md) - Why we keep/change Smalltalk conventions
 - [Architecture](docs/beamtalk-architecture.md) - Compiler, runtime, and live development flow
-- [IDE and Live Development](docs/beamtalk-ide.md) - Smalltalk-style integrated environment
-- [BEAM Interop](docs/beamtalk-interop.md) - Erlang/Elixir integration specification
-- [Feasibility Assessment](docs/beamtalk-feasibility.md) - Technical and market analysis
 - [Agent-Native Development](docs/beamtalk-agent-native-development.md) - AI agents as developers and live actor systems
 
 ### Rust Guidelines

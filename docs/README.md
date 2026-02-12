@@ -32,22 +32,13 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 | Document | Description |
 |----------|-------------|
 | [Architecture](beamtalk-architecture.md) | Compiler pipeline, runtime, and hot code loading |
-| [Network Protocols](beamtalk-protocols.md) | CLI ↔ REPL, compiler daemon JSON-RPC, actor messages |
-| [BEAM Interop](beamtalk-interop.md) | Calling Erlang/Elixir from Beamtalk and vice versa |
-| [Testing Strategy](beamtalk-testing-strategy.md) | How we test the compiler and runtime |
-
-### Tooling & Environment
-
-| Document | Description |
-|----------|-------------|
-| [IDE & Live Development](beamtalk-ide.md) | Smalltalk-style browser, inspector, and debugger |
+| [Testing Strategy](development/testing-strategy.md) | How we test the compiler and runtime |
 
 ### Vision & Planning
 
 | Document | Description |
 |----------|-------------|
 | [Agent-Native Development](beamtalk-agent-native-development.md) | AI agents as developers and live actor systems |
-| [Feasibility Assessment](beamtalk-feasibility.md) | Technical and market analysis |
 
 ---
 
@@ -63,10 +54,8 @@ Welcome to the Beamtalk documentation! This guide will help you navigate the des
 ### "I want to understand how it works"
 
 1. [Architecture](beamtalk-architecture.md) — Compiler and runtime overview
-2. [Network Protocols](beamtalk-protocols.md) — IPC between components
-3. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
-4. [BEAM Interop](beamtalk-interop.md) — Integration with Erlang/Elixir
-5. [Testing Strategy](beamtalk-testing-strategy.md) — How we verify correctness
+2. [Object Model](beamtalk-object-model.md) — Smalltalk objects on BEAM
+3. [Testing Strategy](development/testing-strategy.md) — How we verify correctness
 
 For implementation details, see [internal/](internal/) documentation.
 
@@ -74,7 +63,6 @@ For implementation details, see [internal/](internal/) documentation.
 
 1. [Agent-Native Development](beamtalk-agent-native-development.md) — Live actor systems for AI agents
 2. [Design Principles](beamtalk-principles.md) — Live programming for exploration
-3. [IDE & Live Development](beamtalk-ide.md) — Interactive debugging and inspection
 
 ---
 
