@@ -10,7 +10,7 @@
 
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
-use std::fmt::Write;
+use crate::docvec;
 
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_repeat(
@@ -24,17 +24,15 @@ impl CoreErlangGenerator {
         // in apply '_LoopN'/0 ()
 
         let loop_fn = self.fresh_temp_var("Loop");
-        write!(self.output, "letrec '{loop_fn}'/0 = fun () -> ")?;
-
         let body_var = self.fresh_temp_var("BodyFun");
-        write!(self.output, "let {body_var} = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "
-        )?;
-
-        write!(self.output, "in apply '{loop_fn}'/0 ()")?;
+        let body_code = self.capture_expression(body)?;
+        self.write_document(&docvec![
+            format!("letrec '{loop_fn}'/0 = fun () -> "),
+            format!("let {body_var} = "),
+            body_code,
+            format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
+            format!("in apply '{loop_fn}'/0 ()"),
+        ]);
 
         Ok(())
     }
@@ -71,23 +69,23 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'repeat'/1 (1)
 
-        write!(self.output, "let ")?;
         let n_var = self.fresh_temp_var("temp");
-        write!(self.output, "{n_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, " in letrec 'repeat'/1 = fun (I) -> ")?;
-        write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = ")?;
-        self.generate_expression(body)?;
-        write!(
-            self.output,
-            " in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'repeat'/1 (1)")?;
+        self.write_document(&docvec![
+            format!("let {n_var} = "),
+            receiver_code,
+            format!(" in letrec 'repeat'/1 = fun (I) -> "),
+            format!("case call 'erlang':'=<'(I, {n_var}) of "),
+            "<'true'> when 'true' -> ",
+            "let _ = ",
+            body_code,
+            format!(" in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            "in apply 'repeat'/1 (1)",
+        ]);
 
         Ok(())
     }
@@ -113,15 +111,16 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'repeat'/2 (1, State)
 
-        write!(self.output, "let ")?;
         let n_var = self.fresh_temp_var("temp");
-        write!(self.output, "{n_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in letrec 'repeat'/2 = fun (I, StateAcc) -> ")?;
-
-        write!(self.output, "case call 'erlang':'=<'(I, {n_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
+        self.write_document(&docvec![
+            format!("let {n_var} = "),
+            receiver_code,
+            " in letrec 'repeat'/2 = fun (I, StateAcc) -> ",
+            format!("case call 'erlang':'=<'(I, {n_var}) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
         let final_state_version = self.generate_times_repeat_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
@@ -130,17 +129,14 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'repeat'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "
-        )?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
         // Initial call
         let prev_state = self.current_state_var();
-        write!(self.output, "in apply 'repeat'/2 (1, {prev_state})")?;
+        self.write_document(&docvec![
+            format!(" apply 'repeat'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!("in apply 'repeat'/2 (1, {prev_state})"),
+        ]);
 
         Ok(())
     }
@@ -164,7 +160,7 @@ impl CoreErlangGenerator {
 
         for (i, expr) in body.body.iter().enumerate() {
             if i > 0 {
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             }
             let is_last = i == body.body.len() - 1;
 
@@ -187,14 +183,12 @@ impl CoreErlangGenerator {
                 // Bind the nested construct's returned state to the next StateAcc.
                 let next_version = self.state_version() + 1;
                 let next_var = format!("StateAcc{next_version}");
-                write!(self.output, "let {next_var} = ")?;
-                self.generate_expression(expr)?;
+                let expr_code = self.capture_expression(expr)?;
                 self.set_state_version(next_version);
-                write!(self.output, " in")?;
+                self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in"]);
             } else {
-                write!(self.output, "let _ = ")?;
-                self.generate_expression(expr)?;
-                write!(self.output, " in")?;
+                let expr_code = self.capture_expression(expr)?;
+                self.write_document(&docvec!["let _ = ", expr_code, " in"]);
             }
         }
 
@@ -242,29 +236,31 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/1 (Start)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(body)?;
+        let body_code = self.capture_expression(body)?;
 
-        write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
-        write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = apply {body_var} (I) in ")?;
-        write!(self.output, "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ")?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'loop'/1 ({start_var})")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            " in letrec 'loop'/1 = fun (I) -> ",
+            format!("case call 'erlang':'=<'(I, {end_var}) of "),
+            "<'true'> when 'true' -> ",
+            format!("let _ = apply {body_var} (I) in "),
+            "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ",
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply 'loop'/1 ({start_var})"),
+        ]);
 
         Ok(())
     }
@@ -293,20 +289,21 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/2 (Start, State)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in letrec 'loop'/2 = fun (I, StateAcc) -> ")?;
-
-        write!(self.output, "case call 'erlang':'=<'(I, {end_var}) of ")?;
-        write!(self.output, "<'true'> when 'true' -> ")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+            format!("case call 'erlang':'=<'(I, {end_var}) of "),
+            "<'true'> when 'true' -> ",
+        ]);
 
         let final_state_version = self.generate_to_do_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
@@ -315,20 +312,14 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'loop'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "
-        )?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
         // Initial call
         let prev_state = self.current_state_var();
-        write!(
-            self.output,
-            " in apply 'loop'/2 ({start_var}, {prev_state})"
-        )?;
+        self.write_document(&docvec![
+            format!(" apply 'loop'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
+        ]);
 
         Ok(())
     }
@@ -377,7 +368,7 @@ impl CoreErlangGenerator {
                 // (field_assignment_open, local_var_assignment_in_loop, and non-assignment
                 // branches all emit trailing "in" or "in ").
                 self.generate_local_var_assignment_in_loop(expr)?;
-                write!(self.output, " ")?;
+                self.write_document(&docvec![" "]);
             } else {
                 // Non-assignment expression (could be a nested control flow construct)
                 if is_last && !has_direct_field_assignments {
@@ -390,18 +381,16 @@ impl CoreErlangGenerator {
                     // CURRENT StateAcc, not the binding we're about to create.
                     let next_version = self.state_version() + 1;
                     let next_var = format!("StateAcc{next_version}");
-                    write!(self.output, "let {next_var} = ")?;
-                    self.generate_expression(expr)?;
+                    let expr_code = self.capture_expression(expr)?;
                     // NOW increment state version
                     self.set_state_version(next_version);
                     // Write " in " — the caller's recursive apply becomes the let body:
                     // "let StateAcc1 = <inner loop> in apply 'loop'/2 (I+1, StateAcc1)"
-                    write!(self.output, " in ")?;
+                    self.write_document(&docvec![format!("let {next_var} = "), expr_code, " in ",]);
                 } else {
                     // Not last, or there are direct field assignments that update state
-                    write!(self.output, "let _ = ")?;
-                    self.generate_expression(expr)?;
-                    write!(self.output, " in ")?;
+                    let expr_code = self.capture_expression(expr)?;
+                    self.write_document(&docvec!["let _ = ", expr_code, " in "]);
                 }
             }
         }
@@ -463,57 +452,45 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/1 (Start)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let step_var = self.fresh_temp_var("temp");
-        write!(self.output, "{step_var} = ")?;
-        self.generate_expression(step)?;
+        let step_code = self.capture_expression(step)?;
 
-        write!(self.output, " in let ")?;
         let body_var = self.fresh_temp_var("temp");
-        write!(self.output, "{body_var} = ")?;
-        self.generate_expression(body)?;
-
-        write!(self.output, " in letrec 'loop'/1 = fun (I) -> ")?;
+        let body_code = self.capture_expression(body)?;
 
         // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
         // Use nested case statements since andalso/orelse aren't BIFs
-        write!(
-            self.output,
-            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
-        )?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "end in case Continue of ")?;
-
-        write!(self.output, "<'true'> when 'true' -> ")?;
-        write!(self.output, "let _ = apply {body_var} (I) in ")?;
-        write!(
-            self.output,
-            "apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'nil' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "in apply 'loop'/1 ({start_var})")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {step_var} = "),
+            step_code,
+            format!(" in let {body_var} = "),
+            body_code,
+            " in letrec 'loop'/1 = fun (I) -> ",
+            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+            "<'false'> when 'true' -> ",
+            format!("case call 'erlang':'<'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+            "<'false'> when 'true' -> 'false' ",
+            "end ",
+            "end in case Continue of ",
+            "<'true'> when 'true' -> ",
+            format!("let _ = apply {body_var} (I) in "),
+            format!("apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "),
+            "<'false'> when 'true' -> 'nil' ",
+            "end ",
+            format!("in apply 'loop'/1 ({start_var})"),
+        ]);
 
         Ok(())
     }
@@ -541,43 +518,34 @@ impl CoreErlangGenerator {
         //               end
         //           in apply 'loop'/2 (Start, State)
 
-        write!(self.output, "let ")?;
         let start_var = self.fresh_temp_var("temp");
-        write!(self.output, "{start_var} = ")?;
-        self.generate_expression(receiver)?;
+        let receiver_code = self.capture_expression(receiver)?;
 
-        write!(self.output, " in let ")?;
         let end_var = self.fresh_temp_var("temp");
-        write!(self.output, "{end_var} = ")?;
-        self.generate_expression(limit)?;
+        let limit_code = self.capture_expression(limit)?;
 
-        write!(self.output, " in let ")?;
         let step_var = self.fresh_temp_var("temp");
-        write!(self.output, "{step_var} = ")?;
-        self.generate_expression(step)?;
-
-        write!(self.output, " in letrec 'loop'/2 = fun (I, StateAcc) -> ")?;
+        let step_code = self.capture_expression(step)?;
 
         // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
-        write!(
-            self.output,
-            "let Continue = case call 'erlang':'>'({step_var}, 0) of "
-        )?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> ")?;
-        write!(self.output, "case call 'erlang':'<'({step_var}, 0) of ")?;
-        write!(
-            self.output,
-            "<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "
-        )?;
-        write!(self.output, "<'false'> when 'true' -> 'false' ")?;
-        write!(self.output, "end ")?;
-        write!(self.output, "end in case Continue of ")?;
-
-        write!(self.output, "<'true'> when 'true' -> ")?;
+        self.write_document(&docvec![
+            format!("let {start_var} = "),
+            receiver_code,
+            format!(" in let {end_var} = "),
+            limit_code,
+            format!(" in let {step_var} = "),
+            step_code,
+            " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+            "<'false'> when 'true' -> ",
+            format!("case call 'erlang':'<'({step_var}, 0) of "),
+            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+            "<'false'> when 'true' -> 'false' ",
+            "end ",
+            "end in case Continue of ",
+            "<'true'> when 'true' -> ",
+        ]);
 
         let final_state_version = self.generate_to_do_body_with_threading(body, &[])?;
         let final_state_var = if final_state_version == 0 {
@@ -586,20 +554,14 @@ impl CoreErlangGenerator {
             format!("StateAcc{final_state_version}")
         };
 
-        write!(
-            self.output,
-            " apply 'loop'/2 (call 'erlang':'+'(I, {step_var}), {final_state_var}) "
-        )?;
-
-        write!(self.output, "<'false'> when 'true' -> StateAcc ")?;
-        write!(self.output, "end ")?;
-
         // Initial call
         let prev_state = self.current_state_var();
-        write!(
-            self.output,
-            " in apply 'loop'/2 ({start_var}, {prev_state})"
-        )?;
+        self.write_document(&docvec![
+            format!(" apply 'loop'/2 (call 'erlang':'+'(I, {step_var}), {final_state_var}) "),
+            "<'false'> when 'true' -> StateAcc ",
+            "end ",
+            format!(" in apply 'loop'/2 ({start_var}, {prev_state})"),
+        ]);
 
         Ok(())
     }
