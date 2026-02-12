@@ -49,6 +49,8 @@ Smalltalk recognized this problem in 1972. The solution was the **live image**: 
 
 **Beamtalk brings this model to the BEAM, and in doing so, creates the first modern language where AI agents can develop the way they naturally want to.**
 
+Before we explore how, let's introduce the language itself.
+
 ---
 
 ## 2. What is Beamtalk?
@@ -169,14 +171,14 @@ With that foundation, here's how each of beamtalk's properties helps AI coding a
 
 **Today (file-based development):**
 ```
-Agent edits counter.rs
-→ cargo build (wait 15s)
-→ cargo test (wait 10s)
+Agent edits counter.rs (or .ts, .go, .py)
+→ Build/typecheck (2-60s depending on language — <1s for TypeScript, 15-60s for Rust)
+→ Run tests (5-30s)
 → Parse output: "3 passed, 1 failed"
 → Read failure details
 → Edit again
 ```
-*Total iteration time: 25-60 seconds*
+*Total iteration time: 5-90 seconds per cycle, depending on language and project size*
 
 **In a beamtalk workspace:**
 ```beamtalk
@@ -189,9 +191,9 @@ c increment    // => 2
 
 // No compile step. No test harness. Direct verification.
 ```
-*Total iteration time: <100ms via hot reload*
+*Iteration time for a single method edit: <100ms via hot reload. Structural changes (adding fields, new classes) still require recompilation — seconds, not minutes.*
 
-The BEAM's hot code loading means a changed method takes effect on the *next message send*. The agent doesn't wait for a build — it sees the result of its change instantly.
+The BEAM's hot code loading means a changed method takes effect on the *next message send*. For the common case — modifying method behavior — the agent doesn't wait for a build. Structural changes (new state fields, new class definitions) go through the compiler but are still faster than most file-based workflows because the BEAM reloads only the changed module.
 
 ### 4.2 Reflection Replaces Grep
 
@@ -286,7 +288,7 @@ c increment
 c count        // => 2  ✓
 
 // Only after local verification: run full suite
-TestRunner run: CounterTests
+Beamtalk runTests: CounterTests
 // => 12 passed, 0 failed
 ```
 
@@ -306,15 +308,32 @@ experiment breakSomething  // Crash! But only this actor dies.
 // The original is fine
 server rooms  // => #("general", "dev") — unaffected
 
-// Clean up
-experiment kill  // Or let supervisor handle it
+// The crashed actor is simply gone — its supervisor can restart it,
+// or the agent spawns a new one
 ```
 
 This is natural A/B testing for code changes. The agent can run the old and new implementation side by side, in complete isolation, on the same running system.
 
+### 4.7 The Live↔File Round-Trip
+
+A fair question: if agents work by sending messages to live objects, how does this integrate with version control, code review, and team collaboration?
+
+The answer: **live-first doesn't mean file-free.** Beamtalk source files (`.bt`) remain the persistent record. The workflow is:
+
+1. **Agent modifies methods in the live workspace** — instant feedback, no compile wait
+2. **Agent persists changes to `.bt` source files** — the workspace can serialize modified methods back to their source files
+3. **Standard git workflow** — `git diff`, PR review, CI checks all work on the source files
+4. **Source files bootstrap the workspace** — loading a `.bt` file into a workspace brings live objects into existence
+
+The live workspace is the *development* interface; source files are the *collaboration* interface. This is exactly how Smalltalk development worked in practice — developers interacted with live objects in the browser, and filed out changes to version control.
+
+The provenance system (§5) would strengthen this round-trip by automatically annotating persisted methods with issue context and authorship, making code review richer. But even without provenance, the basic live→file→git→review→merge cycle works today.
+
 ---
 
 ## 5. Provenance Annotations: Code That Knows Why It Exists
+
+> **Design concept.** Provenance annotations are not yet implemented. The syntax and APIs below are illustrative — they show what the system *could* look like and would require a design ADR before implementation. The underlying infrastructure (doc comments, pragmas, CompiledMethod introspection) exists today.
 
 ### The observation
 
@@ -341,29 +360,26 @@ Actor subclass: Counter
   increment => self.count := self.count + 1
 ```
 
-### Runtime introspection of provenance
+### Runtime introspection of provenance (proposed)
 
-Because beamtalk methods are live objects (`CompiledMethod`), annotations become queryable at runtime:
+Because beamtalk methods are live objects (`CompiledMethod`), annotations could become queryable at runtime. Today, `CompiledMethod` already supports `selector`, `source`, and `argumentCount`. Provenance would extend this:
 
 ```beamtalk
+// These exist today:
 Counter >> #increment
 // => CompiledMethod(increment => ...)
 
-(Counter >> #increment) issues
-// => #(BT-427)
+(Counter >> #increment) selector    // => #increment
+(Counter >> #increment) source      // => "self.count := self.count + 1"
 
-(Counter >> #increment) decisions
-// => #(ADR-0009)
+// These would be added by provenance annotations:
+(Counter >> #increment) issues      // => #(BT-427)
+(Counter >> #increment) decisions   // => #(ADR-0009)
+(Counter >> #increment) author      // => #copilot-cli
 
-(Counter >> #increment) author
-// => #copilot-cli
-
-// Query across the system
+// System-wide queries (proposed):
 Beamtalk allMethodsForIssue: #BT-427
 // => #(Counter>>increment, Counter>>decrement, Server>>dispatch)
-
-Beamtalk allMethodsSince: '2026-01-01'
-// => #(...)
 ```
 
 ### Why this matters for agents
@@ -378,15 +394,15 @@ Beamtalk allMethodsSince: '2026-01-01'
 
 5. **History lives in the code, not beside it.** Git blame gives you *when* and *who*. Provenance annotations give you *why* and *what for* — the information agents need most.
 
-### Provenance as first-class objects
+### Provenance as first-class objects (proposed)
 
-In keeping with Smalltalk's "everything is an object" philosophy:
+In keeping with Smalltalk's "everything is an object" philosophy, provenance metadata could bridge the gap between issue trackers and the running system:
 
 ```beamtalk
+// Proposed — not yet implemented
 issue := Issue named: #BT-427
 issue methods           // => All methods linked to this issue
 issue status            // => #closed (from Linear API)
-issue description       // => "Implement actor-specific methods..."
 issue isStale           // => true (closed, but code still references it)
 ```
 
@@ -412,11 +428,11 @@ The boundary between the issue tracker and the codebase dissolves. The workspace
 └──────┬──────┘
        ▼
 ┌─────────────┐
-│ Compile     │  (shell: cargo build, wait 15s)
+│ Compile     │  (shell: build/typecheck, wait 2-60s)
 └──────┬──────┘
        ▼
 ┌─────────────┐
-│ Test        │  (shell: cargo test, wait 30s)
+│ Test        │  (shell: run tests, wait 5-30s)
 └──────┬──────┘
        ▼
 ┌─────────────┐
@@ -427,14 +443,14 @@ The boundary between the issue tracker and the codebase dissolves. The workspace
 │ Iterate     │  (back to edit, 5-15 times)
 └─────────────┘
 
-Total per feature: 15-45 minutes
+Total per feature: 5-45 minutes (varies greatly by language — faster for TypeScript, slower for Rust)
 ```
 
 ### Beamtalk loop (live workspace)
 
 ```
 ┌──────────────────┐
-│ Resume workspace │  (actors still running from last session)
+│ Resume workspace │  (actors still running from last session — planned: ADR 0004)
 └───────┬──────────┘
         ▼
 ┌──────────────────┐
@@ -460,7 +476,7 @@ Total per feature: 15-45 minutes
 Total per feature: 1-5 minutes
 ```
 
-The difference isn't incremental — it's **an order of magnitude**. And the quality of feedback is higher at every step: structured objects instead of text, direct interrogation instead of grep, immediate verification instead of batch testing.
+The difference is significant — potentially **an order of magnitude** for languages with slow compile cycles (Rust, C++), and still a meaningful improvement for faster ones (TypeScript, Go). More importantly, the *quality* of feedback is higher at every step: structured objects instead of text, direct interrogation instead of grep, immediate verification instead of batch testing.
 
 ---
 
@@ -519,7 +535,7 @@ A REPL alone doesn't get you there. The key properties are:
 | Hot method reload | ✅ <100ms | ❌ Restart | ✅ Module | ❌ Rebuild | ✅ Function |
 | Runtime reflection | ✅ First-class | ⚠️ `dir()` | ⚠️ Limited | ❌ Compile-time | ✅ First-class |
 | Isolated experiments | ✅ Actors | ❌ Shared state | ✅ Processes | ❌ Threads | ❌ Shared state |
-| Persistent state | ✅ Workspace | ❌ Session ends | ⚠️ Node runs | ❌ Process ends | ⚠️ nREPL |
+| Persistent state | 🔮 Workspace (planned) | ❌ Session ends | ⚠️ Node runs | ❌ Process ends | ⚠️ nREPL |
 | Structured errors | ✅ Objects | ❌ Strings | ⚠️ Tuples | ✅ Types | ⚠️ Maps |
 | Provenance tracking | 🔮 Planned | ❌ | ❌ | ❌ | ❌ |
 | Method-level editing | ✅ One method | ❌ Whole module | ❌ Whole module | ❌ Whole crate | ✅ One function |
@@ -568,11 +584,13 @@ There's no "with-LSP" vs "without-LSP" split because the **running system is the
 Ronacher wants Go-style `package.Symbol` prefixing so agents can grep for things. This is solving the right problem (findability) with a file-level tool. In a beamtalk workspace:
 
 ```beamtalk
+// Already implemented:
 Beamtalk allClasses select: [:c | c respondsTo: #increment]
 // => #(Counter, StepCounter, Timer)
 
-Beamtalk allMethodsMatching: "rate*"
-// => #(ChatServer>>rateLimit:, ApiGateway>>rateLimitCheck)
+// The live system is the searchable index — no grep needed
+Counter methods
+// => #(increment, decrement, count, reset, ...)
 ```
 
 Grep searches text. Queries search *semantics*. The agent doesn't need `package.Symbol` naming conventions because it can query the object graph directly. This is the Smalltalk class browser, repurposed for agents.
@@ -619,9 +637,13 @@ c count class    // => Integer
 
 The type information exists at runtime, always available. Whether this is sufficient, or whether optional type annotations (Gradual typing? TypeScript-style?) would help agents *before* running the code, is an open question worth exploring.
 
-**Familiar syntax.** Ronacher wisely notes that a new language should "be designed around familiar syntax that is already known to work well." Beamtalk's Smalltalk-derived keyword message syntax (`server handleMessage: msg from: sender`) is unfamiliar to most developers and underrepresented in LLM training data. This is a real adoption risk.
+**Familiar syntax.** Ronacher wisely notes that a new language should "be designed around familiar syntax that is already known to work well." Beamtalk's Smalltalk-derived keyword message syntax (`server handleMessage: msg from: sender`) is unfamiliar to most developers and underrepresented in LLM training data. This is the document's most important honest-risk disclosure.
 
-Counter-argument: the syntax is *regular* — there's essentially one pattern (message sends) applied uniformly. An agent that learns keyword messages once can apply the pattern everywhere. And in a live workspace where the agent sees immediate results, the feedback loop compensates for unfamiliarity. But it's worth watching how agents actually perform on message syntax vs. method call syntax.
+The evidence is mixed. On one hand, agents adapt to unfamiliar syntax faster than humans — they need one or two examples, not months of practice. The syntax is *regular*: there's essentially one pattern (message sends) applied uniformly, which means an agent that learns keyword messages once can apply the pattern everywhere. And in a live workspace where the agent sees immediate results, the feedback loop compensates for unfamiliarity.
+
+On the other hand, we have direct evidence of the cost. The beamtalk project's own `AGENTS.md` has extensive sections on "Syntax Verification — Preventing Hallucinations" because AI agents routinely *blend* familiar patterns (Python method calls, Ruby blocks, JavaScript syntax) into plausible-looking but invalid beamtalk code. The agents don't fail to *understand* keyword messages — they fail to *stay within* the syntax, reverting to patterns more heavily represented in their training data.
+
+This gap will narrow as beamtalk code enters public repositories and training corpora. In the near term, the mitigations are: few-shot examples in agent prompts, AGENTS.md-style verification checklists, and the live workspace's immediate error feedback. Whether this is enough, or whether it represents a fundamental adoption barrier, is an open question that only real-world usage will answer.
 
 **Re-exports and barrel files.** Ronacher hates them; beamtalk largely avoids the problem. Each `.bt` file is one class/module, compiled to one `.beam` file. There's a direct one-to-one mapping from source to artifact. No barrel files, no re-exports, no aliasing confusion. Beamtalk's "one class, one file" convention is exactly what Ronacher recommends.
 
@@ -774,9 +796,10 @@ Ronacher adds another angle: type inference forces a split experience (with-LSP 
 
 TypeScript erases types at runtime. Rust erases types at runtime (monomorphization). The type information that helped during development vanishes when the program runs.
 
-Beamtalk doesn't have to do this. In a live workspace where everything is an object:
+Beamtalk doesn't have to do this. In a live workspace where everything is an object, gradual types could persist to runtime (proposed — not yet implemented):
 
 ```beamtalk
+// Proposed: type annotations queryable as live objects
 Counter >> #increment parameterTypes    // => #(Integer)
 Counter >> #getValue returnType          // => Integer
 Counter stateSchema                      // => #{value => Integer}
@@ -808,46 +831,50 @@ A language is **agent-native** when its core design properties match the needs o
 7. **Conversational** — Interaction is request-response (message passing), not file I/O.
 8. **Gradually typed** — Fast feedback on mistakes without fighting the type system. Types as documentation, not bureaucracy.
 
-Beamtalk has or plans all eight. No other modern language has more than four.
+Beamtalk has or plans all eight. Most modern languages score fully on three or four; the best (Clojure, Elixir) reach five or six, but each misses critical pieces — Clojure lacks fault isolation and distribution; Elixir lacks deep reflection and method-level granularity. No other language targets all eight simultaneously.
+
+### Even without the planned features
+
+It's worth being explicit: the persistent workspace (ADR 0004) and provenance annotations (§5) are not yet built. Without them, beamtalk still offers a unique combination: **<100ms method-level hot reload + live runtime reflection + structured machine-readable errors + actor-based fault isolation + message passing as the universal interface.** No other single language delivers all of these today. The planned features amplify the advantage — especially session persistence, which eliminates cold starts — but the core thesis holds without them.
 
 ### The future: development as conversation
 
 Today, an AI agent developing software is essentially doing text manipulation — reading files, writing files, running shell commands, parsing output. The *program* is something that exists in files. The agent operates *on* the files.
 
-In a beamtalk workspace, the program is something that exists in **running objects**. The agent operates *with* the objects, in conversation:
+In a beamtalk workspace, the program is something that exists in **running objects**. The agent operates *with* the objects, in conversation. Here's what this looks like when the planned features come together — some of this works today (reflection, hot reload, actors), some is future (workspace persistence, provenance):
 
 ```beamtalk
-// Agent joins a workspace where code is already running
+// Agent joins a workspace where code is already running (planned: ADR 0004)
 Workspace connect: "my-project"
 
-// Agent asks the system what needs work
-Workspace currentIssue
-// => Issue(BT-500: "Add rate limiting to ChatServer")
-
-// Agent asks the system about the relevant code
+// Agent asks the system about the relevant code (works today)
 ChatServer methods
 // => #(handleMessage:, addUser:, broadcast:, ...)
 
 ChatServer >> #handleMessage:
 // => CompiledMethod(handleMessage: msg => ...)
 
-// Agent modifies behavior
+// Agent modifies behavior (works today via hot reload)
 ChatServer >> handleMessage: msg =>
   self.rateLimiter check: msg sender.
   // ... rest of implementation
 
-// Agent verifies immediately
+// Agent verifies immediately (works today)
 server := ChatServer spawn
 server handleMessage: (Message new: "test" from: "alice")
 // => #ok
 
-// Agent marks work done — provenance is captured automatically
+// Provenance is captured automatically (proposed: §5)
 // The method now carries @issue BT-500, @author copilot-cli
 ```
 
 The agent never left the conversation. No file I/O, no shell commands, no output parsing. Just messages to living objects.
 
 **This is what software development looks like when the language is designed for it.**
+
+### What remains to prove
+
+The argument in this document is structural: the properties AI agents need are the properties beamtalk inherits from Smalltalk and the BEAM. Empirical validation — measuring agent performance (iterations, time, success rate) in beamtalk workspaces vs. file-based environments — is future work. SemanticSqueak provides case studies for the live-object interaction model; beamtalk needs its own, particularly comparing the full development loop (not just individual interactions) across languages. This is a multi-year vision. The language and core runtime exist today; the workspace persistence and provenance system are next.
 
 ---
 
