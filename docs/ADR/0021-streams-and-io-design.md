@@ -190,6 +190,8 @@ errors do: [:line | Transcript show: line]
 
 **Implementation:** `File lines:` opens a handle, returns a Stream whose generator calls `file:read_line/1`. When the stream is exhausted, the handle closes automatically. If the stream is abandoned without being fully consumed, the BEAM's process-linked file handle ensures cleanup when the owning process exits. Block-scoped `File open:do:` provides explicit lifecycle control for cases where deterministic cleanup matters.
 
+**Cross-process constraint:** File-backed Streams must be consumed by the same process that created them (BEAM file handles are process-local). To pass file data to an actor, materialize first: `(File lines: 'data.csv') take: 100` returns a List that can be sent safely. Collection-backed Streams have no such restriction.
+
 ### Collection Integration
 
 Collections gain a `stream` method that returns a lazy Stream:
@@ -286,7 +288,7 @@ This means collections keep their eager `do:`, `collect:`, `select:` for simple 
 ### "Just use Erlang's file module directly via interop" (BEAM developer)
 **Best argument:** Beamtalk already has BEAM interop. Erlang's `file` module is battle-tested with 30+ years of production use, zero-overhead, and covers every edge case (symlinks, encodings, permissions, large files, memory-mapped I/O). But it's not just about files — you're building an *entire lazy evaluation framework* on top of BEAM, when Erlang already has list comprehensions and Elixir (available via interop) already has `Stream`. Every Beamtalk Stream operation adds a closure layer. For a 5-line file processing task, the overhead of creating closures, wrapping generators, and pulling through a pipeline is worse than a simple `file:read_line/1` loop. You're optimizing for elegance over the pragmatism that makes BEAM great.
 
-**Counter:** The cost argument is real for tiny scripts, but closure overhead is ~nanoseconds vs ~100μs I/O latency — irrelevant in practice. Elixir proved lazy streams on BEAM aren't a performance problem. The key value isn't performance, it's *composability*: `(File lines: 'app.log') select: [:l | l includes: 'ERROR']` in the REPL is one expression. The Erlang equivalent is 5 lines of handle management, pattern matching, and manual cleanup. For an interactive-first language, that matters. Advanced users can always drop to Erlang via interop.
+**Counter:** Closure overhead on BEAM is low (Elixir's `Stream` module has run in production for 12+ years) though not literally free — for small collections (<1000 elements), eager collection methods will be faster. The key value isn't performance, it's *composability*: `(File lines: 'app.log') select: [:l | l includes: 'ERROR']` in the REPL is one expression. The Erlang equivalent is 5 lines of handle management, pattern matching, and manual cleanup. For an interactive-first language, that matters. Advanced users can always drop to Erlang via interop, and eager collection methods remain the default for small-data cases.
 
 ### "We should have ReadStream/WriteStream like Smalltalk" (Smalltalk purist)
 **Best argument:** Beamtalk IS a compiler — and parsers are THE classic use case for ReadStream. Sequential consumption with `peek` (lookahead without consuming) and `upTo:` (consume until delimiter) are the building blocks of every hand-written parser, tokenizer, and protocol handler. Beamtalk's own lexer does exactly this. Dropping ReadStream means anyone writing a parser in Beamtalk has to reinvent sequential-consumption-with-lookahead on top of lazy pipelines, which is awkward — lazy streams are designed for transformation pipelines, not stateful character-by-character consumption.
@@ -311,7 +313,7 @@ This matters doubly for an *interactive-first* language. The REPL is your debugg
 
 And there's a subtler gotcha: side effects in lazy pipelines run at *terminal* time, not at *definition* time. `stream collect: [:x | Transcript show: x. x * 2]` prints nothing when you define it — it prints when you call `asList`. For newcomers, this is deeply confusing. Elixir developers learn this the hard way; do we want that learning curve?
 
-**Counter:** This is the most legitimate objection. Three mitigations: (1) Eager collection methods (`List select:`, `List collect:`) remain the default for simple cases — most users never need `stream`. (2) In the REPL, terminal operations run immediately (you type `s take: 5` and see results), so interactivity is preserved. (3) The side-effect gotcha is real but well-understood — Elixir has lived with it for 12+ years. We can document it clearly and potentially add a REPL inspector that shows "Stream (unevaluated, 3 stages)" to make laziness visible. The debugging concern is real enough that we should ensure Stream has good `printString` / `describe` output showing its pipeline structure.
+**Counter:** This is the most legitimate objection — and it requires concrete commitments, not hand-waving. Three specific mitigations: (1) Eager collection methods (`List select:`, `List collect:`) remain the default for simple cases — most users never need `stream`. Lazy is opt-in, not forced. (2) In the REPL, terminal operations run immediately (you type `s take: 5` and see results), so interactivity is preserved — each temp variable is inspectable. (3) **Stream must ship with good `printString`** showing pipeline structure, e.g. `Stream(from: 1 | select: [:n | n isEven] | collect: [:n | n * n])`. This is a Phase 1 requirement, not a "nice to have." Without it, lazy Streams are opaque in the REPL and the interactive-first principle is violated. The side-effect timing gotcha (lazy side effects run at terminal time) is real and must be documented prominently in Stream's class documentation and the REPL tutorial.
 
 ### "This creates a confusing parallel to Collection protocol" (API designer)
 **Best argument:** After this ADR, Beamtalk has TWO things that respond to `select:`, `collect:`, `do:`, `inject:into:` — Collections (eager) and Streams (lazy). Same method names, different semantics. When a newcomer reads code that says `things select: [:x | x > 0]`, they have to check whether `things` is a List or a Stream to know when the filtering actually happens. When a library accepts "something you can `collect:` on," does it work with both? Do you document that? 
@@ -382,6 +384,16 @@ Keep the current state: `File readAll:` for files, eager collection iteration fo
 
 **Rejected because:** The status quo works for small-data, simple cases — but it's a dead end. Users cannot read large files without loading them into memory. Users cannot compose data processing pipelines. Every new data source (network, stdin, generators) would need its own bespoke iteration pattern. The "do nothing" option is acceptable for 2026 if Beamtalk only targets small scripts, but not if it aims to be a general-purpose language. The investment in Stream pays off across every future I/O feature.
 
+### Alternative F: Eager File.lines + Fill Collection Gaps Only
+Add `File lines:` returning a List (eager), plus fill missing `select:`, `collect:` on Set/Dictionary/String. No lazy Stream class.
+
+```beamtalk
+File lines: 'config.txt'    // Returns a List (eager, whole file)
+aSet select: [:x | x > 0]   // Now works, returns a Set
+```
+
+**Rejected because:** Handles the 80% case (small-to-medium files, consistent collection protocol) but closes the door on large-file processing and infinite sequences. If `File lines:` returns a List, a 1GB log file loads entirely into memory. The incremental cost of lazy Stream is bounded (one new class), while the cost of retrofitting laziness later is high (changing return types is a breaking change). Building Stream now, while the API surface is small, is cheaper than adding it after users depend on eager `File lines:` returning a List. However, this alternative correctly identifies that Phase 3 (collection `stream`) is lower priority than Phase 1-2.
+
 ## Consequences
 
 ### Positive
@@ -398,6 +410,8 @@ Keep the current state: `File readAll:` for files, eager collection iteration fo
 - No dedicated string building class (use `List join` or string concatenation for now)
 - `Stream generate:` (yield-based generators) requires spawning a helper process on BEAM, which partially contradicts the "no processes per stream" design goal — this constructor should be documented as the exception
 - Abandoned file streams (not fully consumed, not block-scoped) rely on process exit for handle cleanup — could leak handles in long-lived processes. `File open:do:` is the safe pattern.
+- **Cross-process limitation:** File-backed Streams cannot be sent as messages to actors — BEAM file handles are process-local. A file Stream consumed by a different process than the one that opened it will fail. Collection-backed and generator-backed Streams (pure closures) transfer safely. This limits the "universal" promise in actor-heavy code. Mitigation: use `File open:do:` (block-scoped, same process) or collect to List before sending.
+- **Auto-await interaction:** When an actor method returns a Stream, auto-await resolves the Future but the Stream's closures still reference the actor's process context. File-backed Streams from actors will fail on the caller side. This interaction must be documented clearly; full resolution is deferred to BT-507 (Future class ADR).
 
 ### Neutral
 - Existing `File readAll:` / `File writeAll:contents:` remain for simple use cases
@@ -412,6 +426,7 @@ Keep the current state: `File readAll:` for files, eager collection iteration fo
 - Implement closure-based generator in `beamtalk_stream.erl`
 - Core protocol: `select:`, `collect:`, `reject:`, `take:`, `drop:`, `do:`, `inject:into:`, `detect:`, `asList`, `anySatisfy:`, `allSatisfy:`
 - Constructors: `Stream from:by:` (generator), `Stream on:` (from collection)
+- **Required:** `printString` showing pipeline structure, e.g. `Stream(from: 1 | select: [...])` — critical for REPL inspectability
 - Register in `builtins.rs`, `beamtalk_stdlib.app.src`, `beamtalk_primitive.erl`
 - Add tests in `tests/stdlib/stream.bt`
 - **Components:** stdlib (lib/), runtime (primitives), codegen (builtins registration)
