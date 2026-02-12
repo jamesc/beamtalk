@@ -115,25 +115,30 @@ fn test_cases_dir() -> PathBuf {
 
 /// Get the daemon socket path.
 ///
-/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation,
-/// falling back to the session-based default `~/.beamtalk/sessions/shell-{ppid}/daemon.sock`.
+/// Respects `BEAMTALK_DAEMON_SOCKET` environment variable for worktree isolation.
+/// When not set, creates a deterministic session-based path using a fixed
+/// E2E test session name to ensure the test harness and daemon agree on the path.
 fn daemon_socket_path() -> PathBuf {
     if let Ok(socket_path) = env::var("BEAMTALK_DAEMON_SOCKET") {
         if !socket_path.is_empty() {
             return PathBuf::from(socket_path);
         }
     }
-    // Match session-based path resolution from paths.rs
-    let ppid = std::os::unix::process::parent_id();
+    // Use a fixed session name so the test and daemon child process agree.
+    // The daemon child has a different PPID than the test process, so we
+    // can't rely on PPID-based session resolution matching.
     dirs::home_dir()
         .map(|h| {
             h.join(".beamtalk")
                 .join("sessions")
-                .join(format!("shell-{ppid}"))
+                .join("e2e-test")
                 .join("daemon.sock")
         })
         .unwrap_or_default()
 }
+
+/// Session name used for E2E test daemon isolation.
+const E2E_SESSION_NAME: &str = "e2e-test";
 
 /// A test case parsed from a `.bt` file.
 #[derive(Debug)]
@@ -368,6 +373,7 @@ impl DaemonManager {
 
         let daemon_child = Command::new(&binary)
             .args(["daemon", "start", "--foreground"])
+            .env("BEAMTALK_SESSION", E2E_SESSION_NAME)
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
@@ -440,6 +446,7 @@ impl DaemonManager {
         let beam_child = Command::new("erl")
             .arg("-noshell")
             .args(&pa_args)
+            .env("BEAMTALK_DAEMON_SOCKET", daemon_socket.to_str().unwrap())
             .stdout(stdout_cfg)
             .stderr(stderr_cfg)
             .spawn()
