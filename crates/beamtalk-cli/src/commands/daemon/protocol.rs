@@ -258,8 +258,6 @@ fn handle_compile(
     id: Option<serde_json::Value>,
     service: &mut SimpleLanguageService,
 ) -> JsonRpcResponse {
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
     let params: CompileParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
@@ -288,10 +286,10 @@ fn handle_compile(
     // Get diagnostics from language service (includes parse errors)
     let mut core_diagnostics = service.diagnostics(&file_path);
 
-    // Parse module again for primitive validation (parse diagnostics already
-    // captured by language service above, so we can safely discard them here)
-    let tokens = lex_with_eof(&source);
-    let (module, _) = parse(tokens);
+    // Get cached module from language service (already parsed by update_file above)
+    let module = service
+        .module(&file_path)
+        .expect("module should be cached after update_file");
 
     // Run @primitive validation (ADR 0007)
     let options = beamtalk_core::CompilerOptions {
@@ -301,7 +299,7 @@ fn handle_compile(
     };
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, &options,
+            module, &options,
         );
     core_diagnostics.extend(primitive_diags);
 
@@ -341,7 +339,7 @@ fn handle_compile(
         // Derive module name from class name in AST (the class definition is
         // the source of truth). :load is for loading class definitions; fall
         // back to file stem only for legacy non-class files.
-        let classes = extract_class_names(&module);
+        let classes = extract_class_names(module);
         // ADR 0016: Apply bt@stdlib@ or bt@ prefix to module names
         let base_name = if let Some(first_class) = module.classes.first() {
             beamtalk_core::erlang::to_module_name(&first_class.name.name)
@@ -358,7 +356,7 @@ fn handle_compile(
         // so workspace bindings (Transcript, Beamtalk) generate persistent_term
         // lookups instead of direct module calls.
         let core = beamtalk_core::erlang::generate_with_workspace_and_source(
-            &module,
+            module,
             &module_name,
             true, // workspace_mode — :load runs in REPL workspace context
             Some(&source),
