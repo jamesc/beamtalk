@@ -244,9 +244,11 @@ pub fn generate(module: &Module) -> Result<String> {
 
     // BT-213: Route based on whether class is actor or value type
     if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?;
+        let doc = generator.generate_actor_module(module)?;
+        generator.write_document(&doc);
     } else {
-        generator.generate_value_type_module(module)?;
+        let doc = generator.generate_value_type_module(module)?;
+        generator.write_document(&doc);
     }
 
     Ok(generator.output)
@@ -288,9 +290,11 @@ pub fn generate_with_name_and_source(
 
     // BT-213: Route based on whether class is actor or value type
     if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?;
+        let doc = generator.generate_actor_module(module)?;
+        generator.write_document(&doc);
     } else {
-        generator.generate_value_type_module(module)?;
+        let doc = generator.generate_value_type_module(module)?;
+        generator.write_document(&doc);
     }
 
     Ok(generator.output)
@@ -329,9 +333,11 @@ pub fn generate_with_bindings(
 
     // BT-213: Route based on whether class is actor or value type
     if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?;
+        let doc = generator.generate_actor_module(module)?;
+        generator.write_document(&doc);
     } else {
-        generator.generate_value_type_module(module)?;
+        let doc = generator.generate_value_type_module(module)?;
+        generator.write_document(&doc);
     }
 
     Ok(generator.output)
@@ -415,9 +421,11 @@ pub fn generate_with_workspace_and_source(
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(module).0;
 
     if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
-        generator.generate_actor_module(module)?;
+        let doc = generator.generate_actor_module(module)?;
+        generator.write_document(&doc);
     } else {
-        generator.generate_value_type_module(module)?;
+        let doc = generator.generate_value_type_module(module)?;
+        generator.write_document(&doc);
     }
 
     Ok(generator.output)
@@ -772,8 +780,8 @@ impl CoreErlangGenerator {
     /// 'start_link'/1 = fun (InitArgs) ->
     ///     call 'gen_server':'start_link'('module_name', InitArgs, [])
     /// ```
-    fn generate_start_link(&mut self) {
-        let doc = docvec![
+    fn generate_start_link_doc(&self) -> Document<'static> {
+        docvec![
             "'start_link'/1 = fun (InitArgs) ->",
             nest(
                 INDENT,
@@ -786,8 +794,7 @@ impl CoreErlangGenerator {
                 ]
             ),
             "\n\n",
-        ];
-        self.write_document(&doc);
+        ]
     }
 
     ///

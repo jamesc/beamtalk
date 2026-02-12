@@ -212,14 +212,16 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_dispatch(
         &mut self,
         module: &Module,
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
         // Write function header
         let header_doc = docvec![
             "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
             nest(INDENT, docvec![line(), "case Selector of",]),
             "\n",
         ];
-        self.write_document(&header_doc);
+        docs.push(header_doc);
 
         // Case clauses are at indent level 2 (inside function + inside case)
         let case_clause_indent: isize = 2;
@@ -286,7 +288,7 @@ impl CoreErlangGenerator {
                     let indent_spaces = case_clause_indent * INDENT;
                     #[allow(clippy::cast_sign_loss)]
                     let indent_str = " ".repeat(indent_spaces as usize);
-                    self.write_document(&docvec![indent_str, nest(indent_spaces, clause_doc)]);
+                    docs.push(docvec![indent_str, nest(indent_spaces, clause_doc)]);
 
                     // Pop the scope when done with this method
                     self.pop_scope();
@@ -297,7 +299,7 @@ impl CoreErlangGenerator {
         // Generate case clauses for methods in class definitions
         for class in &module.classes {
             let doc = self.generate_class_method_dispatches(class, case_clause_indent)?;
-            self.write_document(&doc);
+            docs.push(doc);
         }
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, instVarNames,
@@ -443,12 +445,12 @@ impl CoreErlangGenerator {
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)]
         let indent_str = " ".repeat(indent_spaces as usize);
-        self.write_document(&docvec![indent_str, nest(indent_spaces, default_body),]);
+        docs.push(docvec![indent_str, nest(indent_spaces, default_body),]);
 
         // Close case and function
         let footer_doc = docvec![nest(INDENT, docvec![line(), "end",]), "\n\n",];
-        self.write_document(&footer_doc);
+        docs.push(footer_doc);
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 }
