@@ -36,7 +36,7 @@
 
 // Value type error: is catchable
 v := Validator new
-// => _
+// => {"$beamtalk_class":"Validator"}
 
 [v check: -1] on: Exception do: [:e | e message]
 // => must be non-negative

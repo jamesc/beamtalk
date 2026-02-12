@@ -55,11 +55,11 @@
 // PADDING
 // ===========================================================================
 
-// padLeft:
+// padLeft: (leading spaces significant, cannot assert exact value)
 'hi' padLeft: 5
 // => _
 
-// padRight:
+// padRight: (trailing spaces significant, cannot assert exact value)
 'hi' padRight: 5
 // => _
 
