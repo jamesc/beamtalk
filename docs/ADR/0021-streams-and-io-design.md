@@ -124,18 +124,19 @@ FileStream open: 'data.csv' do: [:file |
 
 ### Layer 3: Lazy Streams (Future Work)
 
-Lazy, composable pipelines for large/infinite data. Deferred to a future ADR once Layer 1 and 2 prove out the design. Potential approaches:
-- Process-based generators (actor yields elements on demand)
-- Continuation-based (closures that produce next element)
-- Interop with Elixir's `Stream` module
+Lazy, composable pipelines for large/infinite data. Deferred to a future ADR once Layer 1 and 2 prove out the design. The recommended approach follows Elixir's proven closure-based model — each lazy operation wraps the previous in a closure, with nothing computed until a terminal operation (like `take:` or `asList`) pulls elements through.
 
 ```beamtalk
 // Future — not part of this ADR
-Stream from: 1 // infinite stream of integers
-  | select: [:n | n isEven]
-  | collect: [:n | n * n]
-  | take: 10
+// Closure-based lazy streams (Elixir model)
+s := LazyStream from: 1
+s := s select: [:n | n isEven]
+s := s collect: [:n | n * n]
+s take: 5
+// => #(4, 16, 36, 64, 100)
 ```
+
+**Chaining syntax note:** Message-send languages (Smalltalk, Newspeak, Beamtalk) have a known limitation where keyword messages cannot chain without parentheses or temporary variables. No satisfying syntax sugar has been found in the Smalltalk literature — the Pharo [Sequence](https://ceur-ws.org/Vol-3627/paper11.pdf) framework (IWST 2023) addresses this at the library level but not syntactically. Temporary variables are the pragmatic approach and align with Beamtalk's interactive-first philosophy (each step is inspectable in the REPL). Research into novel pipeline syntax is tracked in BT-506.
 
 ### Summary of Types
 
