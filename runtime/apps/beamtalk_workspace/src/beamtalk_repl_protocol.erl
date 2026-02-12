@@ -25,7 +25,8 @@
          encode_bindings/3, encode_loaded/3, encode_actors/3,
          encode_modules/3, encode_sessions/3, encode_inspect/3,
          encode_docs/2,
-         is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1]).
+         is_legacy/1, get_op/1, get_id/1, get_session/1, get_params/1,
+         base_response/1]).
 
 %% Protocol request record
 -record(protocol_msg, {

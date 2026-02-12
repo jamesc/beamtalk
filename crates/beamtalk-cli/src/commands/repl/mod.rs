@@ -116,6 +116,8 @@ struct ReplResponse {
     warnings: Option<Vec<String>>,
     /// Documentation text (BT-500: :help command)
     docs: Option<String>,
+    /// Number of actors affected by reload (BT-266)
+    affected_actors: Option<u32>,
 }
 
 impl ReplResponse {
@@ -176,6 +178,39 @@ struct SessionInfo {
     id: String,
     #[allow(dead_code)]
     created_at: Option<i64>,
+}
+
+/// Display the result of a reload operation.
+fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
+    if response.is_error() {
+        if let Some(msg) = response.error_message() {
+            eprintln!("Error: {msg}");
+        }
+        return;
+    }
+    let label = if let Some(ref classes) = response.classes {
+        if classes.is_empty() {
+            module_name
+                .map(|n| format!("Reloaded {n}"))
+                .unwrap_or_else(|| "Reloaded".to_string())
+        } else {
+            format!("Reloaded {}", classes.join(", "))
+        }
+    } else {
+        module_name
+            .map(|n| format!("Reloaded {n}"))
+            .unwrap_or_else(|| "Reloaded".to_string())
+    };
+    if let Some(count) = response.affected_actors {
+        if count > 0 {
+            let word = if count == 1 { "actor" } else { "actors" };
+            println!("{label} ({count} running {word})");
+        } else {
+            println!("{label}");
+        }
+    } else {
+        println!("{label}");
+    }
 }
 
 #[expect(
@@ -431,19 +466,7 @@ pub fn run(
                         };
                         match client.reload_module(module_name) {
                             Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(classes) = response.classes {
-                                    if classes.is_empty() {
-                                        println!("Reloaded {module_name}");
-                                    } else {
-                                        println!("Reloaded {}", classes.join(", "));
-                                    }
-                                } else {
-                                    println!("Reloaded {module_name}");
-                                }
+                                display_reload_result(&response, Some(module_name));
                             }
                             Err(e) => eprintln!("Error: {e}"),
                         }
@@ -452,19 +475,7 @@ pub fn run(
                     ":reload" | ":r" => {
                         match client.reload_file() {
                             Ok(response) => {
-                                if response.is_error() {
-                                    if let Some(msg) = response.error_message() {
-                                        eprintln!("Error: {msg}");
-                                    }
-                                } else if let Some(classes) = response.classes {
-                                    if classes.is_empty() {
-                                        println!("Reloaded");
-                                    } else {
-                                        println!("Reloaded {}", classes.join(", "));
-                                    }
-                                } else {
-                                    println!("Reloaded");
-                                }
+                                display_reload_result(&response, None);
                             }
                             Err(e) => eprintln!("Error: {e}"),
                         }

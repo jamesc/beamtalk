@@ -275,9 +275,7 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
                                 {no_source_file, Module}, Msg,
                                 fun format_error_message/1);
                         SourcePath ->
-                            handle_op(<<"load-file">>,
-                                #{<<"path">> => list_to_binary(SourcePath)},
-                                Msg, SessionPid)
+                            do_reload(SourcePath, ModuleAtom, Msg, SessionPid)
                     end;
                 {error, not_found} ->
                     beamtalk_repl_protocol:encode_error(
@@ -288,7 +286,8 @@ handle_op(<<"reload">>, Params, Msg, SessionPid) ->
             beamtalk_repl_protocol:encode_error(
                 {missing_module_name, reload}, Msg, fun format_error_message/1);
         Path ->
-            handle_op(<<"load-file">>, #{<<"path">> => Path}, Msg, SessionPid)
+            PathStr = binary_to_list(Path),
+            do_reload(PathStr, undefined, Msg, SessionPid)
     end;
 
 handle_op(<<"actors">>, _Params, Msg, _SessionPid) ->
@@ -869,6 +868,62 @@ format_rejection_reason(#beamtalk_error{} = Error) ->
 format_rejection_reason(Reason) ->
     %% Fallback: format arbitrary rejection reasons as printable terms
     iolist_to_binary(io_lib:format("~p", [Reason])).
+
+%%% Reload helpers
+
+%% @private
+%% Execute reload: load file and return response with affected actor count.
+-spec do_reload(string(), atom() | undefined, beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
+do_reload(Path, ModuleAtom, Msg, SessionPid) ->
+    case beamtalk_repl_shell:load_file(SessionPid, Path) of
+        {ok, Classes} ->
+            ActorCount = count_affected_actors(ModuleAtom, Classes),
+            encode_reloaded(Classes, ActorCount, Msg);
+        {error, Reason} ->
+            beamtalk_repl_protocol:encode_error(
+                Reason, Msg, fun format_error_message/1)
+    end.
+
+%% @private
+%% Count actors using the reloaded module/classes.
+-spec count_affected_actors(atom() | undefined, [map()]) -> non_neg_integer().
+count_affected_actors(ModuleAtom, Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
+    case whereis(beamtalk_actor_registry) of
+        undefined -> 0;
+        Pid ->
+            case beamtalk_repl_actors:count_actors_for_module(Pid, ModuleAtom) of
+                {ok, Count} -> Count;
+                {error, _} -> 0
+            end
+    end;
+count_affected_actors(undefined, Classes) ->
+    %% Try each class name from the loaded classes
+    case whereis(beamtalk_actor_registry) of
+        undefined -> 0;
+        Pid ->
+            lists:foldl(fun(ClassMap, Acc) ->
+                Name = maps:get(name, ClassMap, ""),
+                case Name of
+                    "" -> Acc;
+                    _ ->
+                        ModAtom = list_to_atom(Name),
+                        case beamtalk_repl_actors:count_actors_for_module(Pid, ModAtom) of
+                            {ok, Count} -> Acc + Count;
+                            {error, _} -> Acc
+                        end
+                end
+            end, 0, Classes)
+    end.
+
+%% @private
+%% Encode reload response with classes and affected actor count.
+-spec encode_reloaded([map()], non_neg_integer(), beamtalk_repl_protocol:protocol_msg()) -> binary().
+encode_reloaded(Classes, ActorCount, Msg) ->
+    ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
+    Base = beamtalk_repl_protocol:base_response(Msg),
+    jsx:encode(Base#{<<"classes">> => ClassNames,
+                     <<"affected_actors">> => ActorCount,
+                     <<"status">> => [<<"done">>]}).
 
 %%% Error Formatting
 
