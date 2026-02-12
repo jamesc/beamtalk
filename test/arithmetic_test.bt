@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit test example: TestCase subclass with assertion methods (ADR 0014 Phase 2)
+
+TestCase subclass: ArithmeticTest
+
+  testAddition =>
+    self assert: (1 + 2) equals: 3
+
+  testSubtraction =>
+    self assert: (5 - 3) equals: 2
+
+  testNegation =>
+    self assert: (0 - 1) equals: -1
+
+  testEquality =>
+    self assert: (2 + 2 == 4)
+
+  testDeny =>
+    self deny: (1 == 2)

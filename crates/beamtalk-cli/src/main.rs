@@ -119,6 +119,13 @@ enum Command {
         #[arg(default_value = "tests/stdlib")]
         path: String,
     },
+
+    /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
+    Test {
+        /// Test file or directory containing .bt test files
+        #[arg(default_value = "test")]
+        path: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -188,6 +195,7 @@ fn main() -> Result<()> {
         Command::Daemon { action } => commands::daemon::run(&action),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib { path } => commands::test_stdlib::run_tests(&path),
+        Command::Test { path } => commands::test::run_tests(&path),
     };
 
     // Exit with appropriate code
