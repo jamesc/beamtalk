@@ -1272,9 +1272,9 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
         let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
-        let result = generator.generate_binary_op("+", &left, &right);
-        assert!(result.is_ok());
-        assert!(generator.output.contains("call 'erlang':'+'(3, 4)"));
+        let doc = generator.generate_binary_op("+", &left, &right).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(output.contains("call 'erlang':'+'(3, 4)"));
     }
 
     #[test]
@@ -1285,17 +1285,17 @@ mod tests {
             Literal::String(" World".into()),
             Span::new(11, 19),
         )];
-        let result = generator.generate_binary_op("++", &left, &right);
-        assert!(result.is_ok());
+        let doc = generator.generate_binary_op("++", &left, &right).unwrap();
+        let output = doc.to_pretty_string();
         assert!(
-            generator.output.contains("iolist_to_binary"),
+            output.contains("iolist_to_binary"),
             "Should use iolist_to_binary for string concatenation. Got: {}",
-            generator.output
+            output
         );
         assert!(
-            generator.output.contains("binary_to_list"),
+            output.contains("binary_to_list"),
             "Should convert binaries to lists first. Got: {}",
-            generator.output
+            output
         );
     }
 
@@ -1304,12 +1304,12 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
         let right = vec![Expression::Literal(Literal::Integer(42), Span::new(6, 8))];
-        let result = generator.generate_binary_op("=", &left, &right);
-        assert!(result.is_ok());
+        let doc = generator.generate_binary_op("=", &left, &right).unwrap();
+        let output = doc.to_pretty_string();
         assert!(
-            generator.output.contains("call 'erlang':'=:='"),
+            output.contains("call 'erlang':'=:='"),
             "Should use strict equality =:=. Got: {}",
-            generator.output
+            output
         );
     }
 
@@ -1318,12 +1318,12 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
         let right = vec![Expression::Literal(Literal::Integer(99), Span::new(7, 9))];
-        let result = generator.generate_binary_op("~=", &left, &right);
-        assert!(result.is_ok());
+        let doc = generator.generate_binary_op("~=", &left, &right).unwrap();
+        let output = doc.to_pretty_string();
         assert!(
-            generator.output.contains("call 'erlang':'/='"),
+            output.contains("call 'erlang':'/='"),
             "Should use loose inequality /= (negation of ==). Got: {}",
-            generator.output
+            output
         );
     }
 
@@ -1332,14 +1332,14 @@ mod tests {
         let mut generator = CoreErlangGenerator::new("test");
         let left = Expression::Literal(Literal::Integer(5), Span::new(0, 1));
         let right = vec![Expression::Literal(Literal::Integer(5), Span::new(6, 7))];
-        let result = generator.generate_binary_op("==", &left, &right);
-        assert!(result.is_ok());
+        let doc = generator.generate_binary_op("==", &left, &right).unwrap();
+        let output = doc.to_pretty_string();
         assert!(
-            generator.output.contains("call 'erlang':'=='"),
+            output.contains("call 'erlang':'=='"),
             "Should use loose equality ==. Got: {}",
-            generator.output
+            output
         );
-        assert_eq!(generator.output, "call 'erlang':'=='(5, 5)");
+        assert_eq!(output, "call 'erlang':'=='(5, 5)");
     }
 
     #[test]

@@ -100,7 +100,7 @@ impl CoreErlangGenerator {
                     self.generate_block_value_call(receiver, &[])?
                 } else {
                     let recv_var = self.fresh_temp_var("ValRecv");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -271,21 +271,23 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let fun_var = self.fresh_temp_var("Fun");
-        let recv_code = self.capture_expression(receiver)?;
+        let recv_code = self.expression_doc(receiver)?;
 
-        let mut arg_parts: Vec<String> = Vec::new();
+        let mut arg_parts: Vec<Document<'static>> = Vec::new();
         for (i, arg) in arguments.iter().enumerate() {
             if i > 0 {
-                arg_parts.push(", ".to_string());
+                arg_parts.push(Document::String(", ".to_string()));
             }
-            arg_parts.push(self.capture_expression(arg)?);
+            arg_parts.push(self.expression_doc(arg)?);
         }
-        let args_str = arg_parts.join("");
+        let args_doc = Document::Vec(arg_parts);
 
         let doc = docvec![
             format!("let {fun_var} = "),
             recv_code,
-            format!(" in apply {fun_var} ({args_str})"),
+            format!(" in apply {fun_var} ("),
+            args_doc,
+            ")",
         ];
         Ok(doc)
     }
@@ -345,7 +347,7 @@ impl CoreErlangGenerator {
                 "class" if arguments.is_empty() => {
                     // BT-412: Return class as first-class object (#beamtalk_object{})
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -364,9 +366,9 @@ impl CoreErlangGenerator {
                         let selector_var = self.fresh_var("Selector");
                         let args_var = self.fresh_var("Args");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
-                        let args_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
+                        let args_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -385,8 +387,8 @@ impl CoreErlangGenerator {
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -463,7 +465,7 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "isNil" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -475,7 +477,7 @@ impl CoreErlangGenerator {
                 }
                 "notNil" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -494,8 +496,8 @@ impl CoreErlangGenerator {
                     "ifNil:" if arguments.len() == 1 => {
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NilBlk");
-                        let recv_code = self.capture_expression(receiver)?;
-                        let block_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let block_code = self.expression_doc(&arguments[0])?;
                         let doc = docvec![
                             format!("let {recv_var} = "),
                             recv_code,
@@ -513,8 +515,8 @@ impl CoreErlangGenerator {
                         let block_var = self.fresh_temp_var("NotNilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let block_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let block_code = self.expression_doc(&arguments[0])?;
                         let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -534,9 +536,9 @@ impl CoreErlangGenerator {
                         let not_nil_var = self.fresh_temp_var("NotNilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[1], "ifNil:ifNotNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let nil_code = self.capture_expression(&arguments[0])?;
-                        let not_nil_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let nil_code = self.expression_doc(&arguments[0])?;
+                        let not_nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -558,9 +560,9 @@ impl CoreErlangGenerator {
                         let nil_var = self.fresh_temp_var("NilBlk");
                         let block_takes_arg =
                             validate_if_not_nil_block(&arguments[0], "ifNotNil:ifNil:")?;
-                        let recv_code = self.capture_expression(receiver)?;
-                        let not_nil_code = self.capture_expression(&arguments[0])?;
-                        let nil_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let not_nil_code = self.expression_doc(&arguments[0])?;
+                        let nil_code = self.expression_doc(&arguments[1])?;
                         let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -605,8 +607,8 @@ impl CoreErlangGenerator {
                         let err0 = self.fresh_temp_var("Err");
                         let err1 = self.fresh_temp_var("Err");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let msg_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let msg_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {recv_var} = "),
@@ -645,12 +647,12 @@ impl CoreErlangGenerator {
             MessageSelector::Unary(name) => match name.as_str() {
                 "yourself" if arguments.is_empty() => {
                     // Identity: just return the receiver
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     Ok(Some(docvec![recv_code]))
                 }
                 "hash" if arguments.is_empty() => {
                     let recv_var = self.fresh_temp_var("Obj");
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
                     let doc = docvec![
                         format!("let {recv_var} = "),
                         recv_code,
@@ -691,7 +693,7 @@ impl CoreErlangGenerator {
                     let pid_var = self.fresh_var("Pid");
                     let future_var = self.fresh_var("Future");
 
-                    let recv_code = self.capture_expression(receiver)?;
+                    let recv_code = self.expression_doc(receiver)?;
 
                     let doc = docvec![
                         format!("let {receiver_var} = "),
@@ -715,8 +717,8 @@ impl CoreErlangGenerator {
                         let receiver_var = self.fresh_var("Receiver");
                         let selector_var = self.fresh_var("Selector");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let sel_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let sel_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -741,8 +743,8 @@ impl CoreErlangGenerator {
                         let hint =
                             Self::binary_string_literal("Value types have no instance variables");
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let name_code = self.capture_expression(&arguments[0])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let name_code = self.expression_doc(&arguments[0])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),
@@ -791,9 +793,9 @@ impl CoreErlangGenerator {
                             "Value types are immutable. Use a method that returns a new instance instead.",
                         );
 
-                        let recv_code = self.capture_expression(receiver)?;
-                        let name_code = self.capture_expression(&arguments[0])?;
-                        let value_code = self.capture_expression(&arguments[1])?;
+                        let recv_code = self.expression_doc(receiver)?;
+                        let name_code = self.expression_doc(&arguments[0])?;
+                        let value_code = self.expression_doc(&arguments[1])?;
 
                         let doc = docvec![
                             format!("let {receiver_var} = "),

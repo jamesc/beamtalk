@@ -57,7 +57,7 @@ impl CoreErlangGenerator {
     /// over arguments with comma separation found throughout dispatch codegen.
     /// Captures a comma-separated argument list as a `Document` (ADR 0018 bridge).
     ///
-    /// Uses `capture_expression` for each argument, joining with commas.
+    /// Uses `expression_doc` for each argument, joining with commas.
     fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],
@@ -67,7 +67,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::String(", ".to_string()));
             }
-            parts.push(Document::String(self.capture_expression(arg)?));
+            parts.push(self.expression_doc(arg)?);
         }
         Ok(Document::Vec(parts))
     }
@@ -121,23 +121,19 @@ impl CoreErlangGenerator {
                         "-> operator must have exactly one argument".to_string(),
                     ));
                 }
-                let key_str = self.capture_expression(receiver)?;
-                let val_str = self.capture_expression(&arguments[0])?;
+                let key_doc = self.expression_doc(receiver)?;
+                let val_doc = self.expression_doc(&arguments[0])?;
                 let doc = docvec![
                     "~{'$beamtalk_class' => 'Association', 'key' => ",
-                    key_str,
+                    key_doc,
                     ", 'value' => ",
-                    val_str,
+                    val_doc,
                     "}~"
                 ];
                 return Ok(doc);
             }
-            // Bridge: generate_binary_op still writes to buffer
-            let start = self.output.len();
-            self.generate_binary_op(op, receiver, arguments)?;
-            let result = self.output[start..].to_string();
-            self.output.truncate(start);
-            return Ok(Document::String(result));
+            let doc = self.generate_binary_op(op, receiver, arguments)?;
+            return Ok(doc);
         }
 
         // Special case: ProtoObject methods - fundamental operations on all objects
@@ -211,12 +207,12 @@ impl CoreErlangGenerator {
             )));
         }
 
-        let receiver_str = self.capture_expression(receiver)?;
+        let receiver_doc = self.expression_doc(receiver)?;
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'send'(",
-            receiver_str,
+            receiver_doc,
             format!(", '{selector_atom}', ["),
             args_doc,
             "])"
@@ -245,32 +241,20 @@ impl CoreErlangGenerator {
                 }
             }
             if name == "await" && arguments.is_empty() {
-                // Bridge: generate_await still writes to buffer
-                let start = self.output.len();
-                self.generate_await(receiver)?;
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Some(Document::String(result)));
+                let doc = self.generate_await(receiver)?;
+                return Ok(Some(doc));
             }
             if name == "awaitForever" && arguments.is_empty() {
-                // Bridge: generate_await_forever still writes to buffer
-                let start = self.output.len();
-                self.generate_await_forever(receiver)?;
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Some(Document::String(result)));
+                let doc = self.generate_await_forever(receiver)?;
+                return Ok(Some(doc));
             }
         }
 
         // Keyword await:/spawnWith: messages
         if let MessageSelector::Keyword(parts) = selector {
             if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
-                // Bridge: generate_await_with_timeout still writes to buffer
-                let start = self.output.len();
-                self.generate_await_with_timeout(receiver, &arguments[0])?;
-                let result = self.output[start..].to_string();
-                self.output.truncate(start);
-                return Ok(Some(Document::String(result)));
+                let doc = self.generate_await_with_timeout(receiver, &arguments[0])?;
+                return Ok(Some(doc));
             }
             // BT-246: Only match ClassReference, not Identifier.
             if parts.len() == 1 && parts[0].keyword == "spawnWith:" && arguments.len() == 1 {
@@ -810,13 +794,13 @@ impl CoreErlangGenerator {
             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
-                let val_str = self.capture_expression(value)?;
+                let val_doc = self.expression_doc(value)?;
 
                 let new_state = self.next_state_var();
 
                 let doc = docvec![
                     format!("let {val_var} = "),
-                    val_str,
+                    val_doc,
                     format!(
                         " in let {new_state} = call 'maps':'put'('{}', {val_var}, {current_state}) in ",
                         field.name
@@ -907,20 +891,20 @@ impl CoreErlangGenerator {
         let module_name = Self::compiled_module_name(class_name);
         let in_repl_context = self.lookup_var("__bindings__").is_some();
 
-        let args_str = match init_args {
-            Some(args) => self.capture_expression(args)?,
-            None => String::new(),
+        let args_doc = match init_args {
+            Some(args) => self.expression_doc(args)?,
+            None => Document::Nil,
         };
 
         if in_repl_context {
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
                 format!("<'undefined'> when 'true' -> call '{module_name}':'spawn'("),
-                args_str.clone(),
+                args_doc.clone(),
                 format!(
                     ") <RegistryPid> when 'true' -> let SpawnResult = call '{module_name}':'spawn'("
                 ),
-                args_str,
+                args_doc,
                 ") in ",
                 "let SpawnPid = call 'erlang':'element'(4, SpawnResult) in ",
                 format!(
@@ -931,7 +915,7 @@ impl CoreErlangGenerator {
             ];
             Ok(doc)
         } else {
-            let doc = docvec![format!("call '{module_name}':'spawn'("), args_str, ")"];
+            let doc = docvec![format!("call '{module_name}':'spawn'("), args_doc, ")"];
             Ok(doc)
         }
     }
@@ -951,10 +935,10 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        let arg_str = self.capture_expression(&arguments[0])?;
+        let arg_doc = self.expression_doc(&arguments[0])?;
         let doc = docvec![
             format!("call 'beamtalk_method_resolver':'resolve'('{class_name}', "),
-            arg_str,
+            arg_doc,
             ")"
         ];
         Ok(doc)
@@ -979,13 +963,13 @@ impl CoreErlangGenerator {
                 arguments.len()
             )));
         }
-        let receiver_str = self.capture_expression(receiver)?;
-        let arg_str = self.capture_expression(&arguments[0])?;
+        let receiver_doc = self.expression_doc(receiver)?;
+        let arg_doc = self.expression_doc(&arguments[0])?;
         let doc = docvec![
             "call 'beamtalk_method_resolver':'resolve'(",
-            receiver_str,
+            receiver_doc,
             ", ",
-            arg_str,
+            arg_doc,
             ")"
         ];
         Ok(doc)

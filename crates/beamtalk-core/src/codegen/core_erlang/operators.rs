@@ -5,6 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use super::document::Document;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
@@ -31,7 +32,7 @@ impl CoreErlangGenerator {
         op: &str,
         left: &Expression,
         arguments: &[Expression],
-    ) -> Result<()> {
+    ) -> Result<Document<'static>> {
         if arguments.len() != 1 {
             return Err(CodeGenError::Internal(
                 "binary operator must have exactly one argument".to_string(),
@@ -64,19 +65,16 @@ impl CoreErlangGenerator {
             }
         };
 
-        let left_code = self.capture_expression(left)?;
-        let right_code = self.capture_expression(&arguments[0])?;
+        let left_code = self.expression_doc(left)?;
+        let right_code = self.expression_doc(&arguments[0])?;
 
-        let doc = docvec![
+        Ok(docvec![
             format!("call 'erlang':'{erlang_op}'("),
             left_code,
             ", ",
             right_code,
             ")",
-        ];
-
-        self.write_document(&doc);
-        Ok(())
+        ])
     }
 
     /// Generates `++` concatenation with runtime type dispatch.
@@ -84,7 +82,7 @@ impl CoreErlangGenerator {
     /// Lists use `erlang:'++'`, strings use `iolist_to_binary`.
     /// When the receiver type is known at compile time (literal), we emit
     /// the optimal path directly. Otherwise, a runtime `is_list` check selects.
-    fn generate_concat_op(&mut self, left: &Expression, right: &Expression) -> Result<()> {
+    fn generate_concat_op(&mut self, left: &Expression, right: &Expression) -> Result<Document<'static>> {
         use crate::ast::Literal;
 
         // Compile-time optimization: detect known types from AST
@@ -96,29 +94,27 @@ impl CoreErlangGenerator {
 
         if is_list {
             // List concatenation: erlang:'++'
-            let left_code = self.capture_expression(left)?;
-            let right_code = self.capture_expression(right)?;
-            let doc = docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",];
-            self.write_document(&doc);
+            let left_code = self.expression_doc(left)?;
+            let right_code = self.expression_doc(right)?;
+            Ok(docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",])
         } else if is_string {
             // String concatenation: iolist_to_binary
-            let left_code = self.capture_expression(left)?;
-            let right_code = self.capture_expression(right)?;
-            let doc = docvec![
+            let left_code = self.expression_doc(left)?;
+            let right_code = self.expression_doc(right)?;
+            Ok(docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
                 "), call 'erlang':'binary_to_list'(",
                 right_code,
                 ")])",
-            ];
-            self.write_document(&doc);
+            ])
         } else {
             // Runtime dispatch: check is_list at runtime
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            let left_code = self.capture_expression(left)?;
-            let right_code = self.capture_expression(right)?;
-            let doc = docvec![
+            let left_code = self.expression_doc(left)?;
+            let right_code = self.expression_doc(right)?;
+            Ok(docvec![
                 format!("let {left_var} = "),
                 left_code,
                 format!(" in let {right_var} = "),
@@ -132,10 +128,7 @@ impl CoreErlangGenerator {
                           call 'erlang':'binary_to_list'({right_var})]) \
                      end"
                 ),
-            ];
-            self.write_document(&doc);
+            ])
         }
-
-        Ok(())
     }
 }

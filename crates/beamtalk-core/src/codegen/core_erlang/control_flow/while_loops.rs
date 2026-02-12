@@ -107,17 +107,12 @@ impl CoreErlangGenerator {
         self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
 
         // Extract block body from condition expression
-        let start = self.output.len();
         if let Expression::Block(cond_block) = condition {
-            self.generate_block_body(cond_block)?;
+            docs.push(self.generate_block_body(cond_block)?);
         } else {
             // Fallback: generate as expression (shouldn't happen for whileTrue:)
-            let doc = self.generate_expression(condition)?;
-            self.write_document(&doc);
+            docs.push(self.generate_expression(condition)?);
         }
-        let cond_body = self.output[start..].to_string();
-        self.output.truncate(start);
-        docs.push(Document::String(cond_body));
 
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;
@@ -295,16 +290,11 @@ impl CoreErlangGenerator {
         self.in_loop_body = true; // Enable StateAcc lookup for condition
         self.set_state_version(0); // Ensure we refer to plain StateAcc inside the fun
 
-        let start = self.output.len();
         if let Expression::Block(cond_block) = condition {
-            self.generate_block_body(cond_block)?;
+            docs.push(self.generate_block_body(cond_block)?);
         } else {
-            let doc = self.generate_expression(condition)?;
-            self.write_document(&doc);
+            docs.push(self.generate_expression(condition)?);
         }
-        let cond_body = self.output[start..].to_string();
-        self.output.truncate(start);
-        docs.push(Document::String(cond_body));
 
         // Restore prior context so nested loops/conditions behave correctly
         self.in_loop_body = prev_in_loop_body;

@@ -137,7 +137,7 @@ impl CoreErlangGenerator {
             // Check for early return
             if let Expression::Return { value, .. } = expr {
                 let final_state = self.current_state_var();
-                let value_str = self.capture_expression(value)?;
+                let value_str = self.expression_doc(value)?;
                 let doc = docvec![
                     "let _ReturnValue = ",
                     value_str,
@@ -159,7 +159,7 @@ impl CoreErlangGenerator {
                             let val_var = self.fresh_temp_var("Val");
                             let current_state = self.current_state_var();
 
-                            let value_str = self.capture_expression(value)?;
+                            let value_str = self.expression_doc(value)?;
 
                             let new_state = self.next_state_var();
                             let doc = docvec![
@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
                     }
                 } else if Self::is_super_message_send(expr) {
                     // Super message send as last expression: unpack {reply, Result, NewState}
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         "let _SuperTuple = ",
                         expr_str,
@@ -188,13 +188,13 @@ impl CoreErlangGenerator {
                 } else if Self::is_error_message_send(expr) {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     docs.push(docvec![expr_str]);
                 } else if self.control_flow_has_mutations(expr) {
                     // BT-483: Last expression is control flow with field mutations.
                     // The mutation variant returns {Result, State} tuple.
                     let tuple_var = self.fresh_temp_var("Tuple");
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         format!("let {tuple_var} = "),
                         expr_str,
@@ -205,7 +205,7 @@ impl CoreErlangGenerator {
                     docs.push(doc);
                 } else {
                     // Regular last expression: bind to Result and reply
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         "let _Result = ",
                         expr_str,
@@ -227,7 +227,7 @@ impl CoreErlangGenerator {
                 } else {
                     format!("State{next_version}")
                 };
-                let expr_str = self.capture_expression(expr)?;
+                let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![
                     format!("let {tuple_var} = "),
                     expr_str,
@@ -238,7 +238,7 @@ impl CoreErlangGenerator {
             } else {
                 // Regular intermediate expression: wrap in let to discard value
                 let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.capture_expression(expr)?;
+                let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
                 docs.push(doc);
             }
@@ -283,7 +283,7 @@ impl CoreErlangGenerator {
                             let val_var = self.fresh_temp_var("Val");
                             let current_state = self.current_state_var();
 
-                            let value_str = self.capture_expression(value)?;
+                            let value_str = self.expression_doc(value)?;
 
                             let new_state = self.next_state_var();
                             let doc = docvec![
@@ -300,7 +300,7 @@ impl CoreErlangGenerator {
                     }
                 } else if Self::is_super_message_send(expr) {
                     // Super message send as last expression: unpack {reply, Result, NewState}
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         "let _SuperTuple = ",
                         expr_str,
@@ -312,13 +312,13 @@ impl CoreErlangGenerator {
                 } else if Self::is_error_message_send(expr) {
                     // Error message send: never returns, so just emit the call directly
                     // without wrapping in a reply tuple (would be unreachable code)
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     docs.push(docvec![expr_str]);
                 } else if self.control_flow_has_mutations(expr) {
                     // BT-483: Last expression is control flow with field mutations.
                     // The mutation variant returns {Result, State} tuple.
                     let tuple_var = self.fresh_temp_var("Tuple");
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         format!("let {tuple_var} = "),
                         expr_str,
@@ -329,7 +329,7 @@ impl CoreErlangGenerator {
                     docs.push(doc);
                 } else {
                     // Regular last expression: bind to Result and reply
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![
                         "let _Result = ",
                         expr_str,
@@ -359,7 +359,7 @@ impl CoreErlangGenerator {
                         // Generate: let VarName = <value> in ...
                         // Note: we delay updating the binding until after generating the RHS
                         // so that the RHS sees the prior value (for rebinding cases).
-                        let value_str = self.capture_expression(value)?;
+                        let value_str = self.expression_doc(value)?;
                         // Now update the variable binding to point at the (possibly shadowing) let-bound var.
                         self.bind_var(var_name, &core_var);
                         let doc = docvec![format!("let {core_var} = "), value_str, " in ",];
@@ -373,13 +373,13 @@ impl CoreErlangGenerator {
                     let core_var = self
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![format!("let {core_var} = "), expr_str, " in ",];
                     docs.push(doc);
                 } else {
                     // Multiple threaded vars - fall back for now
                     let tmp_var = self.fresh_temp_var("seq");
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
                     docs.push(doc);
                 }
@@ -399,16 +399,18 @@ impl CoreErlangGenerator {
                 {
                     // Use the domain service method for selector-to-atom conversion
                     let selector_atom = selector.to_erlang_atom();
-                    let mut arg_strs = Vec::new();
-                    for arg in arguments {
-                        arg_strs.push(self.capture_expression(arg)?);
+                    let mut arg_docs: Vec<Document<'static>> = Vec::new();
+                    for (j, arg) in arguments.iter().enumerate() {
+                        if j > 0 {
+                            arg_docs.push(Document::String(", ".to_string()));
+                        }
+                        arg_docs.push(self.expression_doc(arg)?);
                     }
-                    let args_joined = arg_strs.join(", ");
                     let doc = docvec![
                         format!(
                             "let {super_result_var} = call 'beamtalk_dispatch':'super'('{selector_atom}', ["
                         ),
-                        args_joined,
+                        Document::Vec(arg_docs),
                         format!("], Self, {current_state}, '{class_name}')"),
                     ];
                     docs.push(doc);
@@ -429,7 +431,7 @@ impl CoreErlangGenerator {
                 } else {
                     format!("State{next_version}")
                 };
-                let expr_str = self.capture_expression(expr)?;
+                let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![
                     format!("let {tuple_var} = "),
                     expr_str,
@@ -440,7 +442,7 @@ impl CoreErlangGenerator {
             } else {
                 // Non-assignment intermediate expression: wrap in let
                 let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.capture_expression(expr)?;
+                let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
                 docs.push(doc);
             }
@@ -564,19 +566,19 @@ impl CoreErlangGenerator {
             let method_source_str = method_source_parts.join("");
 
             // BT-412: Class variable initial values
-            let mut class_var_parts = Vec::new();
+            let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
                 if cv_idx > 0 {
-                    class_var_parts.push(", ".to_string());
+                    class_var_parts.push(Document::String(", ".to_string()));
                 }
                 let val = if let Some(ref default_value) = cv.default_value {
-                    self.capture_expression(default_value)?
+                    self.expression_doc(default_value)?
                 } else {
-                    "'nil'".to_string()
+                    docvec!["'nil'"]
                 };
-                class_var_parts.push(format!("'{}' => {val}", cv.name.name));
+                class_var_parts.push(docvec![format!("'{}' => ", cv.name.name), val]);
             }
-            let class_vars_str = class_var_parts.join("");
+            let class_vars_doc = Document::Vec(class_var_parts);
 
             let is_sealed = if class.is_sealed { "true" } else { "false" };
             let is_abstract = if class.is_abstract { "true" } else { "false" };
@@ -610,7 +612,9 @@ impl CoreErlangGenerator {
                         line(),
                         format!("'method_source' => ~{{{method_source_str}}}~,"),
                         line(),
-                        format!("'class_variables' => ~{{{class_vars_str}}}~"),
+                        format!("'class_variables' => ~{{"),
+                        class_vars_doc,
+                        "}~",
                     ]
                 ),
                 line(),
@@ -785,7 +789,7 @@ impl CoreErlangGenerator {
             if let Expression::Return { value, .. } = expr {
                 if has_class_vars {
                     let result_var = self.fresh_temp_var("Ret");
-                    let value_str = self.capture_expression(value)?;
+                    let value_str = self.expression_doc(value)?;
                     if self.class_var_mutated {
                         let final_cv = self.current_class_var();
                         let doc = docvec![
@@ -803,7 +807,7 @@ impl CoreErlangGenerator {
                         docs.push(doc);
                     }
                 } else {
-                    let value_str = self.capture_expression(value)?;
+                    let value_str = self.expression_doc(value)?;
                     docs.push(docvec![value_str]);
                 }
                 return Ok(Document::Vec(docs));
@@ -815,7 +819,7 @@ impl CoreErlangGenerator {
                         // Open-scope expression: generate it and close with class_var_result.
                         // The result var is stored in last_open_scope_result.
                         self.last_open_scope_result = None;
-                        let expr_str = self.capture_expression(expr)?;
+                        let expr_str = self.expression_doc(expr)?;
                         let final_cv = self.current_class_var();
                         if let Some(result_var) = &self.last_open_scope_result.clone() {
                             let doc = docvec![
@@ -833,7 +837,7 @@ impl CoreErlangGenerator {
                         }
                     } else {
                         let result_var = self.fresh_temp_var("Ret");
-                        let expr_str = self.capture_expression(expr)?;
+                        let expr_str = self.expression_doc(expr)?;
                         if self.class_var_mutated {
                             let final_cv = self.current_class_var();
                             let doc = docvec![
@@ -852,7 +856,7 @@ impl CoreErlangGenerator {
                         }
                     }
                 } else {
-                    let expr_str = self.capture_expression(expr)?;
+                    let expr_str = self.expression_doc(expr)?;
                     docs.push(docvec![expr_str]);
                 }
             } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
@@ -862,7 +866,7 @@ impl CoreErlangGenerator {
                 docs.push(self.generate_expression(expr)?);
             } else {
                 let tmp_var = self.fresh_temp_var("seq");
-                let expr_str = self.capture_expression(expr)?;
+                let expr_str = self.expression_doc(expr)?;
                 let doc = docvec![format!("let {tmp_var} = "), expr_str, " in ",];
                 docs.push(doc);
             }

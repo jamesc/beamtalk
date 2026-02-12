@@ -151,23 +151,23 @@ impl CoreErlangGenerator {
             return Ok(docvec!["~{}~"]);
         }
 
-        let mut result = String::from("~{ ");
+        let mut parts: Vec<Document<'static>> = vec![Document::String("~{ ".to_string())];
 
         for (i, pair) in pairs.iter().enumerate() {
             if i > 0 {
-                result.push_str(", ");
+                parts.push(Document::String(", ".to_string()));
             }
 
             // Generate the key
-            result.push_str(&self.capture_expression(&pair.key)?);
-            result.push_str(" => ");
+            parts.push(self.expression_doc(&pair.key)?);
+            parts.push(Document::String(" => ".to_string()));
 
             // Generate the value
-            result.push_str(&self.capture_expression(&pair.value)?);
+            parts.push(self.expression_doc(&pair.value)?);
         }
 
-        result.push_str(" }~");
-        Ok(Document::String(result))
+        parts.push(Document::String(" }~".to_string()));
+        Ok(Document::Vec(parts))
     }
 
     /// Generates code for a list literal: `#(1, 2, 3)` → `[1, 2, 3]`
@@ -276,11 +276,11 @@ impl CoreErlangGenerator {
             if self.class_var_names.contains(field_name) {
                 let val_var = self.fresh_temp_var("Val");
                 let current_cv = self.current_class_var();
-                let val_str = self.capture_expression(value)?;
+                let val_doc = self.expression_doc(value)?;
                 let new_cv = self.next_class_var();
                 let doc = docvec![
                     format!("let {val_var} = "),
-                    val_str,
+                    val_doc,
                     format!(
                         " in let {new_cv} = call 'maps':'put'('{field_name}', {val_var}, {current_cv}) in "
                     )
@@ -313,14 +313,14 @@ impl CoreErlangGenerator {
         let current_state = self.current_state_var();
 
         // Capture value expression (preserves side effects on state)
-        let val_str = self.capture_expression(value)?;
+        let val_doc = self.expression_doc(value)?;
 
         // Now increment state version for the new state after assignment
         let new_state = self.next_state_var();
 
         let doc = docvec![
             format!("let {val_var} = "),
-            val_str,
+            val_doc,
             format!(
                 " in let {new_state} = call 'maps':'put'('{field_name}', {val_var}, {current_state}) in "
             ),
@@ -349,15 +349,12 @@ impl CoreErlangGenerator {
         }
         let header = docvec!["fun (", params, ") -> "];
 
-        // Capture block body output via buffer
-        let start = self.output.len();
-        self.generate_block_body(block)?;
-        let body_str = self.output[start..].to_string();
-        self.output.truncate(start);
+        // Generate block body as Document
+        let body_doc = self.generate_block_body(block)?;
 
         // Pop the scope when done with the block
         self.pop_scope();
-        Ok(docvec![header, body_str])
+        Ok(docvec![header, body_doc])
     }
 
     /// Generates await expression.
@@ -367,12 +364,10 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// call 'beamtalk_future':'await'(Future)
     /// ```
-    pub(super) fn generate_await(&mut self, future: &Expression) -> Result<()> {
+    pub(super) fn generate_await(&mut self, future: &Expression) -> Result<Document<'static>> {
         // Delegate to beamtalk_future:await/1, which uses 30s default timeout
-        let future_str = self.capture_expression(future)?;
-        let doc = docvec!["call 'beamtalk_future':'await'(", future_str, ")"];
-        self.write_document(&doc);
-        Ok(())
+        let future_doc = self.expression_doc(future)?;
+        Ok(docvec!["call 'beamtalk_future':'await'(", future_doc, ")"])
     }
 
     /// Generates await with explicit timeout.
@@ -385,18 +380,16 @@ impl CoreErlangGenerator {
         &mut self,
         future: &Expression,
         timeout: &Expression,
-    ) -> Result<()> {
-        let future_str = self.capture_expression(future)?;
-        let timeout_str = self.capture_expression(timeout)?;
-        let doc = docvec![
+    ) -> Result<Document<'static>> {
+        let future_doc = self.expression_doc(future)?;
+        let timeout_doc = self.expression_doc(timeout)?;
+        Ok(docvec![
             "call 'beamtalk_future':'await'(",
-            future_str,
+            future_doc,
             ", ",
-            timeout_str,
+            timeout_doc,
             ")"
-        ];
-        self.write_document(&doc);
-        Ok(())
+        ])
     }
 
     /// Generates awaitForever expression.
@@ -405,11 +398,9 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// call 'beamtalk_future':'await_forever'(Future)
     /// ```
-    pub(super) fn generate_await_forever(&mut self, future: &Expression) -> Result<()> {
-        let future_str = self.capture_expression(future)?;
-        let doc = docvec!["call 'beamtalk_future':'await_forever'(", future_str, ")"];
-        self.write_document(&doc);
-        Ok(())
+    pub(super) fn generate_await_forever(&mut self, future: &Expression) -> Result<Document<'static>> {
+        let future_doc = self.expression_doc(future)?;
+        Ok(docvec!["call 'beamtalk_future':'await_forever'(", future_doc, ")"])
     }
 
     /// Generates code for cascade expressions.
@@ -616,10 +607,9 @@ impl CoreErlangGenerator {
     ///
     /// Handles field assignments specially to keep State{n} variables in scope
     /// for subsequent expressions. See inline comments for threading details.
-    pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<()> {
+    pub(super) fn generate_block_body(&mut self, block: &Block) -> Result<Document<'static>> {
         if block.body.is_empty() {
-            self.write_document(&docvec!["'nil'"]);
-            return Ok(());
+            return Ok(docvec!["'nil'"]);
         }
 
         // Generate body expressions in sequence
@@ -640,6 +630,8 @@ impl CoreErlangGenerator {
         // NOT:
         //   let _seq1 = 0 in <expression that can't see Count>
 
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
         for (i, expr) in block.body.iter().enumerate() {
             let is_last = i == block.body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
@@ -647,13 +639,11 @@ impl CoreErlangGenerator {
 
             if is_last {
                 // Last expression: generate directly (its value is the block's result)
-                let doc = self.generate_expression(expr)?;
-                self.write_document(&doc);
+                docs.push(self.generate_expression(expr)?);
             } else if is_field_assignment {
                 // Field assignment not at end: generate WITHOUT closing the value
                 // This leaves the let bindings open for subsequent expressions
-                let doc = self.generate_field_assignment_open(expr)?;
-                self.write_document(&doc);
+                docs.push(self.generate_field_assignment_open(expr)?);
             } else if is_local_assignment {
                 // Local variable assignment: generate with proper binding
                 if let Expression::Assignment { target, value, .. } = expr {
@@ -673,11 +663,10 @@ impl CoreErlangGenerator {
                         // Capture the value expression (preserves side effects)
                         // Important: capture BEFORE updating the mapping,
                         // so that any uses of the variable in the RHS see the previous binding.
-                        let val_str = self.capture_expression(value)?;
+                        let val_doc = self.expression_doc(value)?;
                         // Now update the mapping so subsequent expressions see this binding.
                         self.bind_var(var_name, &core_var);
-                        let doc = docvec![format!("let {core_var} = "), val_str, " in "];
-                        self.write_document(&doc);
+                        docs.push(docvec![format!("let {core_var} = "), val_doc, " in "]);
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
@@ -690,9 +679,8 @@ impl CoreErlangGenerator {
                     let core_var = self
                         .lookup_var(var)
                         .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    let expr_str = self.capture_expression(expr)?;
-                    let doc = docvec![format!("let {core_var} = "), expr_str, " in "];
-                    self.write_document(&doc);
+                    let expr_doc = self.expression_doc(expr)?;
+                    docs.push(docvec![format!("let {core_var} = "), expr_doc, " in "]);
                 } else {
                     // Multi-var case not supported yet
                     return Err(CodeGenError::UnsupportedFeature {
@@ -702,12 +690,11 @@ impl CoreErlangGenerator {
                 }
             } else {
                 // Not an assignment or loop - generate and discard result
-                let expr_str = self.capture_expression(expr)?;
-                let doc = docvec!["let _Unit = ", expr_str, " in "];
-                self.write_document(&doc);
+                let expr_doc = self.expression_doc(expr)?;
+                docs.push(docvec!["let _Unit = ", expr_doc, " in "]);
             }
         }
 
-        Ok(())
+        Ok(Document::Vec(docs))
     }
 }
