@@ -7,6 +7,7 @@
 //   - runAll: discover and run all test* methods
 //   - run:   run a single test method by name
 //   - failure output formatting
+//   - setUp/tearDown lifecycle
 //   - edge cases: unknown method, no test methods
 
 // Load Counter actor first, then CounterTest (depends on Counter)
@@ -14,6 +15,7 @@
 // @load tests/e2e/fixtures/counter_test.bt
 // @load tests/e2e/fixtures/failing_test.bt
 // @load tests/e2e/fixtures/empty_test.bt
+// @load tests/e2e/fixtures/lifecycle_test.bt
 
 // === Happy path: all tests pass ===
 
@@ -46,6 +48,16 @@ FailingTest run: #testPass
 // Run the failing test individually (output includes failure details)
 FailingTest run: #testFail
 // => _
+
+// === setUp/tearDown lifecycle ===
+
+// LifecycleTest has setUp and tearDown — both tests should pass
+// because setUp sets log to "S" before each test on a fresh instance
+LifecycleTest runAll
+// => 2 tests, 2 passed (_)
+
+LifecycleTest run: #testFirst
+// => 1 tests, 1 passed (_)
 
 // === Edge case: unknown method name ===
 
