@@ -454,5 +454,26 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
+    // TestCase — BUnit test framework base class (ADR 0014 Phase 2)
+    classes.insert(
+        "TestCase".into(),
+        ClassInfo {
+            name: "TestCase".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            state: vec![],
+            methods: vec![
+                builtin_method("setUp", 0, "TestCase"),
+                builtin_method("tearDown", 0, "TestCase"),
+                builtin_method("assert:", 1, "TestCase"),
+                builtin_method("assert:equals:", 2, "TestCase"),
+                builtin_method("deny:", 1, "TestCase"),
+                builtin_method("should:raise:", 2, "TestCase"),
+                builtin_method("fail:", 1, "TestCase"),
+            ],
+        },
+    );
+
     classes
 }

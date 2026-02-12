@@ -15,7 +15,6 @@
 /// [:x | x * 2] value: 3       // => 6
 /// [true] whileTrue: [Transcript show: 'loop']
 /// ```
-
 sealed Object subclass: Block
   /// Evaluate a zero-argument block.
   ///

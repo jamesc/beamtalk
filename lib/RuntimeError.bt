@@ -11,7 +11,6 @@
 /// ```beamtalk
 /// [42 unknownMsg] on: RuntimeError do: [:e | e message]
 /// ```
-
 Error subclass: RuntimeError
   /// Human-readable description of the receiver.
   ///

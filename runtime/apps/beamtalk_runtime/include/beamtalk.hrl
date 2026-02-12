@@ -63,3 +63,22 @@
     error :: #beamtalk_error{},
     span  :: {binary(), integer(), integer(), integer(), integer()} | undefined
 }).
+
+%% @doc CompiledMethod value object type.
+%%
+%% DDD Context: Object System
+%%
+%% Represents a method's metadata as returned by the >> operator.
+%% This is a tagged map (value type) with '$beamtalk_class' => 'CompiledMethod'.
+%%
+%% Fields:
+%% - $beamtalk_class: Always 'CompiledMethod' (class tag)
+%% - __selector__: Method name atom (e.g., getValue, increment)
+%% - __source__: Source code binary (or <<"">> if unavailable)
+%% - __method_info__: Map with arity and block function
+-type compiled_method() :: #{
+    '$beamtalk_class' := 'CompiledMethod',
+    '__selector__' := atom(),
+    '__source__' := binary(),
+    '__method_info__' := map()
+}.
