@@ -1,0 +1,110 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Chat Room Demo — Multi-Actor Showcase (BT-431)
+//
+// This example demonstrates:
+// 1. **Actors** — ChatRoom and ChatMember as independent processes
+// 2. **Message passing** — async messages between actors
+// 3. **Collections** — Set for member tracking, List for message history
+// 4. **Blocks** — iteration with do: for broadcasting
+// 5. **State management** — mutable actor state
+// 6. **Live interaction** — REPL as the chat interface
+//
+// Try it in the REPL:
+//   $ beamtalk repl
+//   > :load examples/chat_room.bt
+//   > room := ChatRoom spawn
+//   > alice := ChatMember spawn
+//   > alice setName: "Alice"
+//   > alice setRoom: room
+//   > room join: alice
+//   > room say: "Hello!" from: alice
+//   > room getHistory
+//
+// See examples/chat_room_demo.md for a full walkthrough
+
+// ===========================================================================
+// CHATROOM ACTOR
+// ===========================================================================
+//
+// ChatRoom manages a Set of member actors and a List of message history.
+// It demonstrates:
+// - Storing actor references (PIDs) in a Set
+// - Broadcasting via do: iteration over actor Set
+// - List concatenation for message history
+
+Actor subclass: ChatRoom
+  state: members = Set new     // Set of ChatMember actor references
+  state: history = #()         // List of message strings
+
+  // Add a member to the room
+  // Demonstrates: Set add: operation with actor references
+  join: member =>
+    self.members := self.members add: member
+  
+  // Remove a member from the room
+  // Demonstrates: Set remove: operation
+  leave: member =>
+    self.members := self.members remove: member
+  
+  // Broadcast a message to all members
+  // Demonstrates: 
+  // - List concatenation (++) for history with list literal wrapping
+  // - Set do: iteration with blocks
+  // - Calling actor methods inside block (m receiveMessage:)
+  say: message from: sender =>
+    self.history := self.history ++ #(message).
+    self.members do: [:m | m receiveMessage: message]
+  
+  // Return current online members
+  // Demonstrates: Returning a Set of actor references
+  online =>
+    ^self.members
+  
+  // Return message history
+  // Demonstrates: Returning a List
+  getHistory =>
+    ^self.history
+
+// ===========================================================================
+// CHATMEMBER ACTOR
+// ===========================================================================
+//
+// ChatMember represents a chat participant with a name, inbox, and room ref.
+// It demonstrates:
+// - Actor-to-actor references (room field)
+// - Receiving messages from other actors
+// - State mutations (name, inbox, room)
+
+Actor subclass: ChatMember
+  state: name = "Guest"        // Member's display name
+  state: inbox = #()           // List of received messages
+  state: room = nil            // Reference to the ChatRoom actor
+
+  // Set the member's display name
+  setName: newName =>
+    self.name := newName
+  
+  // Set the chat room reference
+  // Demonstrates: Storing an actor reference in a field
+  setRoom: newRoom =>
+    self.room := newRoom
+
+  // Receive a message (called by ChatRoom during broadcast)
+  // Demonstrates: List concatenation for inbox
+  receiveMessage: msg =>
+    self.inbox := self.inbox ++ #(msg)
+
+  // Send a message via the room
+  // Demonstrates: Calling method on actor reference stored in field
+  say: message =>
+    self.room say: message from: self
+
+  // Return received messages
+  getInbox =>
+    ^self.inbox
+  
+  // Return member's name
+  getName =>
+    ^self.name
