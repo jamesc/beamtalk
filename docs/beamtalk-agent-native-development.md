@@ -94,7 +94,7 @@ Beamtalk's syntax is Smalltalk-**inspired**, not Smalltalk-**compatible**. We ke
 | **Keyword messages** | `array at: 1 put: "hello"` | Named parameters built into the syntax — reads like English |
 | **Unary messages** | `counter increment` | No parentheses needed for zero-argument calls |
 | **Binary messages** | `3 + 4` | Arithmetic and comparison operators work as expected |
-| **Blocks (closures)** | `[:x | x + 1]` | Concise anonymous functions |
+| **Blocks (closures)** | `[:x \| x + 1]` | Concise anonymous functions |
 | **Assignment** | `count := 0` | `:=` clearly distinct from equality (`=`) |
 | **Comments** | `// single line` | Familiar to C/JS/Rust developers |
 | **State declaration** | `state: name = default` | Instance variables with initial values |
@@ -136,7 +136,7 @@ Beamtalk occupies a unique position:
 | **OTP boilerplate** | Heavy | Moderate (macros hide some) | None (objects *are* OTP processes) |
 | **Live programming** | Hot reload | Hot reload | Hot reload + reflection + introspection |
 
-The key insight: **objects are the right abstraction over BEAM processes.** The BEAM's actor model (isolated processes communicating by messages) *is* the object-oriented paradigm that Smalltalk invented. Beamtalk makes this connection explicit — every object is a process, every method call is a message, every class is a supervision boundary.
+The key insight: **objects are the right abstraction over BEAM processes.** The BEAM's actor model (isolated processes communicating by messages) *is* the object-oriented paradigm that Smalltalk invented. Beamtalk makes this connection explicit — every actor is a process, every method call is a message send, and the OTP supervision model maps naturally onto class hierarchies.
 
 ---
 
