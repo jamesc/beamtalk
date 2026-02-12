@@ -188,7 +188,7 @@ errors := lines select: [:line | line includes: 'ERROR']
 errors do: [:line | Transcript show: line]
 ```
 
-**Implementation:** `File lines:` opens a handle, returns a Stream whose generator calls `file:read_line/1`. When the stream is exhausted or garbage collected, the handle closes. Block-scoped `File open:do:` provides explicit lifecycle control.
+**Implementation:** `File lines:` opens a handle, returns a Stream whose generator calls `file:read_line/1`. When the stream is exhausted, the handle closes automatically. If the stream is abandoned without being fully consumed, the BEAM's process-linked file handle ensures cleanup when the owning process exits. Block-scoped `File open:do:` provides explicit lifecycle control for cases where deterministic cleanup matters.
 
 ### Collection Integration
 
@@ -359,12 +359,28 @@ lines := Elixir.File streamBang: 'data.csv'
 ### Alternative C: Iterator Protocol (Rust/Python model)
 Define an `Iterable` protocol that any object can implement, similar to Rust's `Iterator` trait or Python's `__iter__`.
 
-**Rejected because:** Requires language-level protocol/trait support (Behaviours) that Beamtalk doesn't have yet. Stream achieves the same result via a concrete class — when Behaviours arrive, Stream naturally becomes the reference implementation of an Iterable behaviour.
+```beamtalk
+// Hypothetical — requires Behaviours
+behaviour Iterable
+  next => ...    // returns {value, nextState} or #done
+  
+// Any class could implement Iterable
+Object subclass: Range
+  implements: Iterable
+  next => ...
+```
+
+**Rejected because:** Requires language-level protocol/trait support (Behaviours) that Beamtalk doesn't have yet. A concrete Stream class delivers the same user value now. When Behaviours arrive, Stream naturally becomes the reference implementation of an `Iterable` behaviour — the design is forward-compatible, not locked in.
 
 ### Alternative D: FileStream as Actor
 Wrap file handles in a gen_server (actor) for supervised lifecycle management.
 
 **Rejected because:** Erlang developers do file I/O inline, not via process wrappers. The BEAM already links file handles to the calling process for auto-cleanup. A gen_server adds ~5μs overhead per call and supervision complexity for no benefit in the common case. Block-scoped `File open:do:` handles cleanup idiomatically. Users who need actor-wrapped files can build that at the application level.
+
+### Alternative E: Do Nothing (Status Quo)
+Keep the current state: `File readAll:` for files, eager collection iteration for data processing. Rely on Erlang interop for anything beyond whole-file reads.
+
+**Rejected because:** The status quo works for small-data, simple cases — but it's a dead end. Users cannot read large files without loading them into memory. Users cannot compose data processing pipelines. Every new data source (network, stdin, generators) would need its own bespoke iteration pattern. The "do nothing" option is acceptable for 2026 if Beamtalk only targets small scripts, but not if it aims to be a general-purpose language. The investment in Stream pays off across every future I/O feature.
 
 ## Consequences
 
@@ -380,6 +396,8 @@ Wrap file handles in a gen_server (actor) for supervised lifecycle management.
 - Departure from Smalltalk's ReadStream/WriteStream (porting friction for parser-heavy code)
 - Closure-based lazy evaluation is a bigger engineering lift than positional streams
 - No dedicated string building class (use `List join` or string concatenation for now)
+- `Stream generate:` (yield-based generators) requires spawning a helper process on BEAM, which partially contradicts the "no processes per stream" design goal — this constructor should be documented as the exception
+- Abandoned file streams (not fully consumed, not block-scoped) rely on process exit for handle cleanup — could leak handles in long-lived processes. `File open:do:` is the safe pattern.
 
 ### Neutral
 - Existing `File readAll:` / `File writeAll:contents:` remain for simple use cases
