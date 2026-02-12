@@ -10,7 +10,7 @@ ClassVarCounter getCount
 
 // Create an instance via class method that increments counter
 ClassVarCounter create
-// => _
+// => #Actor<ClassVarCounter,_>
 
 // Class variable was incremented
 ClassVarCounter getCount
@@ -18,7 +18,7 @@ ClassVarCounter getCount
 
 // Create another instance
 ClassVarCounter create
-// => _
+// => #Actor<ClassVarCounter,_>
 
 // Class variable persists across calls
 ClassVarCounter getCount

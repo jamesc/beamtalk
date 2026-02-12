@@ -20,7 +20,7 @@ _error kind
 
 // _error message contains the error description
 _error message
-// => _
+// => Integer does not understand 'nonExistentMethod'
 
 // _error class should reflect the error hierarchy (BT-452)
 _error class

@@ -56,6 +56,8 @@ pub(super) fn print_help() {
     println!("Beamtalk REPL Commands:");
     println!();
     println!("  :help, :h       Show this help message");
+    println!("  :help <Class>   Show class documentation and methods");
+    println!("  :help <C> <sel> Show method documentation");
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");

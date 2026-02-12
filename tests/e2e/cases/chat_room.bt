@@ -22,14 +22,14 @@ room := ChatRoom spawn
 
 // Initially no members
 online := room online
-// => _
+// => {"$beamtalk_class":"Set","elements":[]}
 
 online isEmpty
 // => true
 
 // No message history
 hist := room getHistory
-// => _
+// => []
 
 hist size
 // => 0
@@ -47,10 +47,10 @@ bob := ChatMember spawn
 
 // Set member names
 alice setName: "Alice"
-// => _
+// => Alice
 
 bob setName: "Bob"
-// => _
+// => Bob
 
 // Verify names were set
 alice getName
@@ -61,21 +61,21 @@ bob getName
 
 // Set room references for members
 alice setRoom: room
-// => _
+// => #Actor<ChatRoom,_>
 
 bob setRoom: room
-// => _
+// => #Actor<ChatRoom,_>
 
 // Join the room
 room join: alice
-// => _
+// => {"$beamtalk_class":"Set","elements":_}
 
 room join: bob
-// => _
+// => {"$beamtalk_class":"Set","elements":_}
 
 // Check online members (Set of actor references)
 members := room online
-// => _
+// => {"$beamtalk_class":"Set","elements":_}
 
 members size
 // => 2
@@ -93,11 +93,11 @@ members includes: bob
 
 // Send a message from Alice
 room say: "Hello everyone!" from: alice
-// => _
+// => nil
 
 // Check message history
 history := room getHistory
-// => _
+// => ["Hello everyone!"]
 
 history size
 // => 1
@@ -107,7 +107,7 @@ history first
 
 // Check that alice received the message (via do: broadcast)
 aliceInbox := alice getInbox
-// => _
+// => ["Hello everyone!"]
 
 aliceInbox size
 // => 1
@@ -117,7 +117,7 @@ aliceInbox first
 
 // Check that bob also received it
 bobInbox := bob getInbox
-// => _
+// => ["Hello everyone!"]
 
 bobInbox size
 // => 1
@@ -131,24 +131,24 @@ bobInbox first
 
 // Bob replies
 room say: "Hey Alice!" from: bob
-// => _
+// => nil
 
 // History now has 2 messages
 history2 := room getHistory
-// => _
+// => ["Hello everyone!","Hey Alice!"]
 
 history2 size
 // => 2
 
 // Both members received both messages
 aliceInbox2 := alice getInbox
-// => _
+// => ["Hello everyone!","Hey Alice!"]
 
 aliceInbox2 size
 // => 2
 
 bobInbox2 := bob getInbox
-// => _
+// => ["Hello everyone!","Hey Alice!"]
 
 bobInbox2 size
 // => 2
@@ -159,11 +159,11 @@ bobInbox2 size
 
 // Alice leaves
 room leave: alice
-// => _
+// => {"$beamtalk_class":"Set","elements":_}
 
 // Online members now has only bob
 onlineAfter := room online
-// => _
+// => {"$beamtalk_class":"Set","elements":_}
 
 onlineAfter size
 // => 1
@@ -176,18 +176,18 @@ onlineAfter includes: bob
 
 // Message sent after alice leaves
 room say: "Anyone there?" from: bob
-// => _
+// => nil
 
 // Alice doesn't receive the new message
 aliceInbox3 := alice getInbox
-// => _
+// => ["Hello everyone!","Hey Alice!"]
 
 aliceInbox3 size
 // => 2
 
 // Bob receives it
 bobInbox3 := bob getInbox
-// => _
+// => ["Hello everyone!","Hey Alice!","Anyone there?"]
 
 bobInbox3 size
 // => 3
