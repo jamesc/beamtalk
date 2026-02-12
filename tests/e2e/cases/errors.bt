@@ -71,9 +71,9 @@ undefinedVar + 5
 // ===========================================================================
 // These test common typos and syntax mistakes that users make
 
-// Missing colon in keyword message - lowercase counter makes it undefined
+// Missing colon in keyword message - lowercase counter triggers undefined variable
 counter subclass Foo
-// => ERROR: undefined
+// => ERROR: Undefined variable
 
 // Wrong bracket type - opening with [ but closing with )
 [:x | x + 1)
@@ -105,7 +105,7 @@ Counter spawn]
 
 // Incomplete keyword message (missing argument after colon)
 obj foo:
-// => ERROR: undefined
+// => ERROR: expected expression, found foo:
 
 // Missing closing parenthesis
 (1 + 2
@@ -127,9 +127,9 @@ obj foo:
 #
 // => ERROR: #
 
-// Invalid number with letter (not radix notation)
+// Invalid number with letter - lexed as integer 123 + unary message abc
 123abc
-// => ERROR: undefined
+// => ERROR: does not understand
 
 // Number followed by invalid character sequence (tests lexer error recovery)
 42$
@@ -140,9 +140,9 @@ obj foo:
 // ===========================================================================
 // Multiple errors in one expression - parser should recover
 
-// Block with error in parameters AND body
+// Block with empty body evaluates to nil, then nil + 1 is arithmetic error
 [:x :y | ] + 1
-// => ERROR: expected expression
+// => ERROR: badarith
 
 // Multiple syntax errors in sequence
 ] + [ + )
