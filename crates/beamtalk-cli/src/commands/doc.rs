@@ -16,7 +16,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Information about a documented class.
 struct ClassInfo {
@@ -80,8 +80,10 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     // Generate CSS
     write_css(&output_path)?;
 
-    // Generate index page
-    write_index_page(&output_path, &classes)?;
+    // Generate index page (include README.md from source dir if present, per ADR 0008)
+    let readme_path = source_path.join("README.md");
+    let readme = fs::read_to_string(&readme_path).ok();
+    write_index_page(&output_path, &classes, readme.as_deref())?;
 
     // Generate per-class pages
     for class in &classes {
@@ -137,7 +139,15 @@ fn parse_class_info(path: &Utf8Path) -> Result<Option<ClassInfo>> {
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    if has_errors {
+        warn!("Skipping '{}': parse errors detected", path);
+        return Ok(None);
+    }
 
     let Some(class) = module.classes.first() else {
         debug!("No class definition in '{}'", path);
@@ -482,12 +492,26 @@ fn write_css(output_dir: &Utf8Path) -> Result<()> {
 }
 
 /// Write the index (landing) page.
-fn write_index_page(output_dir: &Utf8Path, classes: &[ClassInfo]) -> Result<()> {
+///
+/// If `readme` is provided (from source dir's README.md), it is rendered
+/// above the class listing as the project overview (per ADR 0008).
+fn write_index_page(
+    output_dir: &Utf8Path,
+    classes: &[ClassInfo],
+    readme: Option<&str>,
+) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header("Beamtalk API Reference", None));
 
     html.push_str("<h1>Beamtalk API Reference</h1>\n");
-    html.push_str("<p>Standard library classes and API documentation.</p>\n");
+
+    if let Some(readme_content) = readme {
+        html.push_str("<section class=\"readme\">\n");
+        html.push_str(&render_doc(readme_content));
+        html.push_str("</section>\n");
+    } else {
+        html.push_str("<p>Standard library classes and API documentation.</p>\n");
+    }
 
     html.push_str("<h2>Classes</h2>\n");
     html.push_str("<ul class=\"class-list\">\n");
