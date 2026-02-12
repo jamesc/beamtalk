@@ -17,7 +17,7 @@
 /// #(1, 2, 3) first         // => 1
 /// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
 /// ```
-sealed Object subclass: List
+sealed Collection subclass: List
   /// Number of elements in the list.
   ///
   /// ## Examples

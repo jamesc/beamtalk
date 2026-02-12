@@ -1,0 +1,139 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Stream — Lazy, closure-based sequences.
+///
+/// Stream is Beamtalk's universal interface for sequential data.
+/// Operations are either **lazy** (return a new Stream) or
+/// **terminal** (force evaluation and return a result).
+///
+/// ## Examples
+/// ```beamtalk
+/// (Stream from: 1) take: 5             // => #(1, 2, 3, 4, 5)
+/// (Stream on: #(1, 2, 3)) asList       // => #(1, 2, 3)
+/// ((Stream from: 1) select: [:n | n isEven]) take: 3  // => #(2, 4, 6)
+/// ```
+sealed Object subclass: Stream
+
+  /// Create an infinite Stream starting from `start`, incrementing by 1.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream from: 1) take: 3           // => #(1, 2, 3)
+  /// ```
+  class sealed from: start => @primitive 'from:'
+
+  /// Create an infinite Stream starting from `start`, applying `stepFun` to get next.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream from: 1 by: [:n | n * 2]) take: 4  // => #(1, 2, 4, 8)
+  /// ```
+  class sealed from: start by: stepFun => @primitive 'from:by:'
+
+  /// Create a Stream from a collection (list).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
+  /// ```
+  class sealed on: collection => @primitive 'on:'
+
+  /// Filter elements matching predicate (lazy).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)
+  /// ```
+  select: predicate => @primitive 'select:'
+
+  /// Transform each element (lazy).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)
+  /// ```
+  collect: transform => @primitive 'collect:'
+
+  /// Inverse filter — exclude elements matching predicate (lazy).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Stream on: #(1, 2, 3, 4)) reject: [:n | n > 2]) asList  // => #(1, 2)
+  /// ```
+  reject: predicate => @primitive 'reject:'
+
+  /// Skip first N elements (lazy).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Stream on: #(1, 2, 3, 4, 5)) drop: 2) asList  // => #(3, 4, 5)
+  /// ```
+  drop: count => @primitive 'drop:'
+
+  /// Return first N elements as a List (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream from: 1) take: 5           // => #(1, 2, 3, 4, 5)
+  /// ```
+  take: count => @primitive 'take:'
+
+  /// Iterate with side effects, return nil (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]
+  /// ```
+  do: block => @primitive 'do:'
+
+  /// Fold/reduce with initial value (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
+  /// ```
+  inject: initial into: block => @primitive 'inject:into:'
+
+  /// Return first element matching predicate, or nil (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
+  /// ```
+  detect: predicate => @primitive 'detect:'
+
+  /// Materialize entire stream to a List (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
+  /// ```
+  asList => @primitive 'asList'
+
+  /// Return true if any element satisfies predicate (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) anySatisfy: [:n | n > 2]  // => true
+  /// ```
+  anySatisfy: predicate => @primitive 'anySatisfy:'
+
+  /// Return true if all elements satisfy predicate (terminal).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2, 3)) allSatisfy: [:n | n > 0]  // => true
+  /// ```
+  allSatisfy: predicate => @primitive 'allSatisfy:'
+
+  /// Return a developer-readable string showing pipeline structure.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream from: 1) printString        // => 'Stream(from: 1)'
+  /// ```
+  printString => @primitive 'printString'
+
+  /// Human-readable description of the receiver.
+  describe => 'a Stream'

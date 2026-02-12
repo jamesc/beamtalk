@@ -877,6 +877,9 @@ format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error 
     %% ADR 0015/BT-452: Evaluation error with wrapped Exception — use actual class name
     ClassName = atom_to_binary(ExClass, utf8),
     iolist_to_binary([ClassName, <<": ">>, beamtalk_error:format(Error)]);
+format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
+    %% BT-237: Format structured beamtalk_error from eval context
+    iolist_to_binary(beamtalk_error:format(Error));
 format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([<<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)]);
 format_error_message({load_error, Reason}) ->
