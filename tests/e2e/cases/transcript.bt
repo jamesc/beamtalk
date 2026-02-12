@@ -11,11 +11,11 @@
 // BASIC OUTPUT
 // ===========================================================================
 
-// show: prints a string (returns Future from async send)
+// show: prints a string (async send, REPL auto-awaits to nil)
 Transcript show: 'Hello'
 // => nil
 
-// cr prints a newline (returns Future from async send)
+// cr prints a newline (async send, REPL auto-awaits to nil)
 Transcript cr
 // => nil
 

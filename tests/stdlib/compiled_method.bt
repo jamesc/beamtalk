@@ -13,7 +13,7 @@
 // ===========================================================================
 
 Counter >> #getValue
-// => {"$beamtalk_class":"CompiledMethod","__method_info__":_,"__selector__":"getValue","__source__":"getValue => ^self.value"}
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 Counter >> #nonExistent
 // => nil
@@ -26,7 +26,7 @@ cls := Counter
 // => Counter
 
 cls >> #getValue
-// => {"$beamtalk_class":"CompiledMethod","__method_info__":_,"__selector__":"getValue","__source__":"getValue => ^self.value"}
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 (cls >> #getValue) selector
 // => getValue

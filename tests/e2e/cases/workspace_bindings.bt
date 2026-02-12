@@ -12,11 +12,11 @@
 // TRANSCRIPT BINDING — BASIC DISPATCH
 // ===========================================================================
 
-// Transcript show: dispatches through workspace binding (async send → future)
+// Transcript show: dispatches through workspace binding (async send, REPL auto-awaits to nil)
 Transcript show: 'Hello'
 // => nil
 
-// Transcript cr dispatches through workspace binding
+// Transcript cr dispatches through workspace binding (async send, REPL auto-awaits to nil)
 Transcript cr
 // => nil
 

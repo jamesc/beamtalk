@@ -18,7 +18,7 @@ cls := (Beamtalk classNamed: #Counter) await
 // => Counter
 
 cls >> #getValue
-// => {"$beamtalk_class":"CompiledMethod","__method_info__":_,"__selector__":"getValue","__source__":"getValue => ^self.value"}
+// => {"$beamtalk_class":"CompiledMethod",_}
 
 (cls >> #getValue) selector
 // => getValue

@@ -11,6 +11,7 @@ c := ErrorCounter spawn
 // => #Actor<ErrorCounter,_>
 
 // riskyIncrement triggers 1/0 exception, handler increments errorCount
+// Returns a future (bare PID) from async send
 c riskyIncrement
 // => #Actor<_>
 
@@ -23,6 +24,7 @@ c getValue await
 // => 0
 
 // Call again to verify mutation accumulates
+// Returns a future (bare PID) from async send
 c riskyIncrement
 // => #Actor<_>
 
@@ -36,6 +38,7 @@ d := ErrorCounter spawn
 // => #Actor<ErrorCounter,_>
 
 // safeIncrementWithCleanup: body increments value, cleanup increments errorCount
+// Returns a future (bare PID) from async send
 d safeIncrementWithCleanup
 // => #Actor<_>
 
@@ -48,6 +51,7 @@ d getErrorCount await
 // => 1
 
 // Call again to verify both accumulate
+// Returns a future (bare PID) from async send
 d safeIncrementWithCleanup
 // => #Actor<_>
 
