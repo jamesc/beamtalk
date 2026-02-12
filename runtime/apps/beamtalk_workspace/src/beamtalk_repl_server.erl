@@ -262,12 +262,31 @@ handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
 
 handle_op(<<"reload">>, Params, Msg, SessionPid) ->
     Module = binary_to_list(maps:get(<<"module">>, Params, <<>>)),
-    %% Reload is load with the same path - delegate to load-file
-    %% For now, treat as load-file if path is available
     case maps:get(<<"path">>, Params, undefined) of
+        undefined when Module =/= [] ->
+            %% Look up source path from module tracker
+            ModuleAtom = list_to_atom(Module),
+            {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
+            case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
+                {ok, Info} ->
+                    case beamtalk_repl_modules:get_source_file(Info) of
+                        undefined ->
+                            beamtalk_repl_protocol:encode_error(
+                                {no_source_file, Module}, Msg,
+                                fun format_error_message/1);
+                        SourcePath ->
+                            handle_op(<<"load-file">>,
+                                #{<<"path">> => list_to_binary(SourcePath)},
+                                Msg, SessionPid)
+                    end;
+                {error, not_found} ->
+                    beamtalk_repl_protocol:encode_error(
+                        {module_not_loaded, Module}, Msg,
+                        fun format_error_message/1)
+            end;
         undefined ->
             beamtalk_repl_protocol:encode_error(
-                {not_implemented, {reload, Module}}, Msg, fun format_error_message/1);
+                {missing_module_name, reload}, Msg, fun format_error_message/1);
         Path ->
             handle_op(<<"load-file">>, #{<<"path">> => Path}, Msg, SessionPid)
     end;
@@ -920,8 +939,14 @@ format_error_message({inspect_failed, PidStr}) ->
     iolist_to_binary([<<"Failed to inspect actor: ">>, list_to_binary(PidStr)]);
 format_error_message({actor_not_alive, PidStr}) ->
     iolist_to_binary([<<"Actor is not alive: ">>, list_to_binary(PidStr)]);
-format_error_message({not_implemented, {reload, Module}}) ->
-    iolist_to_binary([<<"Reload not yet implemented for: ">>, list_to_binary(Module)]);
+format_error_message({no_source_file, Module}) ->
+    iolist_to_binary([<<"No source file recorded for module: ">>, list_to_binary(Module),
+                      <<". Try :load <path> to load it first.">>]);
+format_error_message({module_not_loaded, Module}) ->
+    iolist_to_binary([<<"Module not loaded: ">>, list_to_binary(Module),
+                      <<". Use :load <path> to load it first.">>]);
+format_error_message({missing_module_name, reload}) ->
+    <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->
     iolist_to_binary([<<"Failed to create session: ">>, format_name(Reason)]);
 format_error_message(Reason) ->

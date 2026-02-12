@@ -63,6 +63,7 @@ pub(super) fn print_help() {
     println!("  :bindings       Show current variable bindings");
     println!("  :load <path>    Load a .bt file");
     println!("  :reload         Reload the last loaded file");
+    println!("  :reload <name>  Reload a module by name");
     println!("  :modules        List loaded modules");
     println!("  :unload <name>  Unload a module (fails if actors exist)");
     println!("  :actors         List running actors");

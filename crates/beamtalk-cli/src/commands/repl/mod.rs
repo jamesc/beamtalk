@@ -421,6 +421,34 @@ pub fn run(
                         }
                         continue;
                     }
+                    _ if line.starts_with(":reload ")
+                        || line.starts_with(":r ") =>
+                    {
+                        let module_name = if line.starts_with(":reload ") {
+                            line.strip_prefix(":reload ").unwrap().trim()
+                        } else {
+                            line.strip_prefix(":r ").unwrap().trim()
+                        };
+                        match client.reload_module(module_name) {
+                            Ok(response) => {
+                                if response.is_error() {
+                                    if let Some(msg) = response.error_message() {
+                                        eprintln!("Error: {msg}");
+                                    }
+                                } else if let Some(classes) = response.classes {
+                                    if classes.is_empty() {
+                                        println!("Reloaded {module_name}");
+                                    } else {
+                                        println!("Reloaded {}", classes.join(", "));
+                                    }
+                                } else {
+                                    println!("Reloaded {module_name}");
+                                }
+                            }
+                            Err(e) => eprintln!("Error: {e}"),
+                        }
+                        continue;
+                    }
                     ":reload" | ":r" => {
                         match client.reload_file() {
                             Ok(response) => {
