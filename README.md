@@ -133,6 +133,7 @@ researcher respondsTo: #plan: // => true
 Researcher methods            // => #(analyze:, plan:, query:, ...)
 
 // Hot-reload: redefine behavior mid-run, takes effect on next message
+// (proposed syntax — see agent-native development doc for design details)
 Researcher >> plan: prompt =>
   Transcript show: "Planning: ", prompt.
   ^super plan: prompt

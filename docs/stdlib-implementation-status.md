@@ -82,6 +82,8 @@
 | `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
 | `sealed` | modifier | ✅ | 🧪 | Method modifier preventing override |
 
+_Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getValue => ...`), not an `Object` selector. It is documented here for completeness but is not counted as a stdlib method.
+
 ### Number (`lib/Number.bt`)
 
 **Class:** `Number` — superclass: `Object` — `abstract`

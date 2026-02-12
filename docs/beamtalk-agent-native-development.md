@@ -182,7 +182,7 @@ Agent edits counter.rs (or .ts, .go, .py)
 
 **In a beamtalk workspace:**
 ```beamtalk
-// Agent modifies a method on the live class
+// Agent modifies a method on the live class (proposed syntax — not yet implemented)
 Counter >> increment => self.count := self.count + 1
 
 // Effect is immediate — next message send uses new code
@@ -287,8 +287,8 @@ c increment
 c increment
 c count        // => 2  ✓
 
-// Only after local verification: run full suite
-Beamtalk runTests: CounterTests
+// Only after local verification: run full suite via CLI
+// (today: `just test` or `just test-e2e`; in-workspace test API is planned)
 // => 12 passed, 0 failed
 ```
 
@@ -605,7 +605,8 @@ Ronacher worries about reformatting causing constructs to move between lines, tr
 
 ```beamtalk
 // Not: "edit lines 47-52 of counter.bt"
-// Instead: "replace the increment method on Counter"
+// Instead: conceptually, "replace the increment method on Counter"
+// (proposed syntax — not yet implemented; see §4.1 for design)
 Counter >> increment => self.count := self.count + 2
 ```
 
