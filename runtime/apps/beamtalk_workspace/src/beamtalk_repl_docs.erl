@@ -70,9 +70,13 @@ format_method_doc(ClassName, SelectorBin) ->
             case gen_server:call(ClassPid, {lookup_flattened, SelectorAtom}, 5000) of
                 {ok, DefiningClass, _MethodInfo} ->
                     %% Found the method — get its doc from the defining class
-                    DefClassPid = beamtalk_object_class:whereis_class(DefiningClass),
-                    DefModule = gen_server:call(DefClassPid, module_name, 5000),
-                    DocInfo = get_method_doc(DefModule, SelectorAtom),
+                    DocInfo = case beamtalk_object_class:whereis_class(DefiningClass) of
+                        undefined ->
+                            {atom_to_binary(SelectorAtom, utf8), none};
+                        DefClassPid ->
+                            DefModule = gen_server:call(DefClassPid, module_name, 5000),
+                            get_method_doc(DefModule, SelectorAtom)
+                    end,
                     Output = format_method_output(ClassName, SelectorBin,
                                                    DefiningClass, DocInfo),
                     {ok, Output};
