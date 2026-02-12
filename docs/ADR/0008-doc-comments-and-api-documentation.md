@@ -178,7 +178,7 @@ Elixir developers will miss `@doc` and runtime reflection. However, `///` with M
 | 🏭 **Operator** | "Runtime docs mean I can inspect a running system's API without source code" |
 | 🎨 **Language designer** | "This is the most composable — docs are data, not syntax, so they compose with metaprogramming" |
 
-**Why rejected despite strong steelman:** Implementation cost is 3-4× higher (parser + codegen + runtime metadata storage + reflection protocol). The `///` approach delivers tooling benefits (LSP, REPL, generated docs) immediately. Runtime doc access via `@doc` can be added as a complementary feature later without breaking `///`.
+**Why rejected despite strong steelman:** With EEP-48, `///` comments are compiled into `.beam` doc chunks — so runtime access is achieved without `@doc` syntax. `code:get_doc/1` provides the same introspection that `@doc` would. The `@doc` pragma would add parser complexity for no additional benefit. `///` is the authoring syntax; EEP-48 is the delivery mechanism.
 
 ### Option C: Convention-based `//` Comments (Rejected)
 
@@ -193,10 +193,10 @@ Elixir developers will miss `@doc` and runtime reflection. However, `///` with M
 
 ### Tension Points
 
-- **Smalltalk purists strongly prefer `@doc`** (docs as objects) but accept `///` as pragmatic
-- **BEAM veterans are split** — Elixir's `@doc` is beloved, but `///` is good enough
+- **Smalltalk purists accept `///` + EEP-48** — docs are runtime-accessible (the key concern), just not authored as message sends
+- **BEAM veterans are satisfied** — EEP-48 is the standard; Erlang and Elixir tools read Beamtalk docs natively
 - **Newcomers and tooling developers agree** on `///` — lowest friction, best tooling ROI
-- **Operators care about runtime access** which only `@doc` provides — but `:help` in REPL covers 90% of the use case
+- **Operators get full runtime access** — `code:get_doc/1` works in production without source code
 
 ## Alternatives Considered
 
@@ -208,7 +208,7 @@ Object subclass: Integer
   + other => @primitive '+'
 ```
 
-Rejected because the implementation cost is significantly higher: the pragma would need to be parsed, the doc string would need to flow through codegen to runtime metadata, and a reflection protocol (`doc:`) would need to be implemented. The `///` approach provides the same tooling benefits (LSP hover, generated docs, REPL help) with only lexer and AST changes.
+Rejected because `///` + EEP-48 achieves the same runtime accessibility without a new pragma. The `@doc` syntax would add parser complexity, and the doc string would need its own flow through codegen — whereas `///` trivia naturally attaches to AST nodes and compiles to EEP-48 doc chunks alongside existing codegen.
 
 ### Alternative: Convention-based `//` Comments
 
