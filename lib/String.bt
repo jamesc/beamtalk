@@ -1,87 +1,420 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// String - UTF-8 text operations
-//
-// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
-// All string operations are grapheme-aware.
+//// String — UTF-8 text operations.
+////
+//// Strings in Beamtalk are UTF-8 encoded binaries (Erlang binaries).
+//// All string operations are grapheme-aware.
+////
+//// ## BEAM Mapping
+//// Beamtalk strings map directly to Erlang binaries.
+////
+//// ## Examples
+//// ```beamtalk
+//// 'hello' class         // => String
+//// 'hello' length        // => 5
+//// 'hello' ++ ' world'   // => 'hello world'
+//// ```
 
 sealed Object subclass: String
-  // Binary operators first (parser constraint)
+  /// Test equality with another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' = 'abc'      // => true
+  /// 'abc' = 'xyz'      // => false
+  /// ```
   = other => @primitive '='
+
+  /// Test inequality with another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' ~= 'xyz'     // => true
+  /// 'abc' ~= 'abc'     // => false
+  /// ```
   ~= other => (self = other) not
+
+  /// Test if the receiver sorts before another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' < 'xyz'      // => true
+  /// 'xyz' < 'abc'      // => false
+  /// ```
   < other => @primitive '<'
+
+  /// Test if the receiver sorts after another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'xyz' > 'abc'      // => true
+  /// 'abc' > 'xyz'      // => false
+  /// ```
   > other => @primitive '>'
+
+  /// Test if the receiver sorts before or equal to another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' <= 'xyz'     // => true
+  /// 'abc' <= 'abc'     // => true
+  /// ```
   <= other => @primitive '<='
+
+  /// Test if the receiver sorts after or equal to another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'xyz' >= 'abc'     // => true
+  /// 'abc' >= 'abc'     // => true
+  /// ```
   >= other => @primitive '>='
+
+  /// Concatenate the receiver with another string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' ++ ' world'  // => 'hello world'
+  /// 'a' ++ 'b'           // => 'ab'
+  /// ```
   ++ other => @primitive '++'
 
-  // Concatenation alias
+  /// Alias for `++`. Concatenate two strings.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' , ' world'   // => 'hello world'
+  /// ```
   , other => self ++ other
 
-  // Length and access
+  /// Number of grapheme clusters in the string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' length       // => 5
+  /// '' length            // => 0
+  /// ```
   length => @primitive 'length'
+
+  /// Alias for `length`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' size         // => 5
+  /// ```
   size => self length
+
+  /// Return the grapheme cluster at the given 1-based index.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' at: 1        // => 'h'
+  /// 'hello' at: 5        // => 'o'
+  /// ```
   at: index => @primitive 'at:'
 
-  // Case transformation
+  /// Convert all characters to uppercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' uppercase    // => 'HELLO'
+  /// ```
   uppercase => @primitive 'uppercase'
+
+  /// Convert all characters to lowercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'HELLO' lowercase    // => 'hello'
+  /// ```
   lowercase => @primitive 'lowercase'
+
+  /// Capitalize the first character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' capitalize   // => 'Hello'
+  /// ```
   capitalize => @primitive 'capitalize'
 
-  // Whitespace
+  /// Remove leading and trailing whitespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '  hello  ' trim     // => 'hello'
+  /// ```
   trim => @primitive 'trim'
+
+  /// Remove leading whitespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '  hello' trimLeft   // => 'hello'
+  /// ```
   trimLeft => @primitive 'trimLeft'
+
+  /// Remove trailing whitespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello  ' trimRight  // => 'hello'
+  /// ```
   trimRight => @primitive 'trimRight'
 
-  // Reverse
+  /// Reverse the string (grapheme-aware).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' reverse      // => 'olleh'
+  /// ```
   reverse => @primitive 'reverse'
 
-  // Search
+  /// Test if the receiver contains a substring.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello world' includes: 'world'  // => true
+  /// 'hello' includes: 'xyz'          // => false
+  /// ```
   includes: substring => @primitive 'includes:'
+
+  /// Test if the receiver starts with the given prefix.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' startsWith: 'hel'   // => true
+  /// 'hello' startsWith: 'xyz'   // => false
+  /// ```
   startsWith: prefix => @primitive 'startsWith:'
+
+  /// Test if the receiver ends with the given suffix.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' endsWith: 'llo'     // => true
+  /// 'hello' endsWith: 'xyz'     // => false
+  /// ```
   endsWith: suffix => @primitive 'endsWith:'
+
+  /// Return the 1-based index of the first occurrence of a substring, or 0 if not found.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' indexOf: 'ell'      // => 2
+  /// 'hello' indexOf: 'xyz'      // => 0
+  /// ```
   indexOf: substring => @primitive 'indexOf:'
 
-  // Splitting
+  /// Split the string by a separator.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'a,b,c' split: ','          // => #('a', 'b', 'c')
+  /// ```
   split: separator => @primitive 'split:'
+
+  /// Split the string by a pattern.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'a::b::c' splitOn: '::'     // => #('a', 'b', 'c')
+  /// ```
   splitOn: pattern => @primitive 'splitOn:'
+
+  /// Repeat the string `n` times.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'ab' repeat: 3              // => 'ababab'
+  /// ```
   repeat: n => @primitive 'repeat:'
+
+  /// Split the string into lines.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'a\nb\nc' lines             // => #('a', 'b', 'c')
+  /// ```
   lines => @primitive 'lines'
+
+  /// Split the string into words (whitespace-separated).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello world' words         // => #('hello', 'world')
+  /// ```
   words => @primitive 'words'
 
-  // Replace
+  /// Replace all occurrences of `old` with `new`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'aabaa' replaceAll: 'a' with: 'x'     // => 'xxbxx'
+  /// ```
   replaceAll: old with: new => @primitive 'replaceAll:with:'
+
+  /// Replace the first occurrence of `old` with `new`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'aabaa' replaceFirst: 'a' with: 'x'   // => 'xabaa'
+  /// ```
   replaceFirst: old with: new => @primitive 'replaceFirst:with:'
 
-  // Substring
+  /// Take the first `n` grapheme clusters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' take: 3             // => 'hel'
+  /// ```
   take: n => @primitive 'take:'
+
+  /// Drop the first `n` grapheme clusters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' drop: 2             // => 'llo'
+  /// ```
   drop: n => @primitive 'drop:'
 
-  // Padding
+  /// Left-pad the string to the given width with spaces.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hi' padLeft: 5             // => '   hi'
+  /// ```
   padLeft: width => @primitive 'padLeft:'
+
+  /// Right-pad the string to the given width with spaces.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hi' padRight: 5            // => 'hi   '
+  /// ```
   padRight: width => @primitive 'padRight:'
+
+  /// Left-pad the string to the given width with the specified character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hi' padLeft: 5 with: '0'  // => '000hi'
+  /// ```
   padLeft: width with: char => @primitive 'padLeft:with:'
 
-  // Pure Beamtalk
+  /// Test if the string is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '' isEmpty                  // => true
+  /// 'hello' isEmpty             // => false
+  /// ```
   isEmpty => self length = 0
+
+  /// Test if the string is not empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' isNotEmpty          // => true
+  /// '' isNotEmpty               // => false
+  /// ```
   isNotEmpty => self length > 0
 
-  // Testing
+  /// Test if the string is empty or contains only whitespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '   ' isBlank               // => true
+  /// '' isBlank                  // => true
+  /// ```
   isBlank => @primitive 'isBlank'
+
+  /// Test if all characters are digits.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '123' isDigit               // => true
+  /// '12a' isDigit               // => false
+  /// ```
   isDigit => @primitive 'isDigit'
+
+  /// Test if all characters are letters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' isAlpha               // => true
+  /// 'ab1' isAlpha               // => false
+  /// ```
   isAlpha => @primitive 'isAlpha'
 
-  // Conversion
+  /// Parse the string as an integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '42' asInteger              // => 42
+  /// ```
   asInteger => @primitive 'asInteger'
+
+  /// Parse the string as a float.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// '3.14' asFloat              // => 3.14
+  /// ```
   asFloat => @primitive 'asFloat'
+
+  /// Convert the string to an atom (Symbol).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' asAtom              // => #hello
+  /// ```
   asAtom => @primitive 'asAtom'
+
+  /// Convert the string to a list of grapheme cluster strings.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' asList                // => #('a', 'b', 'c')
+  /// ```
   asList => @primitive 'asList'
 
-  // Iteration
+  /// Iterate over each grapheme cluster, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' each: [:c | Transcript show: c]
+  /// ```
   each: block => @primitive 'each:'
+
+  /// Collect results of evaluating `block` on each grapheme cluster.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'abc' collect: [:c | c uppercase]  // => #('A', 'B', 'C')
+  /// ```
   collect: block => @primitive 'collect:'
+
+  /// Select grapheme clusters for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'a1b2' select: [:c | c isAlpha]    // => #('a', 'b')
+  /// ```
   select: block => @primitive 'select:'
 
+  /// Return the string itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' describe            // => 'hello'
+  /// ```
   describe => self
+
+  /// Return the string itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 'hello' printString         // => 'hello'
+  /// ```
   printString => self

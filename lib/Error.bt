@@ -1,10 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Error - Non-resumable exceptions
-//
-// Subclass of Exception for errors that cannot be resumed.
-// Maps to Erlang's error class in try/catch.
+//// Error — Non-resumable exceptions.
+////
+//// Subclass of Exception for errors that cannot be resumed.
+//// Maps to Erlang's `error` class in try/catch.
+////
+//// ## Examples
+//// ```beamtalk
+//// [1 / 0] on: Error do: [:e | e message]
+//// ```
 
 Exception subclass: Error
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Error describe   // => 'an Error'
+  /// ```
   describe => 'an Error'

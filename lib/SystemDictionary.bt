@@ -1,14 +1,48 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// SystemDictionary - Global class for system-wide reflection
-//
-// Provides access to the class registry, global namespace, and
-// system-wide introspection. The global binding `Beamtalk` is an instance
-// of SystemDictionary, analogous to Smalltalk's `Smalltalk` global.
+//// SystemDictionary — System-wide reflection and class registry.
+////
+//// Provides access to the class registry, global namespace, and
+//// system-wide introspection. The global binding `Beamtalk` is an
+//// instance of SystemDictionary, analogous to Smalltalk's `Smalltalk` global.
+////
+//// ## Examples
+//// ```beamtalk
+//// Beamtalk version
+//// Beamtalk allClasses
+//// Beamtalk classNamed: #Integer
+//// ```
 
 Actor subclass: SystemDictionary
+  /// Return a list of all registered class names.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk allClasses
+  /// ```
   allClasses => @primitive 'allClasses'
+
+  /// Look up a class by name (symbol).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk classNamed: #Integer
+  /// ```
   classNamed: className => @primitive 'classNamed:'
+
+  /// Return the global namespace as a dictionary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk globals
+  /// ```
   globals => @primitive 'globals'
+
+  /// Return the Beamtalk version string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk version
+  /// ```
   version => @primitive 'version'

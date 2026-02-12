@@ -1,30 +1,108 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-//
-// Dictionary — the class of key-value maps (Erlang maps).
-//
-// Dictionaries are immutable key-value collections backed by Erlang maps.
-// Operations that "modify" a dictionary return a new dictionary.
-//
-// Syntax: #{key => value, ...}
+
+//// Dictionary — Immutable key-value collection.
+////
+//// Dictionaries are backed by Erlang maps. Operations that "modify"
+//// a dictionary return a new dictionary — the original is unchanged.
+////
+//// ## BEAM Mapping
+//// Beamtalk dictionaries map directly to Erlang maps.
+////
+//// ## Examples
+//// ```beamtalk
+//// #{#name => 'Alice'} class                   // => Dictionary
+//// #{#name => 'Alice'} at: #name               // => 'Alice'
+//// #{#a => 1} at: #b put: 2                    // => #{#a => 1, #b => 2}
+//// ```
 
 sealed Object subclass: Dictionary
 
-  // Access
+  /// Number of key-value pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} size                   // => 2
+  /// ```
   size => @primitive 'size'
+
+  /// Return a list of all keys.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} keys
+  /// ```
   keys => @primitive 'keys'
+
+  /// Return a list of all values.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} values
+  /// ```
   values => @primitive 'values'
+
+  /// Return the value associated with `key`. Raises an error if not found.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#name => 'Alice'} at: #name              // => 'Alice'
+  /// ```
   at: key => @primitive 'at:'
+
+  /// Return the value for `key`, or evaluate `block` if absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} at: #b ifAbsent: [0]            // => 0
+  /// ```
   at: key ifAbsent: block => @primitive 'at:ifAbsent:'
+
+  /// Return a new dictionary with `key` mapped to `value`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} at: #b put: 2                   // => #{#a => 1, #b => 2}
+  /// ```
   at: key put: value => @primitive 'at:put:'
+
+  /// Test if the dictionary contains the given key.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} includesKey: #a                 // => true
+  /// #{#a => 1} includesKey: #b                 // => false
+  /// ```
   includesKey: key => @primitive 'includesKey:'
 
-  // Mutation (returns new dictionary)
+  /// Return a new dictionary without the given key.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1, #b => 2} removeKey: #a          // => #{#b => 2}
+  /// ```
   removeKey: key => @primitive 'removeKey:'
+
+  /// Merge another dictionary into the receiver (other's values win on conflict).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}
+  /// ```
   merge: other => @primitive 'merge:'
 
-  // Iteration
+  /// Iterate over each key-value pair, evaluating `block` with key and value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
+  /// ```
   keysAndValuesDo: block => @primitive 'keysAndValuesDo:'
 
-  // Reflection
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} describe                        // => 'a Dictionary'
+  /// ```
   describe => 'a Dictionary'

@@ -1,10 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// InstantiationError - Errors for incorrect object creation
-//
-// Subclass of Error for instantiation-related errors:
-// instantiation_error (e.g., Actor new instead of Actor spawn)
+//// InstantiationError — Incorrect object creation errors.
+////
+//// Raised when an object is instantiated incorrectly, for example
+//// calling `new` on an Actor (use `spawn` instead).
+////
+//// ## Examples
+//// ```beamtalk
+//// [Counter new] on: InstantiationError do: [:e | e message]
+//// ```
 
 Error subclass: InstantiationError
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// InstantiationError describe   // => 'an InstantiationError'
+  /// ```
   describe => 'an InstantiationError'

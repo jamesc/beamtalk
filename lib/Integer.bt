@@ -1,59 +1,351 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Integer - Whole number arithmetic and operations
-//
-// Integers in Beamtalk are arbitrary precision (Erlang integers).
+//// Integer — Whole number arithmetic and operations.
+////
+//// Integers in Beamtalk are arbitrary precision (Erlang integers).
+//// All arithmetic operations return integers unless explicitly
+//// converted with `asFloat`.
+////
+//// ## BEAM Mapping
+//// Beamtalk integers map directly to Erlang integers.
+////
+//// ## Examples
+//// ```beamtalk
+//// 42 class       // => Integer
+//// 3 + 4          // => 7
+//// 2 ** 100       // => 1267650600228229401496703205376
+//// 17 % 5         // => 2
+//// ```
 
 sealed Number subclass: Integer
-  // Binary operators — quoted selectors route through beamtalk_integer:dispatch
+  /// Add an integer to the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 + 4         // => 7
+  /// -1 + 1        // => 0
+  /// ```
   + other => @primitive '+'
+
+  /// Subtract an integer from the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 10 - 3        // => 7
+  /// 0 - 5         // => -5
+  /// ```
   - other => @primitive '-'
+
+  /// Multiply the receiver by an integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 6 * 7         // => 42
+  /// -3 * 4        // => -12
+  /// ```
   * other => @primitive '*'
+
+  /// Divide the receiver by an integer (integer division).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 10 / 3        // => 3
+  /// 42 / 7        // => 6
+  /// ```
   / other => @primitive '/'
+
+  /// Remainder after integer division.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 17 % 5        // => 2
+  /// 10 % 3        // => 1
+  /// ```
   % other => @primitive '%'
+
+  /// Raise the receiver to a power.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 2 ** 10       // => 1024
+  /// 3 ** 3        // => 27
+  /// ```
   ** other => @primitive '**'
+
+  /// Test equality with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 = 42       // => true
+  /// 1 = 2         // => false
+  /// ```
   = other => @primitive '='
+
+  /// Test inequality with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 ~= 2        // => true
+  /// 42 ~= 42      // => false
+  /// ```
   ~= other => (self = other) not
+
+  /// Test if the receiver is less than another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 < 2         // => true
+  /// 5 < 3         // => false
+  /// ```
   < other => @primitive '<'
+
+  /// Test if the receiver is greater than another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 > 3         // => true
+  /// 1 > 2         // => false
+  /// ```
   > other => @primitive '>'
+
+  /// Test if the receiver is less than or equal to another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 <= 2        // => true
+  /// 3 <= 3        // => true
+  /// ```
   <= other => @primitive '<='
+
+  /// Test if the receiver is greater than or equal to another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 >= 3        // => true
+  /// 3 >= 3        // => true
+  /// ```
   >= other => @primitive '>='
 
-  // Pure Beamtalk
+  /// Negate the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 negated     // => -5
+  /// -3 negated    // => 3
+  /// ```
   negated => 0 - self
+
+  /// Absolute value of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// -42 abs       // => 42
+  /// 7 abs         // => 7
+  /// ```
   abs => (self < 0) ifTrue: [self negated] ifFalse: [self]
+
+  /// Test if the receiver is even.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 4 isEven      // => true
+  /// 7 isEven      // => false
+  /// ```
   isEven => (self % 2) = 0
+
+  /// Test if the receiver is odd.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 7 isOdd       // => true
+  /// 4 isOdd       // => false
+  /// ```
   isOdd => (self % 2) ~= 0
+
+  /// Return the smaller of the receiver and `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 min: 7      // => 3
+  /// 10 min: 2     // => 2
+  /// ```
   min: other => (self < other) ifTrue: [self] ifFalse: [other]
+
+  /// Return the larger of the receiver and `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 max: 7      // => 7
+  /// 10 max: 2     // => 10
+  /// ```
   max: other => (self > other) ifTrue: [self] ifFalse: [other]
 
-  // Structural intrinsics — loop constructs
+  /// Evaluate `block` the receiver number of times.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 timesRepeat: [Transcript show: 'hi']
+  /// ```
   timesRepeat: block => @intrinsic timesRepeat
+
+  /// Iterate from the receiver to `end`, evaluating `block` with each value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 to: 3 do: [:i | Transcript show: i]
+  /// ```
   to: end do: block => @intrinsic toDo
+
+  /// Iterate from the receiver to `end` by `step`, evaluating `block` with each value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
+  /// ```
   to: end by: step do: block => @intrinsic toByDo
 
-  // Conversion — selector-based runtime dispatch
+  /// Convert the receiver to a Float.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 asFloat    // => 42.0
+  /// ```
   asFloat => @primitive 'asFloat'
+
+  /// Convert the receiver to its String representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 asString   // => '42'
+  /// ```
   asString => @primitive 'asString'
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 printString  // => '42'
+  /// ```
   printString => @primitive 'printString'
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 describe   // => '42'
+  /// ```
   describe => self asString
 
-  // Bitwise operations
+  /// Bitwise AND with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 12 bitAnd: 10   // => 8
+  /// ```
   bitAnd: other => @primitive 'bitAnd:'
+
+  /// Bitwise OR with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 12 bitOr: 10    // => 14
+  /// ```
   bitOr: other => @primitive 'bitOr:'
+
+  /// Bitwise XOR with another integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 12 bitXor: 10   // => 6
+  /// ```
   bitXor: other => @primitive 'bitXor:'
+
+  /// Bit shift the receiver by `n` positions. Positive shifts left, negative shifts right.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 bitShift: 4   // => 16
+  /// 16 bitShift: -2 // => 4
+  /// ```
   bitShift: n => @primitive 'bitShift:'
+
+  /// Bitwise complement of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0 bitNot        // => -1
+  /// ```
   bitNot => @primitive 'bitNot'
 
-  // Math
+  /// Factorial of the receiver. Raises an error for negative integers.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 factorial     // => 120
+  /// 0 factorial     // => 1
+  /// ```
   factorial => (self < 0) ifTrue: [self error: 'Factorial is undefined for negative integers'] ifFalse: [(self = 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
+
+  /// Greatest common divisor of the receiver and `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 12 gcd: 8       // => 4
+  /// 7 gcd: 5        // => 1
+  /// ```
   gcd: other => (other = 0) ifTrue: [self abs] ifFalse: [other gcd: (self % other)]
+
+  /// Least common multiple of the receiver and `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 4 lcm: 6        // => 12
+  /// 3 lcm: 5        // => 15
+  /// ```
   lcm: other => (self gcd: other) = 0 ifTrue: [0] ifFalse: [(((self abs) / (self gcd: other)) rounded) * (other abs)]
 
-  // Character predicates — integers are Unicode codepoints (BT-339)
+  /// Test if the codepoint is a Unicode letter.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 65 isLetter     // => true
+  /// 48 isLetter     // => false
+  /// ```
   isLetter => @primitive 'isLetter'
+
+  /// Test if the codepoint is a Unicode digit.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 48 isDigit      // => true
+  /// 65 isDigit      // => false
+  /// ```
   isDigit => @primitive 'isDigit'
+
+  /// Test if the codepoint is an uppercase letter.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 65 isUppercase  // => true
+  /// 97 isUppercase  // => false
+  /// ```
   isUppercase => @primitive 'isUppercase'
+
+  /// Test if the codepoint is a lowercase letter.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 97 isLowercase  // => true
+  /// 65 isLowercase  // => false
+  /// ```
   isLowercase => @primitive 'isLowercase'
+
+  /// Test if the codepoint is a whitespace character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 32 isWhitespace // => true
+  /// 65 isWhitespace // => false
+  /// ```
   isWhitespace => @primitive 'isWhitespace'

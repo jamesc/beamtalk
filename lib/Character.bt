@@ -1,45 +1,176 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Character - Unicode character (codepoint) wrapper
-//
-// Characters in Beamtalk are integers (Unicode codepoints) at the BEAM level.
-// The Character class provides OOP methods for working with individual characters.
-//
-// Syntax: $a, $Z, $1, $\n, $\t
-// Character value: 65  → $A (creates Character from codepoint)
+//// Character — Unicode character (codepoint) wrapper.
+////
+//// Characters in Beamtalk are integers (Unicode codepoints) at the BEAM
+//// level. The Character class provides OOP methods for working with
+//// individual characters.
+////
+//// ## Examples
+//// ```beamtalk
+//// $A class                 // => Character
+//// $A asInteger             // => 65
+//// $a isLetter              // => true
+//// ```
 
 sealed Object subclass: Character
 
-  // Comparison
+  /// Test equality with another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A = $A                  // => true
+  /// $A = $B                  // => false
+  /// ```
   = other => @primitive '='
+
+  /// Test inequality with another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A ~= $B                 // => true
+  /// $A ~= $A                 // => false
+  /// ```
   ~= other => (self = other) not
+
+  /// Test if the receiver sorts before another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A < $B                  // => true
+  /// ```
   < other => @primitive '<'
+
+  /// Test if the receiver sorts after another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $B > $A                  // => true
+  /// ```
   > other => @primitive '>'
+
+  /// Test if the receiver sorts before or equal to another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A <= $A                 // => true
+  /// ```
   <= other => @primitive '<='
+
+  /// Test if the receiver sorts after or equal to another character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A >= $A                 // => true
+  /// ```
   >= other => @primitive '>='
 
-  // Conversion
+  /// Return the Unicode codepoint as an integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A asInteger             // => 65
+  /// ```
   asInteger => @primitive 'asInteger'
+
+  /// Convert the character to a single-character string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A asString              // => 'A'
+  /// ```
   asString => @primitive 'asString'
 
-  // Display
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A printString           // => '$A'
+  /// ```
   printString => @primitive 'printString'
+
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A describe              // => '$A'
+  /// ```
   describe => self printString
 
-  // Identity
+  /// Return a hash value for the character.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A hash
+  /// ```
   hash => @primitive 'hash'
 
-  // Predicates
+  /// Test if the character is a Unicode letter.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $a isLetter              // => true
+  /// $1 isLetter              // => false
+  /// ```
   isLetter => @primitive 'isLetter'
+
+  /// Test if the character is a Unicode digit.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $1 isDigit               // => true
+  /// $a isDigit               // => false
+  /// ```
   isDigit => @primitive 'isDigit'
+
+  /// Test if the character is uppercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A isUppercase           // => true
+  /// $a isUppercase           // => false
+  /// ```
   isUppercase => @primitive 'isUppercase'
+
+  /// Test if the character is lowercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $a isLowercase           // => true
+  /// $A isLowercase           // => false
+  /// ```
   isLowercase => @primitive 'isLowercase'
+
+  /// Test if the character is whitespace.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $  isWhitespace          // => true
+  /// $a isWhitespace          // => false
+  /// ```
   isWhitespace => @primitive 'isWhitespace'
 
-  // Case conversion
+  /// Convert to uppercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $a uppercase             // => $A
+  /// ```
   uppercase => @primitive 'uppercase'
+
+  /// Convert to lowercase.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// $A lowercase             // => $a
+  /// ```
   lowercase => @primitive 'lowercase'
 
-  // Factory (class method)
+  /// Create a Character from a Unicode codepoint integer (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Character value: 65      // => $A
+  /// ```
   class sealed value: codepoint => @primitive 'value:'

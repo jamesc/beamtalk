@@ -1,45 +1,131 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-//
-// Set — the class of unique element collections (Erlang ordsets).
-//
-// Sets are immutable unordered collections of unique elements backed by
-// Erlang's ordsets module. Operations that "modify" a set return a new set.
-//
-// Sets are represented as tagged maps: #{'$beamtalk_class' => 'Set', elements => OrdsetData}
-// Creation: Set new
+
+//// Set — Unordered collection of unique elements.
+////
+//// Sets are immutable collections backed by Erlang's ordsets module.
+//// Operations that "modify" a set return a new set.
+////
+//// ## Examples
+//// ```beamtalk
+//// Set new class                    // => Set
+//// (Set new add: 1) includes: 1    // => true
+//// (Set new add: 1) size           // => 1
+//// ```
 
 sealed Object subclass: Set
   state: elements = #()
 
-  // Size
+  /// Number of elements in the set.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) size           // => 1
+  /// Set new size                    // => 0
+  /// ```
   size => @primitive 'size'
+
+  /// Test if the set has no elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new isEmpty                 // => true
+  /// ```
   isEmpty => @primitive 'isEmpty'
 
-  // Membership
+  /// Test if the set contains the given element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) includes: 1   // => true
+  /// (Set new add: 1) includes: 2   // => false
+  /// ```
   includes: element => @primitive 'includes:'
 
-  // Modification (returns new Set)
+  /// Return a new set with the element added.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) size          // => 1
+  /// ```
   add: element => @primitive 'add:'
+
+  /// Return a new set with the element removed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Set new add: 1) remove: 1) isEmpty   // => true
+  /// ```
   remove: element => @primitive 'remove:'
 
-  // Set operations (returns new Set)
+  /// Return a new set with elements from both sets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) union: (Set new add: 2)
+  /// ```
   union: other => @primitive 'union:'
+
+  /// Return a new set with only elements present in both sets.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)
+  /// ```
   intersection: other => @primitive 'intersection:'
+
+  /// Return a new set with elements in the receiver but not in `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Set new add: 1) add: 2) difference: (Set new add: 2)
+  /// ```
   difference: other => @primitive 'difference:'
 
-  // Predicates
+  /// Test if all elements of the receiver are in `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true
+  /// ```
   isSubsetOf: other => @primitive 'isSubsetOf:'
 
-  // Conversion
+  /// Convert the set to a list of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) asList        // => #(1)
+  /// ```
   asList => @primitive 'asList'
+
+  /// Create a set from a list of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new fromList: #(1, 2, 2, 3)
+  /// ```
   fromList: list => @primitive 'fromList:'
 
-  // Iteration
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) do: [:x | Transcript show: x]
+  /// ```
   do: block => @primitive 'do:'
 
-  // Display
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new printString
+  /// ```
   printString => @primitive 'printString'
 
-  // Reflection
+  /// Human-readable description of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new describe               // => 'a Set'
+  /// ```
   describe => 'a Set'
