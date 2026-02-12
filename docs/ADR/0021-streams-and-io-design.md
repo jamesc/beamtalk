@@ -35,8 +35,10 @@ Beamtalk's opportunity: implement this idea with modern (closure-based lazy) mec
 - Workspace singleton (ADR 0019)
 
 **Collections** (`lib/List.bt`, `lib/Set.bt`, etc.):
-- Full eager iteration: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`
-- No lazy variants
+- List has full eager iteration: `do:`, `collect:`, `select:`, `reject:`, `inject:into:`, `detect:`, `anySatisfy:`, `allSatisfy:`, plus `take:`, `drop:`
+- String has partial iteration: `each:`, `collect:`, `select:`
+- Set has only `do:`; Dictionary has only `keysAndValuesDo:`
+- No lazy variants on any collection
 - All operations materialize full result collections
 
 ### Constraints
@@ -145,6 +147,21 @@ s take: 5
 %% Terminal ops: pull elements until done or limit reached
 ```
 
+**Error handling — misuse examples:**
+```beamtalk
+// Infinite stream + asList = hangs (programmer error, like 1/0)
+(Stream from: 1) asList           // ⚠️ Never terminates — use take: first
+
+// Safe: always bound infinite streams
+(Stream from: 1) take: 10 . asList  // => #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+// REPL inspection — Stream describes its pipeline, not its data
+> s := #(1, 2, 3) stream select: [:n | n > 1]
+Stream(select: [...])              // shows structure, not values
+> s asList
+(2, 3)                             // terminal forces evaluation
+```
+
 ### File Streaming
 
 `File` gains a class method that returns a `Stream` of lines — no new FileStream class needed:
@@ -166,9 +183,9 @@ File open: 'data.csv' do: [:handle |
 // handle closed automatically
 
 // Process large files in constant memory
-(File lines: 'huge.log') 
-  select: [:line | line includes: 'ERROR']
-  | do: [:line | Transcript show: line]
+lines := File lines: 'huge.log'
+errors := lines select: [:line | line includes: 'ERROR']
+errors do: [:line | Transcript show: line]
 ```
 
 **Implementation:** `File lines:` opens a handle, returns a Stream whose generator calls `file:read_line/1`. When the stream is exhausted or garbage collected, the handle closes. Block-scoped `File open:do:` provides explicit lifecycle control.
@@ -250,8 +267,8 @@ This means collections keep their eager `do:`, `collect:`, `select:` for simple 
 ### Smalltalk Developer
 - **Departure:** No ReadStream/WriteStream. This is the biggest break from Smalltalk tradition.
 - **Migration:** `ReadStream on: collection` → `collection stream`. `WriteStream on: String new` → string concatenation or `List join`.
-- `do:`, `collect:`, `select:` work the same — just lazy instead of eager
-- Parsing code using `stream next` / `stream peek` needs adaptation
+- Same protocol names (`select:`, `collect:`, `do:`) — but Stream versions are lazy while Collection versions remain eager
+- Parsing code using `stream next` / `stream peek` needs adaptation (see `peekable` in Steelman Analysis)
 
 ### Erlang/BEAM Developer
 - `File lines:` wrapping `file:read_line/1` lazily is natural
@@ -390,8 +407,9 @@ Wrap file handles in a gen_server (actor) for supervised lifecycle management.
 - **Components:** stdlib (File.bt update), runtime (file line generator)
 
 ### Phase 3: Collection Integration
-- Add `stream` method to List, Tuple, String, Set, Dictionary
-- Returns lazy Stream over elements
+- Add `stream` method to List, String, Set, Dictionary
+- Returns lazy Stream over elements (characters for String, associations for Dictionary)
+- Note: Tuple is excluded — it serves as a Result type (`isOk`, `unwrap`), not a general collection
 - **Components:** stdlib updates to existing classes
 
 ### Future Phases (separate ADRs/issues)
