@@ -41,6 +41,15 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         }
     }
 
+    // In installed mode, runtime must already be present
+    if layout == repl_startup::RuntimeLayout::Installed && !paths.runtime_ebin.exists() {
+        return Err(miette!(
+            "Installed runtime not found at {}.\n\
+            Reinstall with `just install` or set BEAMTALK_RUNTIME_DIR.",
+            paths.runtime_ebin.display()
+        ));
+    }
+
     info!("Starting BEAM node with REPL backend on port {port}...");
 
     // Warn if stdlib is not compiled (directory may exist without .beam files)
