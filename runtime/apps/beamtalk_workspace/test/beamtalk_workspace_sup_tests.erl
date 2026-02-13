@@ -42,8 +42,8 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
     
-    %% Should have 9 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_actor, repl_server, idle_monitor, actor_sup, session_sup
-    ?assertEqual(9, length(ChildSpecs)).
+    %% Should have 10 children: workspace_meta, transcript_stream, system_dictionary, actor_registry, workspace_actor, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
+    ?assertEqual(10, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -58,7 +58,8 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
     ?assert(lists:member(beamtalk_actor_sup, Ids)),
-    ?assert(lists:member(beamtalk_session_sup, Ids)).
+    ?assert(lists:member(beamtalk_session_sup, Ids)),
+    ?assert(lists:member(beamtalk_workspace_bootstrap, Ids)).
 
 workspace_meta_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -162,6 +163,27 @@ singletons_after_metadata_test() ->
     ?assert(TranscriptIdx > MetaIdx),
     ?assert(SysDictIdx > MetaIdx).
 
+%%% Bootstrap child spec tests (ADR 0019 Phase 2)
+
+bootstrap_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+    
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_bootstrap],
+    ?assertEqual(worker, maps:get(type, Spec)),
+    ?assertEqual(permanent, maps:get(restart, Spec)),
+    ?assertEqual({beamtalk_workspace_bootstrap, start_link, []}, maps:get(start, Spec)).
+
+bootstrap_after_singletons_before_repl_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+    
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
+    WorkspaceActorIdx = index_of(beamtalk_workspace_actor, Ids),
+    ReplServerIdx = index_of(beamtalk_repl_server, Ids),
+    %% Bootstrap must come after all singletons but before REPL server
+    ?assert(BootstrapIdx > WorkspaceActorIdx),
+    ?assert(BootstrapIdx < ReplServerIdx).
+
 %%% Helpers
 
 index_of(Elem, List) ->
@@ -197,9 +219,9 @@ all_children_alive_test() ->
         %% Get all children
         Children = supervisor:which_children(Sup),
 
-        %% Expected: 9 children (workspace_meta, transcript_stream, system_dictionary,
-        %% actor_registry, workspace_actor, repl_server, idle_monitor, actor_sup, session_sup)
-        ?assertEqual(9, length(Children)),
+        %% Expected: 10 children (workspace_meta, transcript_stream, system_dictionary,
+        %% actor_registry, workspace_actor, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup)
+        ?assertEqual(10, length(Children)),
 
         %% Verify each child has correct ID and is alive
         ExpectedIds = [
@@ -208,6 +230,7 @@ all_children_alive_test() ->
             beamtalk_system_dictionary,
             beamtalk_actor_registry,
             beamtalk_workspace_actor,
+            beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,
             beamtalk_actor_sup,

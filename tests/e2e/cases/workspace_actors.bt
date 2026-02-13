@@ -12,9 +12,9 @@
 // WORKSPACE BINDING — CLASS INTROSPECTION
 // ===========================================================================
 
-// Workspace class returns Workspace
+// Workspace class returns WorkspaceEnvironment
 Workspace class
-// => Workspace
+// => WorkspaceEnvironment
 
 // Workspace respondsTo: #actors returns true
 Workspace respondsTo: #actors
