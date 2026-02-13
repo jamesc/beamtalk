@@ -667,7 +667,9 @@ Beamtalk combines ideas from:
 
 ## Contributing
 
-See [AGENTS.md](AGENTS.md) for development guidelines, coding standards, and task tracking.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started — covering dev setup, running tests, PR guidelines, and where to help.
+
+For AI agent contributors, see [AGENTS.md](AGENTS.md) for detailed development guidelines.
 
 We use [Linear](https://linear.app) for issue tracking (project prefix: `BT`).
 
