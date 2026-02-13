@@ -115,9 +115,6 @@ pub enum TokenKind {
     /// Fat arrow for method definitions: `=>`
     FatArrow,
 
-    /// Thin arrow for match arms: `->`
-    ThinArrow,
-
     // === Pragmas ===
     /// The `@primitive` directive for primitive method injection (ADR 0007)
     AtPrimitive,
@@ -220,7 +217,6 @@ impl TokenKind {
             | Self::Colon
             | Self::Hash
             | Self::FatArrow
-            | Self::ThinArrow
             | Self::AtPrimitive
             | Self::AtIntrinsic
             | Self::Eof => None,
@@ -260,7 +256,6 @@ impl std::fmt::Display for TokenKind {
             Self::Colon => write!(f, ":"),
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
-            Self::ThinArrow => write!(f, "->"),
             Self::AtPrimitive => write!(f, "@primitive"),
             Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::Eof => write!(f, "<eof>"),

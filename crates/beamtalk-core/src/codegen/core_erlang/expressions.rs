@@ -732,6 +732,13 @@ impl CoreErlangGenerator {
             parts.push(pattern_doc);
             parts.push(Document::String(">".to_string()));
 
+            // Push scope and bind pattern variables so the guard and body
+            // can reference them directly instead of looking up the bindings map.
+            self.push_scope();
+            Self::collect_pattern_variables(&arm.pattern, |name, core_var| {
+                self.bind_var(name, core_var);
+            });
+
             // Generate guard
             if let Some(guard) = &arm.guard {
                 parts.push(Document::String(" when ".to_string()));
@@ -745,6 +752,8 @@ impl CoreErlangGenerator {
             parts.push(Document::String(" -> ".to_string()));
             let body_doc = self.expression_doc(&arm.body)?;
             parts.push(body_doc);
+
+            self.pop_scope();
         }
 
         parts.push(Document::String(" end".to_string()));
@@ -848,6 +857,30 @@ impl CoreErlangGenerator {
                     .to_string(),
                 location: format!("{:?}", expr.span()),
             }),
+        }
+    }
+
+    /// Collects all variable names from a pattern and calls the callback
+    /// with the Beamtalk name and the corresponding Core Erlang variable name.
+    fn collect_pattern_variables(pattern: &Pattern, mut bind: impl FnMut(&str, &str)) {
+        Self::collect_pattern_variables_inner(pattern, &mut bind);
+    }
+
+    fn collect_pattern_variables_inner(pattern: &Pattern, bind: &mut impl FnMut(&str, &str)) {
+        match pattern {
+            Pattern::Variable(id) => {
+                let core_var = Self::erlang_var_name(&id.name);
+                bind(&id.name, &core_var);
+            }
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                for elem in elements {
+                    Self::collect_pattern_variables_inner(elem, bind);
+                }
+                if let Pattern::List { tail: Some(t), .. } = pattern {
+                    Self::collect_pattern_variables_inner(t, bind);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
         }
     }
 

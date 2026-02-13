@@ -205,7 +205,7 @@ impl Parser {
         }
 
         // Special handling for `match:` — produces Expression::Match
-        if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "match")
+        if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "match:")
             && self.peek_at(1) == Some(&TokenKind::LeftBracket)
         {
             return self.parse_match_expression(receiver);
@@ -616,7 +616,7 @@ impl Parser {
         let pat_span = pattern.span();
 
         // Check for optional guard: `when: [guard_expr]`
-        let guard = if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "when")
+        let guard = if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "when:")
         {
             self.advance(); // consume `when:`
             // Guard must be in a block [expr]
@@ -637,12 +637,13 @@ impl Parser {
         };
 
         // Expect -> separator
-        if !self.match_token(&TokenKind::ThinArrow) {
+        if !self.match_binary_selector("->") {
             self.error("Expected '->' after pattern in match arm");
         }
 
-        // Parse body expression
-        let body = self.parse_expression();
+        // Parse body expression — use keyword message level to avoid consuming
+        // semicolons (arm separators) or assignment operators
+        let body = self.parse_keyword_message();
         let span = pat_span.merge(body.span());
 
         if let Some(guard_expr) = guard {
