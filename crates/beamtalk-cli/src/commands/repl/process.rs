@@ -45,7 +45,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     if layout == repl_startup::RuntimeLayout::Installed && !paths.runtime_ebin.exists() {
         return Err(miette!(
             "Installed runtime not found at {}.\n\
-            Reinstall with `just install` or set BEAMTALK_RUNTIME_DIR.",
+            Reinstall Beamtalk using your original installation method, or set BEAMTALK_RUNTIME_DIR.",
             paths.runtime_ebin.display()
         ));
     }

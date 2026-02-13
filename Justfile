@@ -500,25 +500,41 @@ install PREFIX="/usr/local": build-release build-stdlib
     PREFIX="{{PREFIX}}"
     echo "📦 Installing beamtalk to ${PREFIX}..."
 
+    # Validate build artifacts exist
+    if [ ! -f target/release/beamtalk ]; then
+        echo "❌ Release binary not found. Run 'just build-release' first."
+        exit 1
+    fi
+
     # Binary
     install -d "${PREFIX}/bin"
     install -m 755 target/release/beamtalk "${PREFIX}/bin/beamtalk"
 
     # OTP application ebin directories
     for app in beamtalk_runtime beamtalk_workspace jsx; do
+        SRC="runtime/_build/default/lib/${app}/ebin"
+        if ! ls "${SRC}"/*.beam 1>/dev/null 2>&1; then
+            echo "❌ No .beam files found in ${SRC}. Run 'just build-erlang' first."
+            exit 1
+        fi
         install -d "${PREFIX}/lib/beamtalk/lib/${app}/ebin"
-        install -m 644 runtime/_build/default/lib/${app}/ebin/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        install -m 644 "${SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
         # Copy .app file if present
-        if ls runtime/_build/default/lib/${app}/ebin/*.app 1>/dev/null 2>&1; then
-            install -m 644 runtime/_build/default/lib/${app}/ebin/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
+        if ls "${SRC}"/*.app 1>/dev/null 2>&1; then
+            install -m 644 "${SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
         fi
     done
 
     # Stdlib (built under apps/, not _build/)
+    STDLIB_SRC="runtime/apps/beamtalk_stdlib/ebin"
+    if ! ls "${STDLIB_SRC}"/*.beam 1>/dev/null 2>&1; then
+        echo "❌ No stdlib .beam files found. Run 'just build-stdlib' first."
+        exit 1
+    fi
     install -d "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin"
-    install -m 644 runtime/apps/beamtalk_stdlib/ebin/*.beam "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
-    if ls runtime/apps/beamtalk_stdlib/ebin/*.app 1>/dev/null 2>&1; then
-        install -m 644 runtime/apps/beamtalk_stdlib/ebin/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    install -m 644 "${STDLIB_SRC}"/*.beam "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
+    if ls "${STDLIB_SRC}"/*.app 1>/dev/null 2>&1; then
+        install -m 644 "${STDLIB_SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
     fi
 
     echo "✅ Installed beamtalk to ${PREFIX}"
