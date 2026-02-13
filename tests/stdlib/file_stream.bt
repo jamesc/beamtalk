@@ -140,6 +140,42 @@ File open: "tests/stdlib/fixtures/stream_empty.txt" do: [:handle | handle lines 
 // => File.lines('tests/stdlib/fixtures/stream_test.txt')
 
 // ===========================================================================
+// STREAM FINALIZER — PARTIAL CONSUMPTION (BT-537)
+// ===========================================================================
+
+// take: on file stream closes handle via finalizer
+(File lines: "tests/stdlib/fixtures/stream_test.txt") take: 1
+// => ["line one"]
+
+// detect: on file stream closes handle via finalizer
+(File lines: "tests/stdlib/fixtures/stream_test.txt") detect: [:l | l includes: "two"]
+// => line two
+
+// anySatisfy: on file stream closes handle via finalizer
+(File lines: "tests/stdlib/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "one"]
+// => true
+
+// allSatisfy: on file stream with early exit closes handle via finalizer
+(File lines: "tests/stdlib/fixtures/stream_large.txt") allSatisfy: [:l | l = "a"]
+// => false
+
+// Pipeline with finalizer propagation: select + take
+((File lines: "tests/stdlib/fixtures/stream_test.txt") select: [:l | l includes: "line"]) take: 2
+// => ["line one","line two"]
+
+// Pipeline with finalizer propagation: collect + take
+((File lines: "tests/stdlib/fixtures/stream_large.txt") collect: [:l | l size]) take: 3
+// => [1,1,1]
+
+// Pipeline with finalizer propagation: drop + take
+((File lines: "tests/stdlib/fixtures/stream_large.txt") drop: 2) take: 2
+// => ["c","d"]
+
+// Pipeline with finalizer propagation: reject + detect
+((File lines: "tests/stdlib/fixtures/stream_test.txt") reject: [:l | l includes: "one"]) detect: [:l | l includes: "two"]
+// => line two
+
+// ===========================================================================
 // ERROR PATHS
 // ===========================================================================
 

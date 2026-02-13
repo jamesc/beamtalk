@@ -10,6 +10,7 @@
 -behaviour(gen_server).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include("beamtalk_workspace.hrl").
 
 -export([start_link/1, get_port/0, handle_client/2, parse_request/1, format_response/1, format_error/1,
          format_response_with_warnings/2, format_error_with_warnings/2,
@@ -203,51 +204,68 @@ handle_client(Socket, SessionPid) ->
     handle_client_loop(Socket, SessionPid).
 
 %% @private
-%% Session mode: forward requests to beamtalk_repl_shell via protocol-aware dispatch
+%% Session mode: forward requests to beamtalk_repl_shell via protocol-aware dispatch.
+%% The try/catch is scoped to a single iteration so that the recursive
+%% tail-call to handle_client_loop/2 happens outside the try block,
+%% allowing proper tail-call optimisation and preventing stack growth.
 handle_client_loop(Socket, SessionPid) ->
-    try
-        case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
-            {ok, Data} ->
-                %% Decode request using protocol module
-                case beamtalk_repl_protocol:decode(Data) of
-                    {ok, Msg} ->
-                        %% Process request via session or workspace APIs
-                        Response = handle_protocol_request(Msg, SessionPid),
-                        
-                        %% Send response
-                        case gen_tcp:send(Socket, [Response, "\n"]) of
-                            ok ->
-                                handle_client_loop(Socket, SessionPid);
-                            {error, SendError} ->
-                                logger:warning("REPL client send error: ~p", [SendError]),
-                                gen_tcp:close(Socket)
-                        end;
-                    {error, DecodeError} ->
-                        ErrorJson = format_error(DecodeError),
-                        case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
-                            ok ->
-                                handle_client_loop(Socket, SessionPid);
-                            {error, SendError} ->
-                                logger:warning("REPL client send error: ~p", [SendError]),
-                                gen_tcp:close(Socket)
-                        end
-                end;
-            {error, closed} ->
-                ok;
-            {error, timeout} ->
-                gen_tcp:close(Socket);
-            {error, RecvError} ->
-                logger:warning("REPL client recv error: ~p", [RecvError]),
-                gen_tcp:close(Socket)
-        end
-    catch
-        Class:Reason:Stack ->
-            logger:error("REPL client handler crash", #{
-                class => Class,
-                reason => Reason,
-                stack => lists:sublist(Stack, 10)
-            }),
-            catch gen_tcp:close(Socket)
+    Result = try handle_client_once(Socket, SessionPid)
+             catch
+                 Class:Reason:Stack ->
+                     logger:error("REPL client handler crash", #{
+                         class => Class,
+                         reason => Reason,
+                         stack => lists:sublist(Stack, 10)
+                     }),
+                     catch gen_tcp:close(Socket),
+                     stop
+             end,
+    case Result of
+        continue -> handle_client_loop(Socket, SessionPid);
+        stop     -> ok
+    end.
+
+%% @private
+%% Process a single recv/send iteration. Returns 'continue' or 'stop'.
+handle_client_once(Socket, SessionPid) ->
+    case gen_tcp:recv(Socket, 0, ?RECV_TIMEOUT) of
+        {ok, Data} ->
+            %% Decode request using protocol module
+            case beamtalk_repl_protocol:decode(Data) of
+                {ok, Msg} ->
+                    %% Process request via session or workspace APIs
+                    Response = handle_protocol_request(Msg, SessionPid),
+                    
+                    %% Send response
+                    case gen_tcp:send(Socket, [Response, "\n"]) of
+                        ok ->
+                            continue;
+                        {error, SendError} ->
+                            logger:warning("REPL client send error: ~p", [SendError]),
+                            gen_tcp:close(Socket),
+                            stop
+                    end;
+                {error, DecodeError} ->
+                    ErrorJson = format_error(DecodeError),
+                    case gen_tcp:send(Socket, [ErrorJson, "\n"]) of
+                        ok ->
+                            continue;
+                        {error, SendError} ->
+                            logger:warning("REPL client send error: ~p", [SendError]),
+                            gen_tcp:close(Socket),
+                            stop
+                    end
+            end;
+        {error, closed} ->
+            stop;
+        {error, timeout} ->
+            %% No data within RECV_TIMEOUT — just retry.
+            %% The idle monitor handles truly abandoned sessions.
+            continue;
+        {error, RecvError} ->
+            logger:warning("REPL client recv error: ~p", [RecvError]),
+            gen_tcp:close(Socket),
+            stop
     end.
 
 
@@ -297,8 +315,11 @@ handle_op(<<"clear">>, _Params, Msg, SessionPid) ->
 
 handle_op(<<"bindings">>, _Params, Msg, SessionPid) ->
     {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
+    %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
+    %% Users shouldn't see Transcript/Beamtalk/Workspace as "their" bindings.
+    UserBindings = maps:without(?WORKSPACE_BINDINGS, Bindings),
     beamtalk_repl_protocol:encode_bindings(
-        Bindings, Msg, fun term_to_json/1);
+        UserBindings, Msg, fun term_to_json/1);
 
 handle_op(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),
