@@ -6,6 +6,9 @@
 **/*.rs.bk
 *.pdb
 
+# Distribution
+/dist/
+
 # Cargo
 Cargo.lock
 .cargo/

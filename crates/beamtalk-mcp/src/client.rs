@@ -283,41 +283,46 @@ fn next_msg_id() -> String {
 mod tests {
     use super::*;
 
-    /// Port for integration tests. Must have a running REPL:
-    ///   beamtalk repl --port 19876
-    const TEST_PORT: u16 = 19876;
+    /// Port for integration tests. Reads `BEAMTALK_TEST_PORT` env var,
+    /// falls back to 19876 for manual `beamtalk repl --port 19876`.
+    fn test_port() -> u16 {
+        std::env::var("BEAMTALK_TEST_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(19876)
+    }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_eval_arithmetic() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.eval("2 + 3").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "5");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_eval_string() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.eval("'hello'").await.unwrap();
         assert!(!resp.is_error(), "eval should succeed");
         assert_eq!(resp.value_string(), "hello");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_eval_error() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.eval("42 nonexistentMethod").await.unwrap();
         assert!(resp.is_error(), "should be an error");
         assert!(resp.error_message().is_some(), "should have error message");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_bindings() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
 
         // Set a binding
         let resp = client.eval("testVar := 99").await.unwrap();
@@ -334,36 +339,36 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_actors_list() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.actors().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.actors.is_some(), "should return actors list");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_modules_list() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.modules().await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.modules.is_some(), "should return modules list");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_complete() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.complete("Integer ").await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_load_file_and_spawn_actor() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
 
         // Load counter
         let resp = client.load_file("examples/counter.bt").await.unwrap();
@@ -403,9 +408,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_docs() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
         let resp = client.docs("Integer", None).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.docs.is_some(), "should return docs");
@@ -414,9 +419,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_value_string_formats_correctly() {
-        let client = ReplClient::connect(TEST_PORT).await.unwrap();
+        let client = ReplClient::connect(test_port()).await.unwrap();
 
         // Integer value
         let resp = client.eval("42").await.unwrap();
@@ -432,7 +437,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "integration test — requires running REPL on port 19876"]
+    #[ignore = "integration test — requires running REPL (set BEAMTALK_TEST_PORT or default 19876)"]
     async fn test_connection_failure() {
         // Port 1 should never have a REPL running
         let result = ReplClient::connect(1).await;

@@ -7,6 +7,7 @@
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -20,15 +21,22 @@ use crate::paths::{is_daemon_running, socket_path};
 use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
 
 /// Start the BEAM node with REPL backend.
-pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<Child> {
+///
+/// The BEAM process's working directory is set to `project_root` so that
+/// relative file paths (e.g., `File lines: "data.csv"`) resolve correctly.
+pub(super) fn start_beam_node(
+    port: u16,
+    node_name: Option<&String>,
+    project_root: &Path,
+) -> Result<Child> {
     // Find runtime directory - try multiple locations
-    let runtime_dir = repl_startup::find_runtime_dir()?;
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     info!("Using runtime at: {}", runtime_dir.display());
 
-    let paths = repl_startup::beam_paths(&runtime_dir);
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Check if runtime is built
-    if !paths.runtime_ebin.exists() {
+    // Auto-build runtime if not compiled (dev mode only)
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
         let status = Command::new("rebar3")
             .arg("compile")
@@ -39,6 +47,15 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
         if !status.success() {
             return Err(miette!("Failed to build Beamtalk runtime"));
         }
+    }
+
+    // In installed mode, runtime must already be present
+    if layout == repl_startup::RuntimeLayout::Installed && !paths.runtime_ebin.exists() {
+        return Err(miette!(
+            "Installed runtime not found at {}.\n\
+            Reinstall Beamtalk using your original installation method, or set BEAMTALK_RUNTIME_DIR.",
+            paths.runtime_ebin.display()
+        ));
     }
 
     info!("Starting BEAM node with REPL backend on port {port}...");
@@ -94,6 +111,7 @@ pub(super) fn start_beam_node(port: u16, node_name: Option<&String>) -> Result<C
     let child = Command::new("erl")
         .arg("-noshell")
         .args(&args)
+        .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

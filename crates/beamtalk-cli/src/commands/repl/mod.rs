@@ -244,11 +244,15 @@ pub fn run(
         start_daemon()?;
     }
 
+    // Discover project root for BEAM working directory
+    let current_dir = std::env::current_dir().into_diagnostic()?;
+    let project_root = workspace::discovery::discover_project_root(&current_dir);
+
     // Choose startup mode: workspace (default) or foreground (debug)
     let (beam_guard_opt, is_new_workspace, connect_port) = if foreground {
         // Foreground mode: start node directly (original behavior)
         println!("Starting BEAM node in foreground mode (--foreground)...");
-        let mut child = start_beam_node(port, node_name.as_ref())?;
+        let mut child = start_beam_node(port, node_name.as_ref(), &project_root)?;
 
         // Discover the actual port from the BEAM node's stdout.
         // The BEAM prints "BEAMTALK_PORT:<port>" after binding.
@@ -261,12 +265,10 @@ pub fn run(
         (Some(BeamChildGuard { child }), true, actual_port)
     } else {
         // Workspace mode: start or connect to detached node
-        let current_dir = std::env::current_dir().into_diagnostic()?;
-        let project_root = workspace::discovery::discover_project_root(&current_dir);
 
         // Use the same runtime paths as foreground mode
-        let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()?;
-        let paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
+        let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
+        let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
         // Warn if stdlib is not compiled (directory may exist without .beam files)
         if !beamtalk_cli::repl_startup::has_beam_files(&paths.stdlib_ebin) {
