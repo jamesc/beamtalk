@@ -9,7 +9,8 @@
 %%
 %% Streams are represented as tagged maps:
 %%   #{'$beamtalk_class' => 'Stream', generator => fun() -> {element, NextFun} | done,
-%%     description => binary()}
+%%     description => binary(),
+%%     finalizer => fun(() -> term())}  %% optional — called by terminal ops for cleanup
 %%
 %% where generator is a zero-arity function that returns either
 %% `{element, NextFun}` (an element and the continuation) or `done`.
@@ -56,7 +57,7 @@ make_stream(Generator, Description) ->
       description => Description}.
 
 %% @doc Create a Stream tagged map with an optional finalizer callback.
-%% The finalizer is called when a terminal operation stops early (e.g. take:, detect:).
+%% The finalizer is called when any terminal operation completes (for cleanup of resources like file handles).
 -spec make_stream(fun(() -> {term(), fun()} | done), binary(), fun(() -> term())) -> map().
 make_stream(Generator, Description, Finalizer) when is_function(Finalizer, 0) ->
     #{'$beamtalk_class' => 'Stream',

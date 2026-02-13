@@ -140,6 +140,41 @@ take_without_finalizer_test() ->
     Result = beamtalk_stream:take(Stream, 3),
     ?assertEqual([1, 2, 3], Result).
 
+%% Test that do: calls the finalizer
+do_calls_finalizer_test() ->
+    Self = self(),
+    Gen = make_list_gen([1, 2, 3]),
+    Finalizer = fun() -> Self ! finalizer_called end,
+    Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
+    beamtalk_stream:do(Stream, fun(_) -> ok end),
+    receive finalizer_called -> ok
+    after 100 -> ?assert(false)
+    end.
+
+%% Test that inject:into: calls the finalizer
+inject_into_calls_finalizer_test() ->
+    Self = self(),
+    Gen = make_list_gen([1, 2, 3]),
+    Finalizer = fun() -> Self ! finalizer_called end,
+    Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
+    Result = beamtalk_stream:inject_into(Stream, 0, fun(Acc, X) -> Acc + X end),
+    ?assertEqual(6, Result),
+    receive finalizer_called -> ok
+    after 100 -> ?assert(false)
+    end.
+
+%% Test that asList calls the finalizer
+as_list_calls_finalizer_test() ->
+    Self = self(),
+    Gen = make_list_gen([1, 2, 3]),
+    Finalizer = fun() -> Self ! finalizer_called end,
+    Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
+    Result = beamtalk_stream:as_list(Stream),
+    ?assertEqual([1, 2, 3], Result),
+    receive finalizer_called -> ok
+    after 100 -> ?assert(false)
+    end.
+
 %% Test that finalizer is safe to call multiple times (double-close)
 double_finalizer_safe_test() ->
     Self = self(),

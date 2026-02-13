@@ -347,9 +347,9 @@ validate_path(Path) when is_binary(Path) ->
 %%% ============================================================================
 
 %% @private
-%% @doc Create a Stream of lines from a file path, with auto-close on exhaustion.
+%% @doc Create a Stream of lines from a file path, with finalizer-based cleanup.
 make_line_stream(Fd, Path) ->
-    Gen = make_line_gen(Fd),
+    Gen = make_line_gen_no_close(Fd),
     Desc = iolist_to_binary([<<"File.lines('">>, Path, <<"')">>]),
     Finalizer = fun() -> file:close(Fd) end,
     beamtalk_stream:make_stream(Gen, Desc, Finalizer).
@@ -362,26 +362,7 @@ make_line_stream_from_fd(Fd) ->
     beamtalk_stream:make_stream(Gen, <<"FileHandle.lines">>).
 
 %% @private
-%% @doc Generator that reads lines and closes the handle on exhaustion.
-make_line_gen(Fd) ->
-    fun() ->
-        case file:read_line(Fd) of
-            {ok, Line} ->
-                %% Strip trailing newline
-                Stripped = strip_newline(Line),
-                {Stripped, make_line_gen(Fd)};
-            eof ->
-                file:close(Fd),
-                done;
-            {error, Reason} ->
-                logger:warning("File stream read error", #{reason => Reason}),
-                file:close(Fd),
-                done
-        end
-    end.
-
-%% @private
-%% @doc Generator that reads lines without closing (handle managed by open:do:).
+%% @doc Generator that reads lines without closing (handle managed by finalizer or open:do:).
 make_line_gen_no_close(Fd) ->
     fun() ->
         case file:read_line(Fd) of
