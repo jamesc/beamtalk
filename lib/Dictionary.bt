@@ -115,6 +115,14 @@ sealed Collection subclass: Dictionary
   /// ```
   keysAndValuesDo: block => @primitive 'keysAndValuesDo:'
 
+  /// Return a string representation using Beamtalk syntax.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #{#a => 1} printString                     // => '#{#a => 1}'
+  /// ```
+  printString => @primitive 'printString'
+
   /// Human-readable description of the receiver.
   ///
   /// ## Examples

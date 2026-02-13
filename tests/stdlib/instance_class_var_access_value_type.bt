@@ -13,7 +13,7 @@ ClassVarPoint instanceCount
 
 // Create a point via class method (increments instanceCount)
 p1 := ClassVarPoint create: #{#x => 3, #y => 4}
-// => {"$beamtalk_class":"ClassVarPoint","x":3,"y":4}
+// => a ClassVarPoint
 
 // Verify it's a value type (has x field)
 p1 x
@@ -29,7 +29,7 @@ p1 totalPoints
 
 // Create another point
 p2 := ClassVarPoint create: #{#x => 1, #y => 2}
-// => {"$beamtalk_class":"ClassVarPoint","x":1,"y":2}
+// => a ClassVarPoint
 
 // Both instances see updated class variable
 p1 totalPoints

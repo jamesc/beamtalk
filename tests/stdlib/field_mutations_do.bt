@@ -60,7 +60,7 @@ acc := FieldMutationAccumulator spawn
 // => #Actor<FieldMutationAccumulator,_>
 
 (acc processArray: #(2, 3, 4)) await
-// => {"count":3,"product":24,"sum":9}
+// => #{#count => 3, #product => 24, #sum => 9}
 
 acc getSum await
 // => 9

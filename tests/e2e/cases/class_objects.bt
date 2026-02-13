@@ -26,7 +26,7 @@ cls := (Beamtalk classNamed: #Point) await
 // => Point
 
 cls new
-// => {"$beamtalk_class":"Point","x":0,"y":0}
+// => a Point
 
 // ---------------------------------------------------------------------------
 // Dynamic new: with initialization arguments
@@ -42,7 +42,7 @@ cls := (Beamtalk classNamed: #Point) await
 // => Point
 
 p := cls new
-// => {"$beamtalk_class":"Point","x":0,"y":0}
+// => a Point
 
 p getX
 // => 0
