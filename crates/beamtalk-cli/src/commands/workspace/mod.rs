@@ -2048,6 +2048,9 @@ mod tests {
             Some(60),
         )
         .expect("start_detached_node should succeed");
+        // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.
+        // NodeGuard is a no-op for already-dead PIDs, so it won't conflict with stop_workspace.
+        let _guard = NodeGuard { pid: node_info.pid };
 
         // Verify node is running before we stop it
         assert!(
