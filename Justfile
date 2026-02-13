@@ -17,7 +17,7 @@ default:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run local CI checks (build, lint, unit, integration & E2E tests)
-ci: build lint test test-stdlib test-integration test-e2e
+ci: build lint test test-stdlib test-integration test-mcp test-e2e
 
 # Full clean and rebuild everything
 clean-all: clean clean-erlang
@@ -152,7 +152,7 @@ test-mcp: build-stdlib
     echo "✅ MCP integration tests complete"
 
 # Run ALL tests (unit + integration + E2E + Erlang runtime)
-test-all: test-rust test-stdlib test-integration test-e2e test-runtime
+test-all: test-rust test-stdlib test-integration test-mcp test-e2e test-runtime
 
 # Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
 test-stdlib: build-stdlib
