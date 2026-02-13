@@ -1016,6 +1016,33 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_workspace_name_valid_cases() {
+        assert!(validate_workspace_name("myws").is_ok());
+        assert!(validate_workspace_name("my-ws").is_ok());
+        assert!(validate_workspace_name("my_ws").is_ok());
+        assert!(validate_workspace_name("my-ws_123").is_ok());
+        assert!(validate_workspace_name("a").is_ok());
+        assert!(validate_workspace_name("12345").is_ok());
+    }
+
+    #[test]
+    fn test_validate_workspace_name_invalid_cases() {
+        assert!(validate_workspace_name("").is_err());
+        assert!(validate_workspace_name("workspäce").is_err());
+        assert!(validate_workspace_name("has space").is_err());
+        assert!(validate_workspace_name("has.dot").is_err());
+        assert!(validate_workspace_name("has/slash").is_err());
+        assert!(validate_workspace_name("ws!@#").is_err());
+    }
+
+    #[test]
+    fn test_validate_workspace_name_boundary_long_name() {
+        let long_name = "a".repeat(256);
+        // Very long names are valid per the current implementation (only charset is checked)
+        assert!(validate_workspace_name(&long_name).is_ok());
+    }
+
+    #[test]
     fn test_workspace_id_for_none_uses_hash() {
         let path = std::env::current_dir().unwrap();
         let from_none = workspace_id_for(&path, None).unwrap();
@@ -1837,5 +1864,233 @@ mod tests {
             "restarted node should have different PID"
         );
         assert!(is_node_running(&info3), "restarted node should be running");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_list_workspaces_running_node_integration() {
+        let tw = TestWorkspace::new("integ_list_running");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        let workspaces = list_workspaces().unwrap();
+        let found = workspaces
+            .iter()
+            .find(|w| w.workspace_id == tw.id)
+            .expect("Should find the workspace in list");
+
+        assert_eq!(
+            found.status,
+            WorkspaceStatus::Running,
+            "Workspace should be Running"
+        );
+        assert_eq!(
+            found.pid,
+            Some(node_info.pid),
+            "PID should match started node"
+        );
+        assert!(found.port.is_some(), "Port should be reported");
+        assert!(found.port.unwrap() > 0, "Port should be non-zero");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_list_workspaces_stale_cleanup_integration() {
+        let tw = TestWorkspace::new("integ_list_stale");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+
+        // Kill the node without cleanup (simulating crash)
+        let _ = Command::new("kill")
+            .args(["-9", &node_info.pid.to_string()])
+            .status();
+        let _ = wait_for_process_exit(node_info.pid, 5);
+
+        // list_workspaces should detect stale node.info and report Stopped
+        let workspaces = list_workspaces().unwrap();
+        let found = workspaces
+            .iter()
+            .find(|w| w.workspace_id == tw.id)
+            .expect("Should find the workspace in list");
+
+        assert_eq!(
+            found.status,
+            WorkspaceStatus::Stopped,
+            "Stale workspace should be reported as Stopped"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_workspace_status_running_integration() {
+        let tw = TestWorkspace::new("integ_ws_status");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        let detail = workspace_status(Some(&tw.id)).unwrap();
+        assert_eq!(detail.workspace_id, tw.id);
+        assert_eq!(detail.status, WorkspaceStatus::Running);
+        assert!(
+            detail.node_name.is_some(),
+            "node_name should be present for running workspace"
+        );
+        assert!(
+            detail.node_name.as_ref().unwrap().contains(&tw.id),
+            "node_name should contain workspace ID"
+        );
+        assert_eq!(detail.port, Some(node_info.port));
+        assert_eq!(detail.pid, Some(node_info.pid));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_stop_workspace_graceful_timeout_integration() {
+        let tw = TestWorkspace::new("integ_stop_graceful");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        // Graceful stop (force=false) sends SIGTERM which detached BEAM ignores,
+        // so it should return a timeout error suggesting --force
+        let result = stop_workspace(&tw.id, false);
+        assert!(
+            result.is_err(),
+            "Graceful stop should fail for detached BEAM (ignores SIGTERM)"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("--force") || err.contains("did not exit"),
+            "Error should suggest --force, got: {err}"
+        );
+
+        // Node should still be running after failed graceful stop
+        assert!(
+            is_node_running(&node_info),
+            "Node should still be running after failed graceful stop"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_stop_workspace_force_integration() {
+        let tw = TestWorkspace::new("integ_stop_force");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.
+        // NodeGuard is a no-op for already-dead PIDs, so it won't conflict with stop_workspace.
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        // Verify node is running before we stop it
+        assert!(
+            is_node_running(&node_info),
+            "Node should be running before force stop"
+        );
+
+        // Force stop (SIGKILL) should succeed
+        let result = stop_workspace(&tw.id, true);
+        assert!(
+            result.is_ok(),
+            "Force stop should succeed, got: {:?}",
+            result.err()
+        );
+
+        // Node should no longer be running
+        assert!(
+            !is_node_running(&node_info),
+            "Node should not be running after force stop"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_stop_workspace_not_running_integration() {
+        let tw = TestWorkspace::new("integ_stop_notrun");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        // Workspace exists but no node is running
+        let result = stop_workspace(&tw.id, false);
+        assert!(
+            result.is_err(),
+            "Stopping non-running workspace should fail"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not running"),
+            "Error should indicate workspace is not running, got: {err}"
+        );
     }
 }
