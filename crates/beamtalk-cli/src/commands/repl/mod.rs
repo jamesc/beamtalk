@@ -57,6 +57,8 @@ use tracing::warn;
 use crate::commands::workspace;
 use crate::paths::is_daemon_running;
 
+use beamtalk_core::source_analysis::is_input_complete;
+
 /// Maximum retries when connecting to REPL backend.
 const MAX_CONNECT_RETRIES: u32 = 10;
 
@@ -356,17 +358,21 @@ pub fn run(
     let _ = rl.load_history(&history_file);
 
     // Main REPL loop
+    let mut line_buffer: Vec<String> = Vec::new();
     loop {
-        match rl.readline("> ") {
+        let prompt = if line_buffer.is_empty() { "> " } else { "..> " };
+        match rl.readline(prompt) {
             Ok(line) => {
                 let line = line.trim();
-                if line.is_empty() {
+
+                // In multi-line mode, empty line continues accumulation
+                if line.is_empty() && line_buffer.is_empty() {
                     continue;
                 }
 
-                // Add to history
-                let _ = rl.add_history_entry(line);
-
+                // First line: check if it's a REPL command (only when not
+                // already accumulating a multi-line expression)
+                if line_buffer.is_empty() {
                 // Handle special commands
                 match line {
                     ":exit" | ":quit" | ":q" => {
@@ -658,9 +664,22 @@ pub fn run(
                     eprintln!("Hint: did you mean `{suggestion}`? REPL commands start with `:`");
                     continue;
                 }
+                } // end if line_buffer.is_empty() (command handling)
+
+                // Accumulate input for multi-line expression detection
+                line_buffer.push(line.to_string());
+                let accumulated = line_buffer.join("\n");
+
+                if !is_input_complete(&accumulated) {
+                    // Input is incomplete — continue reading
+                    continue;
+                }
+
+                // Input is complete — add to history as single entry and evaluate
+                let _ = rl.add_history_entry(&accumulated);
 
                 // Evaluate expression
-                match client.eval(line) {
+                match client.eval(&accumulated) {
                     Ok(response) => {
                         // Print captured stdout before value/error (BT-355)
                         if let Some(ref output) = response.output {
@@ -692,9 +711,14 @@ pub fn run(
                         break;
                     }
                 }
+                line_buffer.clear();
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl+C - just print newline and continue
+                // Ctrl+C — cancel multi-line input if buffering, otherwise just newline
+                if !line_buffer.is_empty() {
+                    line_buffer.clear();
+                    eprintln!("Cancelled");
+                }
                 println!();
             }
             Err(ReadlineError::Eof) => {
