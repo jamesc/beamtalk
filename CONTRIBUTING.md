@@ -54,9 +54,9 @@ We use [Just](https://github.com/casey/just) as our task runner. Run `just --lis
 
 ```bash
 just build          # Build everything (Rust + Erlang + stdlib)
-just test           # Run fast unit tests (~10s)
-just test-stdlib    # Compiled language feature tests (~14s)
-just test-e2e       # REPL integration tests (~50s)
+just test           # Run Rust tests + Erlang runtime + stdlib tests
+just test-stdlib    # Compiled language feature tests (part of `just test`)
+just test-e2e       # REPL integration tests (slow, full language validation)
 just ci             # Full CI: build, lint, test, test-stdlib, test-e2e
 
 just fmt            # Format all code
@@ -72,7 +72,7 @@ just clean          # Clean build artifacts
 
 | Layer | Command | What it tests |
 |-------|---------|---------------|
-| **Rust unit tests** | `just test-rust` | Parser, AST, codegen in isolation |
+| **Rust unit/integration tests** | `just test-rust` | Parser, AST, codegen |
 | **Erlang unit tests** | `just test-runtime` | Runtime modules in isolation |
 | **Stdlib tests** | `just test-stdlib` | Language features via compiled expressions |
 | **E2E tests** | `just test-e2e` | Full REPL integration |
