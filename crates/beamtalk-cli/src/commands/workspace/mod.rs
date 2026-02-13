@@ -1622,4 +1622,220 @@ mod tests {
         let result = read_port_file(&tw.id).unwrap();
         assert_eq!(result, None);
     }
+
+    // ── Integration Tests (require live Erlang/OTP runtime) ────────────
+    //
+    // These tests spawn real BEAM nodes and are `#[ignore]` by default.
+    // Run them with: `just test-integration` or `cargo test -- --ignored`
+    // Unix-only: uses `kill` and `ps` commands.
+
+    /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
+    #[cfg(unix)]
+    struct NodeGuard {
+        pid: u32,
+    }
+
+    #[cfg(unix)]
+    impl Drop for NodeGuard {
+        fn drop(&mut self) {
+            // Send SIGKILL (detached BEAM nodes ignore SIGTERM)
+            let _ = Command::new("kill")
+                .args(["-9", &self.pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+
+    /// Locate BEAM directories needed to start a workspace node.
+    #[cfg(unix)]
+    fn beam_dirs_for_tests() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let runtime_dir = beamtalk_cli::repl_startup::find_runtime_dir()
+            .expect("Cannot find runtime dir — run from repo root or set BEAMTALK_RUNTIME_DIR");
+        let paths = beamtalk_cli::repl_startup::beam_paths(&runtime_dir);
+        assert!(
+            beamtalk_cli::repl_startup::has_beam_files(&paths.runtime_ebin),
+            "Runtime BEAM files not found at {:?}. Run `cd runtime && rebar3 compile` first.",
+            paths.runtime_ebin,
+        );
+        (
+            paths.runtime_ebin,
+            paths.workspace_ebin,
+            paths.jsx_ebin,
+            paths.stdlib_ebin,
+        )
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_start_detached_node_integration() {
+        let tw = TestWorkspace::new("integ_start");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        // Verify node.info was written with correct fields
+        let saved = get_node_info(&tw.id)
+            .expect("get_node_info should succeed")
+            .expect("node.info should exist after start");
+        assert_eq!(saved.pid, node_info.pid);
+        assert!(
+            saved.port > 0,
+            "port should be assigned (got {})",
+            saved.port
+        );
+        assert!(
+            saved.node_name.contains(&tw.id),
+            "node_name should contain workspace ID"
+        );
+
+        // Verify the node is actually running
+        assert!(
+            is_node_running(&node_info),
+            "is_node_running should return true for live node"
+        );
+
+        // Verify PID corresponds to a real BEAM process
+        let ps_output = Command::new("ps")
+            .args(["-p", &node_info.pid.to_string(), "-o", "comm="])
+            .output()
+            .expect("ps should succeed");
+        let comm = String::from_utf8_lossy(&ps_output.stdout);
+        assert!(
+            comm.contains("beam") || comm.contains("erl"),
+            "PID {} should be a BEAM process, got: {}",
+            node_info.pid,
+            comm.trim()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_is_node_running_true_then_false_integration() {
+        let tw = TestWorkspace::new("integ_running");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+        let node_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("start_detached_node should succeed");
+        let _guard = NodeGuard { pid: node_info.pid };
+
+        // True case: node is running
+        assert!(
+            is_node_running(&node_info),
+            "is_node_running should be true while node is alive"
+        );
+
+        // Kill the node (use SIGKILL since detached BEAM nodes don't exit on SIGTERM)
+        let _ = Command::new("kill")
+            .args(["-9", &node_info.pid.to_string()])
+            .status();
+        // Wait for process to exit
+        let _ = wait_for_process_exit(node_info.pid, 5);
+
+        // False case: node has been killed
+        assert!(
+            !is_node_running(&node_info),
+            "is_node_running should be false after kill"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn test_get_or_start_workspace_lifecycle_integration() {
+        let tw = TestWorkspace::new("integ_lifecycle");
+        let project_path = std::env::current_dir().unwrap();
+
+        let (runtime, workspace, jsx, stdlib) = beam_dirs_for_tests();
+
+        // Step 1: First call creates workspace and starts node
+        let (info1, started1, id1) = get_or_start_workspace(
+            &project_path,
+            Some(&tw.id),
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("first get_or_start should succeed");
+        let _guard1 = NodeGuard { pid: info1.pid };
+        assert!(started1, "first call should start a new node");
+        assert_eq!(id1, tw.id);
+        assert!(is_node_running(&info1), "node should be running");
+
+        // Step 2: Second call reconnects to existing node
+        let (info2, started2, id2) = get_or_start_workspace(
+            &project_path,
+            Some(&tw.id),
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("reconnect should succeed");
+        assert!(!started2, "second call should reuse existing node");
+        assert_eq!(id2, tw.id);
+        assert_eq!(info2.pid, info1.pid, "should return same PID");
+
+        // Step 3: Stop the node (force=true since detached BEAM nodes ignore SIGTERM)
+        stop_workspace(&tw.id, true).expect("stop should succeed");
+        assert!(
+            !is_node_running(&info1),
+            "node should not be running after stop"
+        );
+
+        // Step 4: Third call starts a new node
+        let (info3, started3, id3) = get_or_start_workspace(
+            &project_path,
+            Some(&tw.id),
+            0,
+            &runtime,
+            &workspace,
+            &jsx,
+            &stdlib,
+            false,
+            Some(60),
+        )
+        .expect("restart should succeed");
+        let _guard3 = NodeGuard { pid: info3.pid };
+        assert!(started3, "third call should start a new node");
+        assert_eq!(id3, tw.id);
+        assert_ne!(
+            info3.pid, info1.pid,
+            "restarted node should have different PID"
+        );
+        assert!(is_node_running(&info3), "restarted node should be running");
+    }
 }
