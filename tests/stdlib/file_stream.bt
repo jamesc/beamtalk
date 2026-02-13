@@ -1,0 +1,140 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File streaming tests (BT-513)
+// Tests for File lines: and File open:do: lazy file streaming.
+//
+// Fixture files are pre-created in tests/stdlib/fixtures/ because
+// Beamtalk string literals don't support escape sequences like \n.
+
+// ===========================================================================
+// FILE LINES: BASIC READING
+// ===========================================================================
+
+// Read all lines from a file
+(File lines: "tests/stdlib/fixtures/stream_test.txt") asList
+// => ["line one","line two","line three"]
+
+// Take first N lines
+(File lines: "tests/stdlib/fixtures/stream_test.txt") take: 2
+// => ["line one","line two"]
+
+// Take more lines than exist
+(File lines: "tests/stdlib/fixtures/stream_test.txt") take: 100
+// => ["line one","line two","line three"]
+
+// Single line file (no trailing newline)
+(File lines: "tests/stdlib/fixtures/stream_single.txt") asList
+// => ["only line"]
+
+// File without trailing newline
+(File lines: "tests/stdlib/fixtures/stream_no_trailing.txt") asList
+// => ["first","second"]
+
+// ===========================================================================
+// EMPTY FILE
+// ===========================================================================
+
+// Empty file returns empty stream
+(File lines: "tests/stdlib/fixtures/stream_empty.txt") asList
+// => []
+
+(File lines: "tests/stdlib/fixtures/stream_empty.txt") take: 5
+// => []
+
+// ===========================================================================
+// STREAM PIPELINE COMPOSITION
+// ===========================================================================
+
+// Select lines matching a pattern
+((File lines: "tests/stdlib/fixtures/stream_test.txt") select: [:l | l includes: "two"]) asList
+// => ["line two"]
+
+// Collect (transform) lines
+((File lines: "tests/stdlib/fixtures/stream_test.txt") collect: [:l | l size]) asList
+// => [8,8,10]
+
+// Drop first line
+((File lines: "tests/stdlib/fixtures/stream_test.txt") drop: 1) asList
+// => ["line two","line three"]
+
+// Inject (fold) - count lines
+(File lines: "tests/stdlib/fixtures/stream_test.txt") inject: 0 into: [:count :line | count + 1]
+// => 3
+
+// Detect first matching line
+(File lines: "tests/stdlib/fixtures/stream_test.txt") detect: [:l | l includes: "three"]
+// => line three
+
+// Detect returns nil when no match
+(File lines: "tests/stdlib/fixtures/stream_test.txt") detect: [:l | l includes: "four"]
+// => nil
+
+// anySatisfy
+(File lines: "tests/stdlib/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "one"]
+// => true
+
+(File lines: "tests/stdlib/fixtures/stream_test.txt") anySatisfy: [:l | l includes: "four"]
+// => false
+
+// allSatisfy
+(File lines: "tests/stdlib/fixtures/stream_test.txt") allSatisfy: [:l | l includes: "line"]
+// => true
+
+(File lines: "tests/stdlib/fixtures/stream_test.txt") allSatisfy: [:l | l includes: "one"]
+// => false
+
+// ===========================================================================
+// FILE OPEN:DO: BLOCK-SCOPED HANDLE
+// ===========================================================================
+
+// Read lines through handle
+File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | handle lines asList]
+// => ["line one","line two","line three"]
+
+// Take lines through handle
+File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | handle lines take: 1]
+// => ["line one"]
+
+// Pipeline through handle
+File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | (handle lines select: [:l | l includes: "two"]) asList]
+// => ["line two"]
+
+// Block returns result
+File open: "tests/stdlib/fixtures/stream_test.txt" do: [:handle | handle lines inject: 0 into: [:count :line | count + 1]]
+// => 3
+
+// Empty file through handle
+File open: "tests/stdlib/fixtures/stream_empty.txt" do: [:handle | handle lines asList]
+// => []
+
+// ===========================================================================
+// LAZY EVALUATION (constant memory)
+// ===========================================================================
+
+// take: only reads needed lines (lazy)
+(File lines: "tests/stdlib/fixtures/stream_large.txt") take: 3
+// => ["a","b","c"]
+
+// Chained lazy operations
+((File lines: "tests/stdlib/fixtures/stream_large.txt") drop: 5) take: 3
+// => ["f","g","h"]
+
+// reject: with lazy evaluation
+((File lines: "tests/stdlib/fixtures/stream_large.txt") reject: [:l | l = "e"]) take: 5
+// => ["a","b","c","d","f"]
+
+// ===========================================================================
+// DO: SIDE EFFECTS
+// ===========================================================================
+
+// do: iterates for side effects, returns nil
+(File lines: "tests/stdlib/fixtures/stream_test.txt") do: [:l | l size]
+// => nil
+
+// ===========================================================================
+// PRINTSTRING (Stream description)
+// ===========================================================================
+
+(File lines: "tests/stdlib/fixtures/stream_test.txt") printString
+// => File.lines('tests/stdlib/fixtures/stream_test.txt')

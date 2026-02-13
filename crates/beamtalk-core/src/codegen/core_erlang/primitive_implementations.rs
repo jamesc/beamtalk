@@ -247,7 +247,7 @@ fn generate_block_bif(selector: &str, params: &[String]) -> Option<String> {
     }
 }
 
-/// File primitive implementations (BT-336).
+/// File primitive implementations (BT-336, BT-513).
 ///
 /// File class methods delegate directly to `beamtalk_file` runtime module.
 /// These are class-level methods (no Self parameter needed).
@@ -261,6 +261,11 @@ fn generate_file_bif(selector: &str, params: &[String]) -> Option<String> {
             Some(format!(
                 "call 'beamtalk_file':'writeAll:contents:'({p0}, {p1})"
             ))
+        }
+        "lines:" => Some(format!("call 'beamtalk_file':'lines:'({p0})")),
+        "open:do:" => {
+            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            Some(format!("call 'beamtalk_file':'open:do:'({p0}, {p1})"))
         }
         _ => None,
     }
@@ -1073,6 +1078,28 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_file':'writeAll:contents:'(Path, Text)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_file_lines() {
+        let result = generate_primitive_bif("File", "lines:", &["Path".to_string()]);
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_file':'lines:'(Path)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_file_open_do() {
+        let result = generate_primitive_bif(
+            "File",
+            "open:do:",
+            &["Path".to_string(), "Block".to_string()],
+        );
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_file':'open:do:'(Path, Block)".to_string())
         );
     }
 
