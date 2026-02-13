@@ -1,0 +1,46 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-mcp"
+description = "MCP server for beamtalk REPL — agent interaction with live objects"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["mcp", "beam", "smalltalk", "repl"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "beamtalk-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# MCP SDK
+rmcp = { version = "0.15", features = ["server", "macros", "transport-io", "schemars"] }
+
+# Async runtime
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "sync", "signal", "time"] }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# CLI
+clap.workspace = true
+
+# System directories (workspace discovery)
+dirs.workspace = true
+
+# Cryptography (workspace ID generation)
+sha2.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

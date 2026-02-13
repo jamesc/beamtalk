@@ -32,7 +32,7 @@
 
 // Tuple new returns an empty tuple
 Tuple new
-// => {}
+// => _
 
 (Tuple new) class
 // => Tuple
@@ -47,4 +47,4 @@ Tuple new: #{#a => 1}
 
 // Tuple printString uses Object default
 (Tuple new) printString
-// => a Tuple
+// => _

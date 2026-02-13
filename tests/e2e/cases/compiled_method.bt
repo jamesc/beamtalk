@@ -18,7 +18,7 @@ cls := (Beamtalk classNamed: #Counter) await
 // => Counter
 
 cls >> #getValue
-// => {"$beamtalk_class":"CompiledMethod",_}
+// => a CompiledMethod(_)
 
 (cls >> #getValue) selector
 // => getValue

@@ -217,9 +217,8 @@ pub(crate) fn eunit_helper_functions() -> &'static str {
      \x20           iolist_to_binary([<<\"#Actor<\">>, ClassBin, <<\",\">>, Inner, <<\">\">>])\n\
      \x20   end;\n\
      format_result(V) when is_map(V) ->\n\
-     \x20   %% Delegate to beamtalk_repl_server:term_to_json for maps\n\
-     \x20   try jsx:encode(beamtalk_repl_server:term_to_json(V))\n\
-     \x20   catch _:_ -> iolist_to_binary(io_lib:format(\"~p\", [V])) end;\n\
+     \x20   %% BT-535: Use print_string for Beamtalk display format\n\
+     \x20   beamtalk_primitive:print_string(V);\n\
      format_result(V) when is_list(V) ->\n\
      \x20   case V of\n\
      \x20       [] -> <<\"[]\">>;\n\

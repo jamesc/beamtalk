@@ -56,7 +56,7 @@
 // Keyword message with trailing keyword and argument on next line
 #{#a => 1} at: #b put:
   2
-// => {"a":1,"b":2}
+// => #{#a => 1, #b => 2}
 
 // ===========================================================================
 // MULTI-LINE ASSIGNMENTS
